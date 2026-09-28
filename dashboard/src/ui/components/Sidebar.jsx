@@ -11,6 +11,7 @@ import {
   Globe,
   Puzzle,
   Activity,
+  Network,
   Settings as SettingsIcon,
   ChevronLeft,
   ChevronRight,
@@ -34,6 +35,13 @@ export function getNavGroups() {
   // copy() must be called at render time so locale switches apply.
   // Validator regex picks up these literal calls.
   return [
+    {
+      id: "proxy",
+      label: copy("nav.group.proxy"),
+      items: [
+        { id: "proxy", to: "/proxy", icon: Network, label: copy("nav.proxy") },
+      ],
+    },
     {
       id: "general",
       label: copy("nav.group.general"),

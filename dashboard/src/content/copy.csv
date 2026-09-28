@@ -56,9 +56,9 @@ landing.nav.signup,landing,LandingPage,LandingPage,nav_signup,"SIGN UP",,active
 landing.install.command,landing,LandingPage,LandingPage,install_command,"npx --yes tokentracker-cli",,active
 landing.install.action.copy,landing,LandingPage,LandingPage,install_copy,"COPY COMMAND",,active
 landing.install.action.copied,landing,LandingPage,LandingPage,install_copied,"COPIED",,active
-landing.meta.title,landing,LandingPage,Meta,title,"Token Tracker — AI Token Usage & Cost Tracker for Coding CLIs",,active
+landing.meta.title,landing,LandingPage,Meta,title,"AiTool — AI Proxy & Token Usage Dashboard",,active
 landing.meta.description,landing,LandingPage,Meta,description,"Free, open-source, local-first tracker that monitors AI token usage and cost across Claude Code, Codex, Cursor, Gemini and 27 CLIs. One-command install, privacy-first.",,active
-landing.meta.og_site_name,landing,LandingPage,Meta,og_site_name,"Token Tracker",,active
+landing.meta.og_site_name,landing,LandingPage,Meta,og_site_name,"AiTool",,active
 landing.meta.og_type,landing,LandingPage,Meta,og_type,"website",,active
 landing.meta.og_image,landing,LandingPage,Meta,og_image,"https://www.tokentracker.cc/dashboard-dark.png",,active
 landing.meta.og_url,landing,LandingPage,Meta,og_url,"https://www.tokentracker.cc/",,active
@@ -1654,3 +1654,84 @@ limits.devin.setupHint.subtitle,ui,LimitsPage,UsageLimitsPanel,devin_hint_subtit
 limits.devin.setupHint.step1,ui,LimitsPage,UsageLimitsPanel,devin_hint_step1,"Install the Devin CLI and sign in with the command below — TokenTracker picks it up with no restart.",,active
 limits.devin.setupHint.note,ui,LimitsPage,UsageLimitsPanel,devin_hint_note,"Refresh this page after signing in. TokenTracker sends the saved session token only to Devin's official quota endpoint.",,active
 limits.devin.setupHint.snippet_login,ui,LimitsPage,UsageLimitsPanel,devin_hint_snippet_login,"devin auth login",,active
+nav.group.proxy,proxy,ProxyPage,ProxyPage,proxy,AI Proxy,,active
+nav.proxy,proxy,ProxyPage,ProxyPage,proxy,AI Proxy,,active
+proxy.tab.overview,proxy,ProxyPage,ProxyPage,overview,Overview,,active
+proxy.tab.providers,proxy,ProxyPage,ProxyPage,providers,Providers,,active
+proxy.tab.keys,proxy,ProxyPage,ProxyPage,keys,Access Keys,,active
+proxy.tab.requests,proxy,ProxyPage,ProxyPage,requests,Requests,,active
+proxy.tab.settings,proxy,ProxyPage,ProxyPage,settings,Settings,,active
+proxy.page.subtitle,proxy,ProxyPage,ProxyPage,subtitle,Route AI CLI tools through your own proxy gateway — every request lands in the same usage dashboard.,,active
+proxy.state.running,proxy,ProxyPage,ProxyPage,running,Running,,active
+proxy.state.stopped,proxy,ProxyPage,ProxyPage,stopped,Stopped,,active
+proxy.core.installed_hint,proxy,ProxyPage,ProxyPage,installed_hint,CLIProxyAPI core — multi-provider AI gateway (OpenAI / Anthropic / Gemini compatible).,,active
+proxy.core.missing_hint,proxy,ProxyPage,ProxyPage,missing_hint,Core binary not installed yet — fetch it to enable the proxy.,,active
+proxy.core.endpoint,proxy,ProxyPage,ProxyPage,endpoint,Endpoint,,active
+proxy.action.install_core,proxy,ProxyPage,ProxyPage,install_core,Fetch core,,active
+proxy.action.stop,proxy,ProxyPage,ProxyPage,stop,Stop,,active
+proxy.action.start,proxy,ProxyPage,ProxyPage,start,Start,,active
+proxy.action.copy,proxy,ProxyPage,ProxyPage,copy,Copy,,active
+proxy.bridge.label,proxy,ProxyPage,ProxyPage,label,Usage bridge,,active
+proxy.bridge.streaming,proxy,ProxyPage,ProxyPage,streaming,streaming,,active
+proxy.bridge.connecting,proxy,ProxyPage,ProxyPage,connecting,connecting,,active
+proxy.bridge.idle,proxy,ProxyPage,ProxyPage,idle,idle,,active
+proxy.bridge.last_event,proxy,ProxyPage,ProxyPage,last_event,Last event,,active
+proxy.management.auth_error,proxy,ProxyPage,ProxyPage,auth_error,Management key rejected — restart the core from this page.,,active
+proxy.metric.requests,proxy,ProxyPage,ProxyPage,requests,Requests,,active
+proxy.metric.success_rate,proxy,ProxyPage,ProxyPage,success_rate,Success rate,,active
+proxy.metric.rpm,proxy,ProxyPage,ProxyPage,rpm,RPM,,active
+proxy.metric.tpm,proxy,ProxyPage,ProxyPage,tpm,TPM,,active
+proxy.metric.avg_latency,proxy,ProxyPage,ProxyPage,avg_latency,Avg latency,,active
+proxy.metric.timeline_24h,proxy,ProxyPage,ProxyPage,timeline_24h,Token volume — trailing 24h,,active
+proxy.metric.by_model,proxy,ProxyPage,ProxyPage,by_model,By model,,active
+proxy.metric.by_provider,proxy,ProxyPage,ProxyPage,by_provider,By provider,,active
+proxy.tokens_short,proxy,ProxyPage,ProxyPage,tokens_short,tokens,,active
+proxy.requests_short,proxy,ProxyPage,ProxyPage,requests_short,requests,,active
+proxy.empty.no_usage,proxy,ProxyPage,ProxyPage,no_usage,No usage recorded yet.,,active
+proxy.providers.subtitle,proxy,ProxyPage,ProxyPage,subtitle,OAuth / file-backed credentials the core loads from its auth directory.,,active
+proxy.action.refresh_tokens,proxy,ProxyPage,ProxyPage,refresh_tokens,Refresh all,,active
+proxy.action.upload_auth,proxy,ProxyPage,ProxyPage,upload_auth,Upload auth file,,active
+proxy.providers.file,proxy,ProxyPage,ProxyPage,file,File,,active
+proxy.providers.provider,proxy,ProxyPage,ProxyPage,provider,Provider,,active
+proxy.providers.status,proxy,ProxyPage,ProxyPage,status,Status,,active
+proxy.providers.actions,proxy,ProxyPage,ProxyPage,actions,Actions,,active
+proxy.providers.disabled,proxy,ProxyPage,ProxyPage,disabled,Disabled,,active
+proxy.providers.active,proxy,ProxyPage,ProxyPage,active,Active,,active
+proxy.action.delete_auth,proxy,ProxyPage,ProxyPage,delete_auth,Delete auth file,,active
+proxy.providers.empty,proxy,ProxyPage,ProxyPage,empty,No provider credentials yet.,,active
+proxy.providers.empty_hint,proxy,ProxyPage,ProxyPage,empty_hint,"Upload a CLIProxyAPI auth JSON, or run `cli-proxy-api -claude-login` (etc.) with this auth dir.",,active
+proxy.keys.endpoints,proxy,ProxyPage,ProxyPage,endpoints,Compatible endpoints,,active
+proxy.keys.title,proxy,ProxyPage,ProxyPage,title,Client access keys,,active
+proxy.keys.count,proxy,ProxyPage,ProxyPage,count,{{count}} key(s),,active
+proxy.keys.empty,proxy,ProxyPage,ProxyPage,empty,No access keys — clients cannot authenticate yet.,,active
+proxy.keys.add_placeholder,proxy,ProxyPage,ProxyPage,add_placeholder,Add an access key (e.g. sk-my-key-1),,active
+proxy.action.delete_key,proxy,ProxyPage,ProxyPage,delete_key,Delete key,,active
+proxy.action.add_key,proxy,ProxyPage,ProxyPage,add_key,Add,,active
+proxy.requests.subtitle,proxy,ProxyPage,ProxyPage,subtitle,"Every request proxied by the core, newest first ({{total}} total).",,active
+proxy.requests.filter.all,proxy,ProxyPage,ProxyPage,all,All,,active
+proxy.requests.filter.ok,proxy,ProxyPage,ProxyPage,ok,Success,,active
+proxy.requests.filter.failed,proxy,ProxyPage,ProxyPage,failed,Failed,,active
+proxy.requests.time,proxy,ProxyPage,ProxyPage,time,Time,,active
+proxy.requests.model,proxy,ProxyPage,ProxyPage,model,Model,,active
+proxy.requests.provider,proxy,ProxyPage,ProxyPage,provider,Provider,,active
+proxy.requests.tokens,proxy,ProxyPage,ProxyPage,tokens,Tokens,,active
+proxy.requests.latency,proxy,ProxyPage,ProxyPage,latency,Latency,,active
+proxy.requests.status,proxy,ProxyPage,ProxyPage,status,Status,,active
+proxy.requests.failed,proxy,ProxyPage,ProxyPage,failed,Failed,,active
+proxy.requests.canceled,proxy,ProxyPage,ProxyPage,canceled,Canceled,,active
+proxy.requests.ok,proxy,ProxyPage,ProxyPage,ok,OK,,active
+proxy.requests.prev,proxy,ProxyPage,ProxyPage,prev,Prev,,active
+proxy.requests.next,proxy,ProxyPage,ProxyPage,next,Next,,active
+proxy.requests.empty,proxy,ProxyPage,ProxyPage,empty,No proxied requests recorded yet.,,active
+proxy.loading,proxy,ProxyPage,ProxyPage,loading,Loading…,,active
+proxy.settings.autostart,proxy,ProxyPage,ProxyPage,autostart,Start proxy with dashboard,,active
+proxy.settings.autostart_hint,proxy,ProxyPage,ProxyPage,autostart_hint,"When enabled, the AiTool server boots the CLIProxyAPI core and the usage bridge automatically.",,active
+proxy.settings.core,proxy,ProxyPage,ProxyPage,core,Core binary,,active
+proxy.settings.core_version,proxy,ProxyPage,ProxyPage,core_version,Installed version: {{version}},,active
+proxy.settings.core_updated,proxy,ProxyPage,ProxyPage,core_updated,Core binary fetched.,,active
+proxy.settings.fetch_core,proxy,ProxyPage,ProxyPage,fetch_core,Fetch / update,,active
+proxy.settings.config,proxy,ProxyPage,ProxyPage,config,config.yaml,,active
+proxy.settings.config_hint,proxy,ProxyPage,ProxyPage,config_hint,Raw CLIProxyAPI config — saved through the core's management API; takes effect after a core restart.,,active
+proxy.settings.config_saved,proxy,ProxyPage,ProxyPage,config_saved,config.yaml saved.,,active
+proxy.action.revert,proxy,ProxyPage,ProxyPage,revert,Revert,,active
+proxy.action.save_config,proxy,ProxyPage,ProxyPage,save_config,Save,,active

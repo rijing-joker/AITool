@@ -1572,6 +1572,14 @@ function createLocalApiHandler({ queuePath }) {
   return async function handleLocalApi(req, res, url) {
     const p = url.pathname;
 
+    // --- AiTool proxy layer (core management + usage bridge) ---
+    if (p === "/api/proxy" || p.startsWith("/api/proxy/")) {
+      const handled = await require("./proxy/api").handleProxyApiRequest(req, res, url, {
+        isAuthorizedLocalMutation,
+      });
+      if (handled) return;
+    }
+
     if (p === "/api/local-auth") {
       if (String(req.method || "GET").toUpperCase() !== "GET") {
         json(res, { error: "Method Not Allowed" }, 405);

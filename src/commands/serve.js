@@ -198,6 +198,27 @@ async function cmdServe(argv) {
     return;
   }
 
+  // AiTool proxy layer: when the dashboard boots, bring up the proxy usage
+  // bridge (and, if enabled in ~/.aitool/proxy/settings.json, the core
+  // itself). Failure to start the proxy never blocks the dashboard.
+  try {
+    const proxyConfig = require("../lib/proxy/config");
+    const proxyManager = require("../lib/proxy/manager");
+    const proxyBridge = require("../lib/proxy/usage-bridge");
+    const settings = proxyConfig.readSettings();
+    if (settings.autoStart !== false) {
+      const coreStatus = await proxyManager.status();
+      if (coreStatus.installed) {
+        if (!coreStatus.running) {
+          await proxyManager.start();
+        }
+        proxyBridge.startBridge();
+      }
+    }
+  } catch (e) {
+    process.stdout.write(`Proxy layer warning: ${e?.message || e}\n`);
+  }
+
   {
     const url = getLocalServerUrl(port);
     process.stdout.write(

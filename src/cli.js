@@ -8,6 +8,7 @@ const { cmdServe } = require("./commands/serve");
 const { cmdDeviceLogin } = require("./commands/device-login");
 const { cmdWrapped } = require("./commands/wrapped");
 const { cmdSessions } = require("./commands/sessions");
+const { cmdProxy } = require("./commands/proxy");
 
 async function run(argv) {
   const [command, ...rest] = argv;
@@ -60,6 +61,9 @@ async function run(argv) {
     case "sessions":
       await cmdSessions(rest);
       return;
+    case "proxy":
+      await cmdProxy(rest);
+      return;
     default:
       throw new Error(`Unknown command: ${command}`);
   }
@@ -84,6 +88,7 @@ function printHelp() {
       "  npx tokentracker [--debug] device-login [--json] [--base-url <url>]",
       "  npx tokentracker [--debug] wrapped [--year 2026] [--json]",
       "  npx tokentracker sessions [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--format json|csv] [--out file] [--refresh] [--no-git]",
+      "  aitool proxy [status|start|stop|install|config]",
       "",
       "Notes:",
       "  - init: consent first, local setup next, browser sign-in last.",

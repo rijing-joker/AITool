@@ -48,7 +48,7 @@
   },
   "dependencies": {
     "@mongodb-js/zstd": "^2.0.1",
-    "undici": "8.10.2",
+    "undici": "8.11.2",
     "yaml": "^2.9.1",
     "yauzl": "^3.4.0"
   },

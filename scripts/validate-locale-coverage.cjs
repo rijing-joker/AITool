@@ -40,6 +40,13 @@ const SOURCE_IDENTICAL_KEY_ALLOWLIST = [
   /^ipcheck[.]security[.](?:vpn|tor)$/,
   /^shared[.]app_name$/,
   /^pet[.]character[.](?:clawd|bot|sprout|byte|ember)$/,
+  // AI Proxy tabs: protocol/units/field names that stay verbatim in zh/zh-TW.
+  /^proxy[.]metric[.](?:rpm|tpm)$/,
+  /^proxy[.]settings[.]config$/,
+  /^proxy[.]upstream[.]provider[.](?:codex|deepseek|claude|gemini)$/,
+  /^proxy[.]upstream[.]field[.]baseUrl$/,
+  /^proxy[.]creds[.]settings[.]websockets$/,
+  /^proxy[.]creds[.]models[.]rulesPlaceholder$/,
 ];
 
 // Developer-facing product terms stay in English in Chinese UI copy. Scope

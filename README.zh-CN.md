@@ -40,6 +40,17 @@ core 二进制保持为外部可独立更新的进程（`core-version.txt` 钉�
 
 环境要求：Node.js 20+。代理 core 额外支持 macOS / Linux / Windows（自动获取 Go 构建的二进制）。
 
+### 桌面应用（推荐）
+
+```bash
+cd desktop && npm install && npx tauri build
+open src-tauri/target/release/bundle/macos/AiTool.app   # macOS；同时产出 .dmg
+```
+
+原生窗口 + 系统托盘（打开 / 启动代理 / 停止代理 / 退出）。壳会自动挑空闲端口、拉起 Node 服务，等代理健康后打开仪表盘；关窗隐藏到托盘，退出时一并停掉服务与代理 core。详见 [desktop/README.md](./desktop/README.md)。
+
+### 终端方式
+
 ```bash
 npm install                # 根目录 CLI + 依赖
 npm --prefix dashboard install

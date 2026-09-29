@@ -40,6 +40,20 @@ The core binary stays an external, independently updatable process (pinned in `c
 
 Requirements: Node.js 20+. The proxy core additionally needs macOS / Linux / Windows (a Go-built binary is fetched automatically).
 
+### Desktop app (recommended)
+
+```bash
+cd desktop && npm install && npx tauri build
+open src-tauri/target/release/bundle/macos/AiTool.app   # macOS; also bundles a .dmg
+```
+
+Native window + system tray (Open / Start proxy / Stop proxy / Quit). The shell
+picks a free loopback port, launches the Node server, and opens the dashboard
+once the proxy is healthy; closing the window hides to tray, Quit stops the
+server and the proxy core. See [desktop/README.md](./desktop/README.md).
+
+### Terminal
+
 ```bash
 npm install                # root CLI + deps
 npm --prefix dashboard install

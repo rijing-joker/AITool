@@ -200,7 +200,10 @@ async function cmdServe(argv) {
 
   // AiTool proxy layer: when the dashboard boots, bring up the proxy usage
   // bridge (and, if enabled in ~/.aitool/proxy/settings.json, the core
-  // itself). Failure to start the proxy never blocks the dashboard.
+  // itself). Failure to start the proxy never blocks the dashboard. Warnings
+  // also land in ~/.aitool/proxy/logs/dashboard.log — serve's stdout is a
+  // pipe when launched by the desktop shell, and a full pipe buffer would
+  // otherwise swallow the only trace of a failed autostart.
   try {
     const proxyConfig = require("../lib/proxy/config");
     const proxyManager = require("../lib/proxy/manager");
@@ -216,7 +219,36 @@ async function cmdServe(argv) {
       }
     }
   } catch (e) {
-    process.stdout.write(`Proxy layer warning: ${e?.message || e}\n`);
+    const message = `Proxy layer warning: ${e?.message || e}`;
+    process.stdout.write(`${message}\n`);
+    try {
+      const fs = require("node:fs");
+      const proxyPaths = require("../lib/proxy/paths");
+      fs.mkdirSync(proxyPaths.logsDir, { recursive: true });
+      fs.appendFileSync(
+        proxyPaths.logsDir + "/dashboard.log",
+        `${new Date().toISOString()} ${message}\n`,
+      );
+    } catch {}
+  }
+
+  // AiTool desktop shell: die with the parent app. When the Tauri shell
+  // quits or crashes, the reparenting to launchd (ppid 1) is the one signal
+  // that survives every kill path — take the proxy core down with us so a
+  // quit really stops everything the app started.
+  if (process.env.AITOOL_DESKTOP === "1") {
+    const desktopWatchdog = setInterval(() => {
+      if (process.ppid !== 1) return;
+      clearInterval(desktopWatchdog);
+      (async () => {
+        try {
+          require("../lib/proxy/usage-bridge").stopBridge();
+          await require("../lib/proxy/manager").stop();
+        } catch {}
+        process.exit(0);
+      })();
+    }, 2_000);
+    desktopWatchdog.unref?.();
   }
 
   {

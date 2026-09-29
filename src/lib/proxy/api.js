@@ -152,6 +152,139 @@ function computeOverview(rows) {
 }
 
 // ---------------------------------------------------------------------------
+// EasyCLIProxyAPI API-接入 helpers (management pass-through, remarks, probes)
+// ---------------------------------------------------------------------------
+
+const providerHealth = require("./provider-health");
+
+const REMARK_SECTIONS = new Set(["gemini-api-key", "codex-api-key", "claude-api-key", "openai-compatibility"]);
+
+function truncateForError(text) {
+  const trimmed = String(text ?? "").trim();
+  const chars = Array.from(trimmed);
+  return chars.length <= 240 ? trimmed : `${chars.slice(0, 240).join("")}…`;
+}
+
+// Mirrors the Rust format_management_error so the ported page sees the exact
+// same error strings it was built around.
+function formatManagementError(status, data) {
+  if (data && typeof data === "object" && !Array.isArray(data)) {
+    const field = (key) => (typeof data[key] === "string" ? data[key].trim() : "");
+    const error = field("error");
+    const message = field("message");
+    const detail = error && message && error !== message
+      ? `${error}: ${message}`
+      : error || message;
+    if (detail) return `Management API error (${status}): ${truncateForError(detail)}`;
+  }
+  if (typeof data === "string" && data.trim()) {
+    return `Management API error (${status}): ${truncateForError(data)}`;
+  }
+  return `Management API error (${status})`;
+}
+
+function sha256Hex(text) {
+  return crypto.createHash("sha256").update(Buffer.from(text, "utf8")).digest("hex");
+}
+
+function lengthPrefixed(parts, text) {
+  const bytes = Buffer.from(text, "utf8");
+  const length = Buffer.alloc(8);
+  length.writeBigUInt64BE(BigInt(bytes.length));
+  parts.push(length, bytes);
+}
+
+// Same record identity as EasyCLIProxyAPI's Rust side: sha256 over
+// length-prefixed section/name/base-url plus sorted api-key hashes.
+function remarkRecordIdentity(section, locator) {
+  const keyHashes = [...new Set(
+    (Array.isArray(locator?.apiKeys) ? locator.apiKeys : [])
+      .map((key) => String(key ?? "").trim())
+      .filter(Boolean)
+      .map((key) => sha256Hex(key)),
+  )].sort();
+  if (keyHashes.length === 0) return null;
+  const parts = [];
+  for (const component of [
+    String(section ?? "").trim(),
+    String(locator?.providerName ?? "").trim(),
+    String(locator?.baseUrl ?? "").trim(),
+  ]) {
+    lengthPrefixed(parts, component);
+  }
+  const count = Buffer.alloc(8);
+  count.writeBigUInt64BE(BigInt(keyHashes.length));
+  parts.push(count);
+  for (const keyHash of keyHashes) lengthPrefixed(parts, keyHash);
+  const configIdentity = String(locator?.configIdentity ?? "");
+  if (configIdentity) lengthPrefixed(parts, configIdentity);
+  return { recordHash: sha256Hex(Buffer.concat(parts)), keyHashes };
+}
+
+function readRemarksStore() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(paths.remarksPath, "utf8"));
+    if (parsed && Array.isArray(parsed.entries)) return parsed;
+  } catch {}
+  return { entries: [] };
+}
+
+function writeRemarksStore(store) {
+  fs.mkdirSync(path.dirname(paths.remarksPath), { recursive: true });
+  fs.writeFileSync(paths.remarksPath, `${JSON.stringify(store, null, 2)}\n`);
+}
+
+function resolveProviderRemark(store, query) {
+  const section = String(query?.providerSection ?? "");
+  const identity = remarkRecordIdentity(section, query);
+  if (!identity) return "";
+  let remark = "";
+  for (const entry of store.entries) {
+    if (entry.section !== section || entry.recordHash !== identity.recordHash) continue;
+    if (!identity.keyHashes.includes(entry.keyHash)) continue;
+    remark = entry.remark;
+    if (remark) break;
+  }
+  return remark;
+}
+
+function applyProviderRemarkUpdate(update) {
+  const section = String(update?.providerSection ?? "");
+  if (!REMARK_SECTIONS.has(section)) {
+    throw new Error("Invalid API access type");
+  }
+  const remark = String(update?.remark ?? "").trim();
+  if (Array.from(remark).length > 80) {
+    throw new Error("Key note cannot exceed 80 characters");
+  }
+  if (/[\u0000-\u001f\u007f]/.test(remark)) {
+    throw new Error("Key note cannot contain line breaks or control characters");
+  }
+  const toIdentities = (records) => (Array.isArray(records) ? records : [])
+    .map((locator) => remarkRecordIdentity(section, locator))
+    .filter(Boolean);
+  const previous = toIdentities(update?.previousRecords);
+  const next = toIdentities(update?.records);
+  const all = toIdentities(update?.allRecords);
+  const replaceSet = new Set([...previous, ...next].map((identity) => identity.recordHash));
+  const allHashes = new Set(all.map((identity) => identity.recordHash));
+  const store = readRemarksStore();
+  store.entries = store.entries.filter((entry) => entry.section !== section
+    || (entry.recordHash && allHashes.has(entry.recordHash) && !replaceSet.has(entry.recordHash)));
+  const inserted = new Set(
+    store.entries.filter((entry) => entry.section === section && entry.recordHash).map((entry) => entry.recordHash),
+  );
+  for (const identity of next) {
+    if (inserted.has(identity.recordHash)) continue;
+    inserted.add(identity.recordHash);
+    for (const keyHash of identity.keyHashes) {
+      store.entries.push({ section, recordHash: identity.recordHash, keyHash, remark });
+    }
+  }
+  writeRemarksStore(store);
+}
+
+// ---------------------------------------------------------------------------
 // Route table
 // ---------------------------------------------------------------------------
 
@@ -355,52 +488,70 @@ async function handleProxyApiRequest(req, res, url, ctx) {
       return true;
     }
 
-    // --- upstream API-key providers (EasyCLIProxyAPI "API 接入") ---
-    // Gemini / Claude / Codex upstream keys: GET returns {"<section>": [...]},
-    // mutations take arrays or {items}. OpenAI-compatible providers carry
-    // models[] with name→alias (one alias may repeat across entries/sources —
-    // the core round-robins and fails over between them).
-    const upstreamSections = [
-      ["gemini", "gemini-api-key"],
-      ["claude", "claude-api-key"],
-      ["codex", "codex-api-key"],
-    ];
-    for (const [section, route] of upstreamSections) {
-      if (p === `/api/proxy/upstreams/${section}` && (method === "PUT" || method === "PATCH" || method === "DELETE")) {
-        if (!requireMutation()) return true;
-        const body = await readJsonBody(req);
-        const result = await management.request(method, `/v0/management/${route}`, { body });
-        json(res, result.ok ? { ok: true } : { ok: false, error: result.error || result.status }, result.ok ? 200 : 502);
-        return true;
-      }
-      if (p === `/api/proxy/upstreams/${section}`) {
-        const result = await management.request("GET", `/v0/management/${route}`);
-        if (result.ok) {
-          const data = result.data || {};
-          const list = Array.isArray(data) ? data : data[route] || data.items || [];
-          json(res, { ok: true, providers: list });
-        } else {
-          json(res, { ok: false, error: result.error || result.status }, 502);
-        }
-        return true;
-      }
-    }
-
-    if (p === "/api/proxy/upstreams/openai-compat" && (method === "PUT" || method === "PATCH" || method === "DELETE" || method === "POST")) {
+    // --- management pass-through + provider remarks + health probes ---
+    // The dashboard's port of EasyCLIProxyAPI's managementApi needs the core's
+    // exact semantics: v8-style paths, JSON-or-string responses and the same
+    // error strings ("Management API error (404): not_found", …) so its
+    // fallback logic (e.g. absent v8 config nodes → 404) keeps working.
+    if (p === "/api/proxy/management-request" && method === "POST") {
       if (!requireMutation()) return true;
-      const body = await readJsonBody(req);
-      const result = await management.request(method, "/v0/management/openai-compatibility", { body });
-      json(res, result.ok ? { ok: true, data: result.data } : { ok: false, error: result.error || result.status }, result.ok ? 200 : 502);
+      const raw = await readJsonBody(req);
+      const body = raw && typeof raw === "object" && raw.request && typeof raw.request === "object"
+        ? raw.request
+        : raw;
+      const verb = String(body.method || "").trim().toUpperCase();
+      if (!["GET", "POST", "PUT", "PATCH", "DELETE"].includes(verb)) {
+        json(res, { ok: false, error: "Unsupported management API request method" });
+        return true;
+      }
+      const route = String(body.path || "").trim();
+      if (!route || route.includes("://") || route.includes("..")) {
+        json(res, { ok: false, error: "Invalid management API path" });
+        return true;
+      }
+      const timeoutMs = Math.min(120_000, Math.max(1_000, Number(body.timeoutMs) || 15_000));
+      const result = await management.request(verb, `/v8/management/${route.replace(/^\/+/, "")}`, {
+        query: body.query && typeof body.query === "object" && !Array.isArray(body.query) ? body.query : undefined,
+        body: body.body,
+        timeoutMs,
+      });
+      if (!result.ok) {
+        json(res, { ok: false, error: formatManagementError(result.status, result.data) });
+        return true;
+      }
+      json(res, { ok: true, value: result.data === "" ? null : result.data });
       return true;
     }
-    if (p === "/api/proxy/upstreams/openai-compat") {
-      const result = await management.request("GET", "/v0/management/openai-compatibility");
-      if (result.ok) {
-        const data = result.data || {};
-        const list = Array.isArray(data) ? data : data["openai-compatibility"] || data.items || [];
-        json(res, { ok: true, providers: list });
-      } else {
-        json(res, { ok: false, error: result.error || result.status }, 502);
+
+    if (p === "/api/proxy/provider-remarks/resolve" && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      const store = readRemarksStore();
+      const queries = Array.isArray(body.queries) ? body.queries : [];
+      const remarks = queries.map((query) => resolveProviderRemark(store, query));
+      json(res, { ok: true, remarks });
+      return true;
+    }
+
+    if (p === "/api/proxy/provider-remarks" && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      try {
+        applyProviderRemarkUpdate(body.update || {});
+        json(res, { ok: true });
+      } catch (error) {
+        json(res, { ok: false, error: error?.message || String(error) });
+      }
+      return true;
+    }
+
+    if (p === "/api/proxy/provider-health-probe" && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      try {
+        json(res, { ok: true, result: await providerHealth.probe(body.request || body) });
+      } catch (error) {
+        json(res, { ok: false, error: error?.message || String(error) });
       }
       return true;
     }

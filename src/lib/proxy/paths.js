@@ -22,5 +22,6 @@ module.exports = {
   bucketsStatePath: path.join(proxyRoot, "usage", "buckets.json"),
   pidPath: path.join(proxyRoot, "core.pid"),
   settingsPath: path.join(proxyRoot, "settings.json"),
+  remarksPath: path.join(proxyRoot, "api-access-remarks.json"),
   coreVersionPath: path.join(proxyRoot, "core-version.txt"),
 };

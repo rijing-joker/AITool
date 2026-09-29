@@ -1771,3 +1771,171 @@ proxy.aliases.delete_alias,proxy,ProxyPage,ProxyPage,delete_alias,Delete alias,,
 proxy.aliases.hint,proxy,ProxyPage,ProxyPage,hint,Overlapping names across channels can become ambiguous in the merged /v1 model list — prefer unique aliases for strict pinning.,,active
 proxy.requests.response_model,proxy,ProxyPage,ProxyPage,response_model,Response model,,active
 proxy.requests.substituted_hint,proxy,ProxyPage,ProxyPage,substituted_hint,The upstream reported a different model than requested — possible silent substitution.,,active
+proxy.upstream.notConfigured,proxy,ProxyPage,Upstreams,notConfigured,Not configured,,active
+proxy.upstream.compatibleName,proxy,ProxyPage,Upstreams,compatible_name,OpenAI compatible {{number}},,active
+proxy.upstream.provider.codex,proxy,ProxyPage,Upstreams,provider_codex,Codex API,,active
+proxy.upstream.provider.openaiCompat,proxy,ProxyPage,Upstreams,provider_openai_compat,OpenAI Compatible,,active
+proxy.upstream.provider.deepseek,proxy,ProxyPage,Upstreams,provider_deepseek,DeepSeek,,active
+proxy.upstream.provider.claude,proxy,ProxyPage,Upstreams,provider_claude,Claude,,active
+proxy.upstream.provider.gemini,proxy,ProxyPage,Upstreams,provider_gemini,Gemini,,active
+proxy.upstream.search,proxy,ProxyPage,Upstreams,search,"Search notes, keys or URLs",,active
+proxy.upstream.add,proxy,ProxyPage,Upstreams,add,Add,,active
+proxy.upstream.count,proxy,ProxyPage,Upstreams,count,{{count}} provider(s),,active
+proxy.upstream.matches,proxy,ProxyPage,Upstreams,matches,{{count}} matching,,active
+proxy.upstream.dragHint,proxy,ProxyPage,Upstreams,drag_hint,Drag rows to adjust failover order,,active
+proxy.upstream.dragHandle,proxy,ProxyPage,Upstreams,drag_handle,Drag {{remark}} to reorder; keyboard: press space then use arrow keys,,active
+proxy.upstream.loading,proxy,ProxyPage,Upstreams,loading,Reading configuration,,active
+proxy.upstream.priorityValue,proxy,ProxyPage,Upstreams,priority_value,Priority {{priority}},,active
+proxy.upstream.keys.count,proxy,ProxyPage,Upstreams,keys_count,{{count}} key(s),,active
+proxy.upstream.keys.summary,proxy,ProxyPage,Upstreams,keys_summary,"{{key}} · {{count}} key(s)",,active
+proxy.upstream.defaultUrl,proxy,ProxyPage,Upstreams,default_url,Using default endpoint,,active
+proxy.upstream.models.summary,proxy,ProxyPage,Upstreams,models_summary,{{count}} model(s),,active
+proxy.upstream.enable,proxy,ProxyPage,Upstreams,enable,Enable provider,,active
+proxy.upstream.disable,proxy,ProxyPage,Upstreams,disable,Disable provider,,active
+proxy.upstream.toggleAria,proxy,ProxyPage,Upstreams,toggle_aria,Toggle {{remark}} provider {{action}},,active
+proxy.upstream.status.disabled,proxy,ProxyPage,Upstreams,status_disabled,Disabled,,active
+proxy.upstream.deleteConfirm,proxy,ProxyPage,Upstreams,delete_confirm,"Delete ""{{remark}}""?",,active
+proxy.upstream.notice.added,proxy,ProxyPage,Upstreams,notice_added,Provider added,,active
+proxy.upstream.notice.updated,proxy,ProxyPage,Upstreams,notice_updated,Provider updated,,active
+proxy.upstream.notice.deleted,proxy,ProxyPage,Upstreams,notice_deleted,Provider deleted,,active
+proxy.upstream.empty.filtered,proxy,ProxyPage,Upstreams,empty_filtered,No matching providers,,active
+proxy.upstream.empty.none,proxy,ProxyPage,Upstreams,empty_none,No providers configured yet,,active
+proxy.upstream.empty.tryKeyword,proxy,ProxyPage,Upstreams,empty_try_keyword,Try a different keyword,,active
+proxy.upstream.empty.addFirst,proxy,ProxyPage,Upstreams,empty_add_first,Click “Add” in the top-right corner to create the first provider,,active
+proxy.upstream.dialog.add,proxy,ProxyPage,Upstreams,dialog_add,Add API access,,active
+proxy.upstream.dialog.edit,proxy,ProxyPage,Upstreams,dialog_edit,Edit API access,,active
+proxy.upstream.field.remark,proxy,ProxyPage,Upstreams,field_remark,Note,,active
+proxy.upstream.remarkPlaceholder,proxy,ProxyPage,Upstreams,remark_placeholder,"e.g. production, team primary account",,active
+proxy.upstream.field.keysMany,proxy,ProxyPage,Upstreams,field_keys_many,API Key (one per line),,active
+proxy.upstream.field.baseUrl,proxy,ProxyPage,Upstreams,field_base_url,Base URL,,active
+proxy.upstream.baseRequiredPlaceholder,proxy,ProxyPage,Upstreams,base_required_placeholder,"Required, e.g. https://api.example.com",,active
+proxy.upstream.baseOptionalPlaceholder,proxy,ProxyPage,Upstreams,base_optional_placeholder,Optional — leave blank to use the default endpoint,,active
+proxy.upstream.field.proxyUrl,proxy,ProxyPage,Upstreams,field_proxy_url,Proxy URL,,active
+proxy.upstream.proxyMixed,proxy,ProxyPage,Upstreams,proxy_mixed,Per-key proxy settings currently differ,,active
+proxy.upstream.proxyClear,proxy,ProxyPage,Upstreams,proxy_clear,Clear proxy,,active
+proxy.upstream.thinking.title,proxy,ProxyPage,Upstreams,thinking_title,Thinking levels,,active
+proxy.upstream.thinking.description,proxy,ProxyPage,Upstreams,thinking_description,Applies to every model of this provider once changed; unedited models keep their own settings,,active
+proxy.upstream.thinking.placeholder,proxy,ProxyPage,Upstreams,thinking_placeholder,"e.g. low, medium or a custom level",,active
+proxy.upstream.thinking.add,proxy,ProxyPage,Upstreams,thinking_add,Add,,active
+proxy.upstream.thinking.delete,proxy,ProxyPage,Upstreams,thinking_delete,Delete {{level}},,active
+proxy.upstream.thinking.deleteAria,proxy,ProxyPage,Upstreams,thinking_delete_aria,Delete thinking level {{level}},,active
+proxy.upstream.thinking.empty,proxy,ProxyPage,Upstreams,thinking_empty,Without manual edits every model keeps its own thinking settings,,active
+proxy.upstream.models.title,proxy,ProxyPage,Upstreams,models_title,Models,,active
+proxy.upstream.models.description,proxy,ProxyPage,Upstreams,models_description,Selected models are exposed; removing one hides it from the model list,,active
+proxy.upstream.models.fetch,proxy,ProxyPage,Upstreams,models_fetch,Fetch models,,active
+proxy.upstream.models.selected,proxy,ProxyPage,Upstreams,models_selected,{{count}} model(s) selected,,active
+proxy.upstream.models.selectionRequired,proxy,ProxyPage,Upstreams,models_selection_required,No model selected yet,,active
+proxy.upstream.models.selectionRequiredHint,proxy,ProxyPage,Upstreams,models_selection_required_hint,Fetch the model list first and select at least one model,,active
+proxy.upstream.models.staleHint,proxy,ProxyPage,Upstreams,models_stale_hint,Connection details changed — fetch the model list again,,active
+proxy.upstream.models.restricted,proxy,ProxyPage,Upstreams,models_restricted,Model restrictions configured,,active
+proxy.upstream.models.autoAll,proxy,ProxyPage,Upstreams,models_auto_all,All models are exposed by default when saving,,active
+proxy.upstream.models.autoHint,proxy,ProxyPage,Upstreams,models_auto_hint,Models are fetched automatically on save; deselect unneeded ones ahead of time,,active
+proxy.upstream.models.upstreamDefault,proxy,ProxyPage,Upstreams,models_upstream_default,Using upstream default models,,active
+proxy.upstream.models.allHint,proxy,ProxyPage,Upstreams,models_all_hint,All upstream models are currently exposed,,active
+proxy.upstream.models.hiddenHint,proxy,ProxyPage,Upstreams,models_hidden_hint,Unselected models stay hidden from the exposed list,,active
+proxy.upstream.models.namePlaceholder,proxy,ProxyPage,Upstreams,models_name_placeholder,"Model name, e.g. gpt-4o",,active
+proxy.upstream.models.aliasPlaceholder,proxy,ProxyPage,Upstreams,models_alias_placeholder,Model alias (optional),,active
+proxy.upstream.models.add,proxy,ProxyPage,Upstreams,models_add,Add custom model,,active
+proxy.upstream.models.remove,proxy,ProxyPage,Upstreams,models_remove,Delete model,,active
+proxy.upstream.field.priority,proxy,ProxyPage,Upstreams,field_priority,Priority,,active
+proxy.upstream.advanced,proxy,ProxyPage,Upstreams,advanced,Advanced,,active
+proxy.upstream.field.prefix,proxy,ProxyPage,Upstreams,field_prefix,Model prefix,,active
+proxy.upstream.prefixPlaceholder,proxy,ProxyPage,Upstreams,prefix_placeholder,"Optional, e.g. team-a",,active
+proxy.upstream.field.headers,proxy,ProxyPage,Upstreams,field_headers,Custom headers (Name: Value per line),,active
+proxy.upstream.field.excludedModels,proxy,ProxyPage,Upstreams,field_excluded_models,Excluded models (one per line, wildcards allowed),,active
+proxy.upstream.option.inherit,proxy,ProxyPage,Upstreams,option_inherit,Use default,,active
+proxy.upstream.cloak.mode,proxy,ProxyPage,Upstreams,cloak_mode,Claude cloak mode,,active
+proxy.upstream.cloak.default,proxy,ProxyPage,Upstreams,cloak_default,Default (auto),,active
+proxy.upstream.cloak.auto,proxy,ProxyPage,Upstreams,cloak_auto,Auto,,active
+proxy.upstream.cloak.always,proxy,ProxyPage,Upstreams,cloak_always,Always on,,active
+proxy.upstream.cloak.never,proxy,ProxyPage,Upstreams,cloak_never,Always off,,active
+proxy.upstream.cloak.words,proxy,ProxyPage,Upstreams,cloak_words,Cloak sensitive words (one per line),,active
+proxy.upstream.cloak.strict,proxy,ProxyPage,Upstreams,cloak_strict,Strict mode,,active
+proxy.upstream.cloak.strictDescription,proxy,ProxyPage,Upstreams,cloak_strict_description,Keep only the Claude Code system prompt,,active
+proxy.upstream.cloak.enableStrict,proxy,ProxyPage,Upstreams,cloak_enable_strict,Enable strict mode,,active
+proxy.upstream.cloak.cacheUser,proxy,ProxyPage,Upstreams,cloak_cache_user,Cache user identity,,active
+proxy.upstream.cloak.cacheUserDescription,proxy,ProxyPage,Upstreams,cloak_cache_user_description,Reuse the cloaked user identity,,active
+proxy.upstream.websocket.description,proxy,ProxyPage,Upstreams,websocket_description,Enable WebSocket for this Codex provider,,active
+proxy.upstream.websocket.enable,proxy,ProxyPage,Upstreams,websocket_enable,Enable WebSocket,,active
+proxy.upstream.cooling.title,proxy,ProxyPage,Upstreams,cooling_title,Disable cooling,,active
+proxy.upstream.cooling.description,proxy,ProxyPage,Upstreams,cooling_description,Keep selecting this provider even after upstream rate limits,,active
+proxy.upstream.cooling.disable,proxy,ProxyPage,Upstreams,cooling_disable,Disable cooling,,active
+proxy.upstream.cooling.enable,proxy,ProxyPage,Upstreams,cooling_enable,Enable cooling,,active
+proxy.upstream.modelDialog.title,proxy,ProxyPage,Upstreams,model_dialog_title,Select models,,active
+proxy.upstream.modelDialog.summary,proxy,ProxyPage,Upstreams,model_dialog_summary,Found {{found}} · selected {{selected}},,active
+proxy.upstream.modelDialog.selected,proxy,ProxyPage,Upstreams,model_dialog_selected,Selected models,,active
+proxy.upstream.modelDialog.unselected,proxy,ProxyPage,Upstreams,model_dialog_unselected,Available models,,active
+proxy.upstream.modelDialog.searchSelected,proxy,ProxyPage,Upstreams,model_dialog_search_selected,Search selected models,,active
+proxy.upstream.modelDialog.searchUnselected,proxy,ProxyPage,Upstreams,model_dialog_search_unselected,Search available models,,active
+proxy.upstream.modelDialog.clearSearch,proxy,ProxyPage,Upstreams,model_dialog_clear_search,Clear search,,active
+proxy.upstream.modelDialog.addAll,proxy,ProxyPage,Upstreams,model_dialog_add_all,Add all,,active
+proxy.upstream.modelDialog.removeAll,proxy,ProxyPage,Upstreams,model_dialog_remove_all,Remove all,,active
+proxy.upstream.modelDialog.addResults,proxy,ProxyPage,Upstreams,model_dialog_add_results,Add results,,active
+proxy.upstream.modelDialog.removeResults,proxy,ProxyPage,Upstreams,model_dialog_remove_results,Remove results,,active
+proxy.upstream.modelDialog.addModel,proxy,ProxyPage,Upstreams,model_dialog_add_model,Add {{name}},,active
+proxy.upstream.modelDialog.removeModel,proxy,ProxyPage,Upstreams,model_dialog_remove_model,Remove {{name}},,active
+proxy.upstream.modelDialog.emptySelected,proxy,ProxyPage,Upstreams,model_dialog_empty_selected,No selected models,,active
+proxy.upstream.modelDialog.emptyUnselected,proxy,ProxyPage,Upstreams,model_dialog_empty_unselected,No available models,,active
+proxy.upstream.modelDialog.chooseOne,proxy,ProxyPage,Upstreams,model_dialog_choose_one,Select at least one model,,active
+proxy.upstream.modelDialog.fetching,proxy,ProxyPage,Upstreams,model_dialog_fetching,Fetching models,,active
+proxy.upstream.modelDialog.noMatch,proxy,ProxyPage,Upstreams,model_dialog_no_match,No matching models,,active
+proxy.upstream.modelDialog.apply,proxy,ProxyPage,Upstreams,model_dialog_apply,Apply selection ({{count}}),,active
+proxy.upstream.health.action,proxy,ProxyPage,Upstreams,health_action,Health check,,active
+proxy.upstream.health.title,proxy,ProxyPage,Upstreams,health_title,Model health check,,active
+proxy.upstream.health.description,proxy,ProxyPage,Upstreams,health_description,{{provider}},,active
+proxy.upstream.health.search,proxy,ProxyPage,Upstreams,health_search,Search model names or aliases,,active
+proxy.upstream.health.warning,proxy,ProxyPage,Upstreams,health_warning,"Each check sends one minimal streaming request per model and stops at the first token or a verifiable normal end — it may incur a small cost.",,active
+proxy.upstream.health.summary,proxy,ProxyPage,Upstreams,health_summary,Checked {{checked}}/{{total}} · healthy {{healthy}} · failed {{failed}},,active
+proxy.upstream.health.loadingModels,proxy,ProxyPage,Upstreams,health_loading_models,Fetching model list…,,active
+proxy.upstream.health.modelLoadFailed,proxy,ProxyPage,Upstreams,health_model_load_failed,Failed to refresh the model list: {{error}},,active
+proxy.upstream.health.noMatch,proxy,ProxyPage,Upstreams,health_no_match,No matching models,,active
+proxy.upstream.health.noModel,proxy,ProxyPage,Upstreams,health_no_model,No models available for health checks,,active
+proxy.upstream.health.notChecked,proxy,ProxyPage,Upstreams,health_not_checked,Not checked,,active
+proxy.upstream.health.checkOne,proxy,ProxyPage,Upstreams,health_check_one,Check,,active
+proxy.upstream.health.retryOne,proxy,ProxyPage,Upstreams,health_retry_one,Retry,,active
+proxy.upstream.health.checkAll,proxy,ProxyPage,Upstreams,health_check_all,Check all models,,active
+proxy.upstream.health.checkingProgress,proxy,ProxyPage,Upstreams,health_checking_progress,Checking {{checked}}/{{total}},,active
+proxy.upstream.health.checking,proxy,ProxyPage,Upstreams,health_checking,Checking…,,active
+proxy.upstream.health.healthy,proxy,ProxyPage,Upstreams,health_healthy,Healthy,,active
+proxy.upstream.health.failed,proxy,ProxyPage,Upstreams,health_failed,Failed,,active
+proxy.upstream.health.timeout,proxy,ProxyPage,Upstreams,health_timeout,Request timed out,,active
+proxy.upstream.health.missingDirectKey,proxy,ProxyPage,Upstreams,health_missing_direct_key,No plaintext API key available; first-token latency cannot be measured,,active
+proxy.upstream.health.firstTokenInline,proxy,ProxyPage,Upstreams,health_first_token_inline,First token {{latency}} ms,,active
+proxy.upstream.health.firstTokenLatencyResult,proxy,ProxyPage,Upstreams,health_first_token_result,First token latency: {{latency}} ms,,active
+proxy.upstream.health.responseInline,proxy,ProxyPage,Upstreams,health_response_inline,Response {{latency}} ms,,active
+proxy.upstream.health.responseLatencyResult,proxy,ProxyPage,Upstreams,health_response_result,Response latency: {{latency}} ms,,active
+proxy.upstream.common.refresh,proxy,ProxyPage,Upstreams,common_refresh,Refresh,,active
+proxy.upstream.common.close,proxy,ProxyPage,Upstreams,common_close,Close,,active
+proxy.upstream.common.cancel,proxy,ProxyPage,Upstreams,common_cancel,Cancel,,active
+proxy.upstream.common.save,proxy,ProxyPage,Upstreams,common_save,Save,,active
+proxy.upstream.common.saving,proxy,ProxyPage,Upstreams,common_saving,Saving…,,active
+proxy.upstream.common.delete,proxy,ProxyPage,Upstreams,common_delete,Delete,,active
+proxy.upstream.common.edit,proxy,ProxyPage,Upstreams,common_edit,Edit,,active
+proxy.upstream.common.enable,proxy,ProxyPage,Upstreams,common_enable,Enable,,active
+proxy.upstream.common.disable,proxy,ProxyPage,Upstreams,common_disable,Disable,,active
+proxy.upstream.common.enabled,proxy,ProxyPage,Upstreams,common_enabled,Enabled,,active
+proxy.upstream.common.disabled,proxy,ProxyPage,Upstreams,common_disabled,Disabled,,active
+proxy.upstream.error.invalidAlias,proxy,ProxyPage,Upstreams,error_invalid_alias,Invalid alias model format — whitespace is not allowed,,active
+proxy.upstream.error.baseUrlRequired,proxy,ProxyPage,Upstreams,error_base_url_required,Enter a Base URL first,,active
+proxy.upstream.error.invalidBaseUrl,proxy,ProxyPage,Upstreams,error_invalid_base_url,Base URL is not a valid URL — use something like https://api.example.com,,active
+proxy.upstream.error.unsupportedBaseUrl,proxy,ProxyPage,Upstreams,error_unsupported_base_url,Base URL supports only http:// or https:// addresses,,active
+proxy.upstream.error.noResponse,proxy,ProxyPage,Upstreams,error_no_response,The model endpoint did not respond,,active
+proxy.upstream.error.headerMissingColon,proxy,ProxyPage,Upstreams,error_header_missing_colon,Custom header line {{number}} is missing a colon,,active
+proxy.upstream.error.headerInvalid,proxy,ProxyPage,Upstreams,error_header_invalid,Custom header line {{number}} is invalid,,active
+proxy.upstream.error.priorityInteger,proxy,ProxyPage,Upstreams,error_priority_integer,Priority must be an integer within the safe range.,,active
+proxy.upstream.error.upstream,proxy,ProxyPage,Upstreams,error_upstream,Upstream request failed,,active
+proxy.upstream.error.upstreamHttp,proxy,ProxyPage,Upstreams,error_upstream_http,Upstream returned HTTP {{status}},,active
+proxy.upstream.error.partialLoad,proxy,ProxyPage,Upstreams,error_partial_load,Partial load failure: {{errors}},,active
+proxy.upstream.error.requiredAll,proxy,ProxyPage,Upstreams,error_required_all,"Note, Base URL and API key cannot be empty",,active
+proxy.upstream.error.requiredBaseKey,proxy,ProxyPage,Upstreams,error_required_base_key,Base URL and API key cannot be empty,,active
+proxy.upstream.error.requiredKey,proxy,ProxyPage,Upstreams,error_required_key,API key cannot be empty,,active
+proxy.upstream.error.baseRequired,proxy,ProxyPage,Upstreams,error_base_required,{{provider}} access requires a Base URL,,active
+proxy.upstream.error.noModels,proxy,ProxyPage,Upstreams,error_no_models,No passable models were found — check the Base URL and API key,,active
+proxy.upstream.error.fetchModelsBeforeSave,proxy,ProxyPage,Upstreams,error_fetch_models_before_save,Fetch the model list successfully and select at least one model before saving,,active
+proxy.upstream.error.stale,proxy,ProxyPage,Upstreams,error_stale,The provider configuration was changed elsewhere — refresh and try again,,active
+proxy.upstream.error.duplicate,proxy,ProxyPage,Upstreams,error_duplicate,An identical provider configuration already exists,,active
+proxy.upstream.error.remarkInvalid,proxy,ProxyPage,Upstreams,error_remark_invalid,The note cannot exceed 80 characters or contain line breaks / control characters,,active
+proxy.upstream.error.proxyUrlInvalid,proxy,ProxyPage,Upstreams,error_proxy_url_invalid,"Invalid proxy URL — use http://, https:// or socks5://, or direct / none",,active
+proxy.upstream.error.enterBaseUrl,proxy,ProxyPage,Upstreams,error_enter_base_url,Enter a Base URL first,,active
+proxy.upstream.error.noAvailableModels,proxy,ProxyPage,Upstreams,error_no_available_models,No usable models discovered,,active
+proxy.upstream.error.baseBeforeModels,proxy,ProxyPage,Upstreams,error_base_before_models,Enter a Base URL before fetching models,,active

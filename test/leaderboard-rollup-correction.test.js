@@ -525,7 +525,7 @@ test("SQL pin: profile / account views read the LIVE account RPC (corrections vi
   assert.match(profile, /account_usage_grouped/, "profile uses the live account RPC");
   const summary = readRepoFile("dashboard/edge-patches/tokentracker-account-summary.ts");
   assert.match(summary, /account_usage_grouped/, "account summary uses the live account RPC");
-  const rpc = readRepoFile("scripts/ops/account-usage-grouped-rpc.sql");
+  const rpc = readRepoFile("db/account-usage-grouped-rpc.sql");
   assert.match(rpc, /FROM tokentracker_account_session_states s/, "the account RPC's trae-cn branch reads session states");
   assert.doesNotMatch(rpc, /leaderboard_rollup_daily_v2/, "the account RPC never reads the materialized rollup");
 });

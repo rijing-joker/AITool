@@ -1,5 +1,5 @@
 // Inverse-parity guardrail: cloud badge thresholds live ONLY in
-// scripts/ops/user-badges.sql (the catalog table seed). The edges and the
+// db/user-badges.sql (the catalog table seed). The edges and the
 // dashboard receive thresholds/next_threshold in payloads and must not embed
 // their own copies — a second copy WILL drift.
 //
@@ -67,7 +67,7 @@ test("dashboard source carries no cloud badge threshold literals (mock exempt)",
 });
 
 test("badge id sets agree across SQL, frontend catalog, and copy.csv", () => {
-  const sql = read("scripts/ops/user-badges.sql");
+  const sql = read("db/user-badges.sql");
   const catalog = read("dashboard/src/ui/achievements/badge-catalog.js");
   const copyCsv = read("dashboard/src/content/copy.csv");
   const localApi = read("src/lib/local-api.js");

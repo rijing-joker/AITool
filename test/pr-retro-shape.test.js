@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
 
-const { shapeRetroOutput } = require("../scripts/ops/pr-retro.cjs");
+const { shapeRetroOutput } = require("../scripts/pr-retro.cjs");
 
 test("summarizes non-picked prs while keeping picked full", () => {
   const prs = [

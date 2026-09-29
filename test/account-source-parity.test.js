@@ -4,7 +4,7 @@
 // per-ACCOUNT cloud API and is therefore deduped — not summed — across a user's
 // devices) is hardcoded in several places that MUST agree:
 //   - src/lib/source-metadata.js               (authoritative, used by the CLI)
-//   - scripts/ops/account-usage-grouped-rpc.sql (account view RPC)
+//   - db/account-usage-grouped-rpc.sql (account view RPC)
 //   - dashboard/edge-patches/tokentracker-leaderboard-profile.ts (profile edge)
 //   - dashboard/edge-patches/tokentracker-account-devices.ts (device breakdown edge)
 // A drift (e.g. adding a new account-level source to source-metadata.js but
@@ -64,7 +64,7 @@ test("account-level source list is identical across source-metadata, the account
 
   const others = {
     "account-usage-grouped-rpc.sql": extractSqlAccountSources(
-      readFile("scripts/ops/account-usage-grouped-rpc.sql"),
+      readFile("db/account-usage-grouped-rpc.sql"),
     ),
     "20260817120000_account-session-states.sql (leaderboard_hourly_dedup_v2)": extractSqlAccountSources(
       readFile("migrations/20260817120000_account-session-states.sql"),

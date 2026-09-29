@@ -553,7 +553,7 @@ function scopedQueueRows(queuePath, url) {
 }
 
 // ── Local achievements ───────────────────────────────────────────────────────
-// Local-only badges (the cloud nine live in scripts/ops/user-badges.sql).
+// Local-only badges (the cloud nine live in db/user-badges.sql).
 // Thresholds are ordered bronze → silver → gold → diamond. This module is the
 // single server-side home for LOCAL thresholds; the dashboard renders whatever
 // the payload says and embeds none of these numbers.

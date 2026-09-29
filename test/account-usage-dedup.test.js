@@ -12,7 +12,7 @@
  *   - migrations/20260817120000_account-session-states.sql
  *     (tokentracker_account_session_states + LWW upsert +
  *     leaderboard_hourly_dedup_v2)
- *   - scripts/ops/account-usage-grouped-rpc.sql (account_usage_grouped)
+ *   - db/account-usage-grouped-rpc.sql (account_usage_grouped)
  *   - dashboard/edge-patches/tokentracker-ingest.ts (batch upload)
  *
  * The merge-blocker scenarios run the REAL pipeline: parser -> queue ->
@@ -446,7 +446,7 @@ test("migration: session-state table identity is (user_id, source, session_id) a
 });
 
 test("account_usage_grouped RPC aggregates trae-cn from session states (no watermark path)", () => {
-  const sql = readRepoFile("scripts/ops/account-usage-grouped-rpc.sql");
+  const sql = readRepoFile("db/account-usage-grouped-rpc.sql");
   assert.match(sql, /tokentracker_account_session_states/, "RPC reads the session-state table");
   assert.match(
     sql,

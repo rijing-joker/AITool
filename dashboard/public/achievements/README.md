@@ -12,7 +12,7 @@ deduplicated cross-device history (UTC days); local badges are computed
 on-device in real time and never leave the machine.
 
 > Threshold source of truth: the `tokentracker_badge_catalog` seed in
-> `scripts/ops/user-badges.sql` (cloud) and `LOCAL_BADGE_THRESHOLDS` in
+> `db/user-badges.sql` (cloud) and `LOCAL_BADGE_THRESHOLDS` in
 > `src/lib/local-api.js` (local). The table below is documentation — if it
 > ever disagrees with those, they win.
 

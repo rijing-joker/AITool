@@ -4,7 +4,7 @@ const { test } = require("node:test");
 const {
   extractJsxTextTokens,
   diffAgainstBaseline,
-} = require("../scripts/ops/validate-ui-hardcode-lib.cjs");
+} = require("../scripts/ui-hardcode/validate-ui-hardcode-lib.cjs");
 
 test("extractJsxTextTokens includes unicode letters and digits", () => {
   const tokens = extractJsxTextTokens("<div>123</div><span>中文</span><p>abc</p>");

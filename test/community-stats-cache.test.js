@@ -31,7 +31,7 @@ test("community stats endpoint reads a precomputed snapshot instead of scanning 
 
 test("community stats refresh aggregates the daily rollup plus a live tail", () => {
   const migration = read("migrations/20260716113500_add-community-stats-refresh.sql");
-  const schedule = read("scripts/ops/community-stats-refresh-cron.sql");
+  const schedule = read("db/community-stats-refresh-cron.sql");
 
   assert.match(migration, /tokentracker_leaderboard_rollup_daily/);
   assert.match(migration, /leaderboard_hourly_dedup\(v_through, v_to\)/);

@@ -47,7 +47,7 @@
  *
  * This module is the executable specification of that semantics; the
  * deployed SQL (migrations/20260817120000_account-session-states.sql upsert,
- * scripts/ops/account-usage-grouped-rpc.sql + leaderboard_hourly_dedup_v2
+ * db/account-usage-grouped-rpc.sql + leaderboard_hourly_dedup_v2
  * aggregation branches) implements the same algorithm and MUST stay in sync
  * - test/account-usage-dedup.test.js pins both.
  */
@@ -136,7 +136,7 @@ function upsertAccountSessionStates(states, observations) {
 
 /**
  * Aggregate canonical session states into hourly rows - mirrors the trae-cn
- * branch of account_usage_grouped (scripts/ops/account-usage-grouped-rpc.sql)
+ * branch of account_usage_grouped (db/account-usage-grouped-rpc.sql)
  * and leaderboard_hourly_dedup_v2: SUM per (bucket_start, source, model),
  * conversations = session count.
  *

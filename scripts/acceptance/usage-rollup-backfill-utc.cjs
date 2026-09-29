@@ -5,7 +5,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 
-const sqlPath = path.join(__dirname, "../ops/usage-daily-rollup-backfill.sql");
+const sqlPath = path.join(__dirname, "../../db/usage-daily-rollup-backfill.sql");
 const sql = fs.readFileSync(sqlPath, "utf8");
 
 const hasUtcStart = /hour_start\s*>=\s*\([\s\S]*?at time zone\s+'utc'/i.test(sql);

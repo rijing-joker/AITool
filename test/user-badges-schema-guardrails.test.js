@@ -1,4 +1,4 @@
-// Text-level invariants for scripts/ops/user-badges.sql — the badge storage
+// Text-level invariants for db/user-badges.sql — the badge storage
 // and compute migration. These are load-bearing semantics; if any assertion
 // fails, the edit likely broke monotonic tiers, first-achieved timestamps,
 // momentum adjacency, or the deny-all security posture.
@@ -7,7 +7,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { test } = require("node:test");
 
-const SQL_PATH = path.join(__dirname, "..", "scripts", "ops", "user-badges.sql");
+const SQL_PATH = path.join(__dirname, "..", "db", "user-badges.sql");
 const MIGRATION_PATH = path.join(
   __dirname,
   "..",

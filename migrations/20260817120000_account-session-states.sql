@@ -60,7 +60,7 @@
 --
 -- Semantics mirrored by src/lib/account-usage-dedup.js and pinned by
 -- test/account-usage-dedup.test.js. Apply BEFORE re-deploying the updated
--- scripts/ops/account-usage-grouped-rpc.sql and the ingest edge (both read /
+-- db/account-usage-grouped-rpc.sql and the ingest edge (both read /
 -- write this table).
 -- Rollback: DROP TABLE tokentracker_account_session_states; DROP FUNCTION
 -- tokentracker_upsert_account_session_states(uuid, jsonb); and re-apply the

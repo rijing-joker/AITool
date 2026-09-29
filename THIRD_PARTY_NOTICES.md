@@ -32,7 +32,7 @@ by Jérémy Perret, vendored unmodified at commit
 [`b4bb3c1b5f93`](https://github.com/jeremy-prt/bloub/tree/b4bb3c1b5f93c7b87a2e8d620f667c4093d97749).
 
 Note when re-vendoring: `dashboard/src/lib/bot/README.md` is ours, not upstream's, and
-`decor.ts` / `skins.ts` are listed in `scripts/ops/ui-hardcode-baseline.json`, so a
+`decor.ts` / `skins.ts` are listed in `scripts/ui-hardcode/ui-hardcode-baseline.json`, so a
 refresh needs that file re-copied and the baseline regenerated.
 
 Copyright © 2026 Jérémy Perret

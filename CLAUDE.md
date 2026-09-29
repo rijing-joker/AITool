@@ -1,32 +1,39 @@
 # CLAUDE.md
 
-Guidance for Claude Code working in this repository. Every line here is loaded into every conversation turn — keep it lean and current.
+Guidance for coding agents working in this repository. Every line here is loaded into every conversation turn — keep it lean and current.
 
 ## Project shape
 
-Token Tracker is a local-first AI token usage tracker.
+AiTool is a local-first AI toolbox merging two products. A rebrand from TokenTracker is in progress: legacy `TokenTracker*` directory names, `TOKENTRACKER_` env vars and `~/.tokentracker` paths are load-bearing — don't mass-rename; new proxy/desktop code uses `aitool` / `AITOOL_` / `~/.aitool`.
 
-- **CLI** (`src/`, CommonJS, Node ≥20) — entry `bin/tracker.js` → `src/cli.js`. `serve` runs a local HTTP server on `:7680`, `sync` parses logs into `~/.tokentracker/queue.jsonl`.
-- **Dashboard** (`dashboard/`, React 18 + Vite 7 + TS strict + Tailwind) — built to `dashboard/dist/`, served by the CLI locally and by Vercel at `www.tokentracker.cc`.
+- **AI Proxy** (`src/lib/proxy/`, `src/commands/proxy.js`) — a Node re-implementation of EasyCLIProxyAPI's management layer driving the external Go binary `cli-proxy-api`. The core is never linked or vendored: `core-version.txt` pins the version, `scripts/fetch-core.cjs` downloads the release (`AITOOL_CORE_BIN` or `aitool proxy install --local <CLIProxyAPI checkout>` override), the binary is spawned detached and reached over HTTP (Management API `/v0/management/*`, Bearer key) plus a RESP `SUBSCRIBE usage` socket on the same port. Compatible endpoints `/v1/chat/completions`, `/v1/messages`, `/v1beta/models` on `127.0.0.1:8318`, loopback-only.
+- **CLI** (`src/`, CommonJS, Node ≥20) — entry `bin/tracker.js` → `src/cli.js`. `serve` runs a local HTTP server on `:7680` and starts the proxy core + usage bridge with it (unless `settings.autoStart` is off), `sync` parses logs into `~/.tokentracker/`, `proxy` manages the AI proxy (`status|start|stop|install|config`).
+- **Dashboard** (`dashboard/`, React 18 + Vite 7 + TS strict + Tailwind) — built to `dashboard/dist/`, served by the CLI locally and by Vercel at `www.tokentracker.cc`. The AI Proxy page (`ProxyPage.jsx`) is one route with seven tabs (overview / upstreams / providers / keys / aliases / requests / settings); except Overview, every tab is an interaction port of the matching EasyCLIProxyAPI page (upstreams = ApiAccessPage, providers = AuthFileManagementPage, aliases = ThinkingAliasesPage, keys/settings = ConfigPanel, requests = UsageRecordsPage) — keep the interaction logic aligned when editing.
 - **macOS app** (`TokenTrackerBar/`, Swift 5.9, XcodeGen) — menu bar + WidgetKit. `EmbeddedServer/` bundles the CLI runtime + built dashboard so the `.app` is self-contained.
 - **Windows app** (`TokenTrackerWin/`, .NET 8 WinForms + WPF + WebView2) — system-tray counterpart of the macOS app. Launches the bundled CLI `serve` on a dynamic loopback port (avoids the DoSvc-held `:7680`), hosts the dashboard in WebView2, registers the `tokentracker://` deep-link for OAuth. Built `EmbeddedServer/` (Node + CLI + dashboard) is bundled by `scripts/bundle-node.ps1` so the `.exe` is self-contained. Dashboard adaptations are gated behind `isNativeWindowsApp()` (`dashboard/src/lib/native-bridge.js`) so macOS/web paths are untouched.
+- **Linux app** (`TokenTrackerLinux/`, Tauri 2) — AppImage + `.deb` + `.rpm`, all three from one `tauri build` (target set pinned in `tauri.conf.json` + a test). Bundles its own `EmbeddedServer/`.
+- **Desktop shell** (`desktop/`, Tauri 2) — newest app: native window + system tray around the dashboard. Spawns `node bin/tracker.js serve` from the repo root on a free loopback port (compile-time `AITOOL_ROOT` / `AITOOL_NODE` overrides), close-to-tray, Quit stops server + proxy core. Built manually (`npx tauri build` → `AiTool.app` + dmg) — not part of the release workflows or the version registry.
 
-Data flow: AI CLI runs → hook fires → `rollout.js` parses → `queue.jsonl` → local API → dashboard.
+Data flow, analytics: AI CLI runs → hook fires → `rollout.js` parses → `queue.jsonl` → local API → dashboard.
+Data flow, proxy: proxied request → core emits a usage JSON on the RESP `usage` channel → `src/lib/proxy/usage-bridge.js` appends the raw record to `~/.aitool/proxy/usage/records-*.jsonl` and folds successes into cumulative half-hour buckets appended to the same `queue.jsonl` with `source: "cliproxy"`. Readers dedupe last-row-wins per bucket; bucket totals persist in `usage/buckets.json` so a bridge restart continues the same buckets instead of double-counting.
 
 For the canonical list of supported providers, grep `parse*Incremental` in `src/lib/rollout.js` — the source of truth, not this file.
 
 ## Frequently used commands
 
 ```bash
-npm test                                  # node --test test/*.test.js  (209 files)
+npm test                                  # node --test test/*.test.js
 node --test test/<name>.test.js           # single test file
 npm run ci:local                          # tests + validations + builds
 npm run dashboard:dev                     # Vite dev server with local API mock (port 5173)
 npm run dashboard:build                   # build to dashboard/dist/
 npm run validate:copy                     # copy registry completeness
+npm run validate:locale                   # locale coverage of copy.csv
 npm run validate:ui-hardcode              # no hardcoded UI strings
 npm run validate:guardrails               # architecture guardrails
-node bin/tracker.js serve --no-sync       # local dashboard server on :7680
+node bin/tracker.js serve --no-sync       # local dashboard server on :7680 (proxy starts with it unless disabled)
+node bin/tracker.js proxy status|start|stop|install|config   # AI proxy lifecycle (--local <CLIProxyAPI checkout> builds a fork)
+cd desktop && npx tauri dev               # desktop shell dev (npx tauri build → AiTool.app + dmg)
 ```
 
 `npm run dashboard:dev` skips the CLI backend; to verify `src/` changes use `node bin/tracker.js serve`.
@@ -38,6 +45,10 @@ node bin/tracker.js serve --no-sync       # local dashboard server on :7680
 | Add / modify a provider parser | `src/lib/rollout.js` — search `parse*Incremental` |
 | Install / uninstall a provider hook | `src/lib/<provider>-hook.js` + register in `src/commands/init.js` + `uninstall.js` |
 | Add a local API endpoint | `src/lib/local-api.js` — search `/functions/tokentracker-` |
+| Add a proxy REST endpoint | `src/lib/proxy/api.js` (mounted by `local-api.js` under `/api/proxy/*` — reads are open like the rest of the local API; mutations go through `ctx.isAuthorizedLocalMutation`) |
+| Change proxy core lifecycle / install | `src/lib/proxy/manager.js` + `scripts/fetch-core.cjs` (version pinned in `core-version.txt`) |
+| Change proxy bootstrap config / settings | `src/lib/proxy/config.js` — writes only the fields AiTool must pin; runtime-managed fields (api-keys, upstreams, aliases) persist back into the same `config.yaml` via the core's Management API (`management.js`) |
+| Add / edit an AI Proxy dashboard tab | `dashboard/src/pages/ProxyPage.jsx` + the sibling `*-tab.jsx` files (`upstreams` / `auth-files` / `model-aliases` / `keys` / `requests` / `settings`), client in `dashboard/src/lib/proxy-api.ts` — mirror the matching EasyCLIProxyAPI page's interaction logic |
 | Wire a provider into sync | `src/commands/sync.js` (call site + totals aggregation) + `src/commands/status.js` (status reporting) |
 | Add pricing for a model | `src/lib/pricing/curated-overrides.json` **+ the canonical edge block in `dashboard/edge-patches/tokentracker-leaderboard-refresh.ts`, copied verbatim into the other 4 edge files** (account-daily / account-summary / account-model-breakdown / leaderboard-profile). `test/edge-pricing-parity.test.js` fails on any drift. Deploy the touched edge functions after editing. |
 | Add an OpenCode Go usage-limits row | `src/lib/opencode-go-limits.js` + provider entry in `src/lib/usage-limits.js` + `PROVIDER_LIMIT_SPECS.opencodeGo` in `dashboard/src/ui/dashboard/components/usage-limits-provider-specs.js`. **Authoritative source = the official Go usage API** (`source:'api'`) using `OPENCODE_GO_API_KEY`; the signed-in dashboard scrape (`source:'web'`) remains a legacy compatibility fallback. Local `opencode.db` cost ÷ Go's dollar caps ($12/5h, $30/wk, $60/mo) is only an explicit `TOKENTRACKER_OPENCODE_GO_LOCAL_ESTIMATE=1` estimate because history cannot prove an active subscription. Reads via `readSqliteJsonRowsAsync` so the limits poll never blocks the event loop. |
@@ -79,10 +90,17 @@ total_tokens                  = input + output + cache_creation + cache_read (+ 
 
 UTC, half-hour buckets, append-only — readers take the latest entry per `(source, model, hour_start)`.
 
+### AI proxy (CLIProxyAPI core)
+
+- The core is an external, independently updatable process — never vendor, link, or bundle `cli-proxy-api` into any artifact. Upgrade = bump `core-version.txt`; the binary is fetched at runtime from upstream CLIProxyAPI GitHub releases (`scripts/fetch-core.cjs`), or built from a local fork via `aitool proxy install --local`.
+- Port is `127.0.0.1:8318` — deliberately **not** the core's conventional 8317, so AiTool coexists with a standalone CLIProxyAPI / EasyCLIProxyAPI install on the same machine. Loopback only.
+- **The plaintext management key lives in `~/.aitool/proxy/settings.json`, never in `config.yaml`.** The core bcrypt-hashes `management.secret-key` in config.yaml in place on first load, so config.yaml alone can never authenticate the dashboard (the same constraint EasyCLIProxyAPI solves in its GUI config).
+- Proxy usage rides the same queue contract as native tools: UTC half-hour buckets, `source: "cliproxy"`, same token normalization and `computeRowCost` rules. Don't break `usage/buckets.json` continuity — a bridge restart must resume buckets, not reset or double-count the hour.
+
 ### Project-wide
 
 - CommonJS in `src/`, ESM + TypeScript strict in `dashboard/`. No mixing.
-- Env-var prefixes: `TOKENTRACKER_` for CLI, `VITE_` for dashboard.
+- Env-var prefixes: `TOKENTRACKER_` (analytics CLI — legacy but load-bearing), `AITOOL_` (proxy/desktop: `AITOOL_CORE_BIN`, `AITOOL_CORE_REPO`, `AITOOL_ROOT`, `AITOOL_NODE`), `VITE_` for dashboard.
 - Git commits in **English**, conventional style (`feat:` / `fix:` / `refactor:` / `chore:` / `docs:` / `test:` / `ci:`).
 - **Privacy**: token counts only — never prompts, messages, or conversation bodies.
 - `TokenTrackerBar/EmbeddedServer/` is gitignored; built on demand by `TokenTrackerBar/scripts/bundle-node.sh`.
@@ -100,7 +118,10 @@ The macOS + Windows + Linux release is **one workflow**: `release-dmg.yml` (disp
 | `TokenTrackerBar/` Swift only | ✅ | ✅ |
 | `TokenTrackerWin/` only | ✅ | ✅ |
 | `TokenTrackerLinux/` only | ✅ | ✅ |
+| `desktop/` only | — | — (`npx tauri build` manually; not in the version registry or any release workflow) |
 | `dashboard/edge-patches/`, scripts, docs, CI | — | — |
+
+Bumping `core-version.txt` alone is not a release either — users pick up the new core when `fetch-core.cjs` next runs on their machine; the binary never ships inside any artifact.
 
 **All nine** managed version locations must match or the workflows' "Verify version" steps fail. The authoritative list lives in `scripts/version-files.cjs` (`VERSION_FILES`) — that registry is what `sync-versions` writes, `validate:versions` checks, and the release workflow's `create-release` job verifies, so adding a platform means editing one array rather than several workflows. Beyond `package.json` it covers `TokenTrackerBar/project.yml` (×2 `MARKETING_VERSION`), `TokenTrackerWin/TokenTrackerWin.csproj`, and the six Linux files (`TokenTrackerLinux/package.json`, its `package-lock.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, `src-tauri/tauri.conf.json`, `packaging/arch/.../PKGBUILD`). The root `package-lock.json` is not in the registry because `npm version` maintains it, but the release workflow verifies it too.
 

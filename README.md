@@ -40,6 +40,8 @@ The core binary stays an external, independently updatable process (pinned in `c
 
 Requirements: Node.js 20+. The proxy core additionally needs macOS / Linux / Windows (a Go-built binary is fetched automatically).
 
+> Full run guide — dashboard dev mode, proxy setup, desktop shell, troubleshooting: [docs/running.md](./docs/running.md)
+
 ### Desktop app (recommended)
 
 ```bash

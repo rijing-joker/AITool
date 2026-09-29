@@ -49,7 +49,6 @@ error.boundary.subtitle,shared,*,ErrorBoundary,subtitle,"This view failed to ren
 error.boundary.hint,shared,*,ErrorBoundary,hint,"Open the console, then reload the page",,active
 error.boundary.no_details,shared,*,ErrorBoundary,details,"No error details",,active
 error.boundary.action.reload,shared,*,ErrorBoundary,action_reload,"Reload",,active
-
 landing.screenshot.alt,landing,LandingPage,LandingPage,screenshot_alt,"TokenTracker dashboard screenshot",,active
 landing.nav.login,landing,LandingPage,LandingPage,nav_login,"LOGIN",,active
 landing.nav.signup,landing,LandingPage,LandingPage,nav_signup,"SIGN UP",,active
@@ -72,12 +71,6 @@ share.meta.og_url,share,SharePage,Meta,og_url,"https://www.tokentracker.cc/share
 share.meta.twitter_card,share,SharePage,Meta,twitter_card,"summary_large_image",,active
 landing.cta.primary,landing,LandingPage,LandingPage,cta_primary,"View Dashboard",,active
 landing.cta.secondary,landing,LandingPage,LandingPage,cta_secondary,"GitHub",,active
-
-
-
-
-
-
 landing.v2.hero.title_line1,landing,LandingPage,MarketingLanding,hero_title_1,"TRACK EVERY",,active
 landing.v2.hero.title_line2,landing,LandingPage,MarketingLanding,hero_title_2,"AI TOKEN",,active
 landing.v2.install.mac_cta,landing,LandingPage,MarketingLanding,mac_cta,"Download for macOS",,active
@@ -133,16 +126,10 @@ landing.v3.leaderboard.anonymous,landing,LandingPage,LeaderboardSection,leaderbo
 landing.v3.leaderboard.tokens_synced,landing,LandingPage,LeaderboardSection,leaderboard_tokens_synced,"{{count}} tokens synced",,active
 landing.v3.download.title,landing,LandingPage,DownloadSection,download_title,"Start tracking in 30 seconds.",,active
 landing.v3.download.subtitle,landing,LandingPage,DownloadSection,download_subtitle,"One command or one download. Free, open source, yours.",,active
-
-
-
-
 identity_card.rank_label,ui,IdentityCard,IdentityCard,rank_label,"Started",,active
 identity_card.streak_label,ui,IdentityCard,IdentityCard,streak_label,"Active days",,active
 identity_card.rank_placeholder,ui,IdentityCard,IdentityCard,rank_placeholder,"—",,active
 identity_card.streak_value,ui,IdentityCard,IdentityCard,streak_value,"{{days}} DAY",,active
-
-
 dashboard.core_index.collapse_label,dashboard,DashboardPage,UsagePanel,toggle,"▾",,active
 dashboard.core_index.expand_label,dashboard,DashboardPage,UsagePanel,toggle,"▸",,active
 dashboard.core_index.collapse_aria,dashboard,DashboardPage,UsagePanel,toggle_aria,"Collapse model breakdown",,active
@@ -155,12 +142,10 @@ usage.metric.output,ui,UsagePanel,UsagePanel,metric_output,"Output",,active
 usage.metric.cached_input,ui,UsagePanel,UsagePanel,metric_cached_input,"Cached input",,active
 usage.metric.reasoning_output,ui,UsagePanel,UsagePanel,metric_reasoning_output,"Reasoning output",,active
 usage.button.refresh,ui,UsagePanel,UsagePanel,button_refresh,"Refresh",,active
-
 dashboard.rolling.title,ui,RollingUsagePanel,RollingUsagePanel,title,"Recent Activity",,active
 dashboard.rolling.last_7d,ui,RollingUsagePanel,RollingUsagePanel,label_last_7d,"Last 7 days",,active
 dashboard.rolling.last_30d,ui,RollingUsagePanel,RollingUsagePanel,label_last_30d,"Last 30 days",,active
 dashboard.rolling.avg_active_day,ui,RollingUsagePanel,RollingUsagePanel,label_avg_active_day,"Daily average",,active
-
 dashboard.projects.title,ui,DataDetails,DataDetails,title,"Project Usage",,active
 dashboard.projects.limit_aria,ui,DataDetails,DataDetails,limit_aria,"Select project limit",,active
 dashboard.projects.limit_top_3,ui,DataDetails,DataDetails,limit_top_3,"TOP 3",,active
@@ -208,8 +193,6 @@ widgets.limits.description,dashboard,WidgetsPage,WidgetsPage,limits_desc,"Live r
 dashboard.cost_breakdown.title,ui,CostAnalysisModal,CostAnalysisModal,title,"Cost Breakdown",,active
 dashboard.cost_breakdown.total_label,ui,CostAnalysisModal,CostAnalysisModal,total_label,"Estimated Total Cost",,active
 dashboard.cost_breakdown.close,ui,CostAnalysisModal,CostAnalysisModal,close_label,"Close",,active
-
-
 trend.monitor.label,ui,TrendMonitor,TrendMonitor,label,"Usage Trend",,active
 trend.monitor.predicted,ui,TrendMonitor,TrendMonitor,predicted_label,"Estimated",,active
 trend.zoom.open_aria,ui,TrendMonitor,TrendMonitor,zoom_open_aria,"Expand to full screen",,active
@@ -237,7 +220,6 @@ trend.zoom.insight.calm,ui,TrendMonitorZoomModal,TrendMonitorZoomModal,zoom_insi
 trend.zoom.insight.steady,ui,TrendMonitorZoomModal,TrendMonitorZoomModal,zoom_insight_steady,"A steady rhythm across {{active}} active stretches, cresting at {{peak}}. The kind of pace that ships things without drama.",,active
 trend.zoom.insight.heavy,ui,TrendMonitorZoomModal,TrendMonitorZoomModal,zoom_insight_heavy,"Heavy lifting: {{active}} stretches running hot, peaking at {{peak}}. This is output from someone who manufactures momentum instead of waiting for it.",,active
 trend.zoom.insight.massive,ui,TrendMonitorZoomModal,TrendMonitorZoomModal,zoom_insight_massive,"Industrial scale. A {{peak}} peak and throughput that never cools. At this volume you are not using the model, you are running a foundry.",,active
-
 heatmap.title,ui,ActivityHeatmap,ActivityHeatmap,title,"Activity Heatmap",,active
 heatmap.empty,ui,ActivityHeatmap,ActivityHeatmap,empty_state,"No activity data yet.",,active
 heatmap.legend.less,ui,ActivityHeatmap,ActivityHeatmap,legend_less,"Less",,active
@@ -267,10 +249,6 @@ heatmap.day.wed,ui,ActivityHeatmap,ActivityHeatmap,day_label,"Wed",,active
 heatmap.day.thu,ui,ActivityHeatmap,ActivityHeatmap,day_label,"Thu",,active
 heatmap.day.fri,ui,ActivityHeatmap,ActivityHeatmap,day_label,"Fri",,active
 heatmap.day.sat,ui,ActivityHeatmap,ActivityHeatmap,day_label,"Sat",,active
-
-
-
-
 daily.sort.date.label,dashboard,DashboardPage,DailyTable,sort_label,"Date",,active
 daily.sort.date.title,dashboard,DashboardPage,DailyTable,sort_title,"Sort by Date",,active
 daily.sort.total.label,dashboard,DashboardPage,DailyTable,sort_label,"Total",,active
@@ -287,9 +265,6 @@ daily.sort.conversations.label,dashboard,DashboardPage,DailyTable,sort_label,"Co
 daily.sort.conversations.title,dashboard,DashboardPage,DailyTable,sort_title,"Sort by Conversations",,active
 details.pagination.prev,dashboard,DashboardPage,DailyTable,pagination_prev,"Prev",,active
 details.pagination.next,dashboard,DashboardPage,DailyTable,pagination_next,"Next",,active
-
-
-
 leaderboard.profile.nav.back,dashboard,LeaderboardProfilePage,Header,nav_back,"Leaderboard",,active
 leaderboard.profile.nav.download,dashboard,LeaderboardProfilePage,Header,nav_download,"Download",Shown only to browser visitors without the app,active
 leaderboard.profile.hero.rank_label,dashboard,LeaderboardProfilePage,Hero,rank_label,"Rank",,active
@@ -301,16 +276,11 @@ leaderboard.generated_at,dashboard,LeaderboardPage,LeaderboardPage,generated_at,
 leaderboard.period.week,dashboard,LeaderboardPage,LeaderboardPage,period_week,"Week",,active
 leaderboard.period.month,dashboard,LeaderboardPage,LeaderboardPage,period_month,"Month",,active
 leaderboard.period.total,dashboard,LeaderboardPage,LeaderboardPage,period_total,"All",,active
-
 leaderboard.me_label,dashboard,LeaderboardPage,LeaderboardPage,me_label,"You",,active
 leaderboard.anon_label,dashboard,LeaderboardPage,LeaderboardPage,anon_label,"Anonymous",,active
 leaderboard.error.unknown,dashboard,LeaderboardPage,LeaderboardPage,error_unknown,"Unknown error",,active
-
-
-
 leaderboard.loading,dashboard,LeaderboardPage,LeaderboardPage,state_loading,"Loading…",,active
 leaderboard.empty,dashboard,LeaderboardPage,LeaderboardPage,state_empty,"No data",,active
-
 leaderboard.column.rank,dashboard,LeaderboardPage,LeaderboardPage,column_rank,"Rank",,active
 leaderboard.column.user,dashboard,LeaderboardPage,LeaderboardPage,column_user,"User",,active
 leaderboard.column.total,dashboard,LeaderboardPage,LeaderboardPage,column_total,"Total",,active
@@ -331,20 +301,12 @@ limits.copilot.otelHint.body,dashboard,LimitsPage,LimitsPage,otel_hint_body,"Lim
 limits.copilot.otelHint.copy,dashboard,LimitsPage,LimitsPage,otel_hint_copy,"Copy",,active
 limits.copilot.otelHint.copied,dashboard,LimitsPage,LimitsPage,otel_hint_copied,"Copied",,active
 leaderboard.column.supplemental,dashboard,LeaderboardPage,LeaderboardPage,column_supplemental,"Supplemental",,active
-
-
 leaderboard.pagination.prev,dashboard,LeaderboardPage,LeaderboardPage,pagination_prev,"Previous",,active
 leaderboard.pagination.next,dashboard,LeaderboardPage,LeaderboardPage,pagination_next,"Next",,active
 leaderboard.pagination.ellipsis,dashboard,LeaderboardPage,LeaderboardPage,pagination_ellipsis,"…",,active
 leaderboard.pagination.page_unknown,dashboard,LeaderboardPage,LeaderboardPage,pagination_unknown,"Page {{page}}",,active
-
-
-
-
 dashboard.session_expired.copy_label,dashboard,DashboardPage,AsciiBox,body,"run npx --yes tokentracker-cli init",,active
 dashboard.session_expired.copied,dashboard,DashboardPage,AsciiBox,body,"copied",,active
-
-
 dashboard.install.prompt,dashboard,DashboardPage,AsciiBox,install_prompt,"Install Node.js 18+ then run:",,active
 dashboard.install.cmd.init,dashboard,DashboardPage,AsciiBox,install_cmd,"npx --yes tokentracker-cli init",,active
 dashboard.install.cmd.init_link_code,dashboard,DashboardPage,AsciiBox,install_cmd,"npx --yes tokentracker-cli init --link-code {{link_code}}",,active
@@ -354,20 +316,13 @@ dashboard.install.copied,dashboard,DashboardPage,AsciiBox,install_copy,"Copied t
 dashboard.install.link_code.loading,dashboard,DashboardPage,AsciiBox,install_status,"Generating private code...",,active
 dashboard.install.link_code.failed,dashboard,DashboardPage,AsciiBox,install_status,"Private code unavailable",,active
 dashboard.install.cmd.sync,dashboard,DashboardPage,AsciiBox,install_cmd,"npx --yes tokentracker-cli sync",,active
-
-
-
 dashboard.daily.title,dashboard,DashboardPage,AsciiBox,title,"Daily Breakdown",,active
 dashboard.daily.empty,dashboard,DashboardPage,AsciiBox,empty_state,"No data yet. Use your AI CLI then run {{cmd}}.",,active
-
 dashboard.identity.title,dashboard,DashboardPage,IdentityCard,title,"Your Profile",,active
 dashboard.identity.subtitle,dashboard,DashboardPage,IdentityCard,subtitle,"Track your coding journey",,active
 dashboard.identity.fallback,dashboard,DashboardPage,IdentityCard,handle_fallback,"Anonymous",,active
 dashboard.overview.layout.drag_handle,dashboard,DashboardPage,SortableCard,drag_handle_aria_label,"Drag to reorder",,active
-
-
 dashboard.screenshot.twitter_text,dashboard,DashboardPage,ScreenshotShare,share_text,"{{total_tokens}} tokens on the record.\n{{model_name}} led with {{model_percent}}%.\n\nMy AI usage, unaudited →",,active
-
 nav.usage,shared,*,Sidebar,nav_usage,"Tokens",,active
 nav.limits,shared,*,Sidebar,nav_limits,"Limits",,active
 nav.widgets,shared,*,Sidebar,nav_widgets,"Menu Bar & Widgets",,active
@@ -1939,3 +1894,277 @@ proxy.upstream.error.proxyUrlInvalid,proxy,ProxyPage,Upstreams,error_proxy_url_i
 proxy.upstream.error.enterBaseUrl,proxy,ProxyPage,Upstreams,error_enter_base_url,Enter a Base URL first,,active
 proxy.upstream.error.noAvailableModels,proxy,ProxyPage,Upstreams,error_no_available_models,No usable models discovered,,active
 proxy.upstream.error.baseBeforeModels,proxy,ProxyPage,Upstreams,error_base_before_models,Enter a Base URL before fetching models,,active
+proxy.creds.unnamed,proxy,ProxyPage,Proxy,creds_unnamed,"Unnamed credential file",,active
+proxy.creds.fileOnly,proxy,ProxyPage,Proxy,creds_fileOnly,"This action only supports OAuth credential files. Manage API Access entries on the API Access page.",,active
+proxy.creds.unknownProvider,proxy,ProxyPage,Proxy,creds_unknownProvider,"Unknown Provider",,active
+proxy.creds.summary,proxy,ProxyPage,Proxy,creds_summary,"{{files}} files · {{disabled}} disabled",,active
+proxy.creds.openDirectory,proxy,ProxyPage,Proxy,creds_openDirectory,"Open Folder",,active
+proxy.creds.import,proxy,ProxyPage,Proxy,creds_import,"Import",,active
+proxy.creds.uploaded,proxy,ProxyPage,Proxy,creds_uploaded,"Uploaded {{count}} authentication files",,active
+proxy.creds.uploadFailed,proxy,ProxyPage,Proxy,creds_uploadFailed,"{{count}} files failed to upload: {{errors}}",,active
+proxy.creds.deleted,proxy,ProxyPage,Proxy,creds_deleted,"Authentication file deleted",,active
+proxy.creds.deleteConfirm,proxy,ProxyPage,Proxy,creds_deleteConfirm,"Delete “{{name}}”?",,active
+proxy.creds.copyName,proxy,ProxyPage,Proxy,creds_copyName,"Copy file name",,active
+proxy.creds.searchPlaceholder,proxy,ProxyPage,Proxy,creds_searchPlaceholder,"Search by file name, account, or provider",,active
+proxy.creds.filter.allProviders,proxy,ProxyPage,Proxy,filter_allProviders,"All Providers",,active
+proxy.creds.filter.allStatuses,proxy,ProxyPage,Proxy,filter_allStatuses,"All Statuses",,active
+proxy.creds.filter.enabled,proxy,ProxyPage,Proxy,filter_enabled,"Enabled",,active
+proxy.creds.filter.disabled,proxy,ProxyPage,Proxy,filter_disabled,"Disabled",,active
+proxy.creds.filter.runtime,proxy,ProxyPage,Proxy,filter_runtime,"Runtime Only",,active
+proxy.creds.loading,proxy,ProxyPage,Proxy,creds_loading,"Loading authentication files",,active
+proxy.creds.empty.filtered,proxy,ProxyPage,Proxy,empty_filtered,"No matching authentication files",,active
+proxy.creds.empty.none,proxy,ProxyPage,Proxy,empty_none,"No authentication files",,active
+proxy.creds.empty.tryFilter,proxy,ProxyPage,Proxy,empty_tryFilter,"Try different filters",,active
+proxy.creds.empty.upload,proxy,ProxyPage,Proxy,empty_upload,"Uploaded JSON authentication files will appear here",,active
+proxy.creds.runtime,proxy,ProxyPage,Proxy,creds_runtime,"Runtime",,active
+proxy.creds.runtimeFootnote,proxy,ProxyPage,Proxy,creds_runtimeFootnote,"{{count}} credentials come from runtime storage and can only be managed through their provider or authentication source.",,active
+proxy.creds.unknownSize,proxy,ProxyPage,Proxy,creds_unknownSize,"Unknown size",,active
+proxy.creds.priority.button,proxy,ProxyPage,Proxy,priority_button,"Priority {{priority}}",,active
+proxy.creds.action.enable,proxy,ProxyPage,Proxy,action_enable,"Enable",,active
+proxy.creds.action.disable,proxy,ProxyPage,Proxy,action_disable,"Disable",,active
+proxy.creds.health.seconds,proxy,ProxyPage,Proxy,health_seconds,"{{count}}s",,active
+proxy.creds.health.minutes,proxy,ProxyPage,Proxy,health_minutes,"{{count}} min",,active
+proxy.creds.health.hours,proxy,ProxyPage,Proxy,health_hours,"{{count}} hr",,active
+proxy.creds.health.elapsed,proxy,ProxyPage,Proxy,health_elapsed,"Cooldown timer elapsed",,active
+proxy.creds.health.unknownCooldown,proxy,ProxyPage,Proxy,health_unknownCooldown,"Cooldown state is unknown; the core did not provide valid details.",,active
+proxy.creds.health.credentialModels,proxy,ProxyPage,Proxy,health_credentialModels,"Credential and {{count}} models cooling down",,active
+proxy.creds.health.credential,proxy,ProxyPage,Proxy,health_credential,"Credential-wide cooldown",,active
+proxy.creds.health.models,proxy,ProxyPage,Proxy,health_models,"{{count}} models cooling down",,active
+proxy.creds.health.coreStatus,proxy,ProxyPage,Proxy,health_coreStatus,"Core-reported status: {{status}}",,active
+proxy.creds.health.coreMessage,proxy,ProxyPage,Proxy,health_coreMessage,"Core status message",,active
+proxy.creds.health.expiredHint,proxy,ProxyPage,Proxy,health_expiredHint,"Refresh the list to confirm the latest state; an elapsed timer does not confirm availability.",,active
+proxy.creds.health.missingCooldown,proxy,ProxyPage,Proxy,health_missingCooldown,"This core did not provide cooldown details; recovery time is unknown.",,active
+proxy.creds.health.earliest,proxy,ProxyPage,Proxy,health_earliest,"Earliest cooldown ends in ~{{time}}",,active
+proxy.creds.health.remaining,proxy,ProxyPage,Proxy,health_remaining,"{{time}} remaining",,active
+proxy.creds.health.waiting,proxy,ProxyPage,Proxy,health_waiting,"Elapsed · confirmation needed",,active
+proxy.creds.health.backoffHint,proxy,ProxyPage,Proxy,health_backoffHint,"Backoff level controls retry delays; it is not a failure count.",,active
+proxy.creds.health.backoff,proxy,ProxyPage,Proxy,health_backoff,"Backoff level {{level}}",,active
+proxy.creds.health.deadline,proxy,ProxyPage,Proxy,health_deadline,"Cooldown deadline",,active
+proxy.creds.health.observed,proxy,ProxyPage,Proxy,health_observed,"State observed at",,active
+proxy.creds.health.note,proxy,ProxyPage,Proxy,health_note,"Remaining time is estimated from the core snapshot. Expiry does not confirm restored quota or availability, and no test request is sent automatically.",,active
+proxy.creds.health.credentialScope,proxy,ProxyPage,Proxy,health_credentialScope,"Entire credential",,active
+proxy.creds.health.active,proxy,ProxyPage,Proxy,health_active,"Available",,active
+proxy.creds.health.warning,proxy,ProxyPage,Proxy,health_warning,"Status notice",,active
+proxy.creds.health.refreshing,proxy,ProxyPage,Proxy,health_refreshing,"Refreshing credentials",,active
+proxy.creds.health.pending,proxy,ProxyPage,Proxy,health_pending,"Awaiting verification",,active
+proxy.creds.health.error,proxy,ProxyPage,Proxy,health_error,"Request error",,active
+proxy.creds.health.unknown,proxy,ProxyPage,Proxy,health_unknown,"Status unknown",,active
+proxy.creds.health.reason.quota,proxy,ProxyPage,Proxy,reason_quota,"Quota or rate limit",,active
+proxy.creds.health.reason.credentialQuota,proxy,ProxyPage,Proxy,reason_credentialQuota,"Credential quota limit",,active
+proxy.creds.health.reason.cloudflare,proxy,ProxyPage,Proxy,reason_cloudflare,"Cloudflare challenge",,active
+proxy.creds.health.reason.invalidGrant,proxy,ProxyPage,Proxy,reason_invalidGrant,"Authorization grant invalid",,active
+proxy.creds.health.reason.unauthorized,proxy,ProxyPage,Proxy,reason_unauthorized,"Authentication failed",,active
+proxy.creds.health.reason.accessDenied,proxy,ProxyPage,Proxy,reason_accessDenied,"Access restricted (402/403)",,active
+proxy.creds.health.reason.notFound,proxy,ProxyPage,Proxy,reason_notFound,"Resource not found",,active
+proxy.creds.health.reason.modelUnsupported,proxy,ProxyPage,Proxy,reason_modelUnsupported,"Model not supported",,active
+proxy.creds.health.reason.upstream,proxy,ProxyPage,Proxy,reason_upstream,"Temporary upstream error",,active
+proxy.creds.health.reason.tokenExpired,proxy,ProxyPage,Proxy,reason_tokenExpired,"Access token expired",,active
+proxy.creds.health.reason.unknown,proxy,ProxyPage,Proxy,reason_unknown,"Other or unknown restriction",,active
+proxy.creds.status.disabled,proxy,ProxyPage,Proxy,status_disabled,"Disabled",,active
+proxy.creds.status.unavailable,proxy,ProxyPage,Proxy,status_unavailable,"Unavailable",,active
+proxy.creds.requests.title,proxy,ProxyPage,Proxy,requests_title,"Requests",,active
+proxy.creds.requests.totalsHint,proxy,ProxyPage,Proxy,requests_totalsHint,"Totals since the core started; reset on restart. Refresh the list to update statistics.",,active
+proxy.creds.requests.success,proxy,ProxyPage,Proxy,requests_success,"Success {{count}}",,active
+proxy.creds.requests.failure,proxy,ProxyPage,Proxy,requests_failure,"Failed {{count}}",,active
+proxy.creds.requests.recentRate,proxy,ProxyPage,Proxy,requests_recentRate,"Request success rate over the last 200 minutes",,active
+proxy.creds.requests.unavailable,proxy,ProxyPage,Proxy,requests_unavailable,"The core did not provide recent request statistics",,active
+proxy.creds.requests.interval,proxy,ProxyPage,Proxy,requests_interval,"Interval {{index}}",,active
+proxy.creds.requests.empty,proxy,ProxyPage,Proxy,requests_empty,"No requests",,active
+proxy.creds.settings.title,proxy,ProxyPage,Proxy,settings_title,"Credential settings",,active
+proxy.creds.settings.button,proxy,ProxyPage,Proxy,settings_button,"Settings",,active
+proxy.creds.settings.updated,proxy,ProxyPage,Proxy,settings_updated,"Settings saved for {{name}}",,active
+proxy.creds.settings.routing,proxy,ProxyPage,Proxy,settings_routing,"Routing & connection",,active
+proxy.creds.settings.additional,proxy,ProxyPage,Proxy,settings_additional,"Headers & note",,active
+proxy.creds.settings.prefix,proxy,ProxyPage,Proxy,settings_prefix,"Prefix",,active
+proxy.creds.settings.prefixHint,proxy,ProxyPage,Proxy,settings_prefixHint,"Model routing prefix. Leave empty for no prefix.",,active
+proxy.creds.settings.proxy_url,proxy,ProxyPage,Proxy,settings_proxy_url,"Proxy URL",,active
+proxy.creds.settings.proxy_urlHint,proxy,ProxyPage,Proxy,settings_proxy_urlHint,"Proxy for this credential. Leave empty to use the default configuration.",,active
+proxy.creds.settings.priority,proxy,ProxyPage,Proxy,settings_priority,"Priority",,active
+proxy.creds.settings.priorityHint,proxy,ProxyPage,Proxy,settings_priorityHint,"Integer; higher values take precedence. Empty means 0.",,active
+proxy.creds.settings.weight,proxy,ProxyPage,Proxy,settings_weight,"Scheduling weight",,active
+proxy.creds.settings.weightHint,proxy,ProxyPage,Proxy,settings_weightHint,"Relative weight within a priority level, up to 1000000. Empty defaults to 1; nonpositive values become 0 and are excluded from weighted scheduling.",,active
+proxy.creds.settings.disable_cooling,proxy,ProxyPage,Proxy,settings_disable_cooling,"Disable exponential cooling",,active
+proxy.creds.settings.disable_coolingHint,proxy,ProxyPage,Proxy,settings_disable_coolingHint,"Enable to disable exponential cooling for this credential. Default follows global configuration.",,active
+proxy.creds.settings.websockets,proxy,ProxyPage,Proxy,settings_websockets,"WebSockets",,active
+proxy.creds.settings.websocketsHint,proxy,ProxyPage,Proxy,settings_websocketsHint,"WebSocket support for this credential (Codex / xAI). Connections also depend on backend and upstream support.",,active
+proxy.creds.settings.inherit,proxy,ProxyPage,Proxy,settings_inherit,"Default (no override)",,active
+proxy.creds.settings.excluded_models,proxy,ProxyPage,Proxy,settings_excluded_models,"Excluded models",,active
+proxy.creds.settings.rules,proxy,ProxyPage,Proxy,settings_rules,"Exclusion rules",,active
+proxy.creds.settings.excludedHint,proxy,ProxyPage,Proxy,settings_excludedHint,"One model ID per line; * wildcards are supported. Clearing removes credential exclusions; global exclusions still apply.",,active
+proxy.creds.settings.catalog,proxy,ProxyPage,Proxy,settings_catalog,"Choose exclusions from models ({{count}})",,active
+proxy.creds.settings.catalogError,proxy,ProxyPage,Proxy,settings_catalogError,"Could not load models. Rules can still be edited manually.",,active
+proxy.creds.settings.searchModels,proxy,ProxyPage,Proxy,settings_searchModels,"Search models",,active
+proxy.creds.settings.wildcard,proxy,ProxyPage,Proxy,settings_wildcard,"Excluded by a wildcard; edit the rule above.",,active
+proxy.creds.settings.noModels,proxy,ProxyPage,Proxy,settings_noModels,"No matching models. Enter exclusion rules above.",,active
+proxy.creds.settings.headers,proxy,ProxyPage,Proxy,settings_headers,"Custom headers",,active
+proxy.creds.settings.headersHint,proxy,ProxyPage,Proxy,settings_headersHint,"Enter a JSON object with string keys and values. Remove keys or use {} to clear headers.",,active
+proxy.creds.settings.note,proxy,ProxyPage,Proxy,settings_note,"Note",,active
+proxy.creds.settings.unsaved,proxy,ProxyPage,Proxy,settings_unsaved,"Discard unsaved changes?",,active
+proxy.creds.settings.keepEditing,proxy,ProxyPage,Proxy,settings_keepEditing,"Keep editing",,active
+proxy.creds.settings.discard,proxy,ProxyPage,Proxy,settings_discard,"Discard changes",,active
+proxy.creds.settings.invalid.metadata,proxy,ProxyPage,Proxy,invalid_metadata,"Cannot read settings: the credential is not a valid JSON object.",,active
+proxy.creds.settings.invalid.headers,proxy,ProxyPage,Proxy,invalid_headers,"Headers must be a JSON object with valid, unique header names and string values without line breaks.",,active
+proxy.creds.settings.invalid.weight,proxy,ProxyPage,Proxy,invalid_weight,"Scheduling weight must be an integer no greater than 1000000.",,active
+proxy.creds.settings.invalid.priority,proxy,ProxyPage,Proxy,invalid_priority,"Priority must be a valid integer.",,active
+proxy.creds.models.button,proxy,ProxyPage,Proxy,models_button,"Models",,active
+proxy.creds.models.viewTitle,proxy,ProxyPage,Proxy,models_viewTitle,"Supported Models",,active
+proxy.creds.models.viewDescription,proxy,ProxyPage,Proxy,models_viewDescription,"Models currently registered for this credential; click a model name to copy it",,active
+proxy.creds.models.copyModel,proxy,ProxyPage,Proxy,models_copyModel,"Copy model name",,active
+proxy.creds.models.search,proxy,ProxyPage,Proxy,models_search,"Search model names",,active
+proxy.creds.models.loading,proxy,ProxyPage,Proxy,models_loading,"Loading model list",,active
+proxy.creds.models.noMatch,proxy,ProxyPage,Proxy,models_noMatch,"No matching models",,active
+proxy.creds.models.viewEmpty,proxy,ProxyPage,Proxy,models_viewEmpty,"This credential currently has no available models",,active
+proxy.creds.models.empty,proxy,ProxyPage,Proxy,models_empty,"No candidate models; enter exclusion rules below",,active
+proxy.creds.models.title,proxy,ProxyPage,Proxy,models_title,"Account Model Exclusions",,active
+proxy.creds.models.description,proxy,ProxyPage,Proxy,models_description,"{{provider}} · Checked models are excluded by this account; provider-wide rules also apply",,active
+proxy.creds.models.globalButton,proxy,ProxyPage,Proxy,models_globalButton,"OAuth Credential Model Exclusions",,active
+proxy.creds.models.globalDescription,proxy,ProxyPage,Proxy,models_globalDescription,"Checked models are excluded only for all {{provider}} OAuth credential files, not API Access entries; credential-specific rules still apply",,active
+proxy.creds.models.provider,proxy,ProxyPage,Proxy,models_provider,"OAuth Provider",,active
+proxy.creds.models.summary,proxy,ProxyPage,Proxy,models_summary,"{{total}} candidates · {{excluded}} excluded",,active
+proxy.creds.models.excludeAll,proxy,ProxyPage,Proxy,models_excludeAll,"Exclude All",,active
+proxy.creds.models.excludeAllHint,proxy,ProxyPage,Proxy,models_excludeAllHint,"Add each model in the candidate list; this does not automatically add *",,active
+proxy.creds.models.clearSelected,proxy,ProxyPage,Proxy,models_clearSelected,"Clear Selection",,active
+proxy.creds.models.clearHint,proxy,ProxyPage,Proxy,models_clearHint,"Clear exact selections in the list, preserving wildcard and off-list rules",,active
+proxy.creds.models.wildcardBlocked,proxy,ProxyPage,Proxy,models_wildcardBlocked,"Excluded by {{rule}}; edit the rule below",,active
+proxy.creds.models.rulesLabel,proxy,ProxyPage,Proxy,models_rulesLabel,"Exclusion rules (one per line)",,active
+proxy.creds.models.rulesPlaceholder,proxy,ProxyPage,Proxy,models_rulesPlaceholder,"gpt-image-*",,active
+proxy.creds.models.rulesHint,proxy,ProxyPage,Proxy,models_rulesHint,"* matches any characters; matching is case-insensitive. Enter * to exclude all models. Clearing selections preserves wildcard and off-list rules.",,active
+proxy.creds.models.save,proxy,ProxyPage,Proxy,models_save,"Save ({{count}} rules)",,active
+proxy.creds.models.updated,proxy,ProxyPage,Proxy,models_updated,"OAuth credential model exclusions updated for {{provider}}",,active
+proxy.creds.models.credentialUpdated,proxy,ProxyPage,Proxy,models_credentialUpdated,"Model exclusions updated for {{name}}",,active
+proxy.creds.models.catalogUnavailable,proxy,ProxyPage,Proxy,models_catalogUnavailable,"Could not load candidate models. You can still edit and save exclusion rules below",,active
+proxy.creds.models.invalidMetadata,proxy,ProxyPage,Proxy,models_invalidMetadata,"Could not read the credential file; model settings were not loaded",,active
+proxy.creds.models.invalidExclusions,proxy,ProxyPage,Proxy,models_invalidExclusions,"The credential file has invalid model exclusion rules; check the file first",,active
+proxy.alias.source.openAiCompatible,proxy,ProxyPage,Proxy,source_openAiCompatible,"OpenAI Compatible",,active
+proxy.alias.source.other,proxy,ProxyPage,Proxy,source_other,"Other Source",,active
+proxy.alias.source.available,proxy,ProxyPage,Proxy,source_available,"Models currently available from the core",,active
+proxy.alias.sourceLabel,proxy,ProxyPage,Proxy,alias_sourceLabel,"Source: {{source}}",,active
+proxy.alias.originalModel,proxy,ProxyPage,Proxy,alias_originalModel,"Original Model",,active
+proxy.alias.searchModel,proxy,ProxyPage,Proxy,alias_searchModel,"Search and select an original model",,active
+proxy.alias.availableModels,proxy,ProxyPage,Proxy,alias_availableModels,"Available original models",,active
+proxy.alias.noMatch,proxy,ProxyPage,Proxy,alias_noMatch,"No matching models or sources",,active
+proxy.alias.noModels,proxy,ProxyPage,Proxy,alias_noModels,"No models are currently available",,active
+proxy.alias.error.selectModel,proxy,ProxyPage,Proxy,error_selectModel,"Select an original model first",,active
+proxy.alias.error.emptyAlias,proxy,ProxyPage,Proxy,error_emptyAlias,"The model alias cannot be empty",,active
+proxy.alias.error.invalidAlias,proxy,ProxyPage,Proxy,error_invalidAlias,"The model alias is invalid and cannot contain whitespace",,active
+proxy.alias.error.unsupportedFast,proxy,ProxyPage,Proxy,error_unsupportedFast,"Fast is only available for Codex API, OpenAI-compatible, and Codex OAuth model sources",,active
+proxy.alias.error.unsupportedEffort,proxy,ProxyPage,Proxy,error_unsupportedEffort,"This model source has no available reasoning-effort levels",,active
+proxy.alias.effort.title,proxy,ProxyPage,Proxy,effort_title,"Reasoning Effort",,active
+proxy.alias.effort.description,proxy,ProxyPage,Proxy,effort_description,"Only levels reported by the selected model source are shown",,active
+proxy.alias.effort.none,proxy,ProxyPage,Proxy,effort_none,"Not set",,active
+proxy.alias.effort.noneHint,proxy,ProxyPage,Proxy,effort_noneHint,"Do not override reasoning effort",,active
+proxy.alias.effort.low,proxy,ProxyPage,Proxy,effort_low,"Light",,active
+proxy.alias.effort.medium,proxy,ProxyPage,Proxy,effort_medium,"Balanced",,active
+proxy.alias.effort.high,proxy,ProxyPage,Proxy,effort_high,"Deep",,active
+proxy.alias.effort.xhigh,proxy,ProxyPage,Proxy,effort_xhigh,"Extra High",,active
+proxy.alias.effort.max,proxy,ProxyPage,Proxy,effort_max,"Maximum",,active
+proxy.alias.effort.unsupported,proxy,ProxyPage,Proxy,effort_unsupported,"This model source does not report any available reasoning-effort levels.",,active
+proxy.alias.fast.title,proxy,ProxyPage,Proxy,fast_title,"Fast Acceleration",,active
+proxy.alias.fast.enabled,proxy,ProxyPage,Proxy,fast_enabled,"Enabled; requests use the priority service tier",,active
+proxy.alias.fast.disabled,proxy,ProxyPage,Proxy,fast_disabled,"Disabled; preserve the client service_tier",,active
+proxy.alias.fast.unsupported,proxy,ProxyPage,Proxy,fast_unsupported,"Fast is only available for Codex API, OpenAI-compatible, and Codex OAuth model sources.",,active
+proxy.alias.aliasName.title,proxy,ProxyPage,Proxy,aliasName_title,"Model Alias",,active
+proxy.alias.aliasName.autoDescription,proxy,ProxyPage,Proxy,aliasName_autoDescription,"Generated from the model and selected options; edit it as needed without renaming the original",,active
+proxy.alias.aliasName.example,proxy,ProxyPage,Proxy,aliasName_example,"For example: {{model}}-{{effort}}",,active
+proxy.alias.aliasName.selectFirst,proxy,ProxyPage,Proxy,aliasName_selectFirst,"Select the original model, then enter the alias clients will use",,active
+proxy.alias.aliasName.reuseHint,proxy,ProxyPage,Proxy,aliasName_reuseHint,"The alias already exists; saving adds this model as an additional source. The kernel balances and fails over between sources, and effort/fast settings are shared by the alias.",,active
+proxy.alias.notSelected,proxy,ProxyPage,Proxy,alias_notSelected,"No model selected",,active
+proxy.alias.enterAlias,proxy,ProxyPage,Proxy,alias_enterAlias,"Enter a model alias",,active
+proxy.alias.create,proxy,ProxyPage,Proxy,alias_create,"Create Alias",,active
+proxy.alias.create.title,proxy,ProxyPage,Proxy,create_title,"Create Model Alias",,active
+proxy.alias.create.description,proxy,ProxyPage,Proxy,create_description,"Create a separate model entry and override its reasoning effort and Fast request tier",,active
+proxy.alias.updated,proxy,ProxyPage,Proxy,alias_updated,"Updated model alias {{alias}}",,active
+proxy.alias.created,proxy,ProxyPage,Proxy,alias_created,"Created {{alias}} with reasoning effort fixed to {{effort}}",,active
+proxy.alias.createdCombined,proxy,ProxyPage,Proxy,alias_createdCombined,"Created {{alias}} with reasoning effort {{effort}} and Fast enabled",,active
+proxy.alias.createdPlain,proxy,ProxyPage,Proxy,alias_createdPlain,"Created model alias {{alias}}",,active
+proxy.alias.deleted,proxy,ProxyPage,Proxy,alias_deleted,"Deleted {{alias}}",,active
+proxy.alias.delete,proxy,ProxyPage,Proxy,alias_delete,"Delete {{alias}}",,active
+proxy.alias.deleteConfirm,proxy,ProxyPage,Proxy,alias_deleteConfirm,"Delete the model alias “{{alias}}”?\nIts reasoning-effort and Fast overrides will also be removed.",,active
+proxy.alias.loadingConfig,proxy,ProxyPage,Proxy,alias_loadingConfig,"Loading configuration",,active
+proxy.alias.empty.title,proxy,ProxyPage,Proxy,empty_title,"No model aliases yet",,active
+proxy.alias.empty.description,proxy,ProxyPage,Proxy,empty_description,"Click “Create Alias” to add your first model alias",,active
+proxy.alias.speedCreated,proxy,ProxyPage,Proxy,alias_speedCreated,"Created {{alias}} with the Fast request tier fixed",,active
+proxy.alias.aliasName.fastExample,proxy,ProxyPage,Proxy,aliasName_fastExample,"For example: {{model}}-fast",,active
+proxy.keys.add,proxy,ProxyPage,Proxy,keys_add,"Add Authentication Key",,active
+proxy.keys.addTitle,proxy,ProxyPage,Proxy,keys_addTitle,"Add Authentication Key",,active
+proxy.keys.editTitle,proxy,ProxyPage,Proxy,keys_editTitle,"Edit Authentication Key",,active
+proxy.keys.deleteTitle,proxy,ProxyPage,Proxy,keys_deleteTitle,"Delete Authentication Key",,active
+proxy.keys.keyLabel,proxy,ProxyPage,Proxy,keys_keyLabel,"Authentication Key",,active
+proxy.keys.remarkLabel,proxy,ProxyPage,Proxy,keys_remarkLabel,"Remark",,active
+proxy.keys.remarkHint,proxy,ProxyPage,Proxy,keys_remarkHint,"For example: Development, Alice’s key",,active
+proxy.keys.generate,proxy,ProxyPage,Proxy,keys_generate,"Generate Key",,active
+proxy.keys.show,proxy,ProxyPage,Proxy,keys_show,"Show key",,active
+proxy.keys.hide,proxy,ProxyPage,Proxy,keys_hide,"Hide key",,active
+proxy.keys.deleteConfirm,proxy,ProxyPage,Proxy,keys_deleteConfirm,"Delete authentication key {{key}}?",,active
+proxy.keys.error.emptyKey,proxy,ProxyPage,Proxy,error_emptyKey,"The authentication key cannot be empty",,active
+proxy.keys.error.invalidKey,proxy,ProxyPage,Proxy,error_invalidKey,"Use visible ASCII characters only, without spaces",,active
+proxy.keys.error.duplicateKey,proxy,ProxyPage,Proxy,error_duplicateKey,"This authentication key already exists",,active
+proxy.keys.error.remarkTooLong,proxy,ProxyPage,Proxy,error_remarkTooLong,"The remark cannot exceed 80 characters",,active
+proxy.settings.network.title,proxy,ProxyPage,Proxy,network_title,"Network Settings",,active
+proxy.settings.network.host,proxy,ProxyPage,Proxy,network_host,"Custom Listen IP",,active
+proxy.settings.network.hostHint,proxy,ProxyPage,Proxy,network_hostHint,"For example, 127.0.0.1, 0.0.0.0, or a LAN IP; changing it restarts a running core",,active
+proxy.settings.network.port,proxy,ProxyPage,Proxy,network_port,"Port",,active
+proxy.settings.network.portHint,proxy,ProxyPage,Proxy,network_portHint,"Range 1–65535; changing it restarts a running core",,active
+proxy.settings.network.proxyUrl,proxy,ProxyPage,Proxy,network_proxyUrl,"Proxy URL",,active
+proxy.settings.network.proxyUrlHint,proxy,ProxyPage,Proxy,network_proxyUrlHint,"Turn off “Follow system” to customize it. An empty manual value means a direct connection. Supports HTTP and SOCKS.",,active
+proxy.settings.routing.title,proxy,ProxyPage,Proxy,routing_title,"Session Routing",,active
+proxy.settings.routing.strategy,proxy,ProxyPage,Proxy,routing_strategy,"Routing Strategy",,active
+proxy.settings.routing.roundRobin,proxy,ProxyPage,Proxy,routing_roundRobin,"Round Robin",,active
+proxy.settings.routing.fillFirst,proxy,ProxyPage,Proxy,routing_fillFirst,"Fill First",,active
+proxy.settings.routing.sessionTtl,proxy,ProxyPage,Proxy,routing_sessionTtl,"Session Affinity TTL",,active
+proxy.settings.routing.sessionTtlHint,proxy,ProxyPage,Proxy,routing_sessionTtlHint,"For example, 1h; leave blank to use the core default",,active
+proxy.settings.routing.affinity,proxy,ProxyPage,Proxy,routing_affinity,"Session Affinity",,active
+proxy.settings.routing.affinityHint,proxy,ProxyPage,Proxy,routing_affinityHint,"Prefer the previously selected credential for the same session",,active
+proxy.settings.routing.disableCooling,proxy,ProxyPage,Proxy,routing_disableCooling,"Disable Cooling",,active
+proxy.settings.routing.disableCoolingHint,proxy,ProxyPage,Proxy,routing_disableCoolingHint,"Globally disables cooldown scheduling for credentials and models",,active
+proxy.settings.routing.requestRetry,proxy,ProxyPage,Proxy,routing_requestRetry,"Request Retries",,active
+proxy.settings.routing.requestRetryHint,proxy,ProxyPage,Proxy,routing_requestRetryHint,"Retries responses with status 403, 408, 500, 502, 503, or 504; 0 disables retries",,active
+proxy.settings.routing.maxRetryCredentials,proxy,ProxyPage,Proxy,routing_maxRetryCredentials,"Maximum Credentials Tried",,active
+proxy.settings.routing.maxRetryCredentialsHint,proxy,ProxyPage,Proxy,routing_maxRetryCredentialsHint,"Maximum credentials tried for one failed request; 0 tries all available credentials",,active
+proxy.settings.routing.maxRetryInterval,proxy,ProxyPage,Proxy,routing_maxRetryInterval,"Maximum Retry Wait (seconds)",,active
+proxy.settings.routing.maxRetryIntervalHint,proxy,ProxyPage,Proxy,routing_maxRetryIntervalHint,"Limits how long to wait for cooled-down credentials; lowering it reduces cumulative wait, but is not a hard request timeout",,active
+proxy.settings.routing.streamingBootstrapRetries,proxy,ProxyPage,Proxy,routing_streamingBootstrapRetries,"Streaming Bootstrap Retries",,active
+proxy.settings.routing.streamingBootstrapRetriesHint,proxy,ProxyPage,Proxy,routing_streamingBootstrapRetriesHint,"Safe retries allowed before the first response is sent; 0 disables them",,active
+proxy.settings.diagnostics.title,proxy,ProxyPage,Proxy,diagnostics_title,"Logging & Diagnostics",,active
+proxy.settings.diagnostics.debug,proxy,ProxyPage,Proxy,diagnostics_debug,"Debug mode",,active
+proxy.settings.diagnostics.debugHint,proxy,ProxyPage,Proxy,diagnostics_debugHint,"Emit detailed debug-level logs to help diagnose runtime issues.",,active
+proxy.settings.diagnostics.logToFile,proxy,ProxyPage,Proxy,diagnostics_logToFile,"Write logs to files",,active
+proxy.settings.diagnostics.logToFileHint,proxy,ProxyPage,Proxy,diagnostics_logToFileHint,"Write application logs to rotating files; when disabled, logs go to the console.",,active
+proxy.settings.diagnostics.usageStatistics,proxy,ProxyPage,Proxy,diagnostics_usageStatistics,"Usage statistics",,active
+proxy.settings.diagnostics.usageStatisticsHint,proxy,ProxyPage,Proxy,diagnostics_usageStatisticsHint,"Aggregate request and token usage in memory for the usage records page.",,active
+proxy.settings.diagnostics.redisRetention,proxy,ProxyPage,Proxy,diagnostics_redisRetention,"Usage queue retention (seconds)",,active
+proxy.settings.diagnostics.redisRetentionHint,proxy,ProxyPage,Proxy,diagnostics_redisRetentionHint,"In-memory retention for Management API usage entries, from 1 to 3600 seconds.",,active
+proxy.settings.errors.nonNegativeInteger,proxy,ProxyPage,Proxy,errors_nonNegativeInteger,"Log size and error log retention must be non-negative integers",,active
+proxy.settings.errors.redisRetention,proxy,ProxyPage,Proxy,errors_redisRetention,"Usage queue retention must be an integer between 1 and 3600",,active
+proxy.settings.saving,proxy,ProxyPage,Proxy,settings_saving,"Saving",,active
+proxy.creds.tabHint,proxy,ProxyPage,Proxy,creds_tabHint,"OAuth and file-backed provider credentials shared by every upstream request.",,active
+proxy.alias.subtitle,proxy,ProxyPage,Proxy,alias_subtitle,"Create fixed aliases for kernel models — plain, fixed reasoning effort, or fast service tier.",,active
+proxy.requests.refreshed,proxy,ProxyPage,Proxy,requests_refreshed,"Refreshed",,active
+proxy.requests.detail.title,proxy,ProxyPage,Proxy,detail_title,"Details",,active
+proxy.requests.detail.input,proxy,ProxyPage,Proxy,detail_input,"Input",,active
+proxy.requests.detail.output,proxy,ProxyPage,Proxy,detail_output,"Output",,active
+proxy.requests.detail.reasoning,proxy,ProxyPage,Proxy,detail_reasoning,"Reasoning",,active
+proxy.requests.detail.cacheRead,proxy,ProxyPage,Proxy,detail_cacheRead,"Cache read",,active
+proxy.requests.detail.cacheCreation,proxy,ProxyPage,Proxy,detail_cacheCreation,"Cache creation",,active
+proxy.requests.detail.total,proxy,ProxyPage,Proxy,detail_total,"Total",,active
+proxy.requests.detail.failureMessage,proxy,ProxyPage,Proxy,detail_failureMessage,"Failure message",,active
+proxy.requests.range.1h,proxy,ProxyPage,Proxy,range_1h,"1h",,active
+proxy.requests.range.24h,proxy,ProxyPage,Proxy,range_24h,"24h",,active
+proxy.requests.range.7d,proxy,ProxyPage,Proxy,range_7d,"7d",,active
+proxy.requests.range.all,proxy,ProxyPage,Proxy,range_all,"All",,active
+proxy.requests.range.custom,proxy,ProxyPage,Proxy,range_custom,"Custom",,active
+proxy.requests.range.start,proxy,ProxyPage,Proxy,range_start,"Start",,active
+proxy.requests.range.end,proxy,ProxyPage,Proxy,range_end,"End",,active
+proxy.requests.filter.model,proxy,ProxyPage,Proxy,filter_model,"Filter by model",,active
+proxy.requests.filter.provider,proxy,ProxyPage,Proxy,filter_provider,"Filter by provider",,active
+proxy.metric.top_model,proxy,ProxyPage,Proxy,metric_top_model,"Top model",,active
+proxy.settings.network.hint,proxy,ProxyPage,Proxy,network_hint,"Applied by the running kernel via config hot-reload; port/host changes need a core restart.",,active
+proxy.settings.routing.hint,proxy,ProxyPage,Proxy,routing_hint,"Upstream scheduling, session affinity and retry behaviour.",,active
+proxy.settings.routing.strategyHint,proxy,ProxyPage,Proxy,routing_strategyHint,"round-robin rotates across credentials; fill-first prefers the highest-priority one.",,active
+proxy.settings.diagnostics.hint,proxy,ProxyPage,Proxy,diagnostics_hint,"Kernel logging and usage statistics collection.",,active
+proxy.settings.errors.port,proxy,ProxyPage,Proxy,errors_port,"Enter an integer between 1 and 65535.",,active
+proxy.settings.errors.host,proxy,ProxyPage,Proxy,errors_host,"Listen host cannot be empty.",,active
+proxy.settings.sectionSaved,proxy,ProxyPage,Proxy,settings_sectionSaved,"Settings saved — the kernel reloads them automatically.",,active
+proxy.alias.sourceHint,proxy,ProxyPage,Proxy,alias_sourceHint,"Select a source model to see where its reasoning levels come from.",,active
+proxy.creds.copyFailed,proxy,ProxyPage,Proxy,creds_copyFailed,"Copy failed",,active
+

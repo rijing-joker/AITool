@@ -465,16 +465,51 @@ async function handleProxyApiRequest(req, res, url, ctx) {
     }
     if (p === "/api/proxy/usage/records") {
       const rows = readRecords();
-      const model = url.searchParams.get("model");
-      const provider = url.searchParams.get("provider");
+      const model = (url.searchParams.get("model") || "").trim().toLowerCase();
+      const provider = (url.searchParams.get("provider") || "").trim().toLowerCase();
       const failed = url.searchParams.get("failed");
+      const result = url.searchParams.get("result") || "all";
+      const since = Date.parse(url.searchParams.get("since") || "");
+      const until = Date.parse(url.searchParams.get("until") || "");
       const filtered = rows.filter((row) => {
-        if (model && String(row.response_model || row.model || "") !== model) return false;
-        if (provider && String(row.provider || "") !== provider) return false;
+        if (model && !String(row.response_model || row.model || "").toLowerCase().includes(model)) return false;
+        if (provider && !String(row.provider || "").toLowerCase().includes(provider)) return false;
         if (failed === "true" && !row.failed) return false;
         if (failed === "false" && row.failed) return false;
+        if (result === "success" && (row.failed || row.canceled)) return false;
+        if (result === "failed" && !row.failed) return false;
+        if (result === "canceled" && (!row.canceled || row.failed)) return false;
+        const ts = Date.parse(row.timestamp || "");
+        if (Number.isFinite(since) && (!Number.isFinite(ts) || ts < since)) return false;
+        if (Number.isFinite(until) && (!Number.isFinite(ts) || ts > until)) return false;
         return true;
       });
+      if (url.searchParams.get("stats")) {
+        const success = filtered.filter((row) => !row.failed && !row.canceled);
+        const failedRows = filtered.filter((row) => row.failed);
+        const canceled = filtered.filter((row) => row.canceled && !row.failed);
+        const totalTokens = success.reduce((acc, row) => acc + (Number(row?.tokens?.totalTokens) || 0), 0);
+        const byModel = new Map();
+        for (const row of success) {
+          const name = String(row.response_model || row.model || "unknown");
+          const entry = byModel.get(name) || { model: name, requests: 0, total_tokens: 0 };
+          entry.requests += 1;
+          entry.total_tokens += Number(row?.tokens?.totalTokens) || 0;
+          byModel.set(name, entry);
+        }
+        json(res, {
+          ok: true,
+          stats: {
+            total_requests: filtered.length,
+            success_count: success.length,
+            failure_count: failedRows.length,
+            canceled_count: canceled.length,
+            total_tokens: totalTokens,
+            models: Array.from(byModel.values()).sort((a, b) => b.total_tokens - a.total_tokens).slice(0, 8),
+          },
+        });
+        return true;
+      }
       const pageSize = Math.min(Math.max(Number(url.searchParams.get("pageSize")) || 50, 1), 500);
       const page = Math.max(Number(url.searchParams.get("page")) || 0, 0);
       const start = page * pageSize;
@@ -556,38 +591,158 @@ async function handleProxyApiRequest(req, res, url, ctx) {
       return true;
     }
 
-    // --- model aliases ---
-    // OAuth channel aliases: map of channel → [{name, alias, fork?, display-name?, force-mapping?}].
-    // PUT replaces the whole map; PATCH replaces one channel ({channel, aliases});
-    // DELETE removes one channel (?channel=claude).
-    if (p === "/api/proxy/aliases/oauth" && (method === "PUT" || method === "PATCH" || method === "DELETE")) {
-      if (!requireMutation()) return true;
-      if (method === "DELETE") {
-        const channel = url.searchParams.get("channel");
-        if (!channel) {
-          json(res, { ok: false, error: "channel query parameter required" }, 400);
+    // --- structured config fields (EasyCLIProxyAPI ConfigPanel port) ---
+    // The Rust GUI patches config.yaml on disk and lets the core's watcher
+    // reload; this route does the same with dotted-path field merges. Fields
+    // not in the map are untouched; null removes a key.
+    if (p === "/api/proxy/config-fields") {
+      const YAML = require("yaml");
+      const readFields = () => {
+        let doc = {};
+        try { doc = YAML.parse(fs.readFileSync(paths.configPath, "utf8")) || {}; } catch {}
+        const get = (dotted) => {
+          let node = doc;
+          for (const part of dotted.split(".")) {
+            if (node === null || typeof node !== "object") return undefined;
+            node = node[part];
+          }
+          return node;
+        };
+        return {
+          "server.port": get("server.port"),
+          "server.host": get("server.host"),
+          "proxy-url": get("proxy-url"),
+          "routing.strategy": get("routing.strategy"),
+          "routing.session-affinity": get("routing.session-affinity"),
+          "routing.session-affinity-ttl": get("routing.session-affinity-ttl"),
+          "routing.cooldown.disable-cooling": get("routing.cooldown.disable-cooling"),
+          "routing.retry.request-retry": get("routing.retry.request-retry"),
+          "routing.retry.max-retry-credentials": get("routing.retry.max-retry-credentials"),
+          "routing.retry.max-retry-interval": get("routing.retry.max-retry-interval"),
+          "routing.retry.streaming-bootstrap-retries": get("routing.retry.streaming-bootstrap-retries"),
+          "debug": get("debug"),
+          "logging-to-file": get("logging-to-file"),
+          "observability.usage.usage-statistics-enabled": get("observability.usage.usage-statistics-enabled"),
+          "observability.usage.redis-usage-queue-retention-seconds": get("observability.usage.redis-usage-queue-retention-seconds"),
+        };
+      };
+      if (method === "PUT" || method === "PATCH") {
+        if (!requireMutation()) return true;
+        const body = await readJsonBody(req);
+        const fields = body && typeof body.fields === "object" && body.fields ? body.fields : null;
+        if (!fields) {
+          json(res, { ok: false, error: "fields object required" }, 400);
           return true;
         }
-        const result = await management.request("PATCH", "/v0/management/oauth-model-alias", {
-          body: { channel, aliases: [] },
-        });
-        json(res, result.ok ? { ok: true } : { ok: false, error: result.error || result.status }, result.ok ? 200 : 502);
+        let doc = {};
+        try { doc = YAML.parse(fs.readFileSync(paths.configPath, "utf8")) || {}; } catch {}
+        for (const [dotted, value] of Object.entries(fields)) {
+          if (!/^[a-z0-9.-]+$/i.test(dotted)) {
+            json(res, { ok: false, error: `Invalid config field: ${dotted}` }, 400);
+            return true;
+          }
+          const parts = dotted.split(".");
+          let node = doc;
+          for (let i = 0; i < parts.length - 1; i += 1) {
+            if (node[parts[i]] === null || typeof node[parts[i]] !== "object") node[parts[i]] = {};
+            node = node[parts[i]];
+          }
+          if (value === null) delete node[parts[parts.length - 1]];
+          else node[parts[parts.length - 1]] = value;
+        }
+        fs.mkdirSync(path.dirname(paths.configPath), { recursive: true });
+        fs.writeFileSync(paths.configPath, YAML.stringify(doc));
+        // Keep the bootstrap copy consistent with what ensureConfig expects.
+        json(res, { ok: true, fields: readFields() });
         return true;
       }
-      const body = await readJsonBody(req);
-      const result = await management.request(method, "/v0/management/oauth-model-alias", { body });
-      json(res, result.ok ? { ok: true } : { ok: false, error: result.error || result.status }, result.ok ? 200 : 502);
+      json(res, { ok: true, fields: readFields() });
       return true;
     }
-    if (p === "/api/proxy/aliases/oauth") {
-      const result = await management.request("GET", "/v0/management/oauth-model-alias");
-      if (result.ok) {
-        const data = result.data || {};
-        const raw = Object.hasOwn(data, "oauth-model-alias") ? data["oauth-model-alias"] : data;
-        json(res, { ok: true, aliases: raw && typeof raw === "object" ? raw : {} });
-      } else {
-        json(res, { ok: false, error: result.error || result.status }, 502);
+
+    // --- kernel model aliases (EasyCLIProxyAPI ThinkingAliasesPage engine) ---
+    // Dispatches to alias-config.js, which reads the legacy config view from
+    // the core and writes section-level changes back through the management API.
+    if (p === "/api/proxy/alias-config" && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      const aliasConfig = require("./alias-config");
+      try {
+        switch (String(body.action || "")) {
+          case "load":
+            json(res, { ok: true, state: await aliasConfig.loadState() });
+            break;
+          case "edit-source":
+            json(res, { ok: true, context: await aliasConfig.getEditContext(body) });
+            break;
+          case "create":
+            json(res, { ok: true, state: body.speedOnly
+              ? await aliasConfig.createSpeedAlias(body)
+              : await aliasConfig.createAlias(body) });
+            break;
+          case "delete":
+            json(res, { ok: true, state: await aliasConfig.deleteAlias(body) });
+            break;
+          default:
+            json(res, { ok: false, error: "Unknown alias-config action" }, 400);
+        }
+      } catch (error) {
+        json(res, { ok: false, error: error?.message || String(error) });
       }
+      return true;
+    }
+
+    if (p === "/api/proxy/auth-files/open-directory" && method === "POST") {
+      if (!requireMutation()) return true;
+      const { spawn } = require("node:child_process");
+      fs.mkdirSync(paths.authDir, { recursive: true });
+      const command = process.platform === "darwin" ? "open"
+        : process.platform === "win32" ? "explorer" : "xdg-open";
+      const child = spawn(command, [paths.authDir], { detached: true, stdio: "ignore" });
+      child.unref();
+      json(res, { ok: true, directory: paths.authDir });
+      return true;
+    }
+
+    // --- client api-key remarks (GUI-side notes, like EasyCLIProxyAPI's
+    // GuiApiKeyEntry remarks which live outside the kernel config) ---
+    if (p === "/api/proxy/api-key-remarks" && (method === "PUT" || method === "POST")) {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      const remarks = isPlainObject(body.remarks) ? body.remarks : null;
+      if (!remarks) {
+        json(res, { ok: false, error: "remarks object required" }, 400);
+        return true;
+      }
+      for (const [key, remark] of Object.entries(remarks)) {
+        if (Array.from(String(remark)).length > 80) {
+          json(res, { ok: false, error: "Key note cannot exceed 80 characters" }, 400);
+          return true;
+        }
+        if (/[\u0000-\u001f\u007f]/.test(String(remark))) {
+          json(res, { ok: false, error: "Key note cannot contain line breaks or control characters" }, 400);
+          return true;
+        }
+        void key;
+      }
+      const store = {};
+      for (const [key, remark] of Object.entries(remarks)) {
+        const trimmedKey = String(key).trim();
+        const trimmedRemark = String(remark).trim();
+        if (trimmedKey && trimmedRemark) store[trimmedKey] = trimmedRemark;
+      }
+      fs.mkdirSync(path.dirname(paths.apiKeyRemarksPath), { recursive: true });
+      fs.writeFileSync(paths.apiKeyRemarksPath, `${JSON.stringify(store, null, 2)}\n`);
+      json(res, { ok: true, remarks: store });
+      return true;
+    }
+    if (p === "/api/proxy/api-key-remarks") {
+      let store = {};
+      try {
+        const parsed = JSON.parse(fs.readFileSync(paths.apiKeyRemarksPath, "utf8"));
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) store = parsed;
+      } catch {}
+      json(res, { ok: true, remarks: store });
       return true;
     }
 
@@ -597,6 +752,10 @@ async function handleProxyApiRequest(req, res, url, ctx) {
     json(res, { ok: false, error: error?.message || String(error) }, 500);
     return true;
   }
+}
+
+function isPlainObject(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 module.exports = { handleProxyApiRequest };

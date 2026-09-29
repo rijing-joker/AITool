@@ -153,17 +153,4 @@ export const proxyApi = {
 
   configYaml: () => get<{ ok: true; yaml: string }>("/api/proxy/config.yaml"),
   putConfigYaml: (yaml: string) => mutate<{ ok: true }>("/api/proxy/config.yaml", "PUT", { yaml }),
-
-  // --- OAuth channel model aliases ---
-  oauthAliases: () => get<{ ok: true; aliases: Record<string, OAuthModelAlias[]> }>("/api/proxy/aliases/oauth"),
-  saveOauthChannel: (channel: string, aliases: OAuthModelAlias[]) =>
-    mutate<{ ok: true }>("/api/proxy/aliases/oauth", "PATCH", { channel, aliases }),
 };
-
-export interface OAuthModelAlias {
-  name: string;
-  alias: string;
-  fork?: boolean;
-  "display-name"?: string;
-  "force-mapping"?: boolean;
-}

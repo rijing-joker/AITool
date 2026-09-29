@@ -335,6 +335,8 @@ export const managementApi = {
   ) => request<T>("POST", path, { ...options, body }),
   put: <T = ManagementJson>(path: string, body?: ManagementJson) => request<T>("PUT", path, { body }),
   patch: <T = ManagementJson>(path: string, body?: ManagementJson) => request<T>("PATCH", path, { body }),
+  delete: <T = ManagementJson>(path: string, options: { query?: ManagementRequestOptions["query"] } = {}) =>
+    request<T>("DELETE", path, { query: options.query }),
 };
 
 const messageFromPayload = (value: unknown, depth = 0): string => {

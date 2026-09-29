@@ -28,6 +28,7 @@ let state = {
   socket: null,
   connected: false,
   connecting: false,
+  phase: "idle",
   retryTimer: null,
   retryDelayMs: 1_000,
   buffer: null,
@@ -147,7 +148,7 @@ function appendQueueRow(bucket) {
 // Minimal RESP parser: enough for the core's push frames — arrays of bulk
 // strings / integers, plus simple strings, errors and nil bulk for the
 // LPOP backfill replies.
-function createRespParser(onArray) {
+function createRespParser(onArray, onFrame) {
   let buffer = Buffer.alloc(0);
   return function feed(chunk) {
     buffer = buffer.length ? Buffer.concat([buffer, chunk]) : chunk;
@@ -157,25 +158,30 @@ function createRespParser(onArray) {
       const prefix = String.fromCharCode(buffer[0]);
       const body = buffer.slice(1, lineEnd).toString("utf8");
       if (prefix !== "*") {
-        // Non-array frame (subscribe confirmation integers, +OK, errors) —
-        // skip the whole frame and keep scanning.
+        // Non-array frame: +OK / -ERR / :int / $bulk (including $-1 nil).
         let skipBytes;
         if (prefix === "$") {
           const length = Number(body);
-          if (length < 0) {
+          if (!Number.isFinite(length)) {
             skipBytes = lineEnd + 2;
+          } else if (length < 0) {
+            skipBytes = lineEnd + 2;
+            onFrame?.("$", null);
           } else {
             if (buffer.length < lineEnd + 2 + length + 2) return;
             skipBytes = lineEnd + 2 + length + 2;
+            onFrame?.("$", buffer.slice(lineEnd + 2, lineEnd + 2 + length).toString("utf8"));
           }
         } else {
           skipBytes = lineEnd + 2;
+          onFrame?.(prefix, body);
         }
         buffer = buffer.slice(skipBytes);
         continue;
       }
       const count = Number(body);
       if (!Number.isFinite(count) || count < 0) {
+        if (count === -1) onFrame?.("*", null);
         buffer = buffer.slice(lineEnd + 2);
         continue;
       }
@@ -270,17 +276,16 @@ function handleUsagePayload(payloadText) {
 function drainBackfill(socket) {
   // The queue retains events for a while (config default 60s, AiTool sets
   // 3600s), so pull anything queued while the bridge was down before
-  // subscribing. Replies arrive as single bulk strings; a nil bulk ends it.
+  // subscribing. Replies arrive as bulk strings (or wrapped arrays); a nil
+  // reply ends the backfill and the parser's frame callback flips the phase.
   let drained = 0;
   const lpopLoop = () => {
-    if (!state.connected) return;
+    if (!state.connected || state.phase !== "backfill") return;
     socket.write("*2\r\n$4\r\nLPOP\r\n$5\r\nusage\r\n");
+    drained += 1;
   };
   state.backfillLoop = lpopLoop;
   lpopLoop();
-  // The parser's onArray routes LPOP results; SUBSCRIBE happens once the
-  // backfill reports nil (see handleArray).
-  state.onBackfillComplete = () => {};
 }
 
 function connect() {
@@ -291,24 +296,50 @@ function connect() {
   state.socket = socket;
 
   let subscribed = false;
-  let backfillPending = true;
+
+  const sendSubscribe = () => {
+    if (subscribed || !state.connected) return;
+    subscribed = true;
+    socket.write("*2\r\n$9\r\nSUBSCRIBE\r\n$5\r\nusage\r\n");
+  };
 
   const feed = createRespParser((elements) => {
-    if (!Array.isArray(elements)) return;
-    if (backfillPending) {
-      // LPOP reply: payload string (keep draining) or null/nil (done).
-      if (elements.length >= 1 && typeof elements[0] === "string" && elements[0].trim().startsWith("{")) {
+    if (state.phase === "backfill") {
+      // Some core builds wrap LPOP payloads in arrays; anything else here
+      // means the backfill is done and we can subscribe.
+      if (Array.isArray(elements) && typeof elements[0] === "string" && elements[0].trim().startsWith("{")) {
         handleUsagePayload(elements[0]);
         state.backfillLoop?.();
         return;
       }
-      backfillPending = false;
-      socket.write("*2\r\n$9\r\nSUBSCRIBE\r\n$5\r\nusage\r\n");
-      subscribed = true;
+      state.phase = "subscribed";
+      sendSubscribe();
       return;
     }
-    if (subscribed && elements[0] === "message" && elements[1] === "usage") {
+    if (subscribed && Array.isArray(elements) && elements[0] === "message" && elements[1] === "usage") {
       handleUsagePayload(elements[2] || "");
+    }
+  }, (prefix, value) => {
+    if (state.phase === "authing") {
+      if (prefix === "+") {
+        state.phase = "backfill";
+        drainBackfill(socket);
+      } else if (prefix === "-") {
+        state.lastError = `resp auth failed: ${value}`;
+        socket.destroy();
+      }
+      return;
+    }
+    if (state.phase === "backfill" && prefix === "$") {
+      if (value === null) {
+        state.phase = "subscribed";
+        sendSubscribe();
+        return;
+      }
+      if (typeof value === "string" && value.trim().startsWith("{")) {
+        handleUsagePayload(value);
+        state.backfillLoop?.();
+      }
     }
   });
 
@@ -320,10 +351,19 @@ function connect() {
   socket.on("connect", () => {
     state.connected = true;
     state.connecting = false;
+    state.phase = "authing";
     state.retryDelayMs = 1_000;
     state.lastError = null;
     state.recordsToday = 0;
-    drainBackfill(socket);
+    // The core's RESP endpoint rejects everything before AUTH; it validates
+    // the management secret exactly like the HTTP management API.
+    const token = config.getManagementKey();
+    if (!token) {
+      state.lastError = "management-key-unavailable";
+      socket.destroy();
+      return;
+    }
+    socket.write(`*2\r\n$4\r\nAUTH\r\n$${Buffer.byteLength(token, "utf8")}\r\n${token}\r\n`);
   });
   socket.on("data", feed);
   socket.on("error", (error) => {
@@ -332,6 +372,7 @@ function connect() {
   socket.on("close", () => {
     state.connected = false;
     state.connecting = false;
+    state.phase = "idle";
     state.socket = null;
     if (state.stopping) return;
     scheduleRetry();

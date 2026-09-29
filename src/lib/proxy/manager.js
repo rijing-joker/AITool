@@ -1,4 +1,5 @@
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const { spawn, execFile } = require("node:child_process");
 const paths = require("./paths");
@@ -74,6 +75,36 @@ async function installCore({ sourcePath } = {}) {
     child.on("error", reject);
   });
   return { installed: true, path: paths.binPath, source: "download" };
+}
+
+// Build the core from a local CLIProxyAPI checkout (e.g. the user's fork with
+// fixes not yet in an upstream release) and install that binary instead.
+async function installFromRepo(repoPath) {
+  const { execFile, execFileSync } = require("node:child_process");
+  const repo = path.resolve(String(repoPath || ""));
+  if (!fs.existsSync(path.join(repo, "cmd", "server", "main.go"))) {
+    throw new Error(`not a CLIProxyAPI checkout: ${repo}`);
+  }
+  const out = path.join(os.tmpdir(), `aitool-core-${Date.now()}`);
+  await new Promise((resolve, reject) => {
+    execFile("go", ["build", "-o", out, "./cmd/server"], { cwd: repo, timeout: 300_000 }, (error, stdout, stderr) => {
+      if (error) reject(new Error(`go build failed: ${stderr || error.message}`));
+      else resolve();
+    });
+  });
+  let version = "dev-local";
+  try {
+    const short = execFileSync("git", ["-C", repo, "rev-parse", "--short", "HEAD"]).toString().trim();
+    version = `dev-local+${short}`;
+  } catch {}
+  config.ensureDirs();
+  fs.copyFileSync(out, paths.binPath);
+  fs.chmodSync(paths.binPath, 0o755);
+  fs.writeFileSync(paths.coreVersionPath, `${version}\n`);
+  try {
+    fs.rmSync(out, { force: true });
+  } catch {}
+  return { installed: true, path: paths.binPath, source: `local-repo (${version})` };
 }
 
 async function start() {
@@ -190,6 +221,7 @@ async function status() {
 module.exports = {
   binaryExists,
   installCore,
+  installFromRepo,
   start,
   stop,
   status,

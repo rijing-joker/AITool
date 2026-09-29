@@ -153,4 +153,55 @@ export const proxyApi = {
 
   configYaml: () => get<{ ok: true; yaml: string }>("/api/proxy/config.yaml"),
   putConfigYaml: (yaml: string) => mutate<{ ok: true }>("/api/proxy/config.yaml", "PUT", { yaml }),
+
+  // --- upstream API-key providers (EasyCLIProxyAPI "API 接入") ---
+  upstreamSection: (section: "gemini" | "claude" | "codex") =>
+    get<{ ok: true; providers: UpstreamKeyProvider[] }>(`/api/proxy/upstreams/${section}`),
+  saveUpstreamSection: (section: "gemini" | "claude" | "codex", providers: UpstreamKeyProvider[]) =>
+    mutate<{ ok: true }>(`/api/proxy/upstreams/${section}`, "PUT", providers),
+  openaiCompat: () =>
+    get<{ ok: true; providers: OpenAICompatProvider[] }>("/api/proxy/upstreams/openai-compat"),
+  saveOpenaiCompat: (providers: OpenAICompatProvider[]) =>
+    mutate<{ ok: true }>("/api/proxy/upstreams/openai-compat", "PUT", providers),
+
+  // --- OAuth channel model aliases ---
+  oauthAliases: () => get<{ ok: true; aliases: Record<string, OAuthModelAlias[]> }>("/api/proxy/aliases/oauth"),
+  saveOauthChannel: (channel: string, aliases: OAuthModelAlias[]) =>
+    mutate<{ ok: true }>("/api/proxy/aliases/oauth", "PATCH", { channel, aliases }),
 };
+
+export interface UpstreamKeyProvider {
+  "api-key"?: string;
+  "base-url"?: string;
+  priority?: number;
+  "excluded-models"?: string[];
+  [key: string]: unknown;
+}
+
+export interface OpenAICompatModel {
+  name: string;
+  alias: string;
+  "display-name"?: string;
+  "force-mapping"?: boolean;
+  thinking?: { levels?: string[]; [key: string]: unknown };
+  [key: string]: unknown;
+}
+
+export interface OpenAICompatProvider {
+  name: string;
+  "base-url"?: string;
+  priority?: number;
+  disabled?: boolean;
+  prefix?: string;
+  "api-key-entries"?: Array<{ "api-key"?: string; [key: string]: unknown }>;
+  models?: OpenAICompatModel[];
+  [key: string]: unknown;
+}
+
+export interface OAuthModelAlias {
+  name: string;
+  alias: string;
+  fork?: boolean;
+  "display-name"?: string;
+  "force-mapping"?: boolean;
+}

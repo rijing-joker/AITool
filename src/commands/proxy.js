@@ -13,6 +13,20 @@ async function cmdProxy(argv = []) {
   const sub = String(argv[0] || "status").toLowerCase();
 
   if (sub === "install") {
+    // `aitool proxy install [--local <CLIProxyAPI checkout>]` — the local
+    // build carries fork fixes that upstream releases may not have yet.
+    const localFlagIndex = argv.indexOf("--local");
+    if (localFlagIndex !== -1) {
+      const repoPath = argv[localFlagIndex + 1] && !argv[localFlagIndex + 1].startsWith("--")
+        ? argv[localFlagIndex + 1]
+        : process.env.AITOOL_CORE_REPO;
+      if (!repoPath) {
+        throw new Error("--local requires a path to a CLIProxyAPI checkout (or set AITOOL_CORE_REPO)");
+      }
+      const result = await manager.installFromRepo(repoPath);
+      process.stdout.write(`Core installed: ${result.path} (${result.source})\n`);
+      return;
+    }
     const result = await manager.installCore();
     process.stdout.write(`Core installed: ${result.path} (${result.source})\n`);
     return;

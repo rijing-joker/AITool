@@ -1735,3 +1735,39 @@ proxy.settings.config_hint,proxy,ProxyPage,ProxyPage,config_hint,Raw CLIProxyAPI
 proxy.settings.config_saved,proxy,ProxyPage,ProxyPage,config_saved,config.yaml saved.,,active
 proxy.action.revert,proxy,ProxyPage,ProxyPage,revert,Revert,,active
 proxy.action.save_config,proxy,ProxyPage,ProxyPage,save_config,Save,,active
+proxy.tab.upstreams,proxy,ProxyPage,ProxyPage,upstreams,API Access,,active
+proxy.tab.aliases,proxy,ProxyPage,ProxyPage,aliases,Aliases,,active
+proxy.upstreams.subtitle,proxy,ProxyPage,ProxyPage,subtitle,"Upstream API-key providers the core proxies to — Gemini, Claude, Codex and any OpenAI-compatible endpoint.",,active
+proxy.upstreams.gemini,proxy,ProxyPage,ProxyPage,gemini,Gemini API keys,,active
+proxy.upstreams.claude,proxy,ProxyPage,ProxyPage,claude,Claude API keys,,active
+proxy.upstreams.codex,proxy,ProxyPage,ProxyPage,codex,Codex API keys,,active
+proxy.upstreams.empty,proxy,ProxyPage,ProxyPage,empty,No providers configured yet.,,active
+proxy.upstreams.key_placeholder,proxy,ProxyPage,ProxyPage,key_placeholder,Upstream API key,,active
+proxy.upstreams.baseurl_placeholder,proxy,ProxyPage,ProxyPage,baseurl_placeholder,Base URL (optional),,active
+proxy.upstreams.compat_title,proxy,ProxyPage,ProxyPage,compat_title,OpenAI-compatible providers,,active
+proxy.upstreams.compat_hint,proxy,ProxyPage,ProxyPage,compat_hint,Custom endpoints with per-model aliases — the same alias may map to several providers (round-robin + failover).,,active
+proxy.upstreams.provider_name_placeholder,proxy,ProxyPage,ProxyPage,provider_name_placeholder,Provider name,,active
+proxy.upstreams.add_provider,proxy,ProxyPage,ProxyPage,add_provider,Add provider,,active
+proxy.upstreams.delete_provider,proxy,ProxyPage,ProxyPage,delete_provider,Delete provider,,active
+proxy.upstreams.key_count,proxy,ProxyPage,ProxyPage,key_count,{{count}} key(s),,active
+proxy.upstreams.model_count,proxy,ProxyPage,ProxyPage,model_count,{{count}} model(s),,active
+proxy.upstreams.models_title,proxy,ProxyPage,ProxyPage,models_title,Models & aliases,,active
+proxy.upstreams.no_models,proxy,ProxyPage,ProxyPage,no_models,No models mapped yet.,,active
+proxy.upstreams.model_name_placeholder,proxy,ProxyPage,ProxyPage,model_name_placeholder,Upstream model name,,active
+proxy.upstreams.model_alias_placeholder,proxy,ProxyPage,ProxyPage,model_alias_placeholder,Client-visible alias (optional),,active
+proxy.upstreams.thinking_placeholder,proxy,ProxyPage,ProxyPage,thinking_placeholder,"Thinking levels (e.g. low,medium,high)",,active
+proxy.upstreams.thinking_levels,proxy,ProxyPage,ProxyPage,thinking_levels,thinking: {{levels}},,active
+proxy.upstreams.add_model,proxy,ProxyPage,ProxyPage,add_model,Add model,,active
+proxy.upstreams.delete_model,proxy,ProxyPage,ProxyPage,delete_model,Delete model mapping,,active
+proxy.upstreams.multi_source,proxy,ProxyPage,ProxyPage,multi_source,{{count}} sources,,active
+proxy.upstreams.multi_source_hint,proxy,ProxyPage,ProxyPage,multi_source_hint,This alias is served by several upstream models — the core round-robins and fails over between them.,,active
+proxy.aliases.subtitle,proxy,ProxyPage,ProxyPage,subtitle,OAuth channel model aliases — rename model IDs per channel for both listing and routing.,,active
+proxy.aliases.channels,proxy,ProxyPage,ProxyPage,channels,Channels,,active
+proxy.aliases.empty,proxy,ProxyPage,ProxyPage,empty,No aliases for this channel yet.,,active
+proxy.aliases.name_placeholder,proxy,ProxyPage,ProxyPage,name_placeholder,Upstream model name,,active
+proxy.aliases.alias_placeholder,proxy,ProxyPage,ProxyPage,alias_placeholder,Client-visible alias (optional),,active
+proxy.aliases.add_alias,proxy,ProxyPage,ProxyPage,add_alias,Add alias,,active
+proxy.aliases.delete_alias,proxy,ProxyPage,ProxyPage,delete_alias,Delete alias,,active
+proxy.aliases.hint,proxy,ProxyPage,ProxyPage,hint,Overlapping names across channels can become ambiguous in the merged /v1 model list — prefer unique aliases for strict pinning.,,active
+proxy.requests.response_model,proxy,ProxyPage,ProxyPage,response_model,Response model,,active
+proxy.requests.substituted_hint,proxy,ProxyPage,ProxyPage,substituted_hint,The upstream reported a different model than requested — possible silent substitution.,,active

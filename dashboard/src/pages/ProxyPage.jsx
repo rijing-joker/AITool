@@ -1,15 +1,17 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   AlertTriangle,
   Check,
   Copy as CopyIcon,
+  Globe,
   KeyRound,
   PauseCircle,
   PlayCircle,
   Plus,
   RefreshCw,
   Server,
+  Shuffle,
   Trash2,
   Upload,
   Users,
@@ -21,13 +23,16 @@ import { proxyApi } from "../lib/proxy-api";
 
 // AiTool proxy management — the CLIProxyAPI control surface, styled after the
 // TokenTracker dashboard design language (oai palette, card list, status dots).
-// One route with five tabs: lifecycle + live metrics, provider credentials,
-// client access keys, per-request drill-down, and core settings.
+// One route with seven tabs: lifecycle + live metrics, upstream API-key
+// providers (EasyCLIProxyAPI's "API 接入"), provider auth files, client access
+// keys, model aliases, per-request drill-down, and core settings.
 
 const TABS = [
   { id: "overview", labelKey: "proxy.tab.overview", icon: Activity },
+  { id: "upstreams", labelKey: "proxy.tab.upstreams", icon: Globe },
   { id: "providers", labelKey: "proxy.tab.providers", icon: Users },
   { id: "keys", labelKey: "proxy.tab.keys", icon: KeyRound },
+  { id: "aliases", labelKey: "proxy.tab.aliases", icon: Shuffle },
   { id: "requests", labelKey: "proxy.tab.requests", icon: Zap },
   { id: "settings", labelKey: "proxy.tab.settings", icon: Server },
 ];
@@ -645,12 +650,570 @@ function KeysTab({ status }) {
             placeholder={copy("proxy.keys.add_placeholder")}
             className="h-9 min-w-0 flex-1 rounded-lg border border-oai-gray-200 dark:border-oai-gray-700 bg-transparent px-3 text-sm placeholder:text-oai-gray-400 focus:outline-none focus:ring-2 focus:ring-oai-brand-500"
           />
-          <PrimaryButton onClick={() => {}} disabled={busy || !newKey.trim()}>
+          <PrimaryButton type="submit" disabled={busy || !newKey.trim()}>
             <Plus className="h-4 w-4" />
             {copy("proxy.action.add_key")}
           </PrimaryButton>
         </form>
       </Card>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Upstreams tab (API 接入 — upstream API-key providers)
+// ---------------------------------------------------------------------------
+
+function maskKey(key) {
+  const value = String(key || "");
+  if (value.length <= 10) return value;
+  return `${value.slice(0, 6)}…${value.slice(-4)}`;
+}
+
+function SimpleKeysSection({ section, titleKey }) {
+  const [providers, setProviders] = useState(null);
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [draft, setDraft] = useState({ apiKey: "", baseUrl: "" });
+
+  const load = useCallback(async () => {
+    try {
+      const data = await proxyApi.upstreamSection(section);
+      setProviders(data.providers || []);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setProviders([]);
+    }
+  }, [section]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const save = useCallback(
+    async (next) => {
+      setBusy(true);
+      try {
+        await proxyApi.saveUpstreamSection(section, next);
+        await load();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [section, load],
+  );
+
+  return (
+    <Card className="!p-0 overflow-hidden">
+      <div className="flex items-center justify-between px-4 sm:px-5 py-3.5 border-b border-oai-gray-100 dark:border-oai-gray-800">
+        <p className="text-sm font-semibold">{copy(titleKey)}</p>
+        <span className="text-xs text-oai-gray-400">
+          {copy("proxy.keys.count", { count: providers?.length ?? 0 })}
+        </span>
+      </div>
+      {error ? (
+        <p className="px-4 sm:px-5 py-2 text-xs text-amber-600 dark:text-amber-400">{error}</p>
+      ) : null}
+      {providers === null ? (
+        <div className="px-5 py-6 text-center text-sm text-oai-gray-400">{copy("proxy.loading")}</div>
+      ) : providers.length === 0 ? (
+        <p className="px-5 py-6 text-center text-sm text-oai-gray-400">{copy("proxy.upstreams.empty")}</p>
+      ) : (
+        <ul className="divide-y divide-oai-gray-100 dark:divide-oai-gray-800">
+          {providers.map((provider, index) => {
+            const apiKey = provider["api-key"] || "";
+            const baseUrl = provider["base-url"] || "";
+            return (
+              <li key={`${apiKey}-${index}`} className="flex flex-wrap items-center gap-2 px-4 sm:px-5 py-3 text-sm">
+                <code className="min-w-0 flex-1 truncate font-mono text-xs">{maskKey(apiKey)}</code>
+                {baseUrl ? (
+                  <code className="max-w-[240px] truncate rounded bg-oai-gray-100 dark:bg-oai-gray-800 px-1.5 py-0.5 font-mono text-xs text-oai-gray-500 dark:text-oai-gray-400">
+                    {baseUrl}
+                  </code>
+                ) : null}
+                <CopyButton text={apiKey} />
+                <button
+                  type="button"
+                  onClick={() => void save(providers.filter((_, i) => i !== index))}
+                  disabled={busy}
+                  aria-label={copy("proxy.action.delete_key")}
+                  title={copy("proxy.action.delete_key")}
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-md text-oai-gray-400 hover:bg-red-50 dark:hover:bg-red-950/40 hover:text-red-600 dark:hover:text-red-400 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 disabled:opacity-50"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      <form
+        className="flex flex-wrap items-center gap-2 border-t border-oai-gray-100 dark:border-oai-gray-800 px-4 sm:px-5 py-3"
+        onSubmit={(event) => {
+          event.preventDefault();
+          const apiKey = draft.apiKey.trim();
+          if (!apiKey || !providers) return;
+          const next = [...providers, { "api-key": apiKey, ...(draft.baseUrl.trim() ? { "base-url": draft.baseUrl.trim() } : {}) }];
+          void save(next);
+          setDraft({ apiKey: "", baseUrl: "" });
+        }}
+      >
+        <input
+          value={draft.apiKey}
+          onChange={(event) => setDraft((current) => ({ ...current, apiKey: event.target.value }))}
+          placeholder={copy("proxy.upstreams.key_placeholder")}
+          className="h-9 min-w-0 flex-1 rounded-lg border border-oai-gray-200 dark:border-oai-gray-700 bg-transparent px-3 text-sm placeholder:text-oai-gray-400 focus:outline-none focus:ring-2 focus:ring-oai-brand-500"
+        />
+        <input
+          value={draft.baseUrl}
+          onChange={(event) => setDraft((current) => ({ ...current, baseUrl: event.target.value }))}
+          placeholder={copy("proxy.upstreams.baseurl_placeholder")}
+          className="h-9 w-56 rounded-lg border border-oai-gray-200 dark:border-oai-gray-700 bg-transparent px-3 text-sm placeholder:text-oai-gray-400 focus:outline-none focus:ring-2 focus:ring-oai-brand-500"
+        />
+        <PrimaryButton type="submit" disabled={busy || !draft.apiKey.trim()}>
+          <Plus className="h-4 w-4" />
+          {copy("proxy.action.add_key")}
+        </PrimaryButton>
+      </form>
+    </Card>
+  );
+}
+
+function OpenaiCompatSection() {
+  const [providers, setProviders] = useState(null);
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [expanded, setExpanded] = useState(null);
+  const [draft, setDraft] = useState({ name: "", baseUrl: "", apiKey: "" });
+  const [modelDraft, setModelDraft] = useState({ name: "", alias: "", thinking: "" });
+
+  const load = useCallback(async () => {
+    try {
+      const data = await proxyApi.openaiCompat();
+      setProviders(data.providers || []);
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setProviders([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const save = useCallback(
+    async (next) => {
+      setBusy(true);
+      try {
+        await proxyApi.saveOpenaiCompat(next);
+        await load();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [load],
+  );
+
+  // Count how many sources share each alias across all providers — the
+  // multi-source alias feature (one alias, round-robin across providers).
+  const aliasSources = useMemo(() => {
+    const map = new Map();
+    for (const provider of providers || []) {
+      for (const model of provider.models || []) {
+        const alias = String(model.alias || model.name || "").trim();
+        if (!alias) continue;
+        map.set(alias, (map.get(alias) || 0) + 1);
+      }
+    }
+    return map;
+  }, [providers]);
+
+  const addModel = useCallback(
+    (provider) => {
+      const name = modelDraft.name.trim();
+      const alias = modelDraft.alias.trim() || name;
+      if (!name || !provider) return;
+      const thinkingLevels = modelDraft.thinking
+        .split(",")
+        .map((level) => level.trim())
+        .filter(Boolean);
+      const next = (providers || []).map((entry) =>
+        entry.name === provider.name
+          ? {
+              ...entry,
+              models: [
+                ...(entry.models || []),
+                {
+                  name,
+                  alias,
+                  ...(thinkingLevels.length ? { thinking: { levels: thinkingLevels } } : {}),
+                },
+              ],
+            }
+          : entry,
+      );
+      void save(next);
+      setModelDraft({ name: "", alias: "", thinking: "" });
+    },
+    [providers, modelDraft, save],
+  );
+
+  return (
+    <Card className="!p-0 overflow-hidden">
+      <div className="flex items-center justify-between px-4 sm:px-5 py-3.5 border-b border-oai-gray-100 dark:border-oai-gray-800">
+        <div>
+          <p className="text-sm font-semibold">{copy("proxy.upstreams.compat_title")}</p>
+          <p className="mt-0.5 text-xs text-oai-gray-500 dark:text-oai-gray-400">
+            {copy("proxy.upstreams.compat_hint")}
+          </p>
+        </div>
+        <span className="text-xs text-oai-gray-400">
+          {copy("proxy.keys.count", { count: providers?.length ?? 0 })}
+        </span>
+      </div>
+      {error ? (
+        <p className="px-4 sm:px-5 py-2 text-xs text-amber-600 dark:text-amber-400">{error}</p>
+      ) : null}
+      {providers === null ? (
+        <div className="px-5 py-6 text-center text-sm text-oai-gray-400">{copy("proxy.loading")}</div>
+      ) : providers.length === 0 ? (
+        <p className="px-5 py-6 text-center text-sm text-oai-gray-400">{copy("proxy.upstreams.empty")}</p>
+      ) : (
+        <ul className="divide-y divide-oai-gray-100 dark:divide-oai-gray-800">
+          {providers.map((provider) => {
+            const isOpen = expanded === provider.name;
+            const keyCount = (provider["api-key-entries"] || []).length;
+            const models = provider.models || [];
+            return (
+              <li key={provider.name} className="px-4 sm:px-5 py-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setExpanded(isOpen ? null : provider.name)}
+                    className="min-w-0 flex-1 text-left"
+                  >
+                    <span className="text-sm font-medium">{provider.name}</span>
+                    <span className="ml-2 font-mono text-xs text-oai-gray-500 dark:text-oai-gray-400">
+                      {provider["base-url"] || "—"}
+                    </span>
+                    <span className="ml-2 text-xs text-oai-gray-400">
+                      {copy("proxy.upstreams.key_count", { count: keyCount })} · {copy("proxy.upstreams.model_count", { count: models.length })}
+                    </span>
+                  </button>
+                  {provider.disabled ? (
+                    <span className="rounded-md bg-oai-gray-100 dark:bg-oai-gray-800 px-1.5 py-0.5 text-xs text-oai-gray-500">
+                      {copy("proxy.providers.disabled")}
+                    </span>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!providers) return;
+                      void save(providers.filter((entry) => entry.name !== provider.name));
+                    }}
+                    disabled={busy}
+                    aria-label={copy("proxy.upstreams.delete_provider")}
+                    title={copy("proxy.upstreams.delete_provider")}
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-md text-oai-gray-400 hover:bg-red-50 dark:hover:bg-red-950/40 hover:text-red-600 dark:hover:text-red-400 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 disabled:opacity-50"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+                {isOpen ? (
+                  <div className="mt-3 rounded-lg border border-oai-gray-100 dark:border-oai-gray-800 p-3">
+                    <p className="text-xs font-semibold text-oai-gray-500 dark:text-oai-gray-400">
+                      {copy("proxy.upstreams.models_title")}
+                    </p>
+                    <ul className="mt-2 space-y-1.5">
+                      {models.length === 0 ? (
+                        <li className="text-xs text-oai-gray-400">{copy("proxy.upstreams.no_models")}</li>
+                      ) : (
+                        models.map((model, modelIndex) => {
+                          const alias = String(model.alias || model.name);
+                          const sourceCount = aliasSources.get(alias) || 0;
+                          return (
+                            <li key={`${model.name}-${modelIndex}`} className="flex items-center gap-2 text-xs">
+                              <code className="font-mono text-oai-gray-600 dark:text-oai-gray-300">{model.name}</code>
+                              <span className="text-oai-gray-400">→</span>
+                              <code className="font-mono font-medium text-oai-brand-600 dark:text-oai-brand-400">{alias}</code>
+                              {sourceCount > 1 ? (
+                                <span
+                                  title={copy("proxy.upstreams.multi_source_hint")}
+                                  className="rounded bg-oai-brand-50 dark:bg-oai-brand-950/40 px-1.5 py-0.5 text-[10px] font-semibold text-oai-brand-700 dark:text-oai-brand-300"
+                                >
+                                  {copy("proxy.upstreams.multi_source", { count: sourceCount })}
+                                </span>
+                              ) : null}
+                              {(model.thinking?.levels || []).length ? (
+                                <span className="text-oai-gray-400">
+                                  {copy("proxy.upstreams.thinking_levels", { levels: model.thinking.levels.join("/") })}
+                                </span>
+                              ) : null}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const next = (providers || []).map((entry) =>
+                                    entry.name === provider.name
+                                      ? { ...entry, models: (entry.models || []).filter((_, i) => i !== modelIndex) }
+                                      : entry,
+                                  );
+                                  void save(next);
+                                }}
+                                disabled={busy}
+                                aria-label={copy("proxy.upstreams.delete_model")}
+                                className="ml-auto inline-flex h-6 w-6 items-center justify-center rounded text-oai-gray-400 hover:bg-red-50 dark:hover:bg-red-950/40 hover:text-red-600"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </li>
+                          );
+                        })
+                      )}
+                    </ul>
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <input
+                        value={modelDraft.name}
+                        onChange={(event) => setModelDraft((current) => ({ ...current, name: event.target.value }))}
+                        placeholder={copy("proxy.upstreams.model_name_placeholder")}
+                        className="h-8 w-44 rounded-lg border border-oai-gray-200 dark:border-oai-gray-700 bg-transparent px-2.5 text-xs placeholder:text-oai-gray-400 focus:outline-none focus:ring-2 focus:ring-oai-brand-500"
+                      />
+                      <span className="text-xs text-oai-gray-400">→</span>
+                      <input
+                        value={modelDraft.alias}
+                        onChange={(event) => setModelDraft((current) => ({ ...current, alias: event.target.value }))}
+                        placeholder={copy("proxy.upstreams.model_alias_placeholder")}
+                        className="h-8 w-44 rounded-lg border border-oai-gray-200 dark:border-oai-gray-700 bg-transparent px-2.5 text-xs placeholder:text-oai-gray-400 focus:outline-none focus:ring-2 focus:ring-oai-brand-500"
+                      />
+                      <input
+                        value={modelDraft.thinking}
+                        onChange={(event) => setModelDraft((current) => ({ ...current, thinking: event.target.value }))}
+                        placeholder={copy("proxy.upstreams.thinking_placeholder")}
+                        className="h-8 w-40 rounded-lg border border-oai-gray-200 dark:border-oai-gray-700 bg-transparent px-2.5 text-xs placeholder:text-oai-gray-400 focus:outline-none focus:ring-2 focus:ring-oai-brand-500"
+                      />
+                      <PrimaryButton onClick={() => addModel(provider)} disabled={busy || !modelDraft.name.trim()}>
+                        <Plus className="h-3.5 w-3.5" />
+                        {copy("proxy.upstreams.add_model")}
+                      </PrimaryButton>
+                    </div>
+                  </div>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      <form
+        className="flex flex-wrap items-center gap-2 border-t border-oai-gray-100 dark:border-oai-gray-800 px-4 sm:px-5 py-3"
+        onSubmit={(event) => {
+          event.preventDefault();
+          const name = draft.name.trim();
+          const baseUrl = draft.baseUrl.trim();
+          const apiKey = draft.apiKey.trim();
+          if (!name || !baseUrl || !apiKey || !providers) return;
+          void save([
+            ...providers,
+            { name, "base-url": baseUrl, "api-key-entries": [{ "api-key": apiKey }], models: [] },
+          ]);
+          setDraft({ name: "", baseUrl: "", apiKey: "" });
+        }}
+      >
+        <input
+          value={draft.name}
+          onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
+          placeholder={copy("proxy.upstreams.provider_name_placeholder")}
+          className="h-9 w-40 rounded-lg border border-oai-gray-200 dark:border-oai-gray-700 bg-transparent px-3 text-sm placeholder:text-oai-gray-400 focus:outline-none focus:ring-2 focus:ring-oai-brand-500"
+        />
+        <input
+          value={draft.baseUrl}
+          onChange={(event) => setDraft((current) => ({ ...current, baseUrl: event.target.value }))}
+          placeholder={copy("proxy.upstreams.baseurl_placeholder")}
+          className="h-9 min-w-0 flex-1 rounded-lg border border-oai-gray-200 dark:border-oai-gray-700 bg-transparent px-3 text-sm placeholder:text-oai-gray-400 focus:outline-none focus:ring-2 focus:ring-oai-brand-500"
+        />
+        <input
+          value={draft.apiKey}
+          onChange={(event) => setDraft((current) => ({ ...current, apiKey: event.target.value }))}
+          placeholder={copy("proxy.upstreams.key_placeholder")}
+          className="h-9 w-48 rounded-lg border border-oai-gray-200 dark:border-oai-gray-700 bg-transparent px-3 text-sm placeholder:text-oai-gray-400 focus:outline-none focus:ring-2 focus:ring-oai-brand-500"
+        />
+        <PrimaryButton type="submit" disabled={busy || !draft.name.trim() || !draft.baseUrl.trim() || !draft.apiKey.trim()}>
+          <Plus className="h-4 w-4" />
+          {copy("proxy.upstreams.add_provider")}
+        </PrimaryButton>
+      </form>
+    </Card>
+  );
+}
+
+function UpstreamsTab() {
+  return (
+    <div className="flex flex-col gap-4">
+      <p className="text-sm text-oai-gray-500 dark:text-oai-gray-400">{copy("proxy.upstreams.subtitle")}</p>
+      <SimpleKeysSection section="gemini" titleKey="proxy.upstreams.gemini" />
+      <SimpleKeysSection section="claude" titleKey="proxy.upstreams.claude" />
+      <SimpleKeysSection section="codex" titleKey="proxy.upstreams.codex" />
+      <OpenaiCompatSection />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Aliases tab (OAuth channel model aliases)
+// ---------------------------------------------------------------------------
+
+const OAUTH_CHANNELS = ["claude", "codex", "gemini", "kimi", "xai", "meta", "vertex", "aistudio", "antigravity"];
+
+function AliasesTab() {
+  const [aliases, setAliases] = useState(null);
+  const [channel, setChannel] = useState("claude");
+  const [draft, setDraft] = useState({ name: "", alias: "" });
+  const [error, setError] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const data = await proxyApi.oauthAliases();
+      setAliases(data.aliases || {});
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setAliases({});
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const current = aliases?.[channel] || [];
+
+  const saveChannel = useCallback(
+    async (next) => {
+      setBusy(true);
+      try {
+        await proxyApi.saveOauthChannel(channel, next);
+        await load();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [channel, load],
+  );
+
+  return (
+    <div className="flex flex-col gap-4">
+      <p className="text-sm text-oai-gray-500 dark:text-oai-gray-400">{copy("proxy.aliases.subtitle")}</p>
+
+      <div
+        role="tablist"
+        aria-label={copy("proxy.aliases.channels")}
+        className="flex flex-wrap gap-1.5"
+      >
+        {OAUTH_CHANNELS.map((entry) => (
+          <button
+            key={entry}
+            type="button"
+            onClick={() => setChannel(entry)}
+            className={`rounded-lg px-2.5 py-1 text-xs font-medium capitalize transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 ${
+              channel === entry
+                ? "bg-oai-brand-600 text-white"
+                : "border border-oai-gray-200 dark:border-oai-gray-800 text-oai-gray-500 hover:text-oai-black dark:hover:text-white"
+            }`}
+          >
+            {entry}
+            {(aliases?.[entry] || []).length ? (
+              <span className={`ml-1 ${channel === entry ? "text-white/80" : "text-oai-gray-400"}`}>
+                {(aliases[entry] || []).length}
+              </span>
+            ) : null}
+          </button>
+        ))}
+      </div>
+
+      {error ? (
+        <div className="flex items-start gap-2 rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-3.5 py-2.5 text-sm text-amber-800 dark:text-amber-300">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span className="break-words">{error}</span>
+        </div>
+      ) : null}
+
+      <Card className="!p-0 overflow-hidden">
+        <div className="flex items-center justify-between px-4 sm:px-5 py-3.5 border-b border-oai-gray-100 dark:border-oai-gray-800">
+          <p className="text-sm font-semibold capitalize">{channel}</p>
+          <span className="text-xs text-oai-gray-400">{copy("proxy.keys.count", { count: current.length })}</span>
+        </div>
+        {aliases === null ? (
+          <div className="px-5 py-6 text-center text-sm text-oai-gray-400">{copy("proxy.loading")}</div>
+        ) : current.length === 0 ? (
+          <p className="px-5 py-6 text-center text-sm text-oai-gray-400">{copy("proxy.aliases.empty")}</p>
+        ) : (
+          <ul className="divide-y divide-oai-gray-100 dark:divide-oai-gray-800">
+            {current.map((entry, index) => (
+              <li key={`${entry.name}-${index}`} className="flex items-center gap-2 px-4 sm:px-5 py-3 text-sm">
+                <code className="min-w-0 flex-1 truncate font-mono text-xs text-oai-gray-600 dark:text-oai-gray-300">
+                  {entry.name}
+                </code>
+                <span className="text-oai-gray-400">→</span>
+                <code className="min-w-0 flex-1 truncate font-mono text-xs font-medium text-oai-brand-600 dark:text-oai-brand-400">
+                  {entry.alias}
+                </code>
+                {entry.fork ? (
+                  <span className="rounded bg-oai-gray-100 dark:bg-oai-gray-800 px-1.5 py-0.5 text-[10px] text-oai-gray-500">
+                    fork
+                  </span>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => void saveChannel(current.filter((_, i) => i !== index))}
+                  disabled={busy}
+                  aria-label={copy("proxy.aliases.delete_alias")}
+                  title={copy("proxy.aliases.delete_alias")}
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-md text-oai-gray-400 hover:bg-red-50 dark:hover:bg-red-950/40 hover:text-red-600 dark:hover:text-red-400 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 disabled:opacity-50"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <form
+          className="flex flex-wrap items-center gap-2 border-t border-oai-gray-100 dark:border-oai-gray-800 px-4 sm:px-5 py-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+            const name = draft.name.trim();
+            if (!name) return;
+            const alias = draft.alias.trim() || name;
+            void saveChannel([...current, { name, alias }]);
+            setDraft({ name: "", alias: "" });
+          }}
+        >
+          <input
+            value={draft.name}
+            onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
+            placeholder={copy("proxy.aliases.name_placeholder")}
+            className="h-9 min-w-0 flex-1 rounded-lg border border-oai-gray-200 dark:border-oai-gray-700 bg-transparent px-3 text-sm placeholder:text-oai-gray-400 focus:outline-none focus:ring-2 focus:ring-oai-brand-500"
+          />
+          <span className="text-oai-gray-400">→</span>
+          <input
+            value={draft.alias}
+            onChange={(event) => setDraft((current) => ({ ...current, alias: event.target.value }))}
+            placeholder={copy("proxy.aliases.alias_placeholder")}
+            className="h-9 min-w-0 flex-1 rounded-lg border border-oai-gray-200 dark:border-oai-gray-700 bg-transparent px-3 text-sm placeholder:text-oai-gray-400 focus:outline-none focus:ring-2 focus:ring-oai-brand-500"
+          />
+          <PrimaryButton type="submit" disabled={busy || !draft.name.trim()}>
+            <Plus className="h-4 w-4" />
+            {copy("proxy.aliases.add_alias")}
+          </PrimaryButton>
+        </form>
+      </Card>
+      <p className="text-xs text-oai-gray-400 dark:text-oai-gray-500">{copy("proxy.aliases.hint")}</p>
     </div>
   );
 }
@@ -749,6 +1312,9 @@ function RequestsTab() {
                     {copy("proxy.requests.model")}
                   </th>
                   <th className="px-4 py-3 text-xs font-semibold text-oai-gray-500 dark:text-oai-gray-400">
+                    {copy("proxy.requests.response_model")}
+                  </th>
+                  <th className="px-4 py-3 text-xs font-semibold text-oai-gray-500 dark:text-oai-gray-400">
                     {copy("proxy.requests.provider")}
                   </th>
                   <th className="px-4 py-3 text-right text-xs font-semibold text-oai-gray-500 dark:text-oai-gray-400">
@@ -772,8 +1338,28 @@ function RequestsTab() {
                       {formatTime(record.timestamp)}
                     </td>
                     <td className="max-w-[220px] truncate px-4 py-2.5 font-mono text-xs">
-                      {record.response_model || record.model || record.alias || "—"}
+                      {record.model || record.alias || "—"}
                     </td>
+                    {(() => {
+                      // issue 308 port: surface the upstream-reported model so
+                      // silent model substitution is visible — amber cell when
+                      // the response model differs from the requested one.
+                      const requested = record.model || record.alias || "";
+                      const responseModel = String(record.response_model || "").trim();
+                      const substituted = responseModel !== "" && responseModel !== requested;
+                      return (
+                        <td
+                          className={`max-w-[220px] truncate px-4 py-2.5 font-mono text-xs ${
+                            substituted
+                              ? "rounded bg-amber-50 dark:bg-amber-950/40 font-medium text-amber-700 dark:text-amber-300"
+                              : "text-oai-gray-500 dark:text-oai-gray-400"
+                          }`}
+                          title={substituted ? copy("proxy.requests.substituted_hint") : undefined}
+                        >
+                          {responseModel || "—"}
+                        </td>
+                      );
+                    })()}
                     <td className="px-4 py-2.5 capitalize text-oai-gray-600 dark:text-oai-gray-300">
                       {record.provider || "—"}
                     </td>
@@ -1070,8 +1656,10 @@ export function ProxyPage() {
           </div>
 
           {tab === "overview" ? <OverviewTab status={status} onRefresh={refreshStatus} /> : null}
+          {tab === "upstreams" ? <UpstreamsTab /> : null}
           {tab === "providers" ? <ProvidersTab onDirty={refreshStatus} /> : null}
           {tab === "keys" ? <KeysTab status={status} /> : null}
+          {tab === "aliases" ? <AliasesTab /> : null}
           {tab === "requests" ? <RequestsTab /> : null}
           {tab === "settings" ? <SettingsTab status={status} onRefresh={refreshStatus} /> : null}
         </div>

@@ -355,6 +355,91 @@ async function handleProxyApiRequest(req, res, url, ctx) {
       return true;
     }
 
+    // --- upstream API-key providers (EasyCLIProxyAPI "API 接入") ---
+    // Gemini / Claude / Codex upstream keys: GET returns {"<section>": [...]},
+    // mutations take arrays or {items}. OpenAI-compatible providers carry
+    // models[] with name→alias (one alias may repeat across entries/sources —
+    // the core round-robins and fails over between them).
+    const upstreamSections = [
+      ["gemini", "gemini-api-key"],
+      ["claude", "claude-api-key"],
+      ["codex", "codex-api-key"],
+    ];
+    for (const [section, route] of upstreamSections) {
+      if (p === `/api/proxy/upstreams/${section}` && (method === "PUT" || method === "PATCH" || method === "DELETE")) {
+        if (!requireMutation()) return true;
+        const body = await readJsonBody(req);
+        const result = await management.request(method, `/v0/management/${route}`, { body });
+        json(res, result.ok ? { ok: true } : { ok: false, error: result.error || result.status }, result.ok ? 200 : 502);
+        return true;
+      }
+      if (p === `/api/proxy/upstreams/${section}`) {
+        const result = await management.request("GET", `/v0/management/${route}`);
+        if (result.ok) {
+          const data = result.data || {};
+          const list = Array.isArray(data) ? data : data[route] || data.items || [];
+          json(res, { ok: true, providers: list });
+        } else {
+          json(res, { ok: false, error: result.error || result.status }, 502);
+        }
+        return true;
+      }
+    }
+
+    if (p === "/api/proxy/upstreams/openai-compat" && (method === "PUT" || method === "PATCH" || method === "DELETE" || method === "POST")) {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      const result = await management.request(method, "/v0/management/openai-compatibility", { body });
+      json(res, result.ok ? { ok: true, data: result.data } : { ok: false, error: result.error || result.status }, result.ok ? 200 : 502);
+      return true;
+    }
+    if (p === "/api/proxy/upstreams/openai-compat") {
+      const result = await management.request("GET", "/v0/management/openai-compatibility");
+      if (result.ok) {
+        const data = result.data || {};
+        const list = Array.isArray(data) ? data : data["openai-compatibility"] || data.items || [];
+        json(res, { ok: true, providers: list });
+      } else {
+        json(res, { ok: false, error: result.error || result.status }, 502);
+      }
+      return true;
+    }
+
+    // --- model aliases ---
+    // OAuth channel aliases: map of channel → [{name, alias, fork?, display-name?, force-mapping?}].
+    // PUT replaces the whole map; PATCH replaces one channel ({channel, aliases});
+    // DELETE removes one channel (?channel=claude).
+    if (p === "/api/proxy/aliases/oauth" && (method === "PUT" || method === "PATCH" || method === "DELETE")) {
+      if (!requireMutation()) return true;
+      if (method === "DELETE") {
+        const channel = url.searchParams.get("channel");
+        if (!channel) {
+          json(res, { ok: false, error: "channel query parameter required" }, 400);
+          return true;
+        }
+        const result = await management.request("PATCH", "/v0/management/oauth-model-alias", {
+          body: { channel, aliases: [] },
+        });
+        json(res, result.ok ? { ok: true } : { ok: false, error: result.error || result.status }, result.ok ? 200 : 502);
+        return true;
+      }
+      const body = await readJsonBody(req);
+      const result = await management.request(method, "/v0/management/oauth-model-alias", { body });
+      json(res, result.ok ? { ok: true } : { ok: false, error: result.error || result.status }, result.ok ? 200 : 502);
+      return true;
+    }
+    if (p === "/api/proxy/aliases/oauth") {
+      const result = await management.request("GET", "/v0/management/oauth-model-alias");
+      if (result.ok) {
+        const data = result.data || {};
+        const raw = Object.hasOwn(data, "oauth-model-alias") ? data["oauth-model-alias"] : data;
+        json(res, { ok: true, aliases: raw && typeof raw === "object" ? raw : {} });
+      } else {
+        json(res, { ok: false, error: result.error || result.status }, 502);
+      }
+      return true;
+    }
+
     json(res, { ok: false, error: "Not found" }, 404);
     return true;
   } catch (error) {

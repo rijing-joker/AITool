@@ -52,17 +52,16 @@ jobs:
           VITE_INSFORGE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3OC0xMjM0LTU2NzgtOTBhYi1jZGVmMTIzNDU2NzgiLCJlbWFpbCI6ImFub25AaW5zZm9yZ2UuY29tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODExNDU5NDd9.T0auta_IrVIh0uXW1bob5QSnzvsnJmN28r5XkSGEuQY
         run: npm run dashboard:build
 
-      - name: Test skill management interactions
-        run: npm --prefix dashboard test -- src/pages/SkillsPage.test.jsx
-
-      - name: Test dashboard limits preferences
-        run: npm --prefix dashboard test -- src/hooks/use-limits-display-prefs.test.js
-
-      # The bot character's renderer and its cross-host contracts live on the dashboard
-      # side, so npm test alone does not cover them; test/bot-parity.test.js only pins
-      # the values, not the rendering.
-      - name: Test bot companion renderer
-        run: npm --prefix dashboard test -- src/ui/foundation/BotAnimated.test.jsx src/lib/pets-api.test.js
+      # Full dashboard vitest suite — vitest discovers src/**/*.test.* itself, so
+      # new dashboard tests run in CI without editing this file (the hand-picked
+      # list previously left most of the 100+ suite unrun, e.g. use-proxy-settings).
+      # testTimeout 15s (default 5s): LeaderboardPage's window-session cache tests
+      # need ~5s and time out under full-suite parallel load; they pass solo.
+      # The bot character's renderer and its cross-host contracts live on the
+      # dashboard side, so npm test alone does not cover them; test/bot-parity.test.js
+      # only pins the values, not the rendering.
+      - name: Test dashboard
+        run: npm --prefix dashboard test -- --testTimeout=15000
 
       # Same checks as `npm run ci:local`, with the dashboard build hoisted above.
       - name: Test and validate

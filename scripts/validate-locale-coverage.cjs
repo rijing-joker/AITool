@@ -51,6 +51,8 @@ const SOURCE_IDENTICAL_KEY_ALLOWLIST = [
   /^pswitch[.]tab[.]/,
   // Provider-switch form fields: env/protocol identifiers stay verbatim.
   /^pswitch[.]field[.]/,
+  // Codex reasoning-effort level names stay verbatim.
+  /^pswitch[.]field[.]effort[.]/,
   // The 1M context checkbox label is a unit, not a word.
   /^pswitch[.]advanced[.]one_m$/,
   // Claude Code role names and OpenAI protocol names stay verbatim.

@@ -27,6 +27,12 @@ function codexAuthStashPath() {
   return path.join(providerSwitchRoot(), "codex-auth-stash.json");
 }
 
+// Codex model catalog sidecar (~/.codex): config.toml's model_catalog_json
+// points at this file to populate Codex's /model menu.
+function codexModelCatalogPath() {
+  return path.join(home(), ".codex", "aitool-model-catalog.json");
+}
+
 function backupsDir(app) {
   return path.join(providerSwitchRoot(), "backups", app);
 }
@@ -86,6 +92,7 @@ module.exports = {
   providerSwitchRoot,
   storePath,
   codexAuthStashPath,
+  codexModelCatalogPath,
   backupsDir,
   targetFiles,
   targetFile,

@@ -187,6 +187,7 @@ const CODEX_CUSTOM = {
     config: {
       model: "",
       model_provider: "custom",
+      model_reasoning_effort: "high",
       model_providers: {
         custom: {
           name: "",
@@ -227,6 +228,21 @@ const CODEX_CUSTOM = {
         { value: "chat", labelKey: "pswitch.field.wire_api_chat" },
       ],
       hintKey: "pswitch.field.wire_api_hint",
+    },
+    {
+      id: "reasoning_effort",
+      path: "config.model_reasoning_effort",
+      labelKey: "pswitch.field.reasoning_effort",
+      type: "select",
+      options: [
+        { value: "minimal", labelKey: "pswitch.field.effort.minimal" },
+        { value: "low", labelKey: "pswitch.field.effort.low" },
+        { value: "medium", labelKey: "pswitch.field.effort.medium" },
+        { value: "high", labelKey: "pswitch.field.effort.high" },
+        { value: "xhigh", labelKey: "pswitch.field.effort.xhigh" },
+        { value: "max", labelKey: "pswitch.field.effort.max" },
+      ],
+      hintKey: "pswitch.field.reasoning_effort_hint",
     },
     {
       id: "model",

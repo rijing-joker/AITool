@@ -1,6 +1,7 @@
 const floor = require("./floor");
 const toml = require("./toml");
 const envfile = require("./envfile");
+const catalog = require("./catalog");
 
 // Provider → live-file projections, ported from cc-switch's
 // live/project/{claude,codex,gemini}.rs. Each projection computes the next
@@ -75,8 +76,17 @@ function projectCodex({ prev, target, liveToml, liveAuth, stash }) {
   if (typeof liveToml !== "string") {
     throw new Error("Live ~/.codex/config.toml is missing (create it or run Codex once)");
   }
-  const prevConfig = (prev && prev.settingsConfig && prev.settingsConfig.config) || {};
-  const targetConfig = (target && target.settingsConfig && target.settingsConfig.config) || {};
+  const prevConfig = { ...((prev && prev.settingsConfig && prev.settingsConfig.config) || {}) };
+  const targetConfig = { ...((target && target.settingsConfig && target.settingsConfig.config) || {}) };
+
+  // The model catalog sidecar rides on provider meta; inject its config.toml
+  // pointer as a virtual floor key so the generic residue logic below manages
+  // it (set for the target, removed when only the previous provider owned it
+  // and the pointer still reads our filename).
+  const prevCatalog = catalog.catalogRowsOf(prev);
+  const targetCatalog = catalog.catalogRowsOf(target);
+  if (prevCatalog.length > 0) prevConfig.model_catalog_json = catalog.CODEX_CATALOG_FILENAME;
+  if (targetCatalog.length > 0) targetConfig.model_catalog_json = catalog.CODEX_CATALOG_FILENAME;
 
   let text = liveToml;
 
@@ -116,7 +126,15 @@ function projectCodex({ prev, target, liveToml, liveAuth, stash }) {
     }
   }
 
-  return { configToml: text, auth: resolveCodexAuth({ prev, target, liveAuth, stash }) };
+  // Sidecar action for the caller: write the catalog file for the target,
+  // remove ours when only the previous provider had one, or leave it alone.
+  const catalogAction = targetCatalog.length > 0
+    ? { action: "write", models: targetCatalog }
+    : prevCatalog.length > 0
+      ? { action: "remove" }
+      : { action: "keep" };
+
+  return { configToml: text, auth: resolveCodexAuth({ prev, target, liveAuth, stash }), catalog: catalogAction };
 }
 
 function normalizeTable(entries) {

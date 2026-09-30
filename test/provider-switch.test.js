@@ -917,3 +917,121 @@ test("provider-switch providers carry icon/iconColor/meta and sanitize them", as
   const stored = claude.providers.find((p) => p.id === created.body.provider.id);
   assert.equal(stored.meta.apiFormat, "anthropic");
 });
+
+// ---------------------------------------------------------------------------
+// Codex model catalog (model_catalog_json sidecar)
+// ---------------------------------------------------------------------------
+
+test("provider-switch codex catalog: build/parse round-trip and projection pointer", async () => {
+  const catalog = require("../src/lib/provider-switch/catalog");
+  const content = catalog.buildCodexCatalog([
+    { model: "deepseek-v4-pro", displayName: "DeepSeek V4 Pro", contextWindow: "1048576", reasoningLevels: ["low", "high", "max"], defaultReasoningLevel: "high" },
+    { model: "", displayName: "skipped" },
+  ]);
+  const parsed = JSON.parse(content);
+  assert.equal(parsed.models.length, 1);
+  const entry = parsed.models[0];
+  assert.equal(entry.slug, "deepseek-v4-pro");
+  assert.equal(entry.display_name, "DeepSeek V4 Pro");
+  assert.equal(entry.context_window, 1048576);
+  assert.equal(entry.max_context_window, 1048576);
+  assert.equal(entry.priority, 1000);
+  assert.ok(entry.base_instructions, "base_instructions is required by Codex's parser");
+  assert.deepEqual(
+    entry.supported_reasoning_levels.map((level) => level.effort),
+    ["low", "high", "max"],
+  );
+  assert.equal(entry.default_reasoning_level, "high");
+
+  // Reverse parse back into meta rows.
+  const rows = catalog.parseCodexCatalog(content);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].model, "deepseek-v4-pro");
+  assert.equal(rows[0].displayName, "DeepSeek V4 Pro");
+  assert.deepEqual(rows[0].reasoningLevels, ["low", "high", "max"]);
+  assert.equal(rows[0].defaultReasoningLevel, "high");
+
+  // Projection: a provider with catalog rows gets the pointer key; the
+  // generic residue logic removes it again when only the prev had it.
+  const { projectCodex } = require("../src/lib/provider-switch/targets");
+  const withCatalog = {
+    id: "relay",
+    category: "custom",
+    settingsConfig: { auth: null, config: { model: "deepseek-v4-pro", model_provider: "custom", model_providers: { custom: { name: "R", base_url: "https://r/v1", wire_api: "responses" } } } },
+    meta: { codexCatalogModels: [{ model: "deepseek-v4-pro" }] },
+  };
+  const projected = projectCodex({ prev: null, target: withCatalog, liveToml: "", liveAuth: {}, stash: null });
+  assert.match(projected.configToml, /model_catalog_json = "aitool-model-catalog\.json"/);
+  assert.equal(projected.catalog.action, "write");
+
+  const empty = { id: "plain", category: "custom", settingsConfig: { auth: null, config: {} } };
+  const cleared = projectCodex({ prev: withCatalog, target: empty, liveToml: projected.configToml, liveAuth: {}, stash: null });
+  assert.doesNotMatch(cleared.configToml, /model_catalog_json/);
+  assert.equal(cleared.catalog.action, "remove");
+
+  // A hand-pointed foreign catalog is left alone.
+  const foreign = projectCodex({
+    prev: withCatalog,
+    target: empty,
+    liveToml: 'model_catalog_json = "my-own-models.json"\n',
+    liveAuth: {},
+    stash: null,
+  });
+  assert.match(foreign.configToml, /model_catalog_json = "my-own-models\.json"/);
+});
+
+test("provider-switch api: switch writes the catalog file, import reads it back", async () => {
+  const { handleProviderSwitchApiRequest } = require("../src/lib/provider-switch/api");
+  const handler = handleProviderSwitchApiRequest;
+  const prefix = "/api/provider-switch";
+  const codexDir = path.join(tmpHome, ".codex");
+  fs.mkdirSync(codexDir, { recursive: true });
+  fs.writeFileSync(path.join(codexDir, "config.toml"), "");
+
+  const relay = await call(handler, {
+    method: "POST",
+    url: `${prefix}/providers`,
+    body: JSON.stringify({
+      app: "codex",
+      name: "Catalog Relay",
+      category: "custom",
+      settingsConfig: { auth: null, config: { model: "deepseek-v4-pro", model_provider: "custom", model_providers: { custom: { name: "R", base_url: "https://r/v1" } } } },
+      meta: { codexCatalogModels: [{ model: "deepseek-v4-pro", displayName: "DeepSeek V4 Pro", contextWindow: "1048576", reasoningLevels: ["high"], defaultReasoningLevel: "high" }] },
+    }),
+  });
+
+  const switchRes = await call(handler, {
+    method: "POST",
+    url: `${prefix}/switch`,
+    body: JSON.stringify({ app: "codex", id: relay.body.provider.id }),
+  });
+  assert.equal(switchRes.status, 200);
+  const catalogPath = path.join(codexDir, "aitool-model-catalog.json");
+  assert.ok(fs.existsSync(catalogPath), "catalog file written on switch");
+  const written = JSON.parse(fs.readFileSync(catalogPath, "utf8"));
+  assert.equal(written.models[0].slug, "deepseek-v4-pro");
+  assert.match(fs.readFileSync(path.join(codexDir, "config.toml"), "utf8"), /model_catalog_json = "aitool-model-catalog\.json"/);
+  assert.ok(switchRes.body.wrote.includes(catalogPath), "wrote list includes the catalog file");
+
+  // Import from live: rows move into meta, the pointer is dropped from config.
+  const imported = await call(handler, {
+    method: "POST",
+    url: `${prefix}/providers/import-live`,
+    body: JSON.stringify({ app: "codex", name: "Imported" }),
+  });
+  assert.equal(imported.status, 200);
+  const storedMeta = imported.body.provider.meta;
+  assert.ok(Array.isArray(storedMeta.codexCatalogModels) && storedMeta.codexCatalogModels.length === 1);
+  assert.equal(storedMeta.codexCatalogModels[0].model, "deepseek-v4-pro");
+  assert.ok(!("model_catalog_json" in imported.body.provider.settingsConfig.config));
+
+  // Switching to a provider without rows removes our sidecar again.
+  const plain = await call(handler, {
+    method: "POST",
+    url: `${prefix}/providers`,
+    body: JSON.stringify({ app: "codex", name: "Plain", category: "custom", settingsConfig: { auth: null, config: {} } }),
+  });
+  await call(handler, { method: "POST", url: `${prefix}/switch`, body: JSON.stringify({ app: "codex", id: plain.body.provider.id }) });
+  assert.ok(!fs.existsSync(catalogPath), "catalog file removed when the new provider has no rows");
+  assert.doesNotMatch(fs.readFileSync(path.join(codexDir, "config.toml"), "utf8"), /model_catalog_json = "aitool-model-catalog\.json"/);
+});

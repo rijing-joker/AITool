@@ -2252,6 +2252,25 @@ pswitch.field.wire_api,pswitch,ProviderSwitchPage,ProviderEditDialog,wire_api,Wi
 pswitch.field.wire_api_chat,pswitch,ProviderSwitchPage,ProviderEditDialog,wire_api_chat,chat,,active
 pswitch.field.wire_api_hint,pswitch,ProviderSwitchPage,ProviderEditDialog,wire_api_hint,responses is Codex's default protocol; use chat for Chat Completions relays.,,active
 pswitch.field.wire_api_responses,pswitch,ProviderSwitchPage,ProviderEditDialog,wire_api_responses,responses,,active
+pswitch.field.reasoning_effort,pswitch,ProviderSwitchPage,ProviderEditDialog,reasoning_effort,Reasoning effort,,active
+pswitch.field.reasoning_effort_hint,pswitch,ProviderSwitchPage,ProviderEditDialog,reasoning_effort_hint,Codex's reasoning depth (model_reasoning_effort in config.toml).,,active
+pswitch.field.effort.minimal,pswitch,ProviderSwitchPage,ProviderEditDialog,effort_minimal,minimal,,active
+pswitch.field.effort.low,pswitch,ProviderSwitchPage,ProviderEditDialog,effort_low,low,,active
+pswitch.field.effort.medium,pswitch,ProviderSwitchPage,ProviderEditDialog,effort_medium,medium,,active
+pswitch.field.effort.high,pswitch,ProviderSwitchPage,ProviderEditDialog,effort_high,high,,active
+pswitch.field.effort.xhigh,pswitch,ProviderSwitchPage,ProviderEditDialog,effort_xhigh,xhigh,,active
+pswitch.field.effort.max,pswitch,ProviderSwitchPage,ProviderEditDialog,effort_max,max,,active
+pswitch.catalog.title,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_title,Model mapping,,active
+pswitch.catalog.hint,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_hint,"Rows generate the Codex model catalog file (model_catalog_json): the /model menu lists these models with their display names, context windows, and reasoning levels. Leave empty to skip the catalog.",,active
+pswitch.catalog.add_model,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_add_model,Add model,,active
+pswitch.catalog.col_display,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_col_display,Menu display name,,active
+pswitch.catalog.col_model,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_col_model,Requested model,,active
+pswitch.catalog.col_context,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_col_context,Context window,,active
+pswitch.catalog.col_reasoning,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_col_reasoning,Reasoning levels,,active
+pswitch.catalog.levels_unset,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_levels_unset,Not set,,active
+pswitch.catalog.levels_default,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_levels_default,Default,,active
+pswitch.catalog.not_in_catalog,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_not_in_catalog,This model is not in the mapping — Codex's /model menu won't list it (direct requests still work).,,active
+pswitch.catalog.add_to_mapping,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_add_to_mapping,Add to mapping,,active
 pswitch.hint.claude_official,pswitch,ProviderSwitchPage,ProviderEditDialog,claude_official,Uses the Claude login on this machine — no key needed.,,active
 pswitch.hint.codex_official,pswitch,ProviderSwitchPage,ProviderEditDialog,codex_official,Uses the ChatGPT login for Codex; AiTool stashes and restores it across switches.,,active
 pswitch.provider.applied_live,pswitch,ProviderSwitchPage,ProviderEditDialog,applied_live,"Saved ""{{name}}"" and applied it to the live config files.",,active

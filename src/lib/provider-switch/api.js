@@ -7,6 +7,7 @@ const targets = require("./targets");
 const presetsModule = require("./presets");
 const backup = require("./backup");
 const paths = require("./paths");
+const catalog = require("./catalog");
 
 // Dashboard-facing REST surface for the provider-switch layer, mounted by
 // local-api.js under /api/provider-switch/*. Mirrors the proxy/api.js
@@ -93,6 +94,7 @@ async function switchProvider({ app, id }) {
   const writes = []; // { file, content, parsedBackup? }
   let stashWrite = null; // { content } to persist before clearing auth.json
   let stashRestore = false;
+  let catalogAction = { action: "keep" };
 
   if (app === "claude") {
     const settingsFile = files.find((f) => f.id === "settings");
@@ -104,13 +106,14 @@ async function switchProvider({ app, id }) {
     const authFile = files.find((f) => f.id === "auth");
     const liveAuth = lives.auth.exists ? JSON.parse(lives.auth.content) : {};
     const stash = await readJson(paths.codexAuthStashPath());
-    const { configToml, auth } = targets.projectCodex({
+    const { configToml, auth, catalog: sidecar } = targets.projectCodex({
       prev,
       target,
       liveToml: lives.config.exists ? lives.config.content : "",
       liveAuth,
       stash: stash && typeof stash === "object" ? stash.auth || null : null,
     });
+    catalogAction = sidecar;
     writes.push({ file: configFile, content: configToml });
     if (auth.action === "write") {
       writes.push({
@@ -158,6 +161,21 @@ async function switchProvider({ app, id }) {
   for (const write of writes) {
     await writeLiveFile(write.file, write.content);
     wrote.push(write.file.path);
+  }
+
+  // 4b) Codex model catalog sidecar: write the file the config.toml pointer
+  //     references, or remove ours when the previous provider owned it.
+  if (catalogAction.action === "write") {
+    const catalogPath = paths.codexModelCatalogPath();
+    await ensureDir(path.dirname(catalogPath));
+    await writeFileAtomic(catalogPath, catalog.buildCodexCatalog(catalogAction.models));
+    wrote.push(catalogPath);
+  } else if (catalogAction.action === "remove") {
+    try {
+      await fs.unlink(paths.codexModelCatalogPath());
+    } catch {
+      /* catalog file may be gone already */
+    }
   }
 
   if (stashRestore) {
@@ -386,6 +404,7 @@ async function importFromLive(app, name) {
     throw new Error(`No live ${app} config to import from`);
   }
   let settingsConfig;
+  let meta;
   if (app === "claude") {
     const live = lives.settings.exists ? JSON.parse(lives.settings.content) : {};
     settingsConfig = targets.extractClaudeConfig(live);
@@ -394,6 +413,7 @@ async function importFromLive(app, name) {
     }
   } else if (app === "codex") {
     settingsConfig = targets.extractCodexConfig(lives.config.exists ? lives.config.content : "");
+    meta = await importCodexCatalogMeta(settingsConfig.config);
   } else {
     settingsConfig = targets.extractGeminiConfig(lives.env.exists ? lives.env.content : "");
   }
@@ -404,7 +424,30 @@ async function importFromLive(app, name) {
     settingsConfig,
     notes: "",
     websiteUrl: "",
+    ...(meta && Object.keys(meta).length > 0 ? { meta } : {}),
   });
+}
+
+// The model catalog lives in a sidecar file pointed at by config.toml's
+// model_catalog_json. On import the rows move into provider meta and the
+// pointer is dropped — switching re-writes both from the provider record.
+// A pointer we don't recognize (user's own catalog) stays in config untouched.
+async function importCodexCatalogMeta(config) {
+  if (!config || typeof config !== "object") return null;
+  const pointer = String(config.model_catalog_json || "").trim();
+  if (!pointer) return null;
+  const basename = path.basename(pointer);
+  if (!catalog.READABLE_CATALOG_FILENAMES.includes(basename)) return null;
+  const configDir = path.dirname(paths.targetFile("codex", "config").path);
+  let text = null;
+  try {
+    text = await fs.readFile(path.join(configDir, basename), "utf8");
+  } catch {
+    return null;
+  }
+  const rows = catalog.parseCodexCatalog(text);
+  delete config.model_catalog_json;
+  return rows.length > 0 ? { codexCatalogModels: rows } : null;
 }
 
 // Editor view for one provider. When it is the current one, the live files

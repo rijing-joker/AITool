@@ -5,6 +5,7 @@ import { providerSwitchApi } from "../lib/provider-switch-api";
 import { Button } from "../ui/components";
 import { EndpointSpeedTestDialog } from "./provider-speed-test";
 import { ProviderIconPicker, iconComponentFor } from "./provider-icon-picker";
+import { CodexCatalogEditor } from "./provider-codex-catalog";
 
 // Add/edit provider dialog — an interaction port of cc-switch's
 // AddProviderDialog / EditProviderDialog / ProviderForm: preset cards with
@@ -405,6 +406,9 @@ export function ProviderEditDialog({
       if (app === "claude" && claudeHasAdvancedValues(editing.settingsConfig ?? {}, editingMeta)) {
         setAdvancedOpen(true);
       }
+      if (app === "codex" && codexHasAdvancedValues(editingMeta)) {
+        setAdvancedOpen(true);
+      }
       // cc-switch's read_live_provider_settings: editing the current provider
       // starts from what is actually in the live files.
       if (appState?.current === editing.id) {
@@ -416,6 +420,9 @@ export function ProviderEditDialog({
             setDraft(nextDraft);
             setFromLive(!!view.fromLive);
             if (app === "claude" && claudeHasAdvancedValues(nextDraft, editing.meta || {})) {
+              setAdvancedOpen(true);
+            }
+            if (app === "codex" && codexHasAdvancedValues(editing.meta || {})) {
               setAdvancedOpen(true);
             }
           })
@@ -441,6 +448,14 @@ export function ProviderEditDialog({
   // Advanced section auto-expands when it already carries values (cc-switch's
   // hasAnyAdvancedValue). Computed from the config being loaded, not the
   // (stale) draft state.
+  const codexHasAdvancedValues = (metaObject) => {
+    const rows = metaObject && metaObject.codexCatalogModels;
+    return (
+      !!metaObject.customUserAgent ||
+      !!metaObject.localProxyRequestOverrides ||
+      (Array.isArray(rows) && rows.length > 0)
+    );
+  };
   const claudeHasAdvancedValues = (config, metaObject) => {
     const env = config && config.env && typeof config.env === "object" ? config.env : {};
     const hasMapping = CLAUDE_MODEL_ROLES.some((role) => {
@@ -1231,6 +1246,22 @@ export function ProviderEditDialog({
               ) : null}
               {codexAdvancedOpen ? (
                 <div className="space-y-4 border-t border-oai-gray-100 px-4 py-4 dark:border-oai-gray-800">
+                  <CodexCatalogEditor
+                    models={Array.isArray(meta.codexCatalogModels) ? meta.codexCatalogModels : []}
+                    onChange={(rows) => setMetaValue("codexCatalogModels", rows)}
+                    fetchedModels={fetchedModels}
+                    fetchState={fetchState}
+                    onFetch={() => void fetchModels()}
+                    defaultModel={String(getPath(draft, DEFAULT_MODEL_PATH.codex) ?? "")}
+                    onAddToMapping={() =>
+                      setMeta((current) => {
+                        const list = Array.isArray(current.codexCatalogModels) ? current.codexCatalogModels : [];
+                        const model = String(getPath(draft, DEFAULT_MODEL_PATH.codex) ?? "").trim();
+                        if (!model) return current;
+                        return { ...current, codexCatalogModels: [...list, { model, displayName: model, contextWindow: "", reasoningLevels: [], defaultReasoningLevel: "" }] };
+                      })
+                    }
+                  />
                   <div>
                     <FieldLabel label={copy("pswitch.advanced.user_agent")} />
                     <input
@@ -1244,6 +1275,42 @@ export function ProviderEditDialog({
                     <p className="mt-1 text-xs text-oai-gray-400 dark:text-oai-gray-500">
                       {copy("pswitch.advanced.codex_ua_hint")}
                     </p>
+                  </div>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div>
+                      <FieldLabel label={copy("pswitch.advanced.override_headers")} />
+                      <JsonTextarea
+                        value={(meta.localProxyRequestOverrides && meta.localProxyRequestOverrides.headers) || ""}
+                        onChange={(value) =>
+                          setMeta((current) => ({
+                            ...current,
+                            localProxyRequestOverrides: {
+                              ...(current.localProxyRequestOverrides || {}),
+                              headers: value || undefined,
+                            },
+                          }))
+                        }
+                        rows={3}
+                        label={copy("pswitch.advanced.override_headers")}
+                      />
+                    </div>
+                    <div>
+                      <FieldLabel label={copy("pswitch.advanced.override_body")} />
+                      <JsonTextarea
+                        value={(meta.localProxyRequestOverrides && meta.localProxyRequestOverrides.body) || ""}
+                        onChange={(value) =>
+                          setMeta((current) => ({
+                            ...current,
+                            localProxyRequestOverrides: {
+                              ...(current.localProxyRequestOverrides || {}),
+                              body: value || undefined,
+                            },
+                          }))
+                        }
+                        rows={3}
+                        label={copy("pswitch.advanced.override_body")}
+                      />
+                    </div>
                   </div>
                 </div>
               ) : null}

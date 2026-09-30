@@ -2,21 +2,30 @@
 // (official + generic custom templates only — the partner/promotion catalog
 // is upstream-specific and intentionally not carried over).
 //
-// Presets are templates: the dashboard's add-provider dialog copies one into
-// the editor. `name` is the English fallback; `nameKey` resolves through the
-// dashboard copy registry when present.
+// Each preset carries a `settingsConfig` template plus declarative
+// `formFields` (the port of cc-switch's templateValues): the dashboard's
+// add-provider dialog renders one input per field and writes values into the
+// template at the dotted `path`, so presets stay data and the interaction
+// mirrors the upstream dialog (preset cards → structured form → optional raw
+// JSON editor).
+//
+// `name` is the English fallback; `nameKey`/`hintKey`/field `labelKey`s
+// resolve through the dashboard copy registry. `color` keys into the
+// dashboard's avatar palette.
 
 const CLAUDE_OFFICIAL = {
   id: "claude_official",
   name: "Anthropic Official",
   nameKey: "pswitch.preset.claude_official",
+  hintKey: "pswitch.hint.claude_official",
   category: "official",
-  settingsConfig: {
-    env: {
-      ANTHROPIC_AUTH_TOKEN: "",
-      ANTHROPIC_BASE_URL: "https://api.anthropic.com",
-    },
-  },
+  icon: "sparkles",
+  color: "orange",
+  websiteUrl: "https://www.anthropic.com/claude-code",
+  // Official plan: authenticated by the Claude login / OAuth token on the
+  // machine, so the template carries no credentials (cc-switch does the same).
+  settingsConfig: { env: {} },
+  formFields: [],
 };
 
 const CLAUDE_CUSTOM = {
@@ -24,24 +33,50 @@ const CLAUDE_CUSTOM = {
   name: "Custom Relay",
   nameKey: "pswitch.preset.claude_custom",
   category: "custom",
+  icon: "shuffle",
+  color: "blue",
   settingsConfig: {
     env: {
       ANTHROPIC_AUTH_TOKEN: "",
-      ANTHROPIC_BASE_URL: "https://your-relay.example.com",
+      ANTHROPIC_BASE_URL: "",
       ANTHROPIC_MODEL: "",
     },
   },
+  formFields: [
+    {
+      id: "base_url",
+      path: "env.ANTHROPIC_BASE_URL",
+      labelKey: "pswitch.field.base_url",
+      placeholder: "https://your-relay.example.com",
+    },
+    {
+      id: "api_key",
+      path: "env.ANTHROPIC_AUTH_TOKEN",
+      labelKey: "pswitch.field.api_key",
+      placeholder: "sk-…",
+      secret: true,
+    },
+    {
+      id: "model",
+      path: "env.ANTHROPIC_MODEL",
+      labelKey: "pswitch.field.model",
+      placeholder: "",
+      hintKey: "pswitch.field.model_hint",
+    },
+  ],
 };
 
 const CODEX_OFFICIAL = {
   id: "codex_official",
   name: "OpenAI Official (ChatGPT Login)",
   nameKey: "pswitch.preset.codex_official",
+  hintKey: "pswitch.hint.codex_official",
   category: "official",
-  settingsConfig: {
-    auth: null,
-    config: {},
-  },
+  icon: "terminal",
+  color: "green",
+  websiteUrl: "https://chatgpt.com/codex",
+  settingsConfig: { auth: null, config: {} },
+  formFields: [],
 };
 
 const CODEX_CUSTOM = {
@@ -49,6 +84,8 @@ const CODEX_CUSTOM = {
   name: "Custom Relay",
   nameKey: "pswitch.preset.codex_custom",
   category: "custom",
+  icon: "shuffle",
+  color: "blue",
   settingsConfig: {
     auth: null,
     config: {
@@ -56,13 +93,44 @@ const CODEX_CUSTOM = {
       model_provider: "custom",
       model_providers: {
         custom: {
-          name: "Custom Relay",
-          base_url: "https://your-relay.example.com/v1",
+          name: "",
+          base_url: "",
           wire_api: "responses",
         },
       },
     },
   },
+  formFields: [
+    {
+      id: "relay_name",
+      path: "config.model_providers.custom.name",
+      labelKey: "pswitch.field.relay_name",
+      placeholder: "",
+    },
+    {
+      id: "base_url",
+      path: "config.model_providers.custom.base_url",
+      labelKey: "pswitch.field.base_url",
+      placeholder: "https://your-relay.example.com/v1",
+    },
+    {
+      id: "wire_api",
+      path: "config.model_providers.custom.wire_api",
+      labelKey: "pswitch.field.wire_api",
+      type: "select",
+      options: [
+        { value: "responses", labelKey: "pswitch.field.wire_api_responses" },
+        { value: "chat", labelKey: "pswitch.field.wire_api_chat" },
+      ],
+      hintKey: "pswitch.field.wire_api_hint",
+    },
+    {
+      id: "model",
+      path: "config.model",
+      labelKey: "pswitch.field.model",
+      placeholder: "",
+    },
+  ],
 };
 
 const GEMINI_OFFICIAL = {
@@ -70,11 +138,19 @@ const GEMINI_OFFICIAL = {
   name: "Google Official",
   nameKey: "pswitch.preset.gemini_official",
   category: "official",
-  settingsConfig: {
-    env: {
-      GEMINI_API_KEY: "",
+  icon: "gem",
+  color: "sky",
+  websiteUrl: "https://aistudio.google.com/",
+  settingsConfig: { env: { GEMINI_API_KEY: "" } },
+  formFields: [
+    {
+      id: "api_key",
+      path: "env.GEMINI_API_KEY",
+      labelKey: "pswitch.field.api_key",
+      placeholder: "AIza…",
+      secret: true,
     },
-  },
+  ],
 };
 
 const GEMINI_CUSTOM = {
@@ -82,12 +158,36 @@ const GEMINI_CUSTOM = {
   name: "Custom Relay",
   nameKey: "pswitch.preset.gemini_custom",
   category: "custom",
+  icon: "shuffle",
+  color: "blue",
   settingsConfig: {
     env: {
       GEMINI_API_KEY: "",
-      GOOGLE_GEMINI_BASE_URL: "https://your-relay.example.com",
+      GOOGLE_GEMINI_BASE_URL: "",
+      GEMINI_MODEL: "",
     },
   },
+  formFields: [
+    {
+      id: "api_key",
+      path: "env.GEMINI_API_KEY",
+      labelKey: "pswitch.field.api_key",
+      placeholder: "AIza…",
+      secret: true,
+    },
+    {
+      id: "base_url",
+      path: "env.GOOGLE_GEMINI_BASE_URL",
+      labelKey: "pswitch.field.base_url",
+      placeholder: "https://your-relay.example.com",
+    },
+    {
+      id: "model",
+      path: "env.GEMINI_MODEL",
+      labelKey: "pswitch.field.model",
+      placeholder: "",
+    },
+  ],
 };
 
 const PRESETS = {
@@ -104,4 +204,12 @@ function getPreset(app, presetId) {
   return listPresets(app).find((preset) => preset.id === presetId) || null;
 }
 
-module.exports = { listPresets, getPreset, PRESETS };
+// Fields used by the edit dialog for providers not created from a known
+// preset (or created before presets carried formFields): the per-app default
+// field set, matching what the custom templates own.
+function defaultFormFields(app) {
+  const custom = PRESETS[app]?.find((preset) => preset.category === "custom");
+  return custom ? custom.formFields : [];
+}
+
+module.exports = { listPresets, getPreset, defaultFormFields, PRESETS };

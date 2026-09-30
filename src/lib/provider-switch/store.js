@@ -102,7 +102,16 @@ function sanitizeSettingsConfig(app, settingsConfig) {
   throw new Error(`Unsupported app: ${app}`);
 }
 
-function sanitizeProviderFields(app, { name, category, settingsConfig, notes }) {
+function sanitizeWebsiteUrl(value) {
+  const url = String(value || "").trim();
+  if (!url) return "";
+  if (!/^https?:\/\/\S+$/.test(url) || url.length > 500) {
+    throw new Error("websiteUrl must be an http(s) URL");
+  }
+  return url;
+}
+
+function sanitizeProviderFields(app, { name, category, settingsConfig, notes, websiteUrl }) {
   const trimmedName = String(name || "").trim();
   if (!trimmedName) throw new Error("Provider name is required");
   if (trimmedName.length > 100) throw new Error("Provider name is too long");
@@ -112,13 +121,47 @@ function sanitizeProviderFields(app, { name, category, settingsConfig, notes }) 
     category: normalizedCategory,
     settingsConfig: sanitizeSettingsConfig(app, settingsConfig || {}),
     notes: String(notes || "").slice(0, 2000),
+    websiteUrl: sanitizeWebsiteUrl(websiteUrl),
   };
 }
 
 async function listProviders(app) {
   if (!isSupportedApp(app)) throw new Error(`Unsupported app: ${app}`);
   const store = await readStore();
-  return store.apps[app];
+  const state = store.apps[app];
+  // Presentation order = sort_index (dnd reorder), falling back to creation
+  // order for providers saved before sorting existed.
+  const providers = state.providers
+    .map((provider, index) => ({ provider, index }))
+    .sort((a, b) => {
+      const sa = Number.isFinite(a.provider.sortIndex) ? a.provider.sortIndex : a.index;
+      const sb = Number.isFinite(b.provider.sortIndex) ? b.provider.sortIndex : b.index;
+      return sa - sb;
+    })
+    .map((entry) => entry.provider);
+  return { current: state.current, providers };
+}
+
+// Persist a drag-reorder: orderedIds is the full provider list in its new
+// order; unknown ids are ignored and missing ids keep their relative order.
+async function reorderProviders(app, orderedIds) {
+  if (!isSupportedApp(app)) throw new Error(`Unsupported app: ${app}`);
+  if (!Array.isArray(orderedIds)) throw new Error("orderedIds must be an array");
+  await mutateStore((store) => {
+    const providers = store.apps[app].providers;
+    const rank = new Map(orderedIds.map((id, index) => [id, index]));
+    const ordered = providers
+      .map((provider, index) => ({
+        provider,
+        rank: rank.has(provider.id) ? rank.get(provider.id) : orderedIds.length + index,
+      }))
+      .sort((a, b) => a.rank - b.rank);
+    store.apps[app].providers = ordered.map((entry, index) => ({
+      ...entry.provider,
+      sortIndex: index,
+    }));
+    return store;
+  });
 }
 
 async function getProvider(app, id) {
@@ -132,6 +175,7 @@ async function createProvider(app, fields) {
   const now = new Date().toISOString();
   const provider = { id: newProviderId(), ...clean, createdAt: now, updatedAt: now };
   await mutateStore((store) => {
+    provider.sortIndex = store.apps[app].providers.length;
     store.apps[app].providers.push(provider);
     return store;
   });
@@ -150,6 +194,7 @@ async function updateProvider(app, id, patch) {
       category: patch.category !== undefined ? patch.category : existing.category,
       settingsConfig: patch.settingsConfig !== undefined ? patch.settingsConfig : existing.settingsConfig,
       notes: patch.notes !== undefined ? patch.notes : existing.notes,
+      websiteUrl: patch.websiteUrl !== undefined ? patch.websiteUrl : existing.websiteUrl,
     });
     updated = { ...existing, ...merged, updatedAt: new Date().toISOString() };
     const providers = store.apps[app].providers.slice();
@@ -191,6 +236,7 @@ module.exports = {
   createProvider,
   updateProvider,
   deleteProvider,
+  reorderProviders,
   setCurrentProvider,
   sanitizeSettingsConfig,
 };

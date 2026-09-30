@@ -2252,3 +2252,29 @@ pswitch.preset.codex_official,pswitch,ProviderSwitchPage,ProviderSwitchPage,pres
 pswitch.preset.codex_custom,pswitch,ProviderSwitchPage,ProviderSwitchPage,preset_codex_custom,Custom Relay,,active
 pswitch.preset.gemini_official,pswitch,ProviderSwitchPage,ProviderSwitchPage,preset_gemini_official,Google Official,,active
 pswitch.preset.gemini_custom,pswitch,ProviderSwitchPage,ProviderSwitchPage,preset_gemini_custom,Custom Relay,,active
+pswitch.action.import_live,pswitch,ProviderSwitchPage,ProviderEditDialog,import_live,Import from live config,,active
+pswitch.field.api_key,pswitch,ProviderSwitchPage,ProviderEditDialog,api_key,API Key,,active
+pswitch.field.api_key_name,pswitch,ProviderSwitchPage,ProviderEditDialog,api_key_name,Credential env name,,active
+pswitch.field.api_key_option,pswitch,ProviderSwitchPage,ProviderEditDialog,api_key_option,ANTHROPIC_API_KEY,,active
+pswitch.field.auth_token_option,pswitch,ProviderSwitchPage,ProviderEditDialog,auth_token_option,ANTHROPIC_AUTH_TOKEN,,active
+pswitch.field.base_url,pswitch,ProviderSwitchPage,ProviderEditDialog,base_url,Base URL,,active
+pswitch.field.model,pswitch,ProviderSwitchPage,ProviderEditDialog,model,Model,,active
+pswitch.field.model_hint,pswitch,ProviderSwitchPage,ProviderEditDialog,model_hint,Leave empty to use the relay's default model.,,active
+pswitch.field.relay_name,pswitch,ProviderSwitchPage,ProviderEditDialog,relay_name,Relay name,,active
+pswitch.field.wire_api,pswitch,ProviderSwitchPage,ProviderEditDialog,wire_api,Wire protocol,,active
+pswitch.field.wire_api_chat,pswitch,ProviderSwitchPage,ProviderEditDialog,wire_api_chat,chat,,active
+pswitch.field.wire_api_hint,pswitch,ProviderSwitchPage,ProviderEditDialog,wire_api_hint,responses is Codex's default protocol; use chat for Chat Completions relays.,,active
+pswitch.field.wire_api_responses,pswitch,ProviderSwitchPage,ProviderEditDialog,wire_api_responses,responses,,active
+pswitch.hint.claude_official,pswitch,ProviderSwitchPage,ProviderEditDialog,claude_official,Uses the Claude login on this machine — no key needed.,,active
+pswitch.hint.codex_official,pswitch,ProviderSwitchPage,ProviderEditDialog,codex_official,Uses the ChatGPT login for Codex; AiTool stashes and restores it across switches.,,active
+pswitch.provider.applied_live,pswitch,ProviderSwitchPage,ProviderEditDialog,applied_live,"Saved ""{{name}}"" and applied it to the live config files.",,active
+pswitch.provider.created,pswitch,ProviderSwitchPage,ProviderEditDialog,created,"Added ""{{name}}"".",,active
+pswitch.provider.drag_handle,pswitch,ProviderSwitchPage,ProviderEditDialog,drag_handle,Drag to reorder {{name}},,active
+pswitch.provider.imported,pswitch,ProviderSwitchPage,ProviderEditDialog,imported,"Imported ""{{name}}"" from the live config.",,active
+pswitch.provider.live_prefill_hint,pswitch,ProviderSwitchPage,ProviderEditDialog,live_prefill_hint,This provider is active — the form was prefilled from the live config files.,,active
+pswitch.provider.loading_live,pswitch,ProviderSwitchPage,ProviderEditDialog,loading_live,Reading the live config files…,,active
+pswitch.provider.notes,pswitch,ProviderSwitchPage,ProviderEditDialog,notes,Notes,,active
+pswitch.provider.preset_no_fields,pswitch,ProviderSwitchPage,ProviderEditDialog,preset_no_fields,This preset has no fields to fill in.,,active
+pswitch.provider.raw_json,pswitch,ProviderSwitchPage,ProviderEditDialog,raw_json,JSON config (advanced),,active
+pswitch.provider.saved,pswitch,ProviderSwitchPage,ProviderEditDialog,saved,"Saved ""{{name}}"".",,active
+pswitch.provider.website_url,pswitch,ProviderSwitchPage,ProviderEditDialog,website_url,Website,,active

@@ -275,6 +275,24 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
       return true;
     }
 
+    // Specific provider sub-routes must come before the generic
+    // /providers/:id matcher (its regex would capture "reorder"/"import-live").
+    if (p === `${prefix}/providers/reorder` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      await store.reorderProviders(body.app, body.orderedIds);
+      json(res, { ok: true, ...(await store.listProviders(body.app)) });
+      return true;
+    }
+
+    if (p === `${prefix}/providers/import-live` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      const provider = await importFromLive(body.app, body.name);
+      json(res, { ok: true, provider });
+      return true;
+    }
+
     const providersMatch = p.match(new RegExp(`^${prefix}/providers(?:/([\\w-]+))?$`));
     if (providersMatch) {
       const providerId = providersMatch[1] || null;
@@ -294,7 +312,14 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
       if (method === "PUT" && providerId) {
         const body = await readJsonBody(req);
         const provider = await store.updateProvider(body.app, providerId, body);
-        json(res, { ok: true, provider });
+        // cc-switch interaction: editing the *current* provider takes effect
+        // immediately — re-run the projection so the live files follow.
+        let applied = null;
+        const state = await store.listProviders(body.app);
+        if (state.current === providerId) {
+          applied = await switchProvider({ app: body.app, id: providerId });
+        }
+        json(res, { ok: true, provider, applied });
         return true;
       }
       if (method === "DELETE" && providerId) {
@@ -303,6 +328,13 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
         json(res, { ok: true });
         return true;
       }
+    }
+
+    if (p === `${prefix}/editor-view` && method === "GET") {
+      const app = url.searchParams.get("app") || "claude";
+      const id = url.searchParams.get("id") || "";
+      json(res, await buildEditorView(app, id));
+      return true;
     }
 
     if (p === `${prefix}/switch` && method === "POST") {
@@ -319,6 +351,71 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
     json(res, { ok: false, error: error?.message || String(error) }, 400);
     return true;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Import-from-live + editor view (cc-switch interaction parity)
+// ---------------------------------------------------------------------------
+
+// Create a provider from the current live config: extract only the
+// provider-owned floor fields so user-owned keys are never absorbed.
+async function importFromLive(app, name) {
+  if (!store.isSupportedApp(app)) throw new Error(`Unsupported app: ${app}`);
+  const files = paths.targetFiles(app);
+  const lives = {};
+  for (const file of files) {
+    lives[file.id] = await readLiveFile(file);
+  }
+  if (!files.some((file) => lives[file.id].exists)) {
+    throw new Error(`No live ${app} config to import from`);
+  }
+  let settingsConfig;
+  if (app === "claude") {
+    const live = lives.settings.exists ? JSON.parse(lives.settings.content) : {};
+    settingsConfig = targets.extractClaudeConfig(live);
+    if (!settingsConfig.env && !Object.keys(settingsConfig).length) {
+      throw new Error("No provider key fields found in the live settings.json");
+    }
+  } else if (app === "codex") {
+    settingsConfig = targets.extractCodexConfig(lives.config.exists ? lives.config.content : "");
+  } else {
+    settingsConfig = targets.extractGeminiConfig(lives.env.exists ? lives.env.content : "");
+  }
+  const providerName = String(name || "").trim() || "Imported config";
+  return store.createProvider(app, {
+    name: providerName,
+    category: "custom",
+    settingsConfig,
+    notes: "",
+    websiteUrl: "",
+  });
+}
+
+// Editor view for one provider. When it is the current one, the live files
+// may have been hand-edited since the switch — the returned settingsConfig
+// overlays the live value on every key the provider owns (fromLive: true),
+// mirroring cc-switch's read_live_provider_settings.
+async function buildEditorView(app, id) {
+  if (!store.isSupportedApp(app)) throw new Error(`Unsupported app: ${app}`);
+  const state = await store.listProviders(app);
+  const provider = state.providers.find((p) => p.id === id);
+  if (!provider) throw new Error(`Provider not found: ${id}`);
+  const isCurrent = state.current === id;
+  let settingsConfig = provider.settingsConfig;
+  let fromLive = false;
+  if (isCurrent) {
+    const lives = {};
+    for (const file of paths.targetFiles(app)) {
+      lives[file.id] = await readLiveFile(file);
+    }
+    settingsConfig = targets.mergeLiveIntoSettingsConfig(app, provider.settingsConfig, {
+      claude: lives.settings?.exists ? JSON.parse(lives.settings.content) : null,
+      codex: lives.config?.exists ? lives.config.content : "",
+      gemini: lives.env?.exists ? lives.env.content : "",
+    }[app]);
+    fromLive = true;
+  }
+  return { ok: true, app, isCurrent, fromLive, settingsConfig };
 }
 
 async function buildStatus() {

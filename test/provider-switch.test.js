@@ -594,3 +594,196 @@ test("provider-switch api: codex switch stashes official login and restores it",
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(codexDir, "auth.json"), "utf8")), login);
   assert.equal(fs.existsSync(stashFile), false);
 });
+
+// ---------------------------------------------------------------------------
+// cc-switch interaction parity: editor view / import-live / reorder / apply
+// ---------------------------------------------------------------------------
+
+test("provider-switch editor-view: editing the current provider overlays live values", async () => {
+  const { handleProviderSwitchApiRequest } = require("../src/lib/provider-switch/api");
+  const handler = handleProviderSwitchApiRequest;
+  const prefix = "/api/provider-switch";
+
+  const created = await call(handler, {
+    method: "POST",
+    url: `${prefix}/providers`,
+    body: JSON.stringify({
+      app: "claude",
+      name: "Relay",
+      category: "custom",
+      settingsConfig: { env: { ANTHROPIC_BASE_URL: "https://a.example.com", ANTHROPIC_AUTH_TOKEN: "sk-a" } },
+    }),
+  });
+  await call(handler, {
+    method: "POST",
+    url: `${prefix}/switch`,
+    body: JSON.stringify({ app: "claude", id: created.body.provider.id }),
+  });
+
+  // Hand-edit the live file after the switch.
+  const livePath = path.join(tmpHome, ".claude", "settings.json");
+  const live = JSON.parse(fs.readFileSync(livePath, "utf8"));
+  live.env.ANTHROPIC_BASE_URL = "https://hand-edited.example.com";
+  fs.writeFileSync(livePath, JSON.stringify(live, null, 2) + "\n");
+
+  const view = await call(handler, {
+    url: `${prefix}/editor-view?app=claude&id=${created.body.provider.id}`,
+  });
+  assert.equal(view.body.fromLive, true);
+  assert.equal(view.body.isCurrent, true);
+  assert.equal(view.body.settingsConfig.env.ANTHROPIC_BASE_URL, "https://hand-edited.example.com");
+  assert.equal(view.body.settingsConfig.env.ANTHROPIC_AUTH_TOKEN, "sk-a");
+
+  // Editing a non-current provider returns the stored config untouched.
+  const other = await call(handler, {
+    method: "POST",
+    url: `${prefix}/providers`,
+    body: JSON.stringify({
+      app: "claude",
+      name: "Other",
+      category: "custom",
+      settingsConfig: { env: { ANTHROPIC_BASE_URL: "https://x.example.com" } },
+    }),
+  });
+  const viewOther = await call(handler, {
+    url: `${prefix}/editor-view?app=claude&id=${other.body.provider.id}`,
+  });
+  assert.equal(viewOther.body.fromLive, false);
+  assert.equal(viewOther.body.settingsConfig.env.ANTHROPIC_BASE_URL, "https://x.example.com");
+});
+
+test("provider-switch update on the current provider re-applies the projection", async () => {
+  const { handleProviderSwitchApiRequest } = require("../src/lib/provider-switch/api");
+  const handler = handleProviderSwitchApiRequest;
+  const prefix = "/api/provider-switch";
+
+  const created = await call(handler, {
+    method: "POST",
+    url: `${prefix}/providers`,
+    body: JSON.stringify({
+      app: "claude",
+      name: "Relay",
+      category: "custom",
+      settingsConfig: { env: { ANTHROPIC_BASE_URL: "https://a.example.com", ANTHROPIC_AUTH_TOKEN: "sk-a" } },
+    }),
+  });
+  await call(handler, {
+    method: "POST",
+    url: `${prefix}/switch`,
+    body: JSON.stringify({ app: "claude", id: created.body.provider.id }),
+  });
+
+  const updated = await call(handler, {
+    method: "PUT",
+    url: `${prefix}/providers/${created.body.provider.id}`,
+    body: JSON.stringify({
+      app: "claude",
+      name: "Relay 2",
+      websiteUrl: "https://relay.example.com",
+      settingsConfig: { env: { ANTHROPIC_BASE_URL: "https://b.example.com", ANTHROPIC_AUTH_TOKEN: "sk-b" } },
+    }),
+  });
+  assert.equal(updated.status, 200);
+  assert.ok(updated.body.applied, "editing the current provider re-applies it");
+  assert.deepEqual(updated.body.applied.wrote, [path.join(tmpHome, ".claude", "settings.json")]);
+
+  const live = JSON.parse(fs.readFileSync(path.join(tmpHome, ".claude", "settings.json"), "utf8"));
+  assert.equal(live.env.ANTHROPIC_BASE_URL, "https://b.example.com");
+  assert.equal(updated.body.provider.websiteUrl, "https://relay.example.com");
+
+  // websiteUrl validation
+  await assert.rejects(async () => {
+    const bad = await call(handler, {
+      method: "PUT",
+      url: `${prefix}/providers/${created.body.provider.id}`,
+      body: JSON.stringify({ app: "claude", websiteUrl: "not a url" }),
+    });
+    if (bad.status !== 200) throw new Error(bad.body.error);
+  });
+});
+
+test("provider-switch import-live creates a provider from the live key fields only", async () => {
+  const { handleProviderSwitchApiRequest } = require("../src/lib/provider-switch/api");
+  const handler = handleProviderSwitchApiRequest;
+  const prefix = "/api/provider-switch";
+
+  // Live claude settings with user keys the import must NOT absorb.
+  const livePath = path.join(tmpHome, ".claude", "settings.json");
+  fs.mkdirSync(path.dirname(livePath), { recursive: true });
+  fs.writeFileSync(
+    livePath,
+    JSON.stringify(
+      {
+        hooks: { Stop: [] },
+        permissions: { allow: ["Bash"] },
+        env: { ANTHROPIC_BASE_URL: "https://a.example.com", ANTHROPIC_AUTH_TOKEN: "sk-a", MY_KEY: "user" },
+        model: "claude-sonnet-4-6",
+      },
+      null,
+      2,
+    ) + "\n",
+  );
+
+  const imported = await call(handler, {
+    method: "POST",
+    url: `${prefix}/providers/import-live`,
+    body: JSON.stringify({ app: "claude" }),
+  });
+  assert.equal(imported.status, 200);
+  assert.equal(imported.body.provider.category, "custom");
+  const config = imported.body.provider.settingsConfig;
+  assert.equal(config.env.ANTHROPIC_BASE_URL, "https://a.example.com");
+  assert.equal(config.env.ANTHROPIC_AUTH_TOKEN, "sk-a");
+  assert.equal(config.env.MY_KEY, undefined, "user env keys are not absorbed");
+  assert.equal(config.model, "claude-sonnet-4-6");
+  assert.equal(config.hooks, undefined, "user-owned top-level keys are not absorbed");
+});
+
+test("provider-switch presets carry declarative formFields and reorder persists drag order", async () => {
+  const { handleProviderSwitchApiRequest } = require("../src/lib/provider-switch/api");
+  const handler = handleProviderSwitchApiRequest;
+  const prefix = "/api/provider-switch";
+
+  const presets = await call(handler, { url: `${prefix}/presets?app=codex` });
+  const custom = presets.body.presets.find((preset) => preset.id === "codex_custom");
+  assert.ok(custom.formFields.length >= 3, "custom preset carries structured fields");
+  const wireApi = custom.formFields.find((field) => field.id === "wire_api");
+  assert.equal(wireApi.type, "select");
+  assert.equal(wireApi.options.length, 2);
+  const official = presets.body.presets.find((preset) => preset.id === "codex_official");
+  assert.deepEqual(official.formFields, [], "official login preset has no fields");
+
+  const a = await call(handler, {
+    method: "POST",
+    url: `${prefix}/providers`,
+    body: JSON.stringify({ app: "codex", name: "A", settingsConfig: { auth: null, config: {} } }),
+  });
+  const b = await call(handler, {
+    method: "POST",
+    url: `${prefix}/providers`,
+    body: JSON.stringify({ app: "codex", name: "B", settingsConfig: { auth: null, config: {} } }),
+  });
+  const c = await call(handler, {
+    method: "POST",
+    url: `${prefix}/providers`,
+    body: JSON.stringify({ app: "codex", name: "C", settingsConfig: { auth: null, config: {} } }),
+  });
+
+  const reordered = await call(handler, {
+    method: "POST",
+    url: `${prefix}/providers/reorder`,
+    body: JSON.stringify({
+      app: "codex",
+      orderedIds: [c.body.provider.id, a.body.provider.id, b.body.provider.id],
+    }),
+  });
+  assert.equal(reordered.status, 200);
+  assert.deepEqual(
+    reordered.body.providers.map((p) => p.name),
+    ["C", "A", "B"],
+  );
+  assert.deepEqual(
+    reordered.body.providers.map((p) => p.sortIndex),
+    [0, 1, 2],
+  );
+});

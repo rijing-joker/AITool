@@ -42,8 +42,29 @@ export interface ProviderSwitchProvider {
   category: "official" | "custom";
   settingsConfig: unknown;
   notes: string;
+  websiteUrl: string;
+  sortIndex: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ProviderSwitchFormFieldOption {
+  value: string;
+  labelKey: string;
+}
+
+// Declarative port of cc-switch's templateValues: the dialog renders one
+// input per field and writes the value into the settingsConfig template at
+// the dotted path.
+export interface ProviderSwitchFormField {
+  id: string;
+  path: string;
+  labelKey: string;
+  placeholder?: string;
+  hintKey?: string;
+  secret?: boolean;
+  type?: "text" | "select";
+  options?: ProviderSwitchFormFieldOption[];
 }
 
 export interface ProviderSwitchTargetFile {
@@ -54,6 +75,19 @@ export interface ProviderSwitchTargetFile {
   exists: boolean;
   size: number;
   modifiedAt: string | null;
+}
+
+export interface ProviderSwitchPreset {
+  id: string;
+  name: string;
+  nameKey?: string;
+  hintKey?: string;
+  category: "official" | "custom";
+  icon?: string;
+  color?: string;
+  websiteUrl?: string;
+  settingsConfig: unknown;
+  formFields: ProviderSwitchFormField[];
 }
 
 export interface ProviderSwitchAppState {
@@ -109,6 +143,29 @@ export const providerSwitchApi = {
     return get(`/api/provider-switch/presets?app=${encodeURIComponent(app)}`);
   },
 
+  getEditorView(
+    app: ProviderSwitchApp,
+    id: string,
+  ): Promise<{ ok: true; app: string; isCurrent: boolean; fromLive: boolean; settingsConfig: unknown }> {
+    return get(
+      `/api/provider-switch/editor-view?app=${encodeURIComponent(app)}&id=${encodeURIComponent(id)}`,
+    );
+  },
+
+  importFromLive(
+    app: ProviderSwitchApp,
+    name?: string,
+  ): Promise<{ ok: true; provider: ProviderSwitchProvider }> {
+    return mutate("/api/provider-switch/providers/import-live", "POST", { app, name });
+  },
+
+  reorderProviders(
+    app: ProviderSwitchApp,
+    orderedIds: string[],
+  ): Promise<{ ok: true; app: string; current: string | null; providers: ProviderSwitchProvider[] }> {
+    return mutate("/api/provider-switch/providers/reorder", "POST", { app, orderedIds });
+  },
+
   getLive(app: ProviderSwitchApp, file: string): Promise<ProviderSwitchLiveFile> {
     return get(`/api/provider-switch/live?app=${encodeURIComponent(app)}&file=${encodeURIComponent(file)}`);
   },
@@ -139,7 +196,7 @@ export const providerSwitchApi = {
 
   createProvider(
     app: ProviderSwitchApp,
-    payload: { name: string; category: string; settingsConfig: unknown; notes?: string },
+    payload: { name: string; category: string; settingsConfig: unknown; notes?: string; websiteUrl?: string },
   ): Promise<{ ok: true; provider: ProviderSwitchProvider }> {
     return mutate("/api/provider-switch/providers", "POST", { app, ...payload });
   },
@@ -147,8 +204,8 @@ export const providerSwitchApi = {
   updateProvider(
     app: ProviderSwitchApp,
     id: string,
-    payload: { name?: string; category?: string; settingsConfig?: unknown; notes?: string },
-  ): Promise<{ ok: true; provider: ProviderSwitchProvider }> {
+    payload: { name?: string; category?: string; settingsConfig?: unknown; notes?: string; websiteUrl?: string },
+  ): Promise<{ ok: true; provider: ProviderSwitchProvider; applied: { wrote: string[] } | null }> {
     return mutate(`/api/provider-switch/providers/${encodeURIComponent(id)}`, "PUT", { app, ...payload });
   },
 

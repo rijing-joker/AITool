@@ -1,31 +1,50 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS as DndCss } from "@dnd-kit/utilities";
+import {
   Check,
   FileCode,
-  Gem,
+  Globe,
+  GripVertical,
+  Import,
   Pencil,
   Plus,
   RefreshCw,
   RotateCcw,
-  Sparkles,
-  Terminal,
   Trash2,
   X,
 } from "lucide-react";
 import { copy } from "../lib/copy";
 import { providerSwitchApi } from "../lib/provider-switch-api";
 import { Button, Card, ConfirmModal } from "../ui/components";
+import { PresetIcon, presetAvatarClass, ProviderEditDialog } from "./provider-edit-dialog";
 
-// Provider config management — a port of cc-switch's config-file module.
-// Presets live in ~/.aitool/provider-switch (served by the local CLI);
-// switching projects a provider's key fields into the live tool configs
-// (~/.claude/settings.json, ~/.codex/config.toml + auth.json,
-// ~/.gemini/.env) with pre-write backups, leaving user-owned fields alone.
+// Provider config management — an interaction port of cc-switch's provider
+// module. Presets live in ~/.aitool/provider-switch (served by the local
+// CLI); switching projects a provider's key fields into the live tool configs
+// (~/.claude/settings.json, ~/.codex/config.toml + auth.json, ~/.gemini/.env)
+// with pre-write backups, leaving user-owned fields alone. The card list is
+// drag-sortable, providers can be imported from the current live config, and
+// editing the active provider re-applies it immediately.
 
 const APPS = [
-  { id: "claude", labelKey: "pswitch.tab.claude", icon: Sparkles },
-  { id: "codex", labelKey: "pswitch.tab.codex", icon: Terminal },
-  { id: "gemini", labelKey: "pswitch.tab.gemini", icon: Gem },
+  { id: "claude", labelKey: "pswitch.tab.claude" },
+  { id: "codex", labelKey: "pswitch.tab.codex" },
+  { id: "gemini", labelKey: "pswitch.tab.gemini" },
 ];
 
 function SectionTitle({ children, action = null }) {
@@ -37,50 +56,94 @@ function SectionTitle({ children, action = null }) {
   );
 }
 
-function CredsModal({ open, onClose, busy, title, subtitle, children, width = "max-w-2xl" }) {
-  if (!open) return null;
+function SortableProviderCard({ provider, isCurrent, busy, dragLabel, onSwitch, onEdit, onDelete }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: provider.id,
+    disabled: busy,
+    transition: { duration: 220, easing: "cubic-bezier(0.2, 0, 0, 1)" },
+  });
+  const style = {
+    position: "relative",
+    zIndex: isDragging ? 2 : undefined,
+    transform: DndCss.Transform.toString(transform),
+    transition: isDragging ? undefined : transition,
+  };
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4 backdrop-blur-[2px]">
-      <div
-        className={`flex max-h-[88vh] w-full ${width} flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-oai-gray-200 dark:bg-oai-gray-950 dark:ring-oai-gray-800`}
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-      >
-        <div className="flex items-start justify-between gap-3 border-b border-oai-gray-100 px-5 py-4 dark:border-oai-gray-800">
-          <div className="min-w-0">
-            <h2 className="text-base font-semibold text-oai-black dark:text-white">{title}</h2>
-            {subtitle ? (
-              <p className="mt-0.5 truncate text-sm text-oai-gray-500 dark:text-oai-gray-400">{subtitle}</p>
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={`rounded-xl border bg-white px-4 py-3.5 transition-colors dark:bg-oai-gray-900 ${
+        isCurrent
+          ? "border-oai-brand-500 ring-1 ring-oai-brand-500/30"
+          : "border-oai-gray-200 dark:border-oai-gray-800"
+      } ${isDragging ? "shadow-lg" : ""}`}
+    >
+      <div className="flex items-start gap-3">
+        <button
+          type="button"
+          className="-ml-1 mt-0.5 cursor-grab touch-none rounded-md p-1 text-oai-gray-300 transition-colors hover:bg-oai-gray-100 hover:text-oai-gray-500 active:cursor-grabbing disabled:opacity-40 dark:text-oai-gray-600 dark:hover:bg-oai-gray-800 dark:hover:text-oai-gray-300"
+          disabled={busy}
+          aria-label={dragLabel}
+          title={dragLabel}
+          {...attributes}
+          {...listeners}
+        >
+          <GripVertical className="h-4 w-4" />
+        </button>
+        <span
+          className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${presetAvatarClass(provider.avatarColor)}`}
+        >
+          <PresetIcon icon={provider.avatarIcon} color={provider.avatarColor} className="h-4 w-4" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="truncate font-medium text-oai-black dark:text-white">{provider.name}</span>
+            <span className="rounded-full bg-oai-gray-100 px-2 py-0.5 text-xs text-oai-gray-500 dark:bg-oai-gray-800 dark:text-oai-gray-400">
+              {provider.category === "official"
+                ? copy("pswitch.provider.category.official")
+                : copy("pswitch.provider.category.custom")}
+            </span>
+            {isCurrent ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-oai-brand-50 px-2 py-0.5 text-xs font-medium text-oai-brand-600 dark:bg-oai-brand-950/50 dark:text-oai-brand-400">
+                <Check className="h-3 w-3" />
+                {copy("pswitch.current_badge")}
+              </span>
             ) : null}
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={busy}
-            className="shrink-0 rounded-md p-1.5 text-oai-gray-400 transition-colors hover:bg-oai-gray-100 hover:text-oai-black disabled:opacity-50 dark:hover:bg-oai-gray-800 dark:hover:text-white"
-            aria-label={copy("pswitch.action.close")}
-          >
-            <X className="h-4 w-4" />
-          </button>
+          {provider.notes ? (
+            <p className="mt-1 line-clamp-2 text-xs leading-5 text-oai-gray-500 dark:text-oai-gray-400">
+              {provider.notes}
+            </p>
+          ) : null}
+          {provider.websiteUrl ? (
+            <a
+              href={provider.websiteUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-1 inline-flex max-w-full items-center gap-1 text-xs text-oai-gray-400 hover:text-oai-brand-600 dark:text-oai-gray-500 dark:hover:text-oai-brand-400"
+            >
+              <Globe className="h-3 w-3 shrink-0" />
+              <span className="truncate">{provider.websiteUrl.replace(/^https?:\/\//, "")}</span>
+            </a>
+          ) : null}
         </div>
-        {children}
+        <div className="flex shrink-0 items-center gap-1.5">
+          <Button
+            variant={isCurrent ? "ghost" : "primary"}
+            size="sm"
+            disabled={busy || isCurrent}
+            onClick={onSwitch}
+          >
+            {copy("pswitch.action.switch")}
+          </Button>
+          <Button variant="ghost" size="sm" aria-label={copy("pswitch.action.edit")} onClick={onEdit}>
+            <Pencil className="h-4 w-4" />
+          </Button>
+          <Button variant="ghost" size="sm" aria-label={copy("pswitch.action.delete")} onClick={onDelete}>
+            <Trash2 className="h-4 w-4 text-red-500 dark:text-red-400" />
+          </Button>
+        </div>
       </div>
-    </div>
-  );
-}
-
-function EditorField({ label, hint, error, children }) {
-  return (
-    <div>
-      <label className="mb-1 block text-sm font-medium text-oai-gray-700 dark:text-oai-gray-300">{label}</label>
-      {children}
-      {hint ? <p className="mt-1 text-xs text-oai-gray-400 dark:text-oai-gray-500">{hint}</p> : null}
-      {error ? (
-        <p className="mt-1 text-xs text-red-600 dark:text-red-400" role="alert">
-          {error}
-        </p>
-      ) : null}
     </div>
   );
 }
@@ -92,13 +155,9 @@ export function ProviderSwitchPage() {
   const [activeApp, setActiveApp] = useState("claude");
   const [notice, setNotice] = useState(null);
 
-  // provider editor dialog state
-  const [editorOpen, setEditorOpen] = useState(false);
+  // dialog state
+  const [dialogOpen, setDialogOpen] = useState(false);
   const [editingProvider, setEditingProvider] = useState(null);
-  const [editorName, setEditorName] = useState("");
-  const [editorCategory, setEditorCategory] = useState("custom");
-  const [editorConfig, setEditorConfig] = useState("");
-  const [editorError, setEditorError] = useState(null);
   const [presets, setPresets] = useState([]);
 
   // confirm dialogs
@@ -116,10 +175,25 @@ export function ProviderSwitchPage() {
   // backups
   const [backups, setBackups] = useState([]);
   const [restoreTarget, setRestoreTarget] = useState(null);
+  const [dragOverId, setDragOverId] = useState(null);
+
+  const dragSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
 
   const appState = useMemo(() => {
     return status?.apps.find((app) => app.app === activeApp) || null;
   }, [status, activeApp]);
+
+  // Card presentation: provider record + preset-derived avatar styling.
+  const providerRows = useMemo(() => {
+    return (appState?.providers || []).map((provider) => ({
+      ...provider,
+      avatarIcon: provider.category === "official" ? officialIconFor(activeApp) : "shuffle",
+      avatarColor: provider.category === "official" ? officialColorFor(activeApp) : "blue",
+    }));
+  }, [appState, activeApp]);
 
   const refreshStatus = useCallback(async () => {
     try {
@@ -168,71 +242,29 @@ export function ProviderSwitchPage() {
     void refreshBackups(activeApp);
   }, [activeApp, liveFileId, loadLive, refreshBackups]);
 
-  const openAddDialog = useCallback(async () => {
-    setEditingProvider(null);
-    setEditorName("");
-    setEditorCategory("custom");
-    setEditorConfig("{\n  \n}\n");
-    setEditorError(null);
-    setEditorOpen(true);
-    try {
-      const res = await providerSwitchApi.getPresets(activeApp);
-      setPresets(res.presets || []);
-    } catch {
-      setPresets([]);
-    }
-  }, [activeApp]);
-
-  const openEditDialog = useCallback((provider) => {
-    setEditingProvider(provider);
-    setEditorName(provider.name);
-    setEditorCategory(provider.category);
-    setEditorConfig(JSON.stringify(provider.settingsConfig ?? {}, null, 2));
-    setEditorError(null);
-    setPresets([]);
-    setEditorOpen(true);
-  }, []);
-
-  const applyPreset = useCallback((presetId) => {
-    const preset = presets.find((p) => p.id === presetId);
-    if (!preset) return;
-    setEditorName((current) => current || preset.name);
-    setEditorCategory(preset.category);
-    setEditorConfig(JSON.stringify(preset.settingsConfig ?? {}, null, 2));
-  }, [presets]);
-
-  const saveEditor = useCallback(async () => {
-    let parsed;
-    try {
-      parsed = JSON.parse(editorConfig);
-    } catch (error) {
-      setEditorError(copy("pswitch.provider.invalid_json", { error: error instanceof Error ? error.message : String(error) }));
-      return;
-    }
-    setBusy(true);
-    setEditorError(null);
-    try {
-      if (editingProvider) {
-        await providerSwitchApi.updateProvider(activeApp, editingProvider.id, {
-          name: editorName,
-          category: editorCategory,
-          settingsConfig: parsed,
-        });
-      } else {
-        await providerSwitchApi.createProvider(activeApp, {
-          name: editorName,
-          category: editorCategory,
-          settingsConfig: parsed,
-        });
+  const openDialog = useCallback(
+    async (provider) => {
+      setEditingProvider(provider || null);
+      setDialogOpen(true);
+      try {
+        const res = await providerSwitchApi.getPresets(activeApp);
+        setPresets(res.presets || []);
+      } catch {
+        setPresets([]);
       }
-      setEditorOpen(false);
+    },
+    [activeApp],
+  );
+
+  const onDialogSaved = useCallback(
+    async (message) => {
+      setNotice(message);
       await refreshStatus();
-    } catch (error) {
-      setEditorError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setBusy(false);
-    }
-  }, [activeApp, editorCategory, editorConfig, editorName, editingProvider, refreshStatus]);
+    },
+    [refreshStatus],
+  );
+
+  const onDialogError = useCallback((message) => setNotice(message), []);
 
   const confirmSwitch = useCallback(async () => {
     if (!switchTarget) return;
@@ -264,6 +296,45 @@ export function ProviderSwitchPage() {
       setBusy(false);
     }
   }, [activeApp, deleteTarget, refreshStatus]);
+
+  const importFromLive = useCallback(async () => {
+    setBusy(true);
+    try {
+      const res = await providerSwitchApi.importFromLive(activeApp);
+      setNotice(copy("pswitch.provider.imported", { name: res.provider.name }));
+      await refreshStatus();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  }, [activeApp, refreshStatus]);
+
+  const handleDragEnd = useCallback(
+    async (event) => {
+      setDragOverId(null);
+      const { active, over } = event;
+      if (!over || active.id === over.id) return;
+      const ids = providerRows.map((row) => row.id);
+      const from = ids.indexOf(String(active.id));
+      const to = ids.indexOf(String(over.id));
+      if (from === -1 || to === -1) return;
+      const orderedIds = arrayMove(ids, from, to);
+      setBusy(true);
+      try {
+        const res = await providerSwitchApi.reorderProviders(activeApp, orderedIds);
+        setStatus((current) => ({
+          ...current,
+          apps: current.apps.map((app) => (app.app === activeApp ? { ...app, providers: res.providers } : app)),
+        }));
+      } catch (error) {
+        setNotice(error instanceof Error ? error.message : String(error));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [activeApp, providerRows],
+  );
 
   const saveLive = useCallback(
     async (policy = "refuse") => {
@@ -297,9 +368,7 @@ export function ProviderSwitchPage() {
 
   const keepMine = useCallback(async () => {
     if (!conflict) return;
-    setLiveBaseHash(conflict.currentHash);
     setConflict(null);
-    // baseHash now matches disk; save with the in-editor content as "mine".
     setBusy(true);
     try {
       await providerSwitchApi.saveLive(activeApp, liveFileId, {
@@ -316,7 +385,7 @@ export function ProviderSwitchPage() {
     }
   }, [activeApp, conflict, liveContent, liveFileId, loadLive]);
 
-  const keepTheirs = useCallback(async () => {
+  const keepTheirs = useCallback(() => {
     if (!conflict) return;
     setConflict(null);
     setLiveContent(conflict.currentContent ?? "");
@@ -339,7 +408,7 @@ export function ProviderSwitchPage() {
     }
   }, [activeApp, liveFileId, loadLive, refreshBackups, restoreTarget]);
 
-    const liveFile = useMemo(() => {
+  const liveFile = useMemo(() => {
     return appState?.files.find((file) => file.id === liveFileId) || null;
   }, [appState, liveFileId]);
 
@@ -372,103 +441,78 @@ export function ProviderSwitchPage() {
         <div className="mb-4 flex items-start justify-between gap-3 rounded-lg border border-oai-gray-200 bg-white px-4 py-3 text-sm text-oai-gray-700 dark:border-oai-gray-800 dark:bg-oai-gray-900 dark:text-oai-gray-300">
           <span className="min-w-0 break-all">{notice}</span>
           <button type="button" onClick={() => setNotice(null)} aria-label={copy("pswitch.action.close")}>
-            <XIcon />
+            <X className="h-4 w-4 shrink-0" />
           </button>
         </div>
       ) : null}
 
-      <div className="mb-6 inline-flex rounded-xl bg-oai-gray-100 p-1 dark:bg-oai-gray-900" role="tablist">
-        {APPS.map(({ id, labelKey, icon: Icon }) => (
-          <button
-            key={id}
-            role="tab"
-            aria-selected={activeApp === id}
-            type="button"
-            onClick={() => setActiveApp(id)}
-            className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 ${
-              activeApp === id
-                ? "bg-white text-oai-black shadow-sm dark:bg-oai-gray-800 dark:text-white"
-                : "text-oai-gray-500 hover:text-oai-black dark:hover:text-white"
-            }`}
-          >
-            <Icon className="h-4 w-4" />
-            {copy(labelKey)}
-          </button>
-        ))}
+      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+        <div className="inline-flex rounded-xl bg-oai-gray-100 p-1 dark:bg-oai-gray-900" role="tablist">
+          {APPS.map(({ id, labelKey }) => (
+            <button
+              key={id}
+              role="tab"
+              aria-selected={activeApp === id}
+              type="button"
+              onClick={() => setActiveApp(id)}
+              className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 ${
+                activeApp === id
+                  ? "bg-white text-oai-black shadow-sm dark:bg-oai-gray-800 dark:text-white"
+                  : "text-oai-gray-500 hover:text-oai-black dark:hover:text-white"
+              }`}
+            >
+              {copy(labelKey)}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2">
+          <Button variant="secondary" size="sm" disabled={busy} onClick={() => void importFromLive()}>
+            <Import className="h-4 w-4" />
+            {copy("pswitch.action.import_live")}
+          </Button>
+          <Button size="sm" disabled={busy} onClick={() => void openDialog(null)}>
+            <Plus className="h-4 w-4" />
+            {copy("pswitch.action.add")}
+          </Button>
+        </div>
       </div>
 
       <section className="mb-8">
-        <SectionTitle
-          action={
-            <Button variant="secondary" size="sm" onClick={() => void openAddDialog()}>
-              <Plus className="h-4 w-4" />
-              {copy("pswitch.action.add")}
-            </Button>
-          }
-        >
-          {copy("pswitch.section.providers")}
-        </SectionTitle>
+        <SectionTitle>{copy("pswitch.section.providers")}</SectionTitle>
         {!appState || appState.providers.length === 0 ? (
           <Card>
             <p className="text-sm text-oai-gray-500 dark:text-oai-gray-400">{copy("pswitch.providers.empty")}</p>
           </Card>
         ) : (
-          <div className="space-y-3">
-            {appState.providers.map((provider) => {
-              const isCurrent = appState.current === provider.id;
-              return (
-                <Card key={provider.id}>
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div className="flex min-w-0 items-center gap-2.5">
-                      <span
-                        className={`relative flex h-2 w-2 shrink-0 ${isCurrent ? "text-oai-brand-500" : "text-oai-gray-300 dark:text-oai-gray-600"}`}
-                        aria-hidden
-                      >
-                        {isCurrent ? (
-                          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-oai-brand-500 opacity-75" />
-                        ) : null}
-                        <span
-                          className={`relative inline-flex h-2 w-2 rounded-full ${isCurrent ? "bg-oai-brand-500" : "bg-oai-gray-300 dark:bg-oai-gray-600"}`}
-                        />
-                      </span>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="truncate font-medium text-oai-black dark:text-white">{provider.name}</span>
-                          <span className="rounded-full bg-oai-gray-100 px-2 py-0.5 text-xs text-oai-gray-500 dark:bg-oai-gray-800 dark:text-oai-gray-400">
-                            {provider.category === "official"
-                              ? copy("pswitch.provider.category.official")
-                              : copy("pswitch.provider.category.custom")}
-                          </span>
-                          {isCurrent ? (
-                            <span className="inline-flex items-center gap-1 text-xs font-medium text-oai-brand-600 dark:text-oai-brand-400">
-                              <Check className="h-3.5 w-3.5" />
-                              {copy("pswitch.current_badge")}
-                            </span>
-                          ) : null}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant={isCurrent ? "ghost" : "primary"}
-                        size="sm"
-                        disabled={busy || isCurrent}
-                        onClick={() => setSwitchTarget(provider)}
-                      >
-                        {copy("pswitch.action.switch")}
-                      </Button>
-                      <Button variant="ghost" size="sm" aria-label={copy("pswitch.action.edit")} onClick={() => openEditDialog(provider)}>
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button variant="ghost" size="sm" aria-label={copy("pswitch.action.delete")} onClick={() => setDeleteTarget(provider)}>
-                        <Trash2 className="h-4 w-4 text-red-500 dark:text-red-400" />
-                      </Button>
-                    </div>
-                  </div>
-                </Card>
-              );
-            })}
-          </div>
+          <DndContext
+            sensors={dragSensors}
+            collisionDetection={closestCenter}
+            onDragStart={() => setNotice(null)}
+            onDragOver={({ over }) => setDragOverId(over ? String(over.id) : null)}
+            onDragCancel={() => setDragOverId(null)}
+            onDragEnd={(event) => void handleDragEnd(event)}
+          >
+            <SortableContext
+              items={providerRows.map((row) => row.id)}
+              strategy={verticalListSortingStrategy}
+            >
+              <div className="flex flex-col gap-2.5">
+                {providerRows.map((provider) => (
+                  <SortableProviderCard
+                    key={provider.id}
+                    provider={provider}
+                    isCurrent={appState.current === provider.id}
+                    busy={busy}
+                    dragLabel={copy("pswitch.provider.drag_handle", { name: provider.name })}
+                    isDragOver={dragOverId === provider.id}
+                    onSwitch={() => setSwitchTarget(provider)}
+                    onEdit={() => void openDialog(provider)}
+                    onDelete={() => setDeleteTarget(provider)}
+                  />
+                ))}
+              </div>
+            </SortableContext>
+          </DndContext>
         )}
       </section>
 
@@ -492,13 +536,16 @@ export function ProviderSwitchPage() {
               </select>
             </div>
             {liveFile ? (
-              <span className="min-w-0 truncate font-mono text-xs text-oai-gray-400 dark:text-oai-gray-500" title={liveFile.path}>
+              <span
+                className="min-w-0 truncate font-mono text-xs text-oai-gray-400 dark:text-oai-gray-500"
+                title={liveFile.path}
+              >
                 {liveFile.path}
               </span>
             ) : null}
           </div>
           {!liveExists ? (
-            <p className="mb-2 text-xs text-oai-amber-600 dark:text-oai-amber-400">{copy("pswitch.live.missing")}</p>
+            <p className="mb-2 text-xs text-oai-amber-dark dark:text-oai-amber-light">{copy("pswitch.live.missing")}</p>
           ) : null}
           {liveError ? (
             <p className="mb-2 text-xs text-red-600 dark:text-red-400" role="alert">
@@ -553,76 +600,17 @@ export function ProviderSwitchPage() {
         </p>
       ) : null}
 
-      {/* Provider add/edit dialog */}
-      {editorOpen ? (
-        <CredsModal
-          open={editorOpen}
-          busy={busy}
-          onClose={() => setEditorOpen(false)}
-          title={editingProvider ? copy("pswitch.provider.dialog.edit_title") : copy("pswitch.provider.dialog.add_title")}
-          subtitle={copy("pswitch.provider.config_hint")}
-        >
-          <div className="space-y-4 overflow-y-auto px-5 py-4">
-            {presets.length ? (
-              <EditorField label={copy("pswitch.provider.preset")}>
-                <select
-                  value=""
-                  onChange={(event) => applyPreset(event.target.value)}
-                  aria-label={copy("pswitch.provider.preset")}
-                  className="w-full rounded-lg border border-oai-gray-200 bg-white px-3 py-2 text-sm text-oai-black focus:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 dark:border-oai-gray-800 dark:bg-oai-gray-900 dark:text-white"
-                >
-                  <option value="">{copy("pswitch.provider.preset.none")}</option>
-                  {presets.map((preset) => (
-                    <option key={preset.id} value={preset.id}>
-                      {preset.nameKey ? copy(preset.nameKey) : preset.name}
-                    </option>
-                  ))}
-                </select>
-              </EditorField>
-            ) : null}
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-[1fr_auto]">
-              <EditorField label={copy("pswitch.provider.name")}>
-                <input
-                  type="text"
-                  value={editorName}
-                  onChange={(event) => setEditorName(event.target.value)}
-                  placeholder={copy("pswitch.provider.name_placeholder")}
-                  className="w-full rounded-lg border border-oai-gray-200 bg-white px-3 py-2 text-sm text-oai-black focus:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 dark:border-oai-gray-800 dark:bg-oai-gray-900 dark:text-white"
-                />
-              </EditorField>
-              <EditorField label={copy("pswitch.provider.category")}>
-                <select
-                  value={editorCategory}
-                  onChange={(event) => setEditorCategory(event.target.value === "official" ? "official" : "custom")}
-                  aria-label={copy("pswitch.provider.category")}
-                  className="rounded-lg border border-oai-gray-200 bg-white px-3 py-2 text-sm text-oai-black focus:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 dark:border-oai-gray-800 dark:bg-oai-gray-900 dark:text-white"
-                >
-                  <option value="official">{copy("pswitch.provider.category.official")}</option>
-                  <option value="custom">{copy("pswitch.provider.category.custom")}</option>
-                </select>
-              </EditorField>
-            </div>
-            <EditorField label={copy("pswitch.provider.config")} error={editorError}>
-              <textarea
-                value={editorConfig}
-                onChange={(event) => setEditorConfig(event.target.value)}
-                spellCheck={false}
-                rows={12}
-                aria-label={copy("pswitch.provider.config")}
-                className="w-full resize-y rounded-lg border border-oai-gray-200 bg-oai-gray-50 p-3 font-mono text-xs text-oai-black focus:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 dark:border-oai-gray-800 dark:bg-oai-gray-950 dark:text-oai-gray-100"
-              />
-            </EditorField>
-          </div>
-          <div className="flex justify-end gap-2 border-t border-oai-gray-100 px-5 py-3 dark:border-oai-gray-800">
-            <Button variant="secondary" size="sm" disabled={busy} onClick={() => setEditorOpen(false)}>
-              {copy("pswitch.action.cancel")}
-            </Button>
-            <Button size="sm" disabled={busy || !editorName.trim()} onClick={() => void saveEditor()}>
-              {copy("pswitch.action.save")}
-            </Button>
-          </div>
-        </CredsModal>
-      ) : null}
+      <ProviderEditDialog
+        open={dialogOpen}
+        busy={busy}
+        app={activeApp}
+        appState={appState}
+        presets={presets}
+        editing={editingProvider}
+        onClose={() => setDialogOpen(false)}
+        onSaved={onDialogSaved}
+        onError={onDialogError}
+      />
 
       <ConfirmModal
         open={!!switchTarget}
@@ -657,7 +645,11 @@ export function ProviderSwitchPage() {
       <ConfirmModal
         open={!!restoreTarget}
         title={copy("pswitch.backups.restore_confirm_title")}
-        description={restoreTarget ? copy("pswitch.backups.restore_confirm_desc", { target: restoreTarget.target || liveFileId }) : ""}
+        description={
+          restoreTarget
+            ? copy("pswitch.backups.restore_confirm_desc", { target: restoreTarget.target || liveFileId })
+            : ""
+        }
         confirmLabel={copy("pswitch.action.restore")}
         cancelLabel={copy("pswitch.action.cancel")}
         destructive
@@ -674,10 +666,14 @@ export function ProviderSwitchPage() {
             aria-modal="true"
             aria-label={copy("pswitch.live.conflict_title")}
           >
-            <h2 className="text-base font-semibold text-oai-black dark:text-white">{copy("pswitch.live.conflict_title")}</h2>
-            <p className="mt-2 text-sm leading-6 text-oai-gray-600 dark:text-oai-gray-300">{copy("pswitch.live.conflict_desc")}</p>
+            <h2 className="text-base font-semibold text-oai-black dark:text-white">
+              {copy("pswitch.live.conflict_title")}
+            </h2>
+            <p className="mt-2 text-sm leading-6 text-oai-gray-600 dark:text-oai-gray-300">
+              {copy("pswitch.live.conflict_desc")}
+            </p>
             <div className="mt-4 flex justify-end gap-2">
-              <Button variant="secondary" size="sm" disabled={busy} onClick={() => void keepTheirs()}>
+              <Button variant="secondary" size="sm" disabled={busy} onClick={keepTheirs}>
                 {copy("pswitch.live.conflict_keep_theirs")}
               </Button>
               <Button size="sm" disabled={busy} onClick={() => void keepMine()}>
@@ -689,6 +685,14 @@ export function ProviderSwitchPage() {
       ) : null}
     </div>
   );
+}
+
+function officialIconFor(app) {
+  return { claude: "sparkles", codex: "terminal", gemini: "gem" }[app] || "sparkles";
+}
+
+function officialColorFor(app) {
+  return { claude: "orange", codex: "green", gemini: "sky" }[app] || "gray";
 }
 
 function appLabel(app) {

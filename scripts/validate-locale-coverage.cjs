@@ -51,6 +51,8 @@ const SOURCE_IDENTICAL_KEY_ALLOWLIST = [
   // verbatim in zh/zh-TW.
   /^pswitch[.]tab[.]/,
   /^pswitch[.]live[.]file[.](?:settings|config|auth|env)$/,
+  // Provider-switch form fields: env/protocol identifiers stay verbatim.
+  /^pswitch[.]field[.]/,
 ];
 
 // Developer-facing product terms stay in English in Chinese UI copy. Scope

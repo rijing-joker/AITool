@@ -183,9 +183,115 @@ function projectGemini({ prev, target, liveEnv }) {
   return text;
 }
 
+// ---------------------------------------------------------------------------
+// Live extraction + merge (import-from-live and the editor view)
+// ---------------------------------------------------------------------------
+
+// Pull only the provider-owned (floor) fields out of a parsed live config —
+// used when importing the current live state as a new provider, so
+// user-owned keys (hooks, permissions, …) are never absorbed into a preset.
+function extractClaudeConfig(live) {
+  const out = {};
+  if (!live || typeof live !== "object") return out;
+  if (live.env && typeof live.env === "object") {
+    const env = {};
+    for (const [key, value] of Object.entries(live.env)) {
+      if (floor.isClaudeProjectedEnv(key)) env[key] = value;
+    }
+    if (Object.keys(env).length > 0) out.env = env;
+  }
+  for (const key of Object.keys(live)) {
+    if (floor.isClaudeFloorTop(key)) out[key] = live[key];
+  }
+  return out;
+}
+
+function extractCodexConfig(liveToml) {
+  const config = {};
+  if (typeof liveToml !== "string") return { auth: null, config };
+  for (const key of floor.CODEX_FLOOR_TOP) {
+    const value = toml.getTopLevelValue(liveToml, key);
+    if (value !== undefined) config[key] = value;
+  }
+  const table = toml.getTableEntries(liveToml, floor.CODEX_PROVIDER_TABLE);
+  if (table && Object.keys(table).length > 0) {
+    config.model_providers = { custom: table };
+  }
+  return { auth: null, config };
+}
+
+function extractGeminiConfig(liveEnv) {
+  const env = {};
+  if (typeof liveEnv !== "string") return { env };
+  for (const entry of envfile.parseEnvFile(liveEnv)) {
+    if (floor.isGeminiFloorEnv(entry.key)) env[entry.key] = entry.value;
+  }
+  return { env };
+}
+
+// Editor-view merge (cc-switch's read_live_provider_settings): when editing
+// the *current* provider, the live files may have been hand-edited since the
+// switch — overlay the live value onto every key the provider itself owns,
+// so the form shows the state that is actually in effect. Only provider-
+// defined paths are overlaid; live keys the provider never managed stay out.
+function mergeLiveIntoSettingsConfig(app, settingsConfig, live) {
+  const merged = JSON.parse(JSON.stringify(settingsConfig || {}));
+
+  if (app === "claude") {
+    const liveConfig = live && typeof live === "object" ? live : {};
+    const liveEnv = liveConfig.env && typeof liveConfig.env === "object" ? liveConfig.env : {};
+    if (merged.env && typeof merged.env === "object") {
+      for (const key of Object.keys(merged.env)) {
+        if (key in liveEnv) merged.env[key] = liveEnv[key];
+      }
+    }
+    for (const key of Object.keys(merged)) {
+      if (key === "env") continue;
+      if (key in liveConfig) merged[key] = liveConfig[key];
+    }
+    return merged;
+  }
+
+  if (app === "codex") {
+    const liveToml = typeof live === "string" ? live : "";
+    const config = merged.config && typeof merged.config === "object" ? merged.config : {};
+    for (const key of Object.keys(config)) {
+      if (key === "model_providers") continue;
+      const value = toml.getTopLevelValue(liveToml, key);
+      if (value !== undefined) config[key] = value;
+    }
+    const providerTable =
+      config.model_providers && typeof config.model_providers === "object" ? config.model_providers.custom : null;
+    if (providerTable && typeof providerTable === "object") {
+      const liveTable = toml.getTableEntries(liveToml, floor.CODEX_PROVIDER_TABLE) || {};
+      for (const key of Object.keys(providerTable)) {
+        if (key in liveTable) providerTable[key] = liveTable[key];
+      }
+    }
+    return merged;
+  }
+
+  if (app === "gemini") {
+    const liveEnv = typeof live === "string" ? live : "";
+    if (merged.env && typeof merged.env === "object") {
+      for (const key of Object.keys(merged.env)) {
+        const value = envfile.getEnvValue(liveEnv, key);
+        if (value !== undefined) merged.env[key] = value;
+      }
+    }
+    return merged;
+  }
+
+  return merged;
+}
+
 module.exports = {
   projectClaude,
   projectCodex,
   projectGemini,
   resolveCodexAuth,
+  extractClaudeConfig,
+  extractCodexConfig,
+  extractGeminiConfig,
+  mergeLiveIntoSettingsConfig,
 };

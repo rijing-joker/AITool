@@ -2271,6 +2271,12 @@ pswitch.catalog.levels_unset,pswitch,ProviderSwitchPage,ProviderEditDialog,catal
 pswitch.catalog.levels_default,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_levels_default,Default,,active
 pswitch.catalog.not_in_catalog,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_not_in_catalog,This model is not in the mapping — Codex's /model menu won't list it (direct requests still work).,,active
 pswitch.catalog.add_to_mapping,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_add_to_mapping,Add to mapping,,active
+pswitch.models.dropdown_aria,pswitch,ProviderSwitchPage,ProviderEditDialog,models_dropdown_aria,Select model,,active
+pswitch.models.search,pswitch,ProviderSwitchPage,ProviderEditDialog,models_search,Search models…,,active
+pswitch.models.none,pswitch,ProviderSwitchPage,ProviderEditDialog,models_none,No matching models.,,active
+pswitch.models.fetch_success,pswitch,ProviderSwitchPage,ProviderEditDialog,models_fetch_success,Fetched {{count}} models.,,active
+pswitch.models.fetch_empty,pswitch,ProviderSwitchPage,ProviderEditDialog,models_fetch_empty,The endpoint returned no models.,,active
+pswitch.models.fetch_failed,pswitch,ProviderSwitchPage,ProviderEditDialog,models_fetch_failed,Failed to fetch models: {{error}},,active
 pswitch.hint.claude_official,pswitch,ProviderSwitchPage,ProviderEditDialog,claude_official,Uses the Claude login on this machine — no key needed.,,active
 pswitch.hint.codex_official,pswitch,ProviderSwitchPage,ProviderEditDialog,codex_official,Uses the ChatGPT login for Codex; AiTool stashes and restores it across switches.,,active
 pswitch.provider.applied_live,pswitch,ProviderSwitchPage,ProviderEditDialog,applied_live,"Saved ""{{name}}"" and applied it to the live config files.",,active

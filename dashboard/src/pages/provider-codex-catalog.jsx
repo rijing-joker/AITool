@@ -1,6 +1,7 @@
 import React from "react";
-import { ChevronDown, Download, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, Plus, Trash2 } from "lucide-react";
 import { copy } from "../lib/copy";
+import { ModelDropdown } from "./provider-model-dropdown";
 
 // Codex model mapping editor — port of cc-switch's catalog table: each row
 // (menu display name, requested model, context window, reasoning levels)
@@ -11,7 +12,7 @@ import { copy } from "../lib/copy";
 // Mirror of the backend's CODEX_REASONING_LEVELS (ascending depth).
 const CODEX_REASONING_LEVELS = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
 
-function RowInput({ value, onChange, placeholder, ariaLabel, numeric, datalistId }) {
+function RowInput({ value, onChange, placeholder, ariaLabel, numeric }) {
   return (
     <input
       type="text"
@@ -21,7 +22,6 @@ function RowInput({ value, onChange, placeholder, ariaLabel, numeric, datalistId
         onChange(next);
       }}
       placeholder={placeholder || ""}
-      list={datalistId}
       autoComplete="off"
       spellCheck={false}
       aria-label={ariaLabel}
@@ -166,20 +166,23 @@ export function CodexCatalogEditor({ models, onChange, fetchedModels, fetchState
                 placeholder={copy("pswitch.catalog.col_display")}
                 ariaLabel={copy("pswitch.catalog.col_display")}
               />
-              <div className="flex gap-1">
+              <div className="flex min-w-0 gap-1">
                 <RowInput
                   value={row.model}
                   onChange={(value) => updateRow(index, { model: value })}
                   placeholder={copy("pswitch.catalog.col_model")}
                   ariaLabel={copy("pswitch.catalog.col_model")}
-                  datalistId={hasFetched ? "catalog-model-options" : undefined}
                 />
                 {hasFetched ? (
-                  <datalist id="catalog-model-options">
-                    {fetchedModels.slice(0, 200).map((model) => (
-                      <option key={model} value={model} />
-                    ))}
-                  </datalist>
+                  <ModelDropdown
+                    models={fetchedModels}
+                    onSelect={(model) =>
+                      updateRow(index, {
+                        model,
+                        displayName: String(row.displayName || "").trim() ? row.displayName : model,
+                      })
+                    }
+                  />
                 ) : null}
               </div>
               <RowInput

@@ -1335,5 +1335,11 @@
   "pswitch.catalog.levels_unset": "未设置",
   "pswitch.catalog.levels_default": "默认",
   "pswitch.catalog.not_in_catalog": "该模型不在模型映射中，Codex 的 /model 菜单不会列出它（直接请求仍然有效）。",
-  "pswitch.catalog.add_to_mapping": "加入映射"
+  "pswitch.catalog.add_to_mapping": "加入映射",
+  "pswitch.models.dropdown_aria": "选择模型",
+  "pswitch.models.search": "搜索模型…",
+  "pswitch.models.none": "没有匹配的模型。",
+  "pswitch.models.fetch_success": "获取到 {{count}} 个模型。",
+  "pswitch.models.fetch_empty": "端点没有返回模型。",
+  "pswitch.models.fetch_failed": "获取模型列表失败：{{error}}"
 }

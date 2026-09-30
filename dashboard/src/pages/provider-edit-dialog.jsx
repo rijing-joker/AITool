@@ -3,9 +3,11 @@ import { ChevronDown, ChevronUp, Download, ExternalLink, Eye, EyeOff, Wand2, X }
 import { copy } from "../lib/copy";
 import { providerSwitchApi } from "../lib/provider-switch-api";
 import { Button } from "../ui/components";
+import { showToast } from "../ui/components/Toast";
 import { EndpointSpeedTestDialog } from "./provider-speed-test";
 import { ProviderIconPicker, iconComponentFor } from "./provider-icon-picker";
 import { CodexCatalogEditor } from "./provider-codex-catalog";
+import { ModelDropdown, ModelInputAction } from "./provider-model-dropdown";
 
 // Add/edit provider dialog — an interaction port of cc-switch's
 // AddProviderDialog / EditProviderDialog / ProviderForm: preset cards with
@@ -218,39 +220,26 @@ function EndpointField({ label, value, onChange, isFullUrl, onFullUrlChange, onM
 }
 
 function ModelInput({ label, value, onChange, models, fetchState, onFetch, placeholder, hint }) {
-  const datalistId = `model-options-${label.replace(/\W+/g, "-").toLowerCase()}`;
   return (
     <div>
-      <FieldLabel label={label}>
-        {onFetch ? (
-          <button
-            type="button"
-            onClick={onFetch}
-            disabled={fetchState === "loading"}
-            className="inline-flex items-center gap-1 text-xs font-medium text-oai-brand-600 hover:underline disabled:opacity-50 dark:text-oai-brand-400"
-          >
-            <Download className="h-3.5 w-3.5" />
-            {fetchState === "loading" ? copy("pswitch.models.fetching") : copy("pswitch.models.fetch")}
-          </button>
-        ) : null}
-      </FieldLabel>
-      <input
-        type="text"
-        value={String(value ?? "")}
-        onChange={(event) => onChange(event.target.value)}
-        placeholder={placeholder || ""}
-        list={models && models.length ? datalistId : undefined}
-        spellCheck={false}
-        aria-label={label}
-        className="w-full rounded-lg border border-oai-gray-200 bg-white px-3 py-2 font-mono text-sm text-oai-black focus:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 dark:border-oai-gray-800 dark:bg-oai-gray-900 dark:text-white"
-      />
-      {models && models.length ? (
-        <datalist id={datalistId}>
-          {models.slice(0, 200).map((model) => (
-            <option key={model} value={model} />
-          ))}
-        </datalist>
-      ) : null}
+      <FieldLabel label={label} />
+      <div className="flex gap-1">
+        <input
+          type="text"
+          value={String(value ?? "")}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder={placeholder || ""}
+          spellCheck={false}
+          aria-label={label}
+          className="w-full min-w-0 rounded-lg border border-oai-gray-200 bg-white px-3 py-2 font-mono text-sm text-oai-black focus:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 dark:border-oai-gray-800 dark:bg-oai-gray-900 dark:text-white"
+        />
+        <ModelInputAction
+          models={models}
+          fetchState={fetchState}
+          onFetch={onFetch}
+          onSelect={onChange}
+        />
+      </div>
       {hint ? <p className="mt-1 text-xs text-oai-gray-400 dark:text-oai-gray-500">{hint}</p> : null}
     </div>
   );
@@ -522,9 +511,18 @@ export function ProviderEditDialog({
       });
       setFetchedModels(res.models);
       setFetchState("done");
+      if (res.models.length > 0) {
+        showToast({ title: copy("pswitch.models.fetch_success", { count: res.models.length }) });
+      } else {
+        showToast({ title: copy("pswitch.models.fetch_empty") });
+      }
     } catch (err) {
       setFetchState("idle");
-      setError(err instanceof Error ? err.message : String(err));
+      showToast({
+        title: copy("pswitch.models.fetch_failed", {
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      });
     }
   }, [currentApiKey, currentEndpoint, fetchState, meta.isFullUrl, selectedPreset]);
 
@@ -1085,14 +1083,25 @@ export function ProviderEditDialog({
                 <div className="space-y-4 border-t border-oai-gray-100 px-4 py-4 dark:border-oai-gray-800">
                   <div>
                     <FieldLabel label={copy("pswitch.advanced.model_mapping")}>
-                      <button
-                        type="button"
-                        onClick={fillAllRoles}
-                        className="inline-flex items-center gap-1 text-xs font-medium text-oai-brand-600 hover:underline dark:text-oai-brand-400"
-                      >
-                        <Wand2 className="h-3.5 w-3.5" />
-                        {copy("pswitch.advanced.fill_all")}
-                      </button>
+                      <span className="flex items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={fillAllRoles}
+                          className="inline-flex items-center gap-1 text-xs font-medium text-oai-brand-600 hover:underline dark:text-oai-brand-400"
+                        >
+                          <Wand2 className="h-3.5 w-3.5" />
+                          {copy("pswitch.advanced.fill_all")}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void fetchModels()}
+                          disabled={fetchState === "loading"}
+                          className="inline-flex items-center gap-1 text-xs font-medium text-oai-brand-600 hover:underline disabled:opacity-50 dark:text-oai-brand-400"
+                        >
+                          <Download className="h-3.5 w-3.5" />
+                          {fetchState === "loading" ? copy("pswitch.models.fetching") : copy("pswitch.models.fetch")}
+                        </button>
+                      </span>
                     </FieldLabel>
                     <div className="space-y-2">
                       {CLAUDE_MODEL_ROLES.map((role) => (
@@ -1117,27 +1126,32 @@ export function ProviderEditDialog({
                               {copy("pswitch.advanced.no_display_name")}
                             </span>
                           )}
-                          <input
-                            type="text"
-                            value={withoutOneM(String(getPath(draft, role.modelPath) ?? ""))}
-                            onChange={(event) =>
-                              setDraft((current) => {
-                                const suffix = oneMOn(role) ? "[1m]" : "";
-                                return setPath(current, role.modelPath, `${event.target.value}${suffix}`);
-                              })
-                            }
-                            list={fetchedModels && fetchedModels.length ? `role-models-${role.key}` : undefined}
-                            placeholder="claude-sonnet-4-6"
-                            aria-label={`${copy(role.labelKey)} model`}
-                            className="w-full rounded-md border border-oai-gray-200 bg-white px-2 py-1.5 font-mono text-xs text-oai-black focus:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 dark:border-oai-gray-800 dark:bg-oai-gray-950 dark:text-white"
-                          />
-                          {fetchedModels && fetchedModels.length ? (
-                            <datalist id={`role-models-${role.key}`}>
-                              {fetchedModels.slice(0, 200).map((model) => (
-                                <option key={model} value={model} />
-                              ))}
-                            </datalist>
-                          ) : null}
+                          <div className="flex min-w-0 gap-1">
+                            <input
+                              type="text"
+                              value={withoutOneM(String(getPath(draft, role.modelPath) ?? ""))}
+                              onChange={(event) =>
+                                setDraft((current) => {
+                                  const suffix = oneMOn(role) ? "[1m]" : "";
+                                  return setPath(current, role.modelPath, `${event.target.value}${suffix}`);
+                                })
+                              }
+                              placeholder="claude-sonnet-4-6"
+                              aria-label={`${copy(role.labelKey)} model`}
+                              className="w-full min-w-0 rounded-md border border-oai-gray-200 bg-white px-2 py-1.5 font-mono text-xs text-oai-black focus:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 dark:border-oai-gray-800 dark:bg-oai-gray-950 dark:text-white"
+                            />
+                            {fetchedModels && fetchedModels.length ? (
+                              <ModelDropdown
+                                models={fetchedModels}
+                                onSelect={(model) =>
+                                  setDraft((current) => {
+                                    const suffix = oneMOn(role) ? "[1m]" : "";
+                                    return setPath(current, role.modelPath, `${model}${suffix}`);
+                                  })
+                                }
+                              />
+                            ) : null}
+                          </div>
                           {role.supportsOneM ? (
                             <label className="flex shrink-0 cursor-pointer items-center gap-1 text-xs text-oai-gray-500 dark:text-oai-gray-400">
                               <input
@@ -1159,17 +1173,7 @@ export function ProviderEditDialog({
                     </p>
                   </div>
                   <div>
-                    <FieldLabel label={copy("pswitch.advanced.api_format")}>
-                      <button
-                        type="button"
-                        onClick={() => void fetchModels()}
-                        disabled={fetchState === "loading"}
-                        className="inline-flex items-center gap-1 text-xs font-medium text-oai-brand-600 hover:underline disabled:opacity-50 dark:text-oai-brand-400"
-                      >
-                        <Download className="h-3.5 w-3.5" />
-                        {fetchState === "loading" ? copy("pswitch.models.fetching") : copy("pswitch.models.fetch")}
-                      </button>
-                    </FieldLabel>
+                    <FieldLabel label={copy("pswitch.advanced.api_format")} />
                     <select
                       value={meta.apiFormat || "anthropic"}
                       onChange={(event) =>

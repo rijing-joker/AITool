@@ -118,6 +118,13 @@
       "cache_write": 0.167,
       "note": "See hy3-preview-agent."
     },
+    "qwen3.8-flash": {
+      "input": 0.15,
+      "output": 0.47,
+      "cache_read": 0.016,
+      "cache_write": 0.2,
+      "note": "Alibaba Model Studio Singapore (International), USD per MTok, verified 2026-09-29: https://www.alibabacloud.com/help/en/model-studio/qwen3-8-flash . Reference API estimate; other regions/providers can have different rates. Issue #715."
+    },
     "hy4-preview": {
       "input": 0.833,
       "output": 2.5,

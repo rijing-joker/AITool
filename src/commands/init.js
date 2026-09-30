@@ -71,6 +71,7 @@ const {
   piAgentDirCollidesWithOmp,
   resolvePrimeAgentDir,
   resolveMinimaxCodeSessionsDir,
+  resolveCommandCodeHome,
   resolveLmstudioLogFiles,
   resolveUnslothDbPath,
   resolveAnythingllmDbPath,
@@ -154,6 +155,7 @@ const SUPPORTED_PROVIDERS = [
   "Devin CLI",
   "Cline",
   "MiniMax Code",
+  "Command Code",
 ];
 
 async function cmdInit(argv) {
@@ -817,6 +819,15 @@ async function applyIntegrationSetup({
     const minimaxCodeSessionsDir = resolveMinimaxCodeSessionsDir(process.env);
     if (minimaxCodeSessionsDir && fssync.existsSync(minimaxCodeSessionsDir)) {
       summary.push({ label: "MiniMax Code", status: "detected", detail: "Passive usage reader (no hook needed)" });
+    }
+  }
+
+  // Command Code (`cmd`): passive reader of ~/.commandcode/projects — no hook
+  // installation needed, and none exists to install.
+  {
+    const commandCodeProjectsDir = path.join(resolveCommandCodeHome(process.env), "projects");
+    if (fssync.existsSync(commandCodeProjectsDir)) {
+      summary.push({ label: "Command Code", status: "detected", detail: "Passive session reader (no hook needed)" });
     }
   }
 

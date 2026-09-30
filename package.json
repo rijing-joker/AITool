@@ -1,7 +1,7 @@
 {
   "name": "aitool",
   "version": "0.1.0",
-  "description": "All-in-one AI toolbox: multi-provider AI gateway (EasyCLIProxyAPI / CLIProxyAPI) + local-first token usage and cost tracking for 41 tools (AI coding CLIs and agents), with a dashboard, desktop pet, widgets, and achievements.",
+  "description": "All-in-one AI toolbox: multi-provider AI gateway (EasyCLIProxyAPI / CLIProxyAPI) + local-first token usage and cost tracking for 42 tools (AI coding CLIs and agents), with a dashboard, desktop pet, widgets, and achievements.",
   "main": "src/cli.js",
   "bin": {
     "aitool": "bin/tracker.js"

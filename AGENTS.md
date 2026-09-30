@@ -9,7 +9,7 @@ If any project-specific instructions appear to conflict across files, follow `CL
 **AiTool** — one local-first app merging two products (a rebrand from TokenTracker is in progress; legacy names remain everywhere on purpose, don't mass-rename):
 
 - **AI Proxy** — a Node re-implementation of EasyCLIProxyAPI's management layer that drives the external Go binary `cli-proxy-api` (pinned in `core-version.txt`, fetched by `scripts/fetch-core.cjs`, `AITOOL_CORE_BIN` to override). Exposes `/v1/chat/completions`, `/v1/messages`, `/v1beta/models` on `127.0.0.1:8318` (loopback-only; port configurable in `config.yaml`). Per-request usage lands in `~/.aitool/proxy/usage/*.jsonl`.
-- **Token Tracker analytics** — the vendored TokenTracker CLI + dashboard tracking 41 AI coding tools, unchanged.
+- **Token Tracker analytics** — the vendored TokenTracker CLI + dashboard tracking 42 AI coding tools, unchanged.
 
 Data flow: AI CLI hooks → `src/lib/rollout.js` parsers (`parse*Incremental`) → `~/.tokentracker/queue.jsonl` (UTC half-hour buckets, append-only) → local API (`src/lib/local-api.js`: `/functions/*` analytics + `/api/proxy/*` proxy) → dashboard. Proxied requests enter the same buckets with `source: "cliproxy"` via `src/lib/proxy/usage-bridge.js`.
 

@@ -1,0 +1,16 @@
+# Keep the build context small: only the Node runtime + dashboard sources are
+# needed to build the image (desktop apps and their toolchains are not).
+.git
+.github
+node_modules
+dashboard/node_modules
+dashboard/dist
+test
+docs
+TokenTrackerBar
+TokenTrackerWin
+TokenTrackerWin.Tests
+TokenTrackerLinux
+desktop
+*.log
+.DS_Store

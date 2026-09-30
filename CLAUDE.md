@@ -33,10 +33,11 @@ npm run validate:ui-hardcode              # no hardcoded UI strings
 npm run validate:guardrails               # architecture guardrails
 node bin/tracker.js serve --no-sync       # local dashboard server on :7680 (proxy starts with it unless disabled)
 node bin/tracker.js proxy status|start|stop|install|config   # AI proxy lifecycle (--local <CLIProxyAPI checkout> builds a fork)
+docker compose up -d --build              # container: dashboard :7680 + proxy :8318, published on host loopback only
 cd desktop && npx tauri dev               # desktop shell dev (npx tauri build → AiTool.app + dmg)
 ```
 
-`npm run dashboard:dev` skips the CLI backend; to verify `src/` changes use `node bin/tracker.js serve`.
+`npm run dashboard:dev` skips the CLI backend; to verify `src/` changes use `node bin/tracker.js serve`. Everything binds 127.0.0.1 by default; `AITOOL_BIND_HOST` overrides the bind address (serve + proxy config.yaml reconcile to it) — that is how the Docker image makes published ports reachable.
 
 ## What's where
 

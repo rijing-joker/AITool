@@ -1,0 +1,32 @@
+# Run AiTool (dashboard + local API + AI proxy) in Docker:
+#
+#   docker compose up -d --build
+#   dashboard:  http://127.0.0.1:7680
+#   AI proxy:   http://127.0.0.1:8318   (OpenAI/Anthropic-compatible client
+#                                       calls, e.g. a Claude Code base URL)
+#
+# Ports publish on the host loopback only. AiTool's local API is login-free
+# and trusts loopback origins (mutation auth = local token + loopback Origin),
+# so keep it off public interfaces unless you front it with an authenticating
+# reverse proxy. To expose on your LAN, change the port bindings to 0.0.0.0
+# and make sure you understand that trust model first.
+
+services:
+  aitool:
+    build: .
+    image: aitool:local
+    container_name: aitool
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:7680:7680"
+      - "127.0.0.1:8318:8318"
+    environment:
+      # Bind all interfaces inside the container so published ports work.
+      AITOOL_BIND_HOST: "0.0.0.0"
+    volumes:
+      - aitool-tracker:/root/.tokentracker
+      - aitool-proxy:/root/.aitool
+
+volumes:
+  aitool-tracker:
+  aitool-proxy:

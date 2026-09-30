@@ -22,6 +22,16 @@ const WSL_DEFAULT_PORT = 7681;
 const DEFAULT_MAX_PORT_ATTEMPTS = 20;
 const NPM_PACKAGE_NAME = "tokentracker-cli";
 const LOCAL_BIND_HOST = "127.0.0.1";
+// Docker / reverse-proxy deployments need the server reachable beyond the
+// container's own loopback (a port mapping cannot reach 127.0.0.1 inside the
+// container). AITOOL_BIND_HOST overrides the bind address; the default stays
+// loopback-only, matching the local-first security posture.
+const BIND_HOST_ENV = "AITOOL_BIND_HOST";
+const UNSPECIFIED_BIND_HOSTS = new Set(["0.0.0.0", "::", "*"]);
+function resolveBindHost(env = process.env) {
+  const value = String(env[BIND_HOST_ENV] || "").trim();
+  return value || LOCAL_BIND_HOST;
+}
 const NATIVE_BACKGROUND_SYNC_INTERVAL_MS = 60_000;
 const STATIC_ASSET_EXTENSIONS = new Set([
   ".css",
@@ -180,8 +190,10 @@ async function cmdServe(argv) {
     );
   }
   let port;
+  const bindHost = resolveBindHost();
   try {
     port = await listenOnAvailablePort(server, opts.port, {
+      host: bindHost,
       allowFallback: !opts.portExplicit,
       ensurePortFreeFn: opts.portExplicit ? ensurePortFree : null,
       onRetry: (failedPort) => {
@@ -252,19 +264,23 @@ async function cmdServe(argv) {
   }
 
   {
-    const url = getLocalServerUrl(port);
-    process.stdout.write(
-      [
-        "",
-        `  tokentracker dashboard running at:`,
-        "",
-        `    ${url}`,
-        "",
-        `  Data: ${queuePath}`,
-        `  Press Ctrl+C to stop.`,
-        "",
-      ].join("\n"),
-    );
+    // 0.0.0.0/:: are not usable URLs — show the loopback URL for them but
+    // state the actual bind host so the override is never silent.
+    const displayHost = UNSPECIFIED_BIND_HOSTS.has(bindHost) ? LOCAL_BIND_HOST : bindHost;
+    const url = `http://${displayHost}:${port}`;
+    const lines = [
+      "",
+      `  tokentracker dashboard running at:`,
+      "",
+      `    ${url}`,
+      "",
+      `  Data: ${queuePath}`,
+    ];
+    if (bindHost !== LOCAL_BIND_HOST) {
+      lines.push(`  Bind host: ${bindHost} (set via ${BIND_HOST_ENV})`);
+    }
+    lines.push(`  Press Ctrl+C to stop.`, "");
+    process.stdout.write(lines.join("\n"));
 
     if (opts.open) {
       openInBrowser(url);
@@ -701,6 +717,7 @@ module.exports = {
   buildPortInUseHint,
   NPM_PACKAGE_NAME,
   LOCAL_BIND_HOST,
+  resolveBindHost,
   isPortUnavailableError,
   listenOnAvailablePort,
   getLocalServerUrl,

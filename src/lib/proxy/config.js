@@ -12,6 +12,13 @@ const paths = require("./paths");
 // config.yaml: the core bcrypt-hashes `management.secret-key` in place on
 // first load, so config.yaml alone can never authenticate the dashboard
 // (same constraint EasyCLIProxyAPI solves by keeping the key in its GUI config).
+// Docker / reverse-proxy deployments set AITOOL_BIND_HOST so the dashboard
+// and the core are reachable through published container ports. Empty by
+// default = loopback only, matching the local-first security posture.
+function configuredBindHost() {
+  return String(process.env.AITOOL_BIND_HOST || "").trim();
+}
+
 function defaultConfigYaml(managementKey) {
   return YAML.stringify({
     "config-version": 8,
@@ -20,7 +27,7 @@ function defaultConfigYaml(managementKey) {
       // never needs to be reachable from the network by default. 8318 (not
       // the core's conventional 8317) so AiTool coexists with a standalone
       // CLIProxyAPI / EasyCLIProxyAPI install on the same machine.
-      host: "127.0.0.1",
+      host: configuredBindHost() || "127.0.0.1",
       port: 8318,
     },
     management: {
@@ -55,6 +62,10 @@ function configExists() {
 // Always reconciles `management.secret-key` in config.yaml with the
 // settings.json plaintext copy, so a core started afterwards accepts the
 // dashboard's Bearer token even if the core hashed an earlier key.
+// AITOOL_BIND_HOST is likewise reconciled: the host is a bootstrap-pinned
+// field, and a config.yaml carried over from a loopback-only host (e.g. a
+// mounted Docker volume) must follow the override instead of silently
+// keeping the container unreachable.
 function ensureConfig() {
   ensureDirs();
   const settings = readSettings();
@@ -62,15 +73,22 @@ function ensureConfig() {
     settings.managementKey = crypto.randomBytes(24).toString("hex");
     writeSettings(settings);
   }
+  const bindHost = configuredBindHost();
   if (!configExists()) {
     fs.writeFileSync(paths.configPath, defaultConfigYaml(settings.managementKey), { mode: 0o600 });
     return { created: true };
   }
   const existing = readConfig();
+  let changed = false;
+  if (existing && bindHost && existing?.server?.host !== bindHost) {
+    existing.server = { ...(existing.server || {}), host: bindHost };
+    changed = true;
+  }
   if (existing && existing?.management?.["secret-key"] !== settings.managementKey) {
     existing.management = { ...(existing.management || {}), "secret-key": settings.managementKey };
-    writeConfig(existing);
+    changed = true;
   }
+  if (changed) writeConfig(existing);
   return { created: false };
 }
 

@@ -2208,7 +2208,6 @@ pswitch.action.cancel,pswitch,ProviderSwitchPage,ProviderSwitchPage,action_cance
 pswitch.action.restore,pswitch,ProviderSwitchPage,ProviderSwitchPage,action_restore,Restore,,active
 pswitch.current_badge,pswitch,ProviderSwitchPage,ProviderSwitchPage,current_badge,Active,,active
 pswitch.section.providers,pswitch,ProviderSwitchPage,ProviderSwitchPage,section_providers,Providers,,active
-pswitch.section.live,pswitch,ProviderSwitchPage,ProviderSwitchPage,section_live,Live config files,,active
 pswitch.section.backups,pswitch,ProviderSwitchPage,ProviderSwitchPage,section_backups,Backups,,active
 pswitch.providers.empty,pswitch,ProviderSwitchPage,ProviderSwitchPage,providers_empty,No providers yet. Add one from a preset to get started.,,active
 pswitch.provider.name,pswitch,ProviderSwitchPage,ProviderSwitchPage,provider_name,Name,,active
@@ -2218,24 +2217,12 @@ pswitch.provider.category.official,pswitch,ProviderSwitchPage,ProviderSwitchPage
 pswitch.provider.category.custom,pswitch,ProviderSwitchPage,ProviderSwitchPage,provider_category_custom,Custom,,active
 pswitch.provider.preset,pswitch,ProviderSwitchPage,ProviderSwitchPage,provider_preset,Preset,,active
 pswitch.provider.preset.none,pswitch,ProviderSwitchPage,ProviderSwitchPage,provider_preset_none,Start from blank,,active
-pswitch.provider.config,pswitch,ProviderSwitchPage,ProviderSwitchPage,provider_config,Provider config (JSON),,active
+pswitch.provider.config,pswitch,ProviderSwitchPage,ProviderEditDialog,provider_config,Config file,,active
+pswitch.provider.config_editor_hint,pswitch,ProviderSwitchPage,ProviderEditDialog,provider_config_editor_hint,"Form edits sync into this JSON in real time; you can also edit the JSON directly — this is exactly what gets saved.",,active
 pswitch.provider.config_hint,pswitch,ProviderSwitchPage,ProviderSwitchPage,provider_config_hint,"Only key fields (endpoints, credentials, model names) are applied on switch; everything else in the live file is left untouched.",,active
 pswitch.provider.invalid_json,pswitch,ProviderSwitchPage,ProviderSwitchPage,provider_invalid_json,Config is not valid JSON: {{error}},,active
 pswitch.provider.dialog.add_title,pswitch,ProviderSwitchPage,ProviderSwitchPage,provider_dialog_add_title,Add provider,,active
 pswitch.provider.dialog.edit_title,pswitch,ProviderSwitchPage,ProviderSwitchPage,provider_dialog_edit_title,Edit provider,,active
-pswitch.live.file,pswitch,ProviderSwitchPage,ProviderSwitchPage,live_file,File,,active
-pswitch.live.file.settings,pswitch,ProviderSwitchPage,ProviderSwitchPage,live_file_settings,settings.json,,active
-pswitch.live.file.config,pswitch,ProviderSwitchPage,ProviderSwitchPage,live_file_config,config.toml,,active
-pswitch.live.file.auth,pswitch,ProviderSwitchPage,ProviderSwitchPage,live_file_auth,auth.json,,active
-pswitch.live.file.env,pswitch,ProviderSwitchPage,ProviderSwitchPage,live_file_env,.env,,active
-pswitch.live.missing,pswitch,ProviderSwitchPage,ProviderSwitchPage,live_missing,This file does not exist yet. Saving creates it.,,active
-pswitch.live.save,pswitch,ProviderSwitchPage,ProviderSwitchPage,live_save,Save file,,active
-pswitch.live.editor_label,pswitch,ProviderSwitchPage,ProviderSwitchPage,live_editor_label,File content,,active
-pswitch.live.saved,pswitch,ProviderSwitchPage,ProviderSwitchPage,live_saved,Saved {{file}}.,,active
-pswitch.live.conflict_title,pswitch,ProviderSwitchPage,ProviderSwitchPage,live_conflict_title,File changed on disk,,active
-pswitch.live.conflict_desc,pswitch,ProviderSwitchPage,ProviderSwitchPage,live_conflict_desc,"The file changed while you were editing. Keep your version, or load the one on disk?",,active
-pswitch.live.conflict_keep_mine,pswitch,ProviderSwitchPage,ProviderSwitchPage,live_conflict_keep_mine,Keep mine,,active
-pswitch.live.conflict_keep_theirs,pswitch,ProviderSwitchPage,ProviderSwitchPage,live_conflict_keep_theirs,Use disk version,,active
 pswitch.backups.empty,pswitch,ProviderSwitchPage,ProviderSwitchPage,backups_empty,No backups yet. A backup is taken before the first managed write to each file.,,active
 pswitch.backups.restore_confirm_title,pswitch,ProviderSwitchPage,ProviderSwitchPage,backups_restore_confirm_title,Restore backup,,active
 pswitch.backups.restore_confirm_desc,pswitch,ProviderSwitchPage,ProviderSwitchPage,backups_restore_confirm_desc,Overwrite the live {{target}} file with this backup? The current file is backed up first.,,active
@@ -2275,7 +2262,6 @@ pswitch.provider.live_prefill_hint,pswitch,ProviderSwitchPage,ProviderEditDialog
 pswitch.provider.loading_live,pswitch,ProviderSwitchPage,ProviderEditDialog,loading_live,Reading the live config files…,,active
 pswitch.provider.notes,pswitch,ProviderSwitchPage,ProviderEditDialog,notes,Notes,,active
 pswitch.provider.preset_no_fields,pswitch,ProviderSwitchPage,ProviderEditDialog,preset_no_fields,This preset has no fields to fill in.,,active
-pswitch.provider.raw_json,pswitch,ProviderSwitchPage,ProviderEditDialog,raw_json,JSON config (advanced),,active
 pswitch.provider.saved,pswitch,ProviderSwitchPage,ProviderEditDialog,saved,"Saved ""{{name}}"".",,active
 pswitch.provider.website_url,pswitch,ProviderSwitchPage,ProviderEditDialog,website_url,Website,,active
 pswitch.field.endpoint,pswitch,ProviderSwitchPage,ProviderEditDialog,endpoint,API Endpoint,,active

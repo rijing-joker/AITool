@@ -47,10 +47,8 @@ const SOURCE_IDENTICAL_KEY_ALLOWLIST = [
   /^proxy[.]upstream[.]field[.]baseUrl$/,
   /^proxy[.]creds[.]settings[.]websockets$/,
   /^proxy[.]creds[.]models[.]rulesPlaceholder$/,
-  // Provider-switch page: CLI product names and live config file names stay
-  // verbatim in zh/zh-TW.
+  // Provider-switch page: CLI product names stay verbatim in zh/zh-TW.
   /^pswitch[.]tab[.]/,
-  /^pswitch[.]live[.]file[.](?:settings|config|auth|env)$/,
   // Provider-switch form fields: env/protocol identifiers stay verbatim.
   /^pswitch[.]field[.]/,
   // The 1M context checkbox label is a unit, not a word.

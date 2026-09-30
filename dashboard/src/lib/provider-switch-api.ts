@@ -121,28 +121,6 @@ export interface ProviderSwitchStatus {
   apps: ProviderSwitchAppState[];
 }
 
-export interface ProviderSwitchPreset {
-  id: string;
-  name: string;
-  nameKey?: string;
-  category: "official" | "custom";
-  settingsConfig: unknown;
-}
-
-export interface ProviderSwitchLiveFile {
-  ok: true;
-  file: ProviderSwitchTargetFile;
-  content: string | null;
-  baseHash: string;
-}
-
-export interface ProviderSwitchLiveConflict {
-  ok: false;
-  error: "conflict";
-  currentContent: string | null;
-  currentHash: string;
-}
-
 export interface ProviderSwitchBackup {
   name: string;
   file: string;
@@ -194,32 +172,12 @@ export const providerSwitchApi = {
     return mutate("/api/provider-switch/providers/reorder", "POST", { app, orderedIds });
   },
 
-  getLive(app: ProviderSwitchApp, file: string): Promise<ProviderSwitchLiveFile> {
-    return get(`/api/provider-switch/live?app=${encodeURIComponent(app)}&file=${encodeURIComponent(file)}`);
-  },
-
-  saveLive(
-    app: ProviderSwitchApp,
-    file: string,
-    payload: { content: string; baseHash: string; policy?: "refuse" | "keepMine" },
-  ): Promise<{ ok: true; backup: string | null }> {
-    return mutate(
-      `/api/provider-switch/live?app=${encodeURIComponent(app)}&file=${encodeURIComponent(file)}`,
-      "PUT",
-      payload,
-    );
-  },
-
   listBackups(app: ProviderSwitchApp): Promise<{ ok: true; app: string; backups: ProviderSwitchBackup[] }> {
     return get(`/api/provider-switch/backups?app=${encodeURIComponent(app)}`);
   },
 
-  restoreBackup(
-    app: ProviderSwitchApp,
-    backup: string,
-    file?: string,
-  ): Promise<{ ok: true; restored: string; backup: string | null }> {
-    return mutate("/api/provider-switch/backups/restore", "POST", { app, backup, file });
+  restoreBackup(app: ProviderSwitchApp, backup: string): Promise<{ ok: true; restored: string; backup: string | null }> {
+    return mutate("/api/provider-switch/backups/restore", "POST", { app, backup });
   },
 
   createProvider(

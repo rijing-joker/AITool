@@ -17,7 +17,6 @@ import {
 import { CSS as DndCss } from "@dnd-kit/utilities";
 import {
   Check,
-  FileCode,
   Globe,
   GripVertical,
   Import,
@@ -164,14 +163,6 @@ export function ProviderSwitchPage() {
   const [switchTarget, setSwitchTarget] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
 
-  // live file editor state
-  const [liveFileId, setLiveFileId] = useState("settings");
-  const [liveContent, setLiveContent] = useState("");
-  const [liveBaseHash, setLiveBaseHash] = useState("");
-  const [liveExists, setLiveExists] = useState(true);
-  const [liveError, setLiveError] = useState(null);
-  const [conflict, setConflict] = useState(null);
-
   // backups
   const [backups, setBackups] = useState([]);
   const [restoreTarget, setRestoreTarget] = useState(null);
@@ -214,44 +205,28 @@ export function ProviderSwitchPage() {
     }
   }, []);
 
-  const loadLive = useCallback(async (app, fileId) => {
-    setLiveError(null);
-    try {
-      const res = await providerSwitchApi.getLive(app, fileId);
-      setLiveContent(res.content ?? "");
-      setLiveBaseHash(res.baseHash);
-      setLiveExists(!!res.file.exists);
-    } catch (error) {
-      setLiveError(error instanceof Error ? error.message : String(error));
-    }
-  }, []);
-
   useEffect(() => {
     void refreshStatus();
   }, [refreshStatus]);
 
   useEffect(() => {
-    const fileIds = appState?.files.map((file) => file.id) || [];
-    if (!fileIds.includes(liveFileId) && fileIds.length) {
-      setLiveFileId(fileIds[0]);
-    }
-  }, [appState, liveFileId]);
-
-  useEffect(() => {
-    void loadLive(activeApp, liveFileId);
     void refreshBackups(activeApp);
-  }, [activeApp, liveFileId, loadLive, refreshBackups]);
+  }, [activeApp, refreshBackups]);
 
   const openDialog = useCallback(
     async (provider) => {
       setEditingProvider(provider || null);
-      setDialogOpen(true);
+      // Load presets before opening so the dialog's init effect sees them and
+      // auto-selects the first preset (add mode) on mount.
+      let list = [];
       try {
         const res = await providerSwitchApi.getPresets(activeApp);
-        setPresets(res.presets || []);
+        list = res.presets || [];
       } catch {
-        setPresets([]);
+        list = [];
       }
+      setPresets(list);
+      setDialogOpen(true);
     },
     [activeApp],
   );
@@ -274,14 +249,13 @@ export function ProviderSwitchPage() {
       setNotice(copy("pswitch.switch.done", { name: switchTarget.name, files: res.wrote.join(", ") }));
       setSwitchTarget(null);
       await refreshStatus();
-      await loadLive(activeApp, liveFileId);
       await refreshBackups(activeApp);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error));
     } finally {
       setBusy(false);
     }
-  }, [activeApp, liveFileId, loadLive, refreshBackups, refreshStatus, switchTarget]);
+  }, [activeApp, refreshBackups, refreshStatus, switchTarget]);
 
   const confirmDelete = useCallback(async () => {
     if (!deleteTarget) return;
@@ -336,81 +310,20 @@ export function ProviderSwitchPage() {
     [activeApp, providerRows],
   );
 
-  const saveLive = useCallback(
-    async (policy = "refuse") => {
-      setBusy(true);
-      setLiveError(null);
-      try {
-        await providerSwitchApi.saveLive(activeApp, liveFileId, {
-          content: liveContent,
-          baseHash: liveBaseHash,
-          policy,
-        });
-        setConflict(null);
-        setNotice(copy("pswitch.live.saved", { file: liveFileId }));
-        await loadLive(activeApp, liveFileId);
-        await refreshBackups(activeApp);
-      } catch (error) {
-        if (error?.status === 409 && error?.payload?.currentHash !== undefined) {
-          setConflict({
-            currentContent: error.payload.currentContent ?? null,
-            currentHash: error.payload.currentHash,
-          });
-        } else {
-          setLiveError(error instanceof Error ? error.message : String(error));
-        }
-      } finally {
-        setBusy(false);
-      }
-    },
-    [activeApp, liveBaseHash, liveContent, liveFileId, loadLive, refreshBackups],
-  );
-
-  const keepMine = useCallback(async () => {
-    if (!conflict) return;
-    setConflict(null);
-    setBusy(true);
-    try {
-      await providerSwitchApi.saveLive(activeApp, liveFileId, {
-        content: liveContent,
-        baseHash: conflict.currentHash,
-        policy: "keepMine",
-      });
-      setNotice(copy("pswitch.live.saved", { file: liveFileId }));
-      await loadLive(activeApp, liveFileId);
-    } catch (error) {
-      setLiveError(error instanceof Error ? error.message : String(error));
-    } finally {
-      setBusy(false);
-    }
-  }, [activeApp, conflict, liveContent, liveFileId, loadLive]);
-
-  const keepTheirs = useCallback(() => {
-    if (!conflict) return;
-    setConflict(null);
-    setLiveContent(conflict.currentContent ?? "");
-    setLiveBaseHash(conflict.currentHash);
-  }, [conflict]);
-
   const confirmRestore = useCallback(async () => {
     if (!restoreTarget) return;
     setBusy(true);
     try {
-      await providerSwitchApi.restoreBackup(activeApp, restoreTarget.name, restoreTarget.target || liveFileId);
+      await providerSwitchApi.restoreBackup(activeApp, restoreTarget.name);
       setRestoreTarget(null);
       setNotice(copy("pswitch.backups.restored"));
-      await loadLive(activeApp, liveFileId);
       await refreshBackups(activeApp);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error));
     } finally {
       setBusy(false);
     }
-  }, [activeApp, liveFileId, loadLive, refreshBackups, restoreTarget]);
-
-  const liveFile = useMemo(() => {
-    return appState?.files.find((file) => file.id === liveFileId) || null;
-  }, [appState, liveFileId]);
+  }, [activeApp, refreshBackups, restoreTarget]);
 
   return (
     <div className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6">
@@ -517,58 +430,6 @@ export function ProviderSwitchPage() {
       </section>
 
       <section className="mb-8">
-        <SectionTitle>{copy("pswitch.section.live")}</SectionTitle>
-        <Card>
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <FileCode className="h-4 w-4 text-oai-gray-400" />
-              <select
-                value={liveFileId}
-                onChange={(event) => setLiveFileId(event.target.value)}
-                aria-label={copy("pswitch.live.file")}
-                className="rounded-lg border border-oai-gray-200 bg-white px-2.5 py-1.5 text-sm text-oai-black focus:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 dark:border-oai-gray-800 dark:bg-oai-gray-900 dark:text-white"
-              >
-                {(appState?.files || []).map((file) => (
-                  <option key={file.id} value={file.id}>
-                    {fileLabel(file.id)}
-                  </option>
-                ))}
-              </select>
-            </div>
-            {liveFile ? (
-              <span
-                className="min-w-0 truncate font-mono text-xs text-oai-gray-400 dark:text-oai-gray-500"
-                title={liveFile.path}
-              >
-                {liveFile.path}
-              </span>
-            ) : null}
-          </div>
-          {!liveExists ? (
-            <p className="mb-2 text-xs text-oai-amber-dark dark:text-oai-amber-light">{copy("pswitch.live.missing")}</p>
-          ) : null}
-          {liveError ? (
-            <p className="mb-2 text-xs text-red-600 dark:text-red-400" role="alert">
-              {liveError}
-            </p>
-          ) : null}
-          <textarea
-            value={liveContent}
-            onChange={(event) => setLiveContent(event.target.value)}
-            spellCheck={false}
-            rows={14}
-            aria-label={copy("pswitch.live.editor_label")}
-            className="w-full resize-y rounded-lg border border-oai-gray-200 bg-oai-gray-50 p-3 font-mono text-xs text-oai-black focus:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 dark:border-oai-gray-800 dark:bg-oai-gray-950 dark:text-oai-gray-100"
-          />
-          <div className="mt-3 flex justify-end">
-            <Button size="sm" disabled={busy} onClick={() => void saveLive("refuse")}>
-              {copy("pswitch.live.save")}
-            </Button>
-          </div>
-        </Card>
-      </section>
-
-      <section className="mb-8">
         <SectionTitle>{copy("pswitch.section.backups")}</SectionTitle>
         <Card>
           {backups.length === 0 ? (
@@ -647,7 +508,7 @@ export function ProviderSwitchPage() {
         title={copy("pswitch.backups.restore_confirm_title")}
         description={
           restoreTarget
-            ? copy("pswitch.backups.restore_confirm_desc", { target: restoreTarget.target || liveFileId })
+            ? copy("pswitch.backups.restore_confirm_desc", { target: restoreTarget.target || "" })
             : ""
         }
         confirmLabel={copy("pswitch.action.restore")}
@@ -657,32 +518,6 @@ export function ProviderSwitchPage() {
         onConfirm={() => void confirmRestore()}
         onCancel={() => setRestoreTarget(null)}
       />
-
-      {conflict ? (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4 backdrop-blur-[2px]">
-          <div
-            className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl ring-1 ring-oai-gray-200 dark:bg-oai-gray-950 dark:ring-oai-gray-800"
-            role="dialog"
-            aria-modal="true"
-            aria-label={copy("pswitch.live.conflict_title")}
-          >
-            <h2 className="text-base font-semibold text-oai-black dark:text-white">
-              {copy("pswitch.live.conflict_title")}
-            </h2>
-            <p className="mt-2 text-sm leading-6 text-oai-gray-600 dark:text-oai-gray-300">
-              {copy("pswitch.live.conflict_desc")}
-            </p>
-            <div className="mt-4 flex justify-end gap-2">
-              <Button variant="secondary" size="sm" disabled={busy} onClick={keepTheirs}>
-                {copy("pswitch.live.conflict_keep_theirs")}
-              </Button>
-              <Button size="sm" disabled={busy} onClick={() => void keepMine()}>
-                {copy("pswitch.live.conflict_keep_mine")}
-              </Button>
-            </div>
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -698,21 +533,6 @@ function officialColorFor(app) {
 function appLabel(app) {
   const entry = APPS.find((item) => item.id === app);
   return entry ? copy(entry.labelKey) : app;
-}
-
-function fileLabel(fileId) {
-  switch (fileId) {
-    case "settings":
-      return copy("pswitch.live.file.settings");
-    case "config":
-      return copy("pswitch.live.file.config");
-    case "auth":
-      return copy("pswitch.live.file.auth");
-    case "env":
-      return copy("pswitch.live.file.env");
-    default:
-      return fileId;
-  }
 }
 
 export default ProviderSwitchPage;

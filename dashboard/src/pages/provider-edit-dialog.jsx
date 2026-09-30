@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronUp, Download, ExternalLink, Eye, EyeOff, Wand2, X } from "lucide-react";
 import { copy } from "../lib/copy";
 import { providerSwitchApi } from "../lib/provider-switch-api";
@@ -12,10 +12,11 @@ import { ProviderIconPicker, iconComponentFor } from "./provider-icon-picker";
 // settingsConfig template at dotted paths, per-app advanced sections
 // (endpoint speed test, full-URL switch, claude model mapping with 1M flags
 // and one-click fill, model list fetching, apiFormat, custom User-Agent,
-// request overrides), the JSON editor with quick toggles + format, an icon
-// picker, and soft validation before save. When editing the currently-active
-// provider the initial values are read back from the live config files
-// (read_live_provider_settings).
+// request overrides), the always-visible config-file JSON editor with quick
+// toggles + format above the action buttons (cc-switch's CommonConfigEditor),
+// an icon picker, and soft validation before save. When editing the
+// currently-active provider the initial values are read back from the live
+// config files (read_live_provider_settings).
 
 const AVATAR_COLORS = {
   orange: "bg-orange-100 text-orange-600 dark:bg-orange-500/15 dark:text-orange-400",
@@ -255,9 +256,22 @@ function ModelInput({ label, value, onChange, models, fetchState, onFetch, place
 }
 
 function JsonTextarea({ value, onChange, rows = 8, error, label }) {
+  const ref = useRef(null);
+  // Embedded webviews can drop React's synthetic onChange for textareas while
+  // still delivering real input events; this native listener keeps the commit
+  // path alive there. Running alongside React's onChange is idempotent.
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    const forward = () => onChange(node.value);
+    node.addEventListener("input", forward);
+    return () => node.removeEventListener("input", forward);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onChange]);
   return (
     <div>
       <textarea
+        ref={ref}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         spellCheck={false}
@@ -305,7 +319,6 @@ export function ProviderEditDialog({
   const [websiteUrl, setWebsiteUrl] = useState("");
   const [notes, setNotes] = useState("");
   const [claudeApiKeyName, setClaudeApiKeyName] = useState("ANTHROPIC_AUTH_TOKEN");
-  const [rawOpen, setRawOpen] = useState(false);
   const [rawText, setRawText] = useState("");
   const [rawError, setRawError] = useState(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -362,12 +375,13 @@ export function ProviderEditDialog({
     [name],
   );
 
-  // Initialize each time the dialog opens.
+  // Initialize each time the dialog opens. rawText is intentionally not
+  // touched here — the mirror effect below repopulates it from the new draft
+  // (resetting it here would desync rawText from rawTextRef and leave the
+  // editor blank).
   useEffect(() => {
     if (!open) return;
     setError(null);
-    setRawOpen(false);
-    setRawText("");
     setRawError(null);
     setPendingIssues(null);
     setFetchedModels(null);
@@ -599,27 +613,53 @@ export function ProviderEditDialog({
     },
   ];
 
-  // --- raw JSON editor ---
-  const openRaw = () => {
-    setRawText(JSON.stringify(draft, null, 2));
-    setRawOpen(true);
-  };
-  const closeRaw = () => {
+  // --- 配置文件 editor (cc-switch's CommonConfigEditor) ---
+  // Two-way mirror between the form draft and the JSON text: form edits
+  // re-serialize into the textarea, typed edits parse back into the draft
+  // (and therefore the form) as soon as they are valid JSON. In-progress
+  // invalid text stays in the textarea and is flagged via rawError.
+  // rawTextRef mirrors rawText exactly (every writer updates both) so save()
+  // can rely on it; the repopulate decision reads the rawText state itself.
+  const rawTextRef = useRef("");
+  const configInvalid = (err) =>
+    copy("pswitch.provider.invalid_json", { error: err instanceof Error ? err.message : String(err) });
+  useEffect(() => {
+    let parsed = null;
     try {
-      const parsed = JSON.parse(rawText);
+      parsed = JSON.parse(rawText);
+    } catch {
+      parsed = null;
+    }
+    if (JSON.stringify(parsed) !== JSON.stringify(draft ?? {})) {
+      const next = JSON.stringify(draft ?? {}, null, 2);
+      rawTextRef.current = next;
+      setRawText(next);
+      setRawError(null);
+    }
+    // rawText is read, not tracked: typed edits commit through
+    // handleConfigTextChange and must not re-trigger repopulation.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft]);
+  const handleConfigTextChange = (text) => {
+    rawTextRef.current = text;
+    setRawText(text);
+    try {
+      const parsed = JSON.parse(text);
+      if (!parsed || typeof parsed !== "object") throw new Error("config must be a JSON object");
       setDraft(parsed);
-      setRawOpen(false);
       setRawError(null);
     } catch (err) {
-      setRawError(copy("pswitch.provider.invalid_json", { error: err instanceof Error ? err.message : String(err) }));
+      setRawError(configInvalid(err));
     }
   };
-  const formatRaw = () => {
+  const formatConfigText = () => {
     try {
-      setRawText(JSON.stringify(JSON.parse(rawText), null, 2));
+      const next = JSON.stringify(JSON.parse(rawTextRef.current), null, 2);
+      rawTextRef.current = next;
+      setRawText(next);
       setRawError(null);
     } catch (err) {
-      setRawError(copy("pswitch.provider.invalid_json", { error: err instanceof Error ? err.message : String(err) }));
+      setRawError(configInvalid(err));
     }
   };
 
@@ -638,14 +678,15 @@ export function ProviderEditDialog({
   };
 
   const save = async (force) => {
-    let payloadConfig = draft;
-    if (rawOpen) {
-      try {
-        payloadConfig = JSON.parse(rawText);
-      } catch (err) {
-        setRawError(copy("pswitch.provider.invalid_json", { error: err instanceof Error ? err.message : String(err) }));
-        return;
-      }
+    // The visible JSON text is the save source (cc-switch keeps the config
+    // string in its form state the same way) — it mirrors the draft exactly
+    // unless the user is mid-edit on invalid JSON, which blocks saving.
+    let payloadConfig;
+    try {
+      payloadConfig = JSON.parse(rawTextRef.current);
+    } catch (err) {
+      setRawError(configInvalid(err));
+      return;
     }
     if (!force) {
       const issues = collectIssues();
@@ -1255,52 +1296,44 @@ export function ProviderEditDialog({
           </div>
 
           <div>
-            <button
-              type="button"
-              onClick={() => (rawOpen ? closeRaw() : openRaw())}
-              className="inline-flex items-center gap-1 text-sm font-medium text-oai-gray-500 transition-colors hover:text-oai-black dark:text-oai-gray-400 dark:hover:text-white"
-            >
-              {rawOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-              {copy("pswitch.provider.raw_json")}
-            </button>
-            {rawOpen ? (
-              <div className="mt-2">
-                {showQuickToggles ? (
-                  <div className="mb-2 flex flex-wrap gap-x-4 gap-y-1.5">
-                    {quickToggles.map((toggle) => (
-                      <label
-                        key={toggle.key}
-                        className="flex cursor-pointer items-center gap-1.5 text-xs text-oai-gray-600 dark:text-oai-gray-300"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={toggle.get()}
-                          onChange={(event) => toggle.set(event.target.checked)}
-                          className="h-3.5 w-3.5 rounded border-oai-gray-300 accent-oai-brand-500"
-                        />
-                        {copy(toggle.labelKey)}
-                      </label>
-                    ))}
-                  </div>
-                ) : null}
-                <div className="mb-2 flex justify-end">
-                  <button
-                    type="button"
-                    onClick={formatRaw}
-                    className="text-xs font-medium text-oai-brand-600 hover:underline dark:text-oai-brand-400"
+            <FieldLabel label={copy("pswitch.provider.config")} />
+            <p className="mt-1 text-xs text-oai-gray-400 dark:text-oai-gray-500">
+              {copy("pswitch.provider.config_editor_hint")}
+            </p>
+            {showQuickToggles ? (
+              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1.5">
+                {quickToggles.map((toggle) => (
+                  <label
+                    key={toggle.key}
+                    className="flex cursor-pointer items-center gap-1.5 text-xs text-oai-gray-600 dark:text-oai-gray-300"
                   >
-                    {copy("pswitch.json.format")}
-                  </button>
-                </div>
-                <JsonTextarea
-                  value={rawText}
-                  onChange={(event) => setRawText(event.target.value)}
-                  rows={10}
-                  error={rawError}
-                  label={copy("pswitch.provider.config")}
-                />
+                    <input
+                      type="checkbox"
+                      checked={toggle.get()}
+                      onChange={(event) => toggle.set(event.target.checked)}
+                      className="h-3.5 w-3.5 rounded border-oai-gray-300 accent-oai-brand-500"
+                    />
+                    {copy(toggle.labelKey)}
+                  </label>
+                ))}
               </div>
             ) : null}
+            <div className="mt-2 flex justify-end">
+              <button
+                type="button"
+                onClick={formatConfigText}
+                className="text-xs font-medium text-oai-brand-600 hover:underline dark:text-oai-brand-400"
+              >
+                {copy("pswitch.json.format")}
+              </button>
+            </div>
+            <JsonTextarea
+              value={rawText}
+              onChange={handleConfigTextChange}
+              rows={12}
+              error={rawError}
+              label={copy("pswitch.provider.config")}
+            />
           </div>
 
           {pendingIssues ? (

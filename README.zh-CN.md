@@ -6,10 +6,11 @@
 
 ### 一个工具箱搞定 AI 编码工作流 —— 多提供商 AI 网关 + Token 用量仪表盘，合一的本地应用。
 
-AiTool 把两个开源项目融合为一个本地优先的产品：
+AiTool 把三个开源项目融合为一个本地优先的产品：
 
 - **AI 代理**（来自 [EasyCLIProxyAPI](https://github.com/router-for-me/EasyCLIProxyAPI) / [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI)，MIT）—— 在本地运行网关，把你的服务提供方账号通过 OpenAI / Anthropic / Gemini 兼容端点暴露出去，并记录每次请求的用量。
 - **Token 用量分析**（来自 [TokenTracker](https://github.com/xiufengsun/TokenTracker)，MIT）—— 本地优先的仪表盘，追踪 42 款 AI 编码工具的 Token 用量与成本。
+- **供应商配置管理**（来自 [cc-switch](https://github.com/farion1231/cc-switch)，MIT）—— 管理各工具的供应商预设，一键切换 Claude Code / Codex CLI / Gemini CLI 的配置文件，无需手改 JSON / TOML。
 
 UI 全程使用 TokenTracker 的设计语言 —— 一个仪表盘覆盖两个世界：代理请求会汇入与原生 CLI 工具相同的趋势、模型分解和成本视图。
 
@@ -23,6 +24,7 @@ UI 全程使用 TokenTracker 的设计语言 —— 一个仪表盘覆盖两个�
 ┌────────────────────────────── AiTool 仪表盘 (localhost:7680) ────────────────────────────────┐
 │  侧边栏                                                                                       │
 │  ├── AI Proxy        ← 新增：代理生命周期、服务提供方、密钥、请求级记录、配置                    │
+│  ├── Provider Configs ← 新增：一键切换 AI CLI 配置文件（cc-switch 移植）                         │
 │  └── Tokens / Sessions / Limits / …  ← TokenTracker 分析（42 款 CLI 工具），保持不变            │
 └──────────────┬──────────────────────────────────────────────────────────┬────────────────────┘
                │ /api/proxy/*                                             │ /functions/*（本地 API）
@@ -69,6 +71,26 @@ aitool proxy stop
 aitool proxy config     # 显示路径与端点
 ```
 
+### Docker
+
+```bash
+docker compose up -d --build
+# 仪表盘：http://127.0.0.1:7680 —— AI 代理：http://127.0.0.1:8318
+```
+
+一个容器运行仪表盘 + 本地 API 和 AI 代理 core（钉住版本的 CLIProxyAPI 二进制在构建时按镜像平台预下载）。数据保存在命名卷中，对应 `~/.tokentracker` 与 `~/.aitool`。端口默认只发布到宿主机**回环地址** —— 本地 API 免登录且信任回环 Origin，未经认证反向代理切勿发布到公网接口。容器内一切通过 `AITOOL_BIND_HOST` 绑定 `0.0.0.0`；裸机运行时默认仍是 `127.0.0.1`。
+
+## 供应商配置管理（来自 cc-switch）
+
+[cc-switch](https://github.com/farion1231/cc-switch) 配置文件模块的 Node 移植。按工具保存命名的供应商预设，在仪表盘的**供应商配置**页（侧边栏 → AI Proxy 分组）一键切换 —— 不用手改 JSON / TOML / env 文件。
+
+| | |
+| --- | --- |
+| **覆盖工具** | Claude Code（`~/.claude/settings.json`）· Codex CLI（`~/.codex/config.toml` + `auth.json`）· Gemini CLI（`~/.gemini/.env`） |
+| **切换模型** | 最小补丁投影（cc-switch 的"关键字段"表）：只写入供应商的关键字段 —— 地址、凭据、模型名；用户自有内容（hooks、permissions、注释）一律不动，上一家供应商的残留仅在未被改动时清除 |
+| **安全性** | 原子写入（凭据文件 0600）、每文件首次写入前自动备份（可在仪表盘恢复）、配置文件编辑器的磁盘冲突检测；Codex 官方 ChatGPT 登录在切向第三方中转时自动暂存、切回时还原 |
+| **存储位置** | `~/.aitool/provider-switch/` —— `providers.json`（预设 + 当前指针）、`codex-auth-stash.json`、`backups/` |
+
 ## AI 代理能力（来自 EasyCLIProxyAPI）
 
 通过仪表盘的 **AI Proxy** 页（标签页）或 core 的管理 API 管理：
@@ -113,9 +135,13 @@ src/lib/local-api.js     本地 API：/functions/*（用量）+ /api/proxy/*（�
 src/lib/proxy/           新增 — paths / config / manager / 管理 API 客户端 / 用量桥 / REST 处理
 src/commands/proxy.js    新增 — `aitool proxy …` 命令
 dashboard/               TokenTracker 仪表盘（Vite + React + Tailwind，oai 设计系统）
-  └── src/pages/ProxyPage.jsx   新增 — AI Proxy 页（5 个标签）
+  └── src/pages/ProxyPage.jsx   新增 — AI Proxy 页（7 个标签）
+src/lib/provider-switch/ 新增 — cc-switch 移植：供应商预设 → 配置文件切换（关键字段投影 / 备份）
+src/commands/…           src/lib/local-api.js 同时挂载 /api/provider-switch/*
+dashboard/…/ProviderSwitchPage.jsx  新增 — /provider-switch 页（供应商配置）
 scripts/fetch-core.cjs   新增 — 下载钉住版本的 CLIProxyAPI release 二进制
 core-version.txt         新增 — 钉住的 core 版本
+Dockerfile / docker-compose.yml   新增 — 容器运行（compose 仅发布回环端口）
 ```
 
 ## 第三方项目
@@ -123,6 +149,7 @@ core-version.txt         新增 — 钉住的 core 版本
 - [TokenTracker](https://github.com/xiufengsun/TokenTracker)（MIT）—— 作为基座并入：CLI、仪表盘、设计系统。
 - [EasyCLIProxyAPI](https://github.com/router-for-me/EasyCLIProxyAPI)（MIT）—— GUI-over-core 架构与功能集的参考；AiTool 用 Node 重新实现了管理层。
 - [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI)（MIT）—— 代理引擎，运行时作为外部二进制下载（不并入仓库）。
+- [cc-switch](https://github.com/farion1231/cc-switch)（MIT）—— 供应商预设 / 配置文件切换模块的参考；AiTool 用 Node 重新实现（仪表盘供应商配置页）。
 
 ## 许可证
 

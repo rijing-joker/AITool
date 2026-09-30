@@ -6,10 +6,11 @@
 
 ### One toolbox for your AI coding workflow — a multi-provider AI gateway plus a token usage dashboard, in one local app.
 
-AiTool merges two open-source projects into a single local-first product:
+AiTool merges three open-source projects into a single local-first product:
 
 - **AI Proxy** (from [EasyCLIProxyAPI](https://github.com/router-for-me/EasyCLIProxyAPI) / [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI), MIT) — run a local gateway that exposes your provider accounts through OpenAI / Anthropic / Gemini compatible endpoints, with per-request usage records.
 - **Token usage analytics** (from [TokenTracker](https://github.com/xiufengsun/TokenTracker), MIT) — the local-first dashboard that tracks token usage and cost across 42 AI coding tools.
+- **Provider config management** (from [cc-switch](https://github.com/farion1231/cc-switch), MIT) — manage per-tool provider presets and one-click switch the live config files of Claude Code / Codex CLI / Gemini CLI, without hand-editing JSON / TOML.
 
 The UI is TokenTracker's design language throughout — one dashboard for both worlds: proxied requests flow into the same trends, model breakdown, and cost views as your native CLI tools.
 
@@ -23,6 +24,7 @@ The UI is TokenTracker's design language throughout — one dashboard for both w
 ┌────────────────────────────── AiTool dashboard (localhost:7680) ─────────────────────────────┐
 │  Sidebar                                                                                     │
 │  ├── AI Proxy        ← NEW: proxy lifecycle, providers, keys, per-request records, config    │
+│  ├── Provider Configs ← NEW: one-click AI-CLI config-file switching (cc-switch port)         │
 │  └── Tokens / Sessions / Limits / …  ← TokenTracker analytics (42 CLI tools), unchanged      │
 └──────────────┬──────────────────────────────────────────────────────────┬────────────────────┘
                │ /api/proxy/*                                             │ /functions/* (local API)
@@ -74,6 +76,26 @@ aitool proxy stop
 aitool proxy config     # show paths and endpoint
 ```
 
+### Docker
+
+```bash
+docker compose up -d --build
+# dashboard: http://127.0.0.1:7680 — AI proxy: http://127.0.0.1:8318
+```
+
+One container runs the dashboard + local API and the AI proxy core (the pinned CLIProxyAPI binary is pre-fetched for the image platform at build time). Data persists in named volumes mapping `~/.tokentracker` and `~/.aitool`. Ports publish on the host **loopback only** — the local API is login-free and trusts loopback origins, so never publish it to a public interface without an authenticating reverse proxy. Inside the container everything binds `0.0.0.0` via `AITOOL_BIND_HOST`; on a bare host the default stays `127.0.0.1`.
+
+## Provider config management (from cc-switch)
+
+A Node port of [cc-switch](https://github.com/farion1231/cc-switch)'s config-file module. Keep named provider presets per tool and switch between them from the dashboard's **Provider Configs** page (sidebar → AI Proxy group) — no more hand-editing JSON / TOML / env files.
+
+| | |
+| --- | --- |
+| **Tools covered** | Claude Code (`~/.claude/settings.json`) · Codex CLI (`~/.codex/config.toml` + `auth.json`) · Gemini CLI (`~/.gemini/.env`) |
+| **Switch model** | Minimal-patch projection (cc-switch's "floor" key fields): only the provider's key fields — endpoint, credentials, model names — are written; user-owned content (hooks, permissions, comments) is never touched, and the previous provider's residue is removed only when you haven't changed it |
+| **Safety** | Atomic writes (`0600` for credential files), first-write backup per file restorable from the dashboard, disk-conflict detection in the live-file editor; Codex's official ChatGPT login is stashed when switching to a third-party relay and restored on switch-back |
+| **Storage** | `~/.aitool/provider-switch/` — `providers.json` (presets + current pointer), `codex-auth-stash.json`, `backups/` |
+
 ## AI Proxy capabilities (from EasyCLIProxyAPI)
 
 Managed through the dashboard's **AI Proxy** page (tabs) or the core's management API:
@@ -120,9 +142,13 @@ src/lib/local-api.js     local API: /functions/* (usage) + /api/proxy/* (new)
 src/lib/proxy/           NEW — paths / config / manager / management client / usage bridge / REST handlers
 src/commands/proxy.js    NEW — `aitool proxy …` command
 dashboard/               TokenTracker dashboard (Vite + React + Tailwind, oai design system)
-  └── src/pages/ProxyPage.jsx   NEW — AI Proxy page (5 tabs)
+  └── src/pages/ProxyPage.jsx   NEW — AI Proxy page (7 tabs)
+src/lib/provider-switch/ NEW — cc-switch port: provider presets → live config files (floors, projections, backups)
+src/commands/…           src/lib/local-api.js also mounts /api/provider-switch/*
+dashboard/…/ProviderSwitchPage.jsx  NEW — /provider-switch page (Provider Configs)
 scripts/fetch-core.cjs   NEW — downloads the pinned CLIProxyAPI release binary
 core-version.txt         NEW — pinned core version
+Dockerfile / docker-compose.yml   NEW — container run (compose publishes loopback ports)
 ```
 
 ## Third-party projects
@@ -130,6 +156,7 @@ core-version.txt         NEW — pinned core version
 - [TokenTracker](https://github.com/xiufengsun/TokenTracker) (MIT) — vendored as the base: CLI, dashboard, design system.
 - [EasyCLIProxyAPI](https://github.com/router-for-me/EasyCLIProxyAPI) (MIT) — reference for the GUI-over-core architecture and feature set; AiTool re-implements the management layer in Node.
 - [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) (MIT) — the proxy engine, downloaded at runtime as an external binary (not vendored).
+- [cc-switch](https://github.com/farion1231/cc-switch) (MIT) — reference for the provider-preset / config-file-switching module; AiTool re-implements it in Node (dashboard Provider Configs page).
 
 ## License
 

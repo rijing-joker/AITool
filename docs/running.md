@@ -7,6 +7,7 @@ How to get every surface of AiTool running locally: the dashboard GUI, the AI pr
 - **Node.js 20+** (the CLI, dashboard build, and everything the desktop shell spawns)
 - **Rust toolchain (cargo)** — only if you build a Tauri desktop app yourself
 - The AI proxy core additionally needs macOS / Linux / Windows; its Go binary is fetched automatically (no toolchain needed)
+- **Docker** — only for the container run (section 5)
 
 ## 1. Terminal: dashboard GUI at `localhost:7680`
 
@@ -73,11 +74,31 @@ Note: `desktop/` is built manually and is not part of the GitHub release workflo
 - **macOS** (`TokenTrackerBar/`, Swift menu bar app): local DMG build steps are in [CLAUDE.md → Local DMG build](../CLAUDE.md). Requires XcodeGen + Xcode.
 - **Windows** (`TokenTrackerWin/`, .NET 8 tray app) and **Linux** (`TokenTrackerLinux/`, Tauri 2 → AppImage/`.deb`/`.rpm`): CI is authoritative — see [CLAUDE.md → Release workflow](../CLAUDE.md). Each bundles its own `EmbeddedServer/` (Node + CLI + dashboard), so a repo-local dev loop is the same `serve` command as in section 1.
 
+## 5. Docker
+
+```bash
+docker compose up -d --build
+# dashboard: http://127.0.0.1:7680 — AI proxy: http://127.0.0.1:8318
+```
+
+Or without compose:
+
+```bash
+docker build -t aitool:local .
+docker run -d --name aitool -p 127.0.0.1:7680:7680 -p 127.0.0.1:8318:8318 aitool:local
+```
+
+- One container = dashboard + local API + AI proxy core. The pinned CLIProxyAPI binary is pre-fetched for the image platform at build time and staged at `/opt/aitool/cli-proxy-api` (outside the data dirs, so a mounted volume cannot shadow it); the proxy layer copies it into `~/.aitool/proxy/bin` on first start.
+- Data: named volumes `aitool-tracker` → `/root/.tokentracker` (analytics) and `aitool-proxy` → `/root/.aitool` (proxy config/usage + provider-switch presets/backups).
+- Ports publish on the host **loopback only**. The local API is login-free and trusts loopback origins — never publish it to a public interface without an authenticating reverse proxy.
+- Inside the container everything binds `0.0.0.0` via `AITOOL_BIND_HOST` (a container-bound `127.0.0.1` is unreachable through `-p`). On a bare host the default stays `127.0.0.1`; the proxy's `config.yaml` `server.host` reconciles to the override on start, including volumes carried over from a loopback-only machine.
+
 ## Troubleshooting
 
 | Symptom | Fix |
 | --- | --- |
 | `serve` says port 7680 is in use | Pass `--port 7681`. On Windows the DoSvc service holds 7680; under WSL the server auto-uses a different port for this reason. |
+| Docker: published port unreachable | `AITOOL_BIND_HOST=0.0.0.0` must be set in the container (the compose file does this) — a `127.0.0.1` bind inside the container is never reachable through `-p`. |
 | `proxy status` → "not installed" | Run `node bin/tracker.js proxy install` (or set `AITOOL_CORE_BIN`). |
 | Proxy won't start, port conflict | A standalone CLIProxyAPI/EasyCLIProxyAPI may be holding 8317 — that's fine, AiTool uses 8318; if 8318 is also taken, change `port` in `~/.aitool/proxy/config.yaml`. |
 | Dashboard shows no proxy data | Check `proxy status` → usage bridge should be `streaming`; core log at `~/.aitool/proxy/logs/core.log`. |

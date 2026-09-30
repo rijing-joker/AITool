@@ -6,12 +6,13 @@ If any project-specific instructions appear to conflict across files, follow `CL
 
 ## What this repo is
 
-**AiTool** — one local-first app merging two products (a rebrand from TokenTracker is in progress; legacy names remain everywhere on purpose, don't mass-rename):
+**AiTool** — one local-first app merging three products (a rebrand from TokenTracker is in progress; legacy names remain everywhere on purpose, don't mass-rename):
 
 - **AI Proxy** — a Node re-implementation of EasyCLIProxyAPI's management layer that drives the external Go binary `cli-proxy-api` (pinned in `core-version.txt`, fetched by `scripts/fetch-core.cjs`, `AITOOL_CORE_BIN` to override). Exposes `/v1/chat/completions`, `/v1/messages`, `/v1beta/models` on `127.0.0.1:8318` (loopback-only; port configurable in `config.yaml`). Per-request usage lands in `~/.aitool/proxy/usage/*.jsonl`.
 - **Token Tracker analytics** — the vendored TokenTracker CLI + dashboard tracking 42 AI coding tools, unchanged.
+- **Provider config management** — a Node port of cc-switch's config-file module: per-app provider presets in `~/.aitool/provider-switch/providers.json`, one-click switch projects each provider's key fields into the AI CLIs' live config files (`~/.claude/settings.json`, `~/.codex/config.toml` + `auth.json`, `~/.gemini/.env`) with pre-write backups; dashboard page `/provider-switch`.
 
-Data flow: AI CLI hooks → `src/lib/rollout.js` parsers (`parse*Incremental`) → `~/.tokentracker/queue.jsonl` (UTC half-hour buckets, append-only) → local API (`src/lib/local-api.js`: `/functions/*` analytics + `/api/proxy/*` proxy) → dashboard. Proxied requests enter the same buckets with `source: "cliproxy"` via `src/lib/proxy/usage-bridge.js`.
+Data flow: AI CLI hooks → `src/lib/rollout.js` parsers (`parse*Incremental`) → `~/.tokentracker/queue.jsonl` (UTC half-hour buckets, append-only) → local API (`src/lib/local-api.js`: `/functions/*` analytics + `/api/proxy/*` proxy + `/api/provider-switch/*` config switching) → dashboard. Proxied requests enter the same buckets with `source: "cliproxy"` via `src/lib/proxy/usage-bridge.js`.
 
 ## Layout
 
@@ -19,10 +20,11 @@ Data flow: AI CLI hooks → `src/lib/rollout.js` parsers (`parse*Incremental`) �
 |---|---|
 | `bin/tracker.js` → `src/cli.js` | CLI (`aitool`), CommonJS, Node ≥20 |
 | `src/lib/proxy/` | proxy paths / config / core manager / management client / usage bridge / REST handlers; `src/commands/proxy.js` is the `aitool proxy …` command |
+| `src/lib/provider-switch/` | cc-switch port: key-field "floor" tables + minimal-patch projections (claude / codex / gemini), line-preserving TOML/.env editors, backups, presets; mounted under `/api/provider-switch/*`; page `dashboard/src/pages/ProviderSwitchPage.jsx` |
 | `dashboard/` | React 18 + Vite 7 + TS strict + Tailwind; the AI Proxy page is `dashboard/src/pages/ProxyPage.jsx` (tab logic mirrors EasyCLIProxyAPI) |
 | `desktop/` | Tauri 2 shell: native window + tray around the dashboard; spawns `node bin/tracker.js serve` on a free loopback port (`AITOOL_ROOT` / `AITOOL_NODE` overrides) |
 | `TokenTrackerBar/`, `TokenTrackerWin/`, `TokenTrackerLinux/` | macOS (Swift menu bar, XcodeGen) / Windows (.NET 8 + WebView2) / Linux (Tauri 2) apps; each bundles a gitignored `EmbeddedServer/` built by its own bundle script |
-| On disk | `~/.tokentracker/` analytics; `~/.aitool/proxy/` — `bin/`, `config.yaml`, `auths/`, `usage/`, `logs/`; plaintext management key in `~/.aitool/proxy/settings.json` |
+| On disk | `~/.tokentracker/` analytics; `~/.aitool/proxy/` — `bin/`, `config.yaml`, `auths/`, `usage/`, `logs/`; plaintext management key in `~/.aitool/proxy/settings.json`; `~/.aitool/provider-switch/` — provider presets, backups, codex-auth stash |
 
 ## Commands
 
@@ -33,6 +35,7 @@ npm run ci:local                    # tests + validators + dashboard build
 npm run dashboard:dev               # Vite dev server :5173 (mock API, skips CLI backend)
 node bin/tracker.js serve --no-sync # real dashboard :7680 (proxy core starts with it)
 npm run validate:copy|locale|ui-hardcode|guardrails|versions|bot-frames
+docker compose up -d --build        # container: dashboard :7680 + proxy :8318, published on host loopback
 cd desktop && npx tauri dev         # desktop shell; npx tauri build → AiTool.app (+ dmg)
 ```
 

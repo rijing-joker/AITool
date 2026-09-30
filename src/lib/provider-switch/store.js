@@ -111,7 +111,30 @@ function sanitizeWebsiteUrl(value) {
   return url;
 }
 
-function sanitizeProviderFields(app, { name, category, settingsConfig, notes, websiteUrl }) {
+// Free-form provider metadata (port of cc-switch's ProviderMeta, reduced to
+// the keys this port consumes): apiFormat, apiKeyField, customUserAgent,
+// localProxyRequestOverrides, endpointAutoSelect, isFullUrl. Unknown keys are
+// preserved so the dashboard can extend it without a store migration.
+function sanitizeMeta(value) {
+  if (value == null) return {};
+  if (typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("meta must be an object");
+  }
+  if (JSON.stringify(value).length > 8192) {
+    throw new Error("meta is too large");
+  }
+  return value;
+}
+
+function sanitizeIcon(value) {
+  return String(value || "").trim().slice(0, 48);
+}
+
+function sanitizeIconColor(value) {
+  return String(value || "").trim().slice(0, 32);
+}
+
+function sanitizeProviderFields(app, { name, category, settingsConfig, notes, websiteUrl, icon, iconColor, meta }) {
   const trimmedName = String(name || "").trim();
   if (!trimmedName) throw new Error("Provider name is required");
   if (trimmedName.length > 100) throw new Error("Provider name is too long");
@@ -122,6 +145,9 @@ function sanitizeProviderFields(app, { name, category, settingsConfig, notes, we
     settingsConfig: sanitizeSettingsConfig(app, settingsConfig || {}),
     notes: String(notes || "").slice(0, 2000),
     websiteUrl: sanitizeWebsiteUrl(websiteUrl),
+    icon: sanitizeIcon(icon),
+    iconColor: sanitizeIconColor(iconColor),
+    meta: sanitizeMeta(meta),
   };
 }
 
@@ -195,6 +221,9 @@ async function updateProvider(app, id, patch) {
       settingsConfig: patch.settingsConfig !== undefined ? patch.settingsConfig : existing.settingsConfig,
       notes: patch.notes !== undefined ? patch.notes : existing.notes,
       websiteUrl: patch.websiteUrl !== undefined ? patch.websiteUrl : existing.websiteUrl,
+      icon: patch.icon !== undefined ? patch.icon : existing.icon,
+      iconColor: patch.iconColor !== undefined ? patch.iconColor : existing.iconColor,
+      meta: patch.meta !== undefined ? patch.meta : existing.meta,
     });
     updated = { ...existing, ...merged, updatedAt: new Date().toISOString() };
     const providers = store.apps[app].providers.slice();

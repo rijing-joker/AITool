@@ -1,6 +1,6 @@
 // Built-in provider presets, ported from cc-switch's src/config/*ProviderPresets.ts
-// (official + generic custom templates only — the partner/promotion catalog
-// is upstream-specific and intentionally not carried over).
+// (official + community/relay templates; the sponsored-partner promotion
+// catalog — affiliate links, prime badges — is intentionally not carried over).
 //
 // Each preset carries a `settingsConfig` template plus declarative
 // `formFields` (the port of cc-switch's templateValues): the dashboard's
@@ -11,14 +11,17 @@
 //
 // `name` is the English fallback; `nameKey`/`hintKey`/field `labelKey`s
 // resolve through the dashboard copy registry. `color` keys into the
-// dashboard's avatar palette.
+// dashboard's avatar palette. `group` drives the selector badge
+// (official | community | custom). `endpointCandidates` seeds the endpoint
+// speed-test dialog; `modelsUrl` overrides the model-list URL when the
+// models endpoint lives on a different host than the API endpoint.
 
 const CLAUDE_OFFICIAL = {
   id: "claude_official",
   name: "Anthropic Official",
   nameKey: "pswitch.preset.claude_official",
   hintKey: "pswitch.hint.claude_official",
-  category: "official",
+  group: "official",
   icon: "sparkles",
   color: "orange",
   websiteUrl: "https://www.anthropic.com/claude-code",
@@ -28,11 +31,104 @@ const CLAUDE_OFFICIAL = {
   formFields: [],
 };
 
+// Community presets below are carried verbatim from cc-switch's MIT-licensed
+// claudeProviderPresets.ts (affiliate parameters stripped), including their
+// role-model mappings so Claude Code's /model menu keeps working per relay.
+const CLAUDE_KIMI = {
+  id: "claude_kimi",
+  name: "Kimi",
+  group: "community",
+  icon: "moon",
+  color: "indigo",
+  websiteUrl: "https://platform.kimi.com",
+  endpointCandidates: ["https://api.moonshot.cn/anthropic"],
+  settingsConfig: {
+    env: {
+      ANTHROPIC_BASE_URL: "https://api.moonshot.cn/anthropic",
+      ANTHROPIC_AUTH_TOKEN: "",
+      ANTHROPIC_MODEL: "kimi-k2.7-code",
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: "kimi-k2.7-code",
+      ANTHROPIC_DEFAULT_SONNET_MODEL: "kimi-k2.7-code",
+      ANTHROPIC_DEFAULT_OPUS_MODEL: "kimi-k2.7-code",
+    },
+  },
+  formFields: [
+    {
+      id: "api_key",
+      path: "env.ANTHROPIC_AUTH_TOKEN",
+      labelKey: "pswitch.field.api_key",
+      placeholder: "sk-…",
+      secret: true,
+    },
+  ],
+};
+
+const CLAUDE_DEEPSEEK = {
+  id: "claude_deepseek",
+  name: "DeepSeek",
+  group: "community",
+  icon: "waves",
+  color: "blue",
+  websiteUrl: "https://platform.deepseek.com",
+  endpointCandidates: ["https://api.deepseek.com/anthropic"],
+  // The Anthropic-compatible layer lives under /anthropic; /models is a
+  // separate endpoint at the root (same note as cc-switch's preset).
+  modelsUrl: "https://api.deepseek.com/models",
+  settingsConfig: {
+    env: {
+      ANTHROPIC_BASE_URL: "https://api.deepseek.com/anthropic",
+      ANTHROPIC_AUTH_TOKEN: "",
+      ANTHROPIC_MODEL: "deepseek-v4-pro",
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: "deepseek-flash",
+      ANTHROPIC_DEFAULT_SONNET_MODEL: "deepseek-v4-pro",
+      ANTHROPIC_DEFAULT_OPUS_MODEL: "deepseek-v4-pro",
+    },
+  },
+  formFields: [
+    {
+      id: "api_key",
+      path: "env.ANTHROPIC_AUTH_TOKEN",
+      labelKey: "pswitch.field.api_key",
+      placeholder: "sk-…",
+      secret: true,
+    },
+  ],
+};
+
+const CLAUDE_MODELSCOPE = {
+  id: "claude_modelscope",
+  name: "ModelScope",
+  group: "community",
+  icon: "boxes",
+  color: "violet",
+  websiteUrl: "https://modelscope.cn",
+  endpointCandidates: ["https://api-inference.modelscope.cn"],
+  settingsConfig: {
+    env: {
+      ANTHROPIC_BASE_URL: "https://api-inference.modelscope.cn",
+      ANTHROPIC_AUTH_TOKEN: "",
+      ANTHROPIC_MODEL: "ZhipuAI/GLM-5.2",
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: "ZhipuAI/GLM-5.2",
+      ANTHROPIC_DEFAULT_SONNET_MODEL: "ZhipuAI/GLM-5.2",
+      ANTHROPIC_DEFAULT_OPUS_MODEL: "ZhipuAI/GLM-5.2",
+    },
+  },
+  formFields: [
+    {
+      id: "api_key",
+      path: "env.ANTHROPIC_AUTH_TOKEN",
+      labelKey: "pswitch.field.api_key",
+      placeholder: "ms-…",
+      secret: true,
+    },
+  ],
+};
+
 const CLAUDE_CUSTOM = {
   id: "claude_custom",
   name: "Custom Relay",
   nameKey: "pswitch.preset.claude_custom",
-  category: "custom",
+  group: "custom",
   icon: "shuffle",
   color: "blue",
   settingsConfig: {
@@ -71,7 +167,7 @@ const CODEX_OFFICIAL = {
   name: "OpenAI Official (ChatGPT Login)",
   nameKey: "pswitch.preset.codex_official",
   hintKey: "pswitch.hint.codex_official",
-  category: "official",
+  group: "official",
   icon: "terminal",
   color: "green",
   websiteUrl: "https://chatgpt.com/codex",
@@ -83,11 +179,11 @@ const CODEX_CUSTOM = {
   id: "codex_custom",
   name: "Custom Relay",
   nameKey: "pswitch.preset.codex_custom",
-  category: "custom",
+  group: "custom",
   icon: "shuffle",
   color: "blue",
   settingsConfig: {
-    auth: null,
+    auth: { OPENAI_API_KEY: "" },
     config: {
       model: "",
       model_provider: "custom",
@@ -101,6 +197,14 @@ const CODEX_CUSTOM = {
     },
   },
   formFields: [
+    {
+      id: "api_key",
+      path: "auth.OPENAI_API_KEY",
+      labelKey: "pswitch.field.api_key",
+      placeholder: "sk-…",
+      secret: true,
+      hintKey: "pswitch.field.codex_key_hint",
+    },
     {
       id: "relay_name",
       path: "config.model_providers.custom.name",
@@ -137,7 +241,7 @@ const GEMINI_OFFICIAL = {
   id: "gemini_official",
   name: "Google Official",
   nameKey: "pswitch.preset.gemini_official",
-  category: "official",
+  group: "official",
   icon: "gem",
   color: "sky",
   websiteUrl: "https://aistudio.google.com/",
@@ -157,7 +261,7 @@ const GEMINI_CUSTOM = {
   id: "gemini_custom",
   name: "Custom Relay",
   nameKey: "pswitch.preset.gemini_custom",
-  category: "custom",
+  group: "custom",
   icon: "shuffle",
   color: "blue",
   settingsConfig: {
@@ -191,7 +295,7 @@ const GEMINI_CUSTOM = {
 };
 
 const PRESETS = {
-  claude: [CLAUDE_OFFICIAL, CLAUDE_CUSTOM],
+  claude: [CLAUDE_OFFICIAL, CLAUDE_KIMI, CLAUDE_DEEPSEEK, CLAUDE_MODELSCOPE, CLAUDE_CUSTOM],
   codex: [CODEX_OFFICIAL, CODEX_CUSTOM],
   gemini: [GEMINI_OFFICIAL, GEMINI_CUSTOM],
 };
@@ -208,7 +312,7 @@ function getPreset(app, presetId) {
 // preset (or created before presets carried formFields): the per-app default
 // field set, matching what the custom templates own.
 function defaultFormFields(app) {
-  const custom = PRESETS[app]?.find((preset) => preset.category === "custom");
+  const custom = PRESETS[app]?.find((preset) => preset.group === "custom");
   return custom ? custom.formFields : [];
 }
 

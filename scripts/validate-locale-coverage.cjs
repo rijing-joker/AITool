@@ -53,6 +53,11 @@ const SOURCE_IDENTICAL_KEY_ALLOWLIST = [
   /^pswitch[.]live[.]file[.](?:settings|config|auth|env)$/,
   // Provider-switch form fields: env/protocol identifiers stay verbatim.
   /^pswitch[.]field[.]/,
+  // The 1M context checkbox label is a unit, not a word.
+  /^pswitch[.]advanced[.]one_m$/,
+  // Claude Code role names and OpenAI protocol names stay verbatim.
+  /^pswitch[.]role[.]/,
+  /^pswitch[.]advanced[.]format_openai_(?:chat|responses)$/,
 ];
 
 // Developer-facing product terms stay in English in Chinese UI copy. Scope

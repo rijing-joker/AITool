@@ -417,7 +417,7 @@ test("provider-switch api: status / create / switch / live save conflict flow", 
 
   // Presets list.
   const presets = await call(handler, { url: `${prefix}/presets?app=codex` });
-  assert.ok(presets.body.presets.some((p) => p.category === "official"));
+  assert.ok(presets.body.presets.some((p) => p.group === "official"));
 
   // Create two providers and switch between them.
   const a = await call(handler, {
@@ -746,7 +746,7 @@ test("provider-switch presets carry declarative formFields and reorder persists 
 
   const presets = await call(handler, { url: `${prefix}/presets?app=codex` });
   const custom = presets.body.presets.find((preset) => preset.id === "codex_custom");
-  assert.ok(custom.formFields.length >= 3, "custom preset carries structured fields");
+  assert.ok(custom.formFields.length >= 4, "custom preset carries structured fields");
   const wireApi = custom.formFields.find((field) => field.id === "wire_api");
   assert.equal(wireApi.type, "select");
   assert.equal(wireApi.options.length, 2);
@@ -786,4 +786,134 @@ test("provider-switch presets carry declarative formFields and reorder persists 
     reordered.body.providers.map((p) => p.sortIndex),
     [0, 1, 2],
   );
+});
+
+// ---------------------------------------------------------------------------
+// Endpoint speed test + model discovery (backend-proxied cc-switch features)
+// ---------------------------------------------------------------------------
+
+const http = require("node:http");
+
+function startMockUpstream() {
+  return new Promise((resolve) => {
+    const server = http.createServer((req, res) => {
+      if (req.url === "/v1/models") {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ data: [{ id: "gpt-5.2" }, { id: "gpt-5.2-codex" }] }));
+        return;
+      }
+      if (req.url.endsWith("/models")) {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify([{ id: "deepseek-v4-pro" }, { id: "deepseek-flash" }]));
+        return;
+      }
+      res.writeHead(200);
+      res.end("ok");
+    });
+    server.listen(0, "127.0.0.1", () => resolve(server));
+  });
+}
+
+test("provider-switch speed-test probes endpoints and fetch-models discovers lists", async () => {
+  const { handleProviderSwitchApiRequest } = require("../src/lib/provider-switch/api");
+  const handler = handleProviderSwitchApiRequest;
+  const prefix = "/api/provider-switch";
+  const upstream = await startMockUpstream();
+  const port = upstream.address().port;
+  try {
+    // speed test: reachable + unreachable, latency reported for both
+    const speed = await call(handler, {
+      method: "POST",
+      url: `${prefix}/speed-test`,
+      body: JSON.stringify({
+        urls: [`http://127.0.0.1:${port}/`, "http://127.0.0.1:9/", "not-a-url"],
+        timeoutMs: 2000,
+      }),
+    });
+    assert.equal(speed.status, 200);
+    const results = speed.body.results;
+    assert.equal(results.length, 2, "invalid urls are dropped");
+    const reachable = results.find((row) => row.url === `http://127.0.0.1:${port}/`);
+    assert.equal(reachable.ok, true);
+    assert.ok(Number.isFinite(reachable.latencyMs));
+    const dead = results.find((row) => row.url === "http://127.0.0.1:9/");
+    assert.equal(dead.ok, false);
+
+    // fetch models: OpenAI shape at /v1/models
+    const openai = await call(handler, {
+      method: "POST",
+      url: `${prefix}/fetch-models`,
+      body: JSON.stringify({ baseUrl: `http://127.0.0.1:${port}`, apiKey: "sk-test" }),
+    });
+    assert.deepEqual(openai.body.models, ["gpt-5.2", "gpt-5.2-codex"]);
+
+    // fetch models: bare-array shape at /models fallback
+    const bare = await call(handler, {
+      method: "POST",
+      url: `${prefix}/fetch-models`,
+      body: JSON.stringify({ baseUrl: `http://127.0.0.1:${port}/v9` }),
+    });
+    assert.deepEqual(bare.body.models, ["deepseek-v4-pro", "deepseek-flash"]);
+
+    // fetch models: explicit modelsUrl wins (cc-switch's DeepSeek override)
+    const explicit = await call(handler, {
+      method: "POST",
+      url: `${prefix}/fetch-models`,
+      body: JSON.stringify({
+        baseUrl: `http://127.0.0.1:${port}/anthropic`,
+        modelsUrl: `http://127.0.0.1:${port}/models`,
+      }),
+    });
+    assert.deepEqual(explicit.body.models, ["deepseek-v4-pro", "deepseek-flash"]);
+
+    // fetch models: no model list anywhere -> error
+    const empty = await call(handler, {
+      method: "POST",
+      url: `${prefix}/fetch-models`,
+      body: JSON.stringify({ baseUrl: "http://127.0.0.1:9" }),
+    });
+    assert.equal(empty.status, 400);
+  } finally {
+    upstream.close();
+  }
+});
+
+test("provider-switch providers carry icon/iconColor/meta and sanitize them", async () => {
+  const { handleProviderSwitchApiRequest } = require("../src/lib/provider-switch/api");
+  const handler = handleProviderSwitchApiRequest;
+  const prefix = "/api/provider-switch";
+
+  const created = await call(handler, {
+    method: "POST",
+    url: `${prefix}/providers`,
+    body: JSON.stringify({
+      app: "claude",
+      name: "Kimi",
+      settingsConfig: { env: { ANTHROPIC_BASE_URL: "https://api.moonshot.cn/anthropic" } },
+      icon: "moon",
+      iconColor: "indigo",
+      meta: {
+        apiFormat: "anthropic",
+        customUserAgent: "claude-cli/2.0",
+        localProxyRequestOverrides: { headers: '{"X-Test":"1"}' },
+      },
+    }),
+  });
+  assert.equal(created.body.provider.icon, "moon");
+  assert.equal(created.body.provider.iconColor, "indigo");
+  assert.equal(created.body.provider.meta.customUserAgent, "claude-cli/2.0");
+
+  // oversized meta rejected
+  const bad = await call(handler, {
+    method: "PUT",
+    url: `${prefix}/providers/${created.body.provider.id}`,
+    body: JSON.stringify({ app: "claude", meta: { blob: "x".repeat(9000) } }),
+  });
+  assert.equal(bad.status, 400);
+
+  // meta round-trips through status
+  const status = await call(handler, { url: `${prefix}/status` });
+  const claude = status.body.apps.find((app) => app.app === "claude");
+  const stored = claude.providers.find((p) => p.id === created.body.provider.id);
+  assert.equal(stored.meta.apiFormat, "anthropic");
 });

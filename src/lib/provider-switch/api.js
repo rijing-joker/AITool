@@ -337,6 +337,22 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
       return true;
     }
 
+    if (p === `${prefix}/speed-test` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      const results = await speedTestEndpoints(body.urls || [], body.timeoutMs);
+      json(res, { ok: true, results });
+      return true;
+    }
+
+    if (p === `${prefix}/fetch-models` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      const result = await fetchModelList(body);
+      json(res, { ok: true, ...result });
+      return true;
+    }
+
     if (p === `${prefix}/switch` && method === "POST") {
       if (!requireMutation()) return true;
       const body = await readJsonBody(req);
@@ -416,6 +432,93 @@ async function buildEditorView(app, id) {
     fromLive = true;
   }
   return { ok: true, app, isCurrent, fromLive, settingsConfig };
+}
+
+// ---------------------------------------------------------------------------
+// Endpoint speed test + model discovery (cc-switch EndpointSpeedTest /
+// fetchModelsForConfig; both must run server-side because browsers cannot
+// probe arbitrary API hosts cross-origin)
+// ---------------------------------------------------------------------------
+
+async function measureEndpoint(url, timeoutMs) {
+  const started = Date.now();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    // A HEAD is not always implemented by relays; fall back to a ranged GET.
+    let response = await fetch(url, { method: "HEAD", redirect: "manual", signal: controller.signal });
+    if (response.status === 405 || response.status === 501) {
+      response = await fetch(url, { method: "GET", headers: { Range: "bytes=0-0" }, redirect: "manual", signal: controller.signal });
+    }
+    // Any HTTP answer proves reachability; 401/404 still measure latency.
+    return { url, ok: true, status: response.status, latencyMs: Date.now() - started, error: null };
+  } catch (error) {
+    const aborted = error?.name === "AbortError";
+    return {
+      url,
+      ok: false,
+      status: null,
+      latencyMs: Date.now() - started,
+      error: aborted ? "timeout" : String(error?.message || error).slice(0, 200),
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function speedTestEndpoints(urls, timeoutMs) {
+  const clean = [...new Set(urls.map((u) => String(u || "").trim()).filter((u) => /^https?:\/\//.test(u)))].slice(0, 12);
+  const timeout = Math.min(Math.max(Number(timeoutMs) || 8000, 1000), 20000);
+  return Promise.all(clean.map((url) => measureEndpoint(url, timeout)));
+}
+
+function extractModelIds(payload) {
+  // OpenAI shape {data:[{id}]}, Gemini shape {models:[{name}]}, or a bare array.
+  if (Array.isArray(payload)) return payload.map((m) => (typeof m === "string" ? m : m?.id || m?.name)).filter(Boolean);
+  if (Array.isArray(payload?.data)) return payload.data.map((m) => m?.id || m?.name).filter(Boolean);
+  if (Array.isArray(payload?.models)) {
+    return payload.models.map((m) => String(m?.name || m?.id || "").replace(/^models\//, "")).filter(Boolean);
+  }
+  return null;
+}
+
+async function fetchModelList({ baseUrl, apiKey, modelsUrl, isFullUrl }) {
+  const base = String(baseUrl || "").trim().replace(/\/+$/, "");
+  const explicit = String(modelsUrl || "").trim();
+  if (!base && !explicit) throw new Error("Base URL is required");
+  const candidates = [];
+  if (explicit && /^https?:\/\//.test(explicit)) {
+    candidates.push(explicit);
+  } else if (base) {
+    // cc-switch probes /v1/models then /models; a full-URL endpoint is used
+    // verbatim (the user already included the models path).
+    if (isFullUrl) candidates.push(base);
+    else candidates.push(`${base}/v1/models`, `${base}/models`);
+  }
+
+  const errors = [];
+  for (const url of candidates) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
+    try {
+      const headers = { Accept: "application/json" };
+      if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+      const response = await fetch(url, { headers, signal: controller.signal });
+      if (!response.ok) {
+        errors.push(`HTTP ${response.status} for ${url}`);
+        continue;
+      }
+      const payload = await response.json().catch(() => null);
+      const models = payload ? extractModelIds(payload) : null;
+      if (models && models.length) return { url, models: models.slice(0, 500) };
+      errors.push(`no model list at ${url}`);
+    } catch (error) {
+      errors.push(`${error?.name === "AbortError" ? "timeout" : error?.message || error} for ${url}`);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  throw new Error(errors.join("; ") || "No model list found");
 }
 
 async function buildStatus() {

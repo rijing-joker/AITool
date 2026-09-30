@@ -43,9 +43,24 @@ export interface ProviderSwitchProvider {
   settingsConfig: unknown;
   notes: string;
   websiteUrl: string;
+  icon: string;
+  iconColor: string;
+  meta: ProviderSwitchProviderMeta;
   sortIndex: number;
   createdAt: string;
   updatedAt: string;
+}
+
+// Port of cc-switch's ProviderMeta, reduced to the keys this port consumes.
+export interface ProviderSwitchProviderMeta {
+  apiFormat?: string;
+  apiKeyField?: string;
+  customUserAgent?: string;
+  localProxyRequestOverrides?: { headers?: string; body?: string };
+  endpointAutoSelect?: boolean;
+  isFullUrl?: boolean;
+  customEndpoints?: string[];
+  [key: string]: unknown;
 }
 
 export interface ProviderSwitchFormFieldOption {
@@ -82,10 +97,12 @@ export interface ProviderSwitchPreset {
   name: string;
   nameKey?: string;
   hintKey?: string;
-  category: "official" | "custom";
+  group: "official" | "community" | "custom";
   icon?: string;
   color?: string;
   websiteUrl?: string;
+  endpointCandidates?: string[];
+  modelsUrl?: string;
   settingsConfig: unknown;
   formFields: ProviderSwitchFormField[];
 }
@@ -132,6 +149,17 @@ export interface ProviderSwitchBackup {
   createdAt: string;
   size: number;
   target: string | null;
+}
+
+export interface ProviderSwitchProviderPayload {
+  name?: string;
+  category?: string;
+  settingsConfig?: unknown;
+  notes?: string;
+  websiteUrl?: string;
+  icon?: string;
+  iconColor?: string;
+  meta?: ProviderSwitchProviderMeta;
 }
 
 export const providerSwitchApi = {
@@ -196,7 +224,7 @@ export const providerSwitchApi = {
 
   createProvider(
     app: ProviderSwitchApp,
-    payload: { name: string; category: string; settingsConfig: unknown; notes?: string; websiteUrl?: string },
+    payload: ProviderSwitchProviderPayload,
   ): Promise<{ ok: true; provider: ProviderSwitchProvider }> {
     return mutate("/api/provider-switch/providers", "POST", { app, ...payload });
   },
@@ -204,9 +232,25 @@ export const providerSwitchApi = {
   updateProvider(
     app: ProviderSwitchApp,
     id: string,
-    payload: { name?: string; category?: string; settingsConfig?: unknown; notes?: string; websiteUrl?: string },
+    payload: ProviderSwitchProviderPayload,
   ): Promise<{ ok: true; provider: ProviderSwitchProvider; applied: { wrote: string[] } | null }> {
     return mutate(`/api/provider-switch/providers/${encodeURIComponent(id)}`, "PUT", { app, ...payload });
+  },
+
+  speedTest(
+    urls: string[],
+    timeoutMs?: number,
+  ): Promise<{ ok: true; results: Array<{ url: string; ok: boolean; status: number | null; latencyMs: number; error: string | null }> }> {
+    return mutate("/api/provider-switch/speed-test", "POST", { urls, timeoutMs });
+  },
+
+  fetchModels(payload: {
+    baseUrl: string;
+    apiKey?: string;
+    modelsUrl?: string;
+    isFullUrl?: boolean;
+  }): Promise<{ ok: true; url: string; models: string[] }> {
+    return mutate("/api/provider-switch/fetch-models", "POST", payload);
   },
 
   deleteProvider(app: ProviderSwitchApp, id: string): Promise<{ ok: true }> {

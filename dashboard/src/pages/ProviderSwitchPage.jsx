@@ -190,8 +190,8 @@ export function ProviderSwitchPage() {
   const providerRows = useMemo(() => {
     return (appState?.providers || []).map((provider) => ({
       ...provider,
-      avatarIcon: provider.category === "official" ? officialIconFor(activeApp) : "shuffle",
-      avatarColor: provider.category === "official" ? officialColorFor(activeApp) : "blue",
+      avatarIcon: provider.icon || (provider.category === "official" ? officialIconFor(activeApp) : "shuffle"),
+      avatarColor: provider.iconColor || (provider.category === "official" ? officialColorFor(activeApp) : "blue"),
     }));
   }, [appState, activeApp]);
 

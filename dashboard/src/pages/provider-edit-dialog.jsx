@@ -1,24 +1,32 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { ExternalLink, Sparkles, Terminal, Gem, Shuffle, Boxes, ChevronDown, ChevronUp, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Download, ExternalLink, Eye, EyeOff, Wand2, X } from "lucide-react";
 import { copy } from "../lib/copy";
 import { providerSwitchApi } from "../lib/provider-switch-api";
 import { Button } from "../ui/components";
+import { EndpointSpeedTestDialog } from "./provider-speed-test";
+import { ProviderIconPicker, iconComponentFor } from "./provider-icon-picker";
 
 // Add/edit provider dialog — an interaction port of cc-switch's
-// AddProviderDialog / EditProviderDialog: preset cards on top (add mode),
-// a structured per-preset form written into the settingsConfig template at
-// dotted paths, an optional raw JSON editor for everything the form doesn't
-// cover, and — when editing the currently-active provider — initial values
-// read back from the live config files (read_live_provider_settings).
-
-const PRESET_ICONS = { sparkles: Sparkles, terminal: Terminal, gem: Gem, shuffle: Shuffle };
-const FALLBACK_ICON = Boxes;
+// AddProviderDialog / EditProviderDialog / ProviderForm: preset cards with
+// search (add mode), structured per-preset fields written into the
+// settingsConfig template at dotted paths, per-app advanced sections
+// (endpoint speed test, full-URL switch, claude model mapping with 1M flags
+// and one-click fill, model list fetching, apiFormat, custom User-Agent,
+// request overrides), the JSON editor with quick toggles + format, an icon
+// picker, and soft validation before save. When editing the currently-active
+// provider the initial values are read back from the live config files
+// (read_live_provider_settings).
 
 const AVATAR_COLORS = {
   orange: "bg-orange-100 text-orange-600 dark:bg-orange-500/15 dark:text-orange-400",
   blue: "bg-blue-100 text-blue-600 dark:bg-blue-500/15 dark:text-blue-400",
   green: "bg-emerald-100 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400",
   sky: "bg-sky-100 text-sky-600 dark:bg-sky-500/15 dark:text-sky-400",
+  violet: "bg-violet-100 text-violet-600 dark:bg-violet-500/15 dark:text-violet-400",
+  indigo: "bg-indigo-100 text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-400",
+  rose: "bg-rose-100 text-rose-600 dark:bg-rose-500/15 dark:text-rose-400",
+  amber: "bg-amber-100 text-amber-600 dark:bg-amber-500/15 dark:text-amber-400",
+  teal: "bg-teal-100 text-teal-600 dark:bg-teal-500/15 dark:text-teal-400",
   gray: "bg-oai-gray-100 text-oai-gray-600 dark:bg-oai-gray-800 dark:text-oai-gray-300",
 };
 
@@ -27,7 +35,7 @@ export function presetAvatarClass(color) {
 }
 
 export function PresetIcon({ icon, color, className = "h-4 w-4" }) {
-  const Icon = PRESET_ICONS[icon] || FALLBACK_ICON;
+  const Icon = iconComponentFor(icon) || iconComponentFor("boxes");
   return <Icon className={className} />;
 }
 
@@ -54,10 +62,225 @@ function setPath(obj, dottedPath, value) {
   return clone;
 }
 
-function Collapsible({ open, children }) {
-  if (!open) return null;
-  return children;
+function deletePath(obj, dottedPath) {
+  const keys = dottedPath.split(".");
+  const clone = JSON.parse(JSON.stringify(obj ?? {}));
+  let current = clone;
+  for (let i = 0; i < keys.length - 1; i++) {
+    if (current == null || typeof current[keys[i]] !== "object") return clone;
+    current = current[keys[i]];
+  }
+  delete current[keys[keys.length - 1]];
+  return clone;
 }
+
+// ---------------------------------------------------------------------------
+// Claude model roles (cc-switch's modelRoleRows) — display name + request
+// model + [1m] context flag per role; the subagent row has no display name.
+// ---------------------------------------------------------------------------
+
+const CLAUDE_MODEL_ROLES = [
+  {
+    key: "sonnet",
+    labelKey: "pswitch.role.sonnet",
+    namePath: "env.ANTHROPIC_DEFAULT_SONNET_MODEL_NAME",
+    modelPath: "env.ANTHROPIC_DEFAULT_SONNET_MODEL",
+    supportsOneM: true,
+  },
+  {
+    key: "opus",
+    labelKey: "pswitch.role.opus",
+    namePath: "env.ANTHROPIC_DEFAULT_OPUS_MODEL_NAME",
+    modelPath: "env.ANTHROPIC_DEFAULT_OPUS_MODEL",
+    supportsOneM: true,
+  },
+  {
+    key: "fable",
+    labelKey: "pswitch.role.fable",
+    namePath: "env.ANTHROPIC_DEFAULT_FABLE_MODEL_NAME",
+    modelPath: "env.ANTHROPIC_DEFAULT_FABLE_MODEL",
+    supportsOneM: true,
+  },
+  {
+    key: "haiku",
+    labelKey: "pswitch.role.haiku",
+    namePath: "env.ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME",
+    modelPath: "env.ANTHROPIC_DEFAULT_HAIKU_MODEL",
+    supportsOneM: false,
+  },
+  {
+    key: "subagent",
+    labelKey: "pswitch.role.subagent",
+    namePath: null,
+    modelPath: "env.ANTHROPIC_DEFAULT_SUBAGENT_MODEL",
+    supportsOneM: false,
+  },
+];
+
+const DEFAULT_MODEL_PATH = { claude: "env.ANTHROPIC_MODEL", codex: "config.model", gemini: "env.GEMINI_MODEL" };
+const ENDPOINT_PATH = {
+  claude: "env.ANTHROPIC_BASE_URL",
+  codex: "config.model_providers.custom.base_url",
+  gemini: "env.GOOGLE_GEMINI_BASE_URL",
+};
+const API_KEY_PATH = { claude: null, codex: "auth.OPENAI_API_KEY", gemini: "env.GEMINI_API_KEY" };
+
+function withoutOneM(value) {
+  return String(value || "").replace(/\[1m\]$/, "");
+}
+
+// ---------------------------------------------------------------------------
+// Shared small controls
+// ---------------------------------------------------------------------------
+
+function FieldLabel({ label, required, children }) {
+  return (
+    <div className="mb-1 flex items-center justify-between gap-2">
+      <label className="block text-sm font-medium text-oai-gray-700 dark:text-oai-gray-300">
+        {label}
+        {required ? <span className="ml-0.5 text-red-500">*</span> : null}
+      </label>
+      {children}
+    </div>
+  );
+}
+
+function SecretInput({ value, onChange, placeholder, ariaLabel }) {
+  const [visible, setVisible] = useState(false);
+  return (
+    <div className="relative">
+      <input
+        type={visible ? "text" : "password"}
+        value={String(value ?? "")}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder || ""}
+        autoComplete="off"
+        spellCheck={false}
+        aria-label={ariaLabel}
+        className="w-full rounded-lg border border-oai-gray-200 bg-white px-3 py-2 pr-9 font-mono text-sm text-oai-black focus:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 dark:border-oai-gray-800 dark:bg-oai-gray-900 dark:text-white"
+      />
+      {String(value ?? "") ? (
+        <button
+          type="button"
+          onClick={() => setVisible((current) => !current)}
+          className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-oai-gray-400 hover:text-oai-black dark:hover:text-white"
+          aria-label={visible ? copy("pswitch.field.hide_key") : copy("pswitch.field.show_key")}
+        >
+          {visible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function EndpointField({ label, value, onChange, isFullUrl, onFullUrlChange, onManage, hint }) {
+  return (
+    <div>
+      <FieldLabel label={label}>
+        {onFullUrlChange ? (
+          <button
+            type="button"
+            onClick={() => onFullUrlChange(!isFullUrl)}
+            className={`rounded-full border px-2 py-0.5 text-xs transition-colors ${
+              isFullUrl
+                ? "border-oai-brand-500 bg-oai-brand-50 text-oai-brand-600 dark:bg-oai-brand-950/40 dark:text-oai-brand-400"
+                : "border-oai-gray-200 text-oai-gray-500 dark:border-oai-gray-800 dark:text-oai-gray-400"
+            }`}
+            aria-pressed={!!isFullUrl}
+          >
+            {copy("pswitch.field.full_url")}
+          </button>
+        ) : null}
+        {onManage ? (
+          <button
+            type="button"
+            onClick={onManage}
+            className="text-xs font-medium text-oai-brand-600 hover:underline dark:text-oai-brand-400"
+          >
+            {copy("pswitch.speed.manage")}
+          </button>
+        ) : null}
+      </FieldLabel>
+      <input
+        type="text"
+        value={String(value ?? "")}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder="https://your-api-endpoint.com"
+        spellCheck={false}
+        aria-label={label}
+        className="w-full rounded-lg border border-oai-gray-200 bg-white px-3 py-2 font-mono text-sm text-oai-black focus:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 dark:border-oai-gray-800 dark:bg-oai-gray-900 dark:text-white"
+      />
+      {hint ? <p className="mt-1 text-xs text-oai-gray-400 dark:text-oai-gray-500">{hint}</p> : null}
+    </div>
+  );
+}
+
+function ModelInput({ label, value, onChange, models, fetchState, onFetch, placeholder, hint }) {
+  const datalistId = `model-options-${label.replace(/\W+/g, "-").toLowerCase()}`;
+  return (
+    <div>
+      <FieldLabel label={label}>
+        {onFetch ? (
+          <button
+            type="button"
+            onClick={onFetch}
+            disabled={fetchState === "loading"}
+            className="inline-flex items-center gap-1 text-xs font-medium text-oai-brand-600 hover:underline disabled:opacity-50 dark:text-oai-brand-400"
+          >
+            <Download className="h-3.5 w-3.5" />
+            {fetchState === "loading" ? copy("pswitch.models.fetching") : copy("pswitch.models.fetch")}
+          </button>
+        ) : null}
+      </FieldLabel>
+      <input
+        type="text"
+        value={String(value ?? "")}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder || ""}
+        list={models && models.length ? datalistId : undefined}
+        spellCheck={false}
+        aria-label={label}
+        className="w-full rounded-lg border border-oai-gray-200 bg-white px-3 py-2 font-mono text-sm text-oai-black focus:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 dark:border-oai-gray-800 dark:bg-oai-gray-900 dark:text-white"
+      />
+      {models && models.length ? (
+        <datalist id={datalistId}>
+          {models.slice(0, 200).map((model) => (
+            <option key={model} value={model} />
+          ))}
+        </datalist>
+      ) : null}
+      {hint ? <p className="mt-1 text-xs text-oai-gray-400 dark:text-oai-gray-500">{hint}</p> : null}
+    </div>
+  );
+}
+
+function JsonTextarea({ value, onChange, rows = 8, error, label }) {
+  return (
+    <div>
+      <textarea
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        spellCheck={false}
+        rows={rows}
+        aria-label={label}
+        className={`w-full resize-y rounded-lg border bg-oai-gray-50 p-3 font-mono text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 dark:bg-oai-gray-950 ${
+          error
+            ? "border-red-400 text-oai-black dark:text-oai-gray-100"
+            : "border-oai-gray-200 text-oai-black dark:border-oai-gray-800 dark:text-oai-gray-100"
+        }`}
+      />
+      {error ? (
+        <p className="mt-1 text-xs text-red-600 dark:text-red-400" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The dialog
+// ---------------------------------------------------------------------------
 
 export function ProviderEditDialog({
   open,
@@ -71,7 +294,12 @@ export function ProviderEditDialog({
   onError,
 }) {
   const [selectedPresetId, setSelectedPresetId] = useState(null);
+  const [presetQuery, setPresetQuery] = useState("");
+  const [sortAZ, setSortAZ] = useState(false);
   const [draft, setDraft] = useState({});
+  const [meta, setMeta] = useState({});
+  const [icon, setIcon] = useState("");
+  const [iconColor, setIconColor] = useState("");
   const [name, setName] = useState("");
   const [category, setCategory] = useState("custom");
   const [websiteUrl, setWebsiteUrl] = useState("");
@@ -79,29 +307,53 @@ export function ProviderEditDialog({
   const [claudeApiKeyName, setClaudeApiKeyName] = useState("ANTHROPIC_AUTH_TOKEN");
   const [rawOpen, setRawOpen] = useState(false);
   const [rawText, setRawText] = useState("");
+  const [rawError, setRawError] = useState(null);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [error, setError] = useState(null);
   const [fromLive, setFromLive] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [iconPickerOpen, setIconPickerOpen] = useState(false);
+  const [speedTestOpen, setSpeedTestOpen] = useState(false);
+  const [fetchedModels, setFetchedModels] = useState(null);
+  const [fetchState, setFetchState] = useState("idle");
+  const [pendingIssues, setPendingIssues] = useState(null);
 
   const isEdit = !!editing;
+  const selectedPreset = useMemo(() => {
+    return presets.find((preset) => preset.id === selectedPresetId) || null;
+  }, [presets, selectedPresetId]);
 
-  // Field set for the current selection: add mode = selected preset's fields;
-  // edit mode = the app's default (custom) field set, since stored providers
-  // don't remember which preset they came from.
+  // Structured fields for the current selection (add mode) or the app's
+  // default field set (edit mode — stored providers don't remember their
+  // preset origin).
   const fields = useMemo(() => {
     if (isEdit) {
-      const custom = presets.find((preset) => preset.category === "custom");
+      const custom = presets.find((preset) => preset.group === "custom");
       return custom ? custom.formFields : [];
     }
-    const preset = presets.find((p) => p.id === selectedPresetId);
-    return preset ? preset.formFields : [];
+    return selectedPreset ? selectedPreset.formFields : [];
   }, [isEdit, presets, selectedPresetId]);
+
+  const currentEndpoint = String(getPath(draft, ENDPOINT_PATH[app]) ?? "");
+  const currentApiKey =
+    app === "claude"
+      ? String(getPath(draft, `env.${claudeApiKeyName}`) ?? "")
+      : String(getPath(draft, API_KEY_PATH[app]) ?? "");
+
+  const endpointCandidates = useMemo(() => {
+    const list = [...(selectedPreset?.endpointCandidates || []), ...(meta.customEndpoints || [])];
+    if (editing) {
+      const fromConfig = String(getPath(editing.settingsConfig, ENDPOINT_PATH[app]) ?? "").replace(/\/+$/, "");
+      if (fromConfig && !list.includes(fromConfig)) list.unshift(fromConfig);
+    }
+    return [...new Set(list.filter(Boolean))];
+  }, [selectedPreset, meta.customEndpoints, editing, app]);
 
   const applyPreset = useCallback(
     (preset) => {
       setSelectedPresetId(preset.id);
       setDraft(JSON.parse(JSON.stringify(preset.settingsConfig ?? {})));
-      setCategory(preset.category);
+      setCategory(preset.group === "official" ? "official" : "custom");
       if (!name.trim()) {
         setName(preset.nameKey ? copy(preset.nameKey) : preset.name);
       }
@@ -116,16 +368,28 @@ export function ProviderEditDialog({
     setError(null);
     setRawOpen(false);
     setRawText("");
-    setClaudeApiKeyName("ANTHROPIC_AUTH_TOKEN");
+    setRawError(null);
+    setPendingIssues(null);
+    setFetchedModels(null);
+    setFetchState("idle");
+    setIconPickerOpen(false);
+    setSpeedTestOpen(false);
     setFromLive(false);
     if (editing) {
       setName(editing.name);
       setCategory(editing.category);
       setWebsiteUrl(editing.websiteUrl || "");
       setNotes(editing.notes || "");
+      setIcon(editing.icon || "");
+      setIconColor(editing.iconColor || "");
+      setMeta({ ...(editing.meta || {}) });
       setDraft(JSON.parse(JSON.stringify(editing.settingsConfig ?? {})));
       if (app === "claude" && editing.settingsConfig?.env) {
         if ("ANTHROPIC_API_KEY" in editing.settingsConfig.env) setClaudeApiKeyName("ANTHROPIC_API_KEY");
+      }
+      const editingMeta = editing.meta || {};
+      if (app === "claude" && claudeHasAdvancedValues(editing.settingsConfig ?? {}, editingMeta)) {
+        setAdvancedOpen(true);
       }
       // cc-switch's read_live_provider_settings: editing the current provider
       // starts from what is actually in the live files.
@@ -134,8 +398,12 @@ export function ProviderEditDialog({
         providerSwitchApi
           .getEditorView(app, editing.id)
           .then((view) => {
-            setDraft(JSON.parse(JSON.stringify(view.settingsConfig ?? {})));
+            const nextDraft = JSON.parse(JSON.stringify(view.settingsConfig ?? {}));
+            setDraft(nextDraft);
             setFromLive(!!view.fromLive);
+            if (app === "claude" && claudeHasAdvancedValues(nextDraft, editing.meta || {})) {
+              setAdvancedOpen(true);
+            }
           })
           .catch((err) => setError(err instanceof Error ? err.message : String(err)))
           .finally(() => setLoading(false));
@@ -145,6 +413,10 @@ export function ProviderEditDialog({
       setCategory("custom");
       setWebsiteUrl("");
       setNotes("");
+      setIcon("");
+      setIconColor("");
+      setMeta({});
+      setPresetQuery("");
       const first = presets[0] || null;
       setSelectedPresetId(first ? first.id : null);
       setDraft(first ? JSON.parse(JSON.stringify(first.settingsConfig ?? {})) : {});
@@ -152,18 +424,35 @@ export function ProviderEditDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, editing, app, appState?.current]);
 
-  const fieldValue = (field) => {
-    if (app === "claude" && field.id === "api_key") {
-      return getPath(draft, `env.${claudeApiKeyName}`) ?? "";
-    }
-    return getPath(draft, field.path) ?? "";
+  // Advanced section auto-expands when it already carries values (cc-switch's
+  // hasAnyAdvancedValue). Computed from the config being loaded, not the
+  // (stale) draft state.
+  const claudeHasAdvancedValues = (config, metaObject) => {
+    const env = config && config.env && typeof config.env === "object" ? config.env : {};
+    const hasMapping = CLAUDE_MODEL_ROLES.some((role) => {
+      const keys = role.modelPath.split(".");
+      let current = config;
+      for (const key of keys) {
+        if (current == null || typeof current !== "object") return false;
+        current = current[key];
+      }
+      return current != null && current !== "";
+    });
+    return (
+      hasMapping ||
+      (metaObject.apiFormat && metaObject.apiFormat !== "anthropic") ||
+      !!metaObject.customUserAgent ||
+      !!metaObject.localProxyRequestOverrides ||
+      Object.keys(env).some((key) => key.startsWith("ANTHROPIC_DEFAULT_"))
+    );
   };
+
+  const setMetaValue = (key, value) =>
+    setMeta((current) => ({ ...current, [key]: value === undefined || value === "" || value === false ? undefined : value }));
 
   const setFieldValue = (field, value) => {
     if (app === "claude" && field.id === "api_key") {
       setDraft((current) => {
-        // The API key may live under either credential env name; keep the
-        // value when the user flips the key-name select.
         const env = { ...(current.env || {}) };
         for (const keyName of ["ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"]) {
           if (keyName !== claudeApiKeyName) delete env[keyName];
@@ -180,6 +469,7 @@ export function ProviderEditDialog({
     const previous = claudeApiKeyName;
     setClaudeApiKeyName(keyName);
     if (keyName === previous) return;
+    setMetaValue("apiKeyField", keyName === "ANTHROPIC_API_KEY" ? "ANTHROPIC_API_KEY" : undefined);
     setDraft((current) => {
       const env = { ...(current.env || {}) };
       if (previous in env) {
@@ -190,56 +480,205 @@ export function ProviderEditDialog({
     });
   };
 
-  const syncRawText = () => setRawText(JSON.stringify(draft, null, 2));
+  // --- model list fetching (cc-switch's fetchModelsForConfig) ---
+  const fetchModels = useCallback(async () => {
+    if (fetchState === "loading") return;
+    setFetchState("loading");
+    try {
+      const res = await providerSwitchApi.fetchModels({
+        baseUrl: currentEndpoint,
+        apiKey: currentApiKey,
+        modelsUrl: selectedPreset?.modelsUrl,
+        isFullUrl: !!meta.isFullUrl,
+      });
+      setFetchedModels(res.models);
+      setFetchState("done");
+    } catch (err) {
+      setFetchState("idle");
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  }, [currentApiKey, currentEndpoint, fetchState, meta.isFullUrl, selectedPreset]);
 
-  const openRaw = () => {
-    syncRawText();
-    setRawOpen(true);
+  // --- claude model roles helpers ---
+  const oneMOn = (role) => String(getPath(draft, role.modelPath) ?? "").endsWith("[1m]");
+  const toggleOneM = (role, on) => {
+    setDraft((current) => {
+      const value = String(getPath(current, role.modelPath) ?? "").trim();
+      if (!value) return current;
+      const suffix = on ? "[1m]" : "";
+      return setPath(current, role.modelPath, `${withoutOneM(value)}${suffix}`);
+    });
+  };
+  const fillAllRoles = () => {
+    setDraft((current) => {
+      const candidates = [
+        getPath(current, DEFAULT_MODEL_PATH.claude),
+        ...CLAUDE_MODEL_ROLES.map((role) => getPath(current, role.modelPath)),
+      ].map((value) => withoutOneM(String(value ?? "").trim()));
+      const model = candidates.find(Boolean);
+      if (!model) return current;
+      let next = current;
+      for (const role of CLAUDE_MODEL_ROLES) {
+        next = setPath(next, role.modelPath, model);
+      }
+      return next;
+    });
   };
 
+  // --- endpoint speed test ---
+  const openSpeedTest = () => setSpeedTestOpen(true);
+  const closeSpeedTest = (picked, listChanged, list) => {
+    setSpeedTestOpen(false);
+    if (picked) {
+      setDraft((current) => setPath(current, ENDPOINT_PATH[app], picked.url));
+      if (picked.autoSelect) setMetaValue("endpointAutoSelect", true);
+    }
+    if (listChanged) {
+      setMeta((current) => ({ ...current, customEndpoints: list }));
+    }
+  };
+
+  // --- claude quick toggles over the config JSON (cc-switch's six checkboxes) ---
+  const quickToggles = [
+    {
+      key: "attribution",
+      labelKey: "pswitch.quick.hide_attribution",
+      get: () => !!getPath(draft, "attribution"),
+      set: (on) =>
+        setDraft((current) => {
+          if (!on) return deletePath(current, "attribution");
+          return { ...current, attribution: { commit: "", pr: "", sessionUrl: false } };
+        }),
+    },
+    {
+      key: "teams",
+      labelKey: "pswitch.quick.teams",
+      get: () => getPath(draft, "env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS") === "1",
+      set: (on) =>
+        setDraft((current) =>
+          on
+            ? setPath(current, "env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS", "1")
+            : deletePath(current, "env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"),
+        ),
+    },
+    {
+      key: "tool_search",
+      labelKey: "pswitch.quick.tool_search",
+      get: () => getPath(draft, "env.ENABLE_TOOL_SEARCH") === "true",
+      set: (on) =>
+        setDraft((current) =>
+          on ? setPath(current, "env.ENABLE_TOOL_SEARCH", "true") : deletePath(current, "env.ENABLE_TOOL_SEARCH"),
+        ),
+    },
+    {
+      key: "effort",
+      labelKey: "pswitch.quick.max_effort",
+      get: () => getPath(draft, "env.CLAUDE_CODE_EFFORT_LEVEL") === "max",
+      set: (on) =>
+        setDraft((current) =>
+          on ? setPath(current, "env.CLAUDE_CODE_EFFORT_LEVEL", "max") : deletePath(current, "env.CLAUDE_CODE_EFFORT_LEVEL"),
+        ),
+    },
+    {
+      key: "autoupdater",
+      labelKey: "pswitch.quick.disable_autoupdater",
+      get: () => getPath(draft, "env.DISABLE_AUTOUPDATER") === "1",
+      set: (on) =>
+        setDraft((current) =>
+          on ? setPath(current, "env.DISABLE_AUTOUPDATER", "1") : deletePath(current, "env.DISABLE_AUTOUPDATER"),
+        ),
+    },
+    {
+      key: "artifact",
+      labelKey: "pswitch.quick.disable_artifact",
+      get: () => getPath(draft, "env.CLAUDE_CODE_DISABLE_ARTIFACT") === "1",
+      set: (on) =>
+        setDraft((current) =>
+          on ? setPath(current, "env.CLAUDE_CODE_DISABLE_ARTIFACT", "1") : deletePath(current, "env.CLAUDE_CODE_DISABLE_ARTIFACT"),
+        ),
+    },
+  ];
+
+  // --- raw JSON editor ---
+  const openRaw = () => {
+    setRawText(JSON.stringify(draft, null, 2));
+    setRawOpen(true);
+  };
   const closeRaw = () => {
     try {
       const parsed = JSON.parse(rawText);
       setDraft(parsed);
       setRawOpen(false);
-      setError(null);
+      setRawError(null);
     } catch (err) {
-      setError(copy("pswitch.provider.invalid_json", { error: err instanceof Error ? err.message : String(err) }));
+      setRawError(copy("pswitch.provider.invalid_json", { error: err instanceof Error ? err.message : String(err) }));
+    }
+  };
+  const formatRaw = () => {
+    try {
+      setRawText(JSON.stringify(JSON.parse(rawText), null, 2));
+      setRawError(null);
+    } catch (err) {
+      setRawError(copy("pswitch.provider.invalid_json", { error: err instanceof Error ? err.message : String(err) }));
     }
   };
 
-  const save = async () => {
+  // --- soft validation (cc-switch aggregates missing name/key/endpoint) ---
+  const collectIssues = () => {
+    const issues = [];
+    if (!name.trim()) issues.push(copy("pswitch.validate.name"));
+    const needsEndpoint = !selectedPreset || selectedPreset.group !== "official";
+    if (showEndpointField && needsEndpoint && !currentEndpoint.trim()) {
+      issues.push(copy(`pswitch.validate.endpoint.${app}`));
+    }
+    if (showApiKeyField && !currentApiKey.trim()) {
+      issues.push(copy(`pswitch.validate.key.${app}`));
+    }
+    return issues;
+  };
+
+  const save = async (force) => {
     let payloadConfig = draft;
     if (rawOpen) {
       try {
         payloadConfig = JSON.parse(rawText);
       } catch (err) {
-        setError(copy("pswitch.provider.invalid_json", { error: err instanceof Error ? err.message : String(err) }));
+        setRawError(copy("pswitch.provider.invalid_json", { error: err instanceof Error ? err.message : String(err) }));
         return;
       }
     }
+    if (!force) {
+      const issues = collectIssues();
+      if (issues.length) {
+        setPendingIssues(issues);
+        return;
+      }
+    }
+    setPendingIssues(null);
+    const cleanMeta = {};
+    for (const [key, value] of Object.entries(meta)) {
+      if (value !== undefined && value !== "" && value !== false) cleanMeta[key] = value;
+    }
     try {
+      const payload = {
+        name,
+        category,
+        settingsConfig: payloadConfig,
+        notes,
+        websiteUrl,
+        icon,
+        iconColor,
+        meta: cleanMeta,
+      };
       if (isEdit) {
-        const res = await providerSwitchApi.updateProvider(app, editing.id, {
-          name,
-          category,
-          settingsConfig: payloadConfig,
-          notes,
-          websiteUrl,
-        });
+        const res = await providerSwitchApi.updateProvider(app, editing.id, payload);
         onSaved(
           res.applied
             ? copy("pswitch.provider.applied_live", { name: res.provider.name })
             : copy("pswitch.provider.saved", { name: res.provider.name }),
         );
       } else {
-        const res = await providerSwitchApi.createProvider(app, {
-          name,
-          category,
-          settingsConfig: payloadConfig,
-          notes,
-          websiteUrl,
-        });
+        const res = await providerSwitchApi.createProvider(app, payload);
         onSaved(copy("pswitch.provider.created", { name: res.provider.name }));
       }
       onClose();
@@ -248,17 +687,60 @@ export function ProviderEditDialog({
     }
   };
 
+  // Preset grid: search + official → community → custom order, with an A→Z
+  // toggle (cc-switch's ProviderPresetSelector).
+  const presetGrid = useMemo(() => {
+    const q = presetQuery.trim().toLowerCase();
+    const displayName = (preset) => (preset.nameKey ? copy(preset.nameKey) : preset.name);
+    let list = presets.filter((preset) => !q || displayName(preset).toLowerCase().includes(q));
+    const rank = { official: 0, community: 1, custom: 2 };
+    list = [...list].sort((a, b) => {
+      if (sortAZ) return displayName(a).localeCompare(displayName(b));
+      return (rank[a.group] ?? 3) - (rank[b.group] ?? 3);
+    });
+    return list;
+  }, [presets, presetQuery, sortAZ]);
+
   if (!open) return null;
 
   // Precomputed so the JSX below has no ternary chains after closing tags
   // (the ui-hardcode JSX text scan would otherwise see them as raw text).
   const showPresetGrid = !isEdit && presets.length !== 0;
   const showNoFieldsHint = !isEdit && fields.length === 0 && !!selectedPresetId;
+  // Written as a loop: an arrow function here leaves a bare `>` in source
+  // that the ui-hardcode JSX text scan reads as raw text.
+  let showApiKeyField = false;
+  for (const field of fields) {
+    if (field.id === "api_key") showApiKeyField = true;
+  }
+  const showEndpointField =
+    app === "claude" ? !selectedPreset || selectedPreset.group !== "official" : app === "codex" || app === "gemini";
+  const showAdvancedToggle = app === "claude" || app === "codex";
+  const showQuickToggles = app === "claude";
+  const apiKeyWebsite = selectedPreset?.websiteUrl || websiteUrl;
+  const showApiKeyLink = !!apiKeyWebsite && selectedPreset?.group === "community";
+  const endpointHint = app === "claude" ? copy("pswitch.field.endpoint_hint") : null;
+  const avatarIconName = icon || (selectedPreset ? selectedPreset.icon : "") || "";
+  // cc-switch renders the endpoint (and model) field for every non-official
+  // preset even when the template pre-fills it — community presets carry
+  // endpoints but no base_url field of their own.
+  let hasBaseUrlField = false;
+  let hasModelField = false;
+  for (const field of fields) {
+    if (field.id === "base_url") hasBaseUrlField = true;
+    if (field.id === "model") hasModelField = true;
+  }
+  const showEndpointForEdit = isEdit && showEndpointField && !hasBaseUrlField;
+  const showModelForEdit = isEdit && !hasModelField;
+  const showEndpointForAdd = !isEdit && showEndpointField && !hasBaseUrlField;
+  const showModelForAdd = !isEdit && !hasModelField;
+  const claudeAdvancedOpen = advancedOpen && app === "claude";
+  const codexAdvancedOpen = advancedOpen && app === "codex";
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4 backdrop-blur-[2px]">
       <div
-        className="flex max-h-[88vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-oai-gray-200 dark:bg-oai-gray-950 dark:ring-oai-gray-800"
+        className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-oai-gray-200 dark:bg-oai-gray-950 dark:ring-oai-gray-800"
         role="dialog"
         aria-modal="true"
         aria-label={isEdit ? copy("pswitch.provider.dialog.edit_title") : copy("pswitch.provider.dialog.add_title")}
@@ -295,11 +777,31 @@ export function ProviderEditDialog({
 
           {showPresetGrid ? (
             <div>
-              <label className="mb-2 block text-sm font-medium text-oai-gray-700 dark:text-oai-gray-300">
-                {copy("pswitch.provider.preset")}
-              </label>
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <label className="block text-sm font-medium text-oai-gray-700 dark:text-oai-gray-300">
+                  {copy("pswitch.provider.preset")}
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={presetQuery}
+                    onChange={(event) => setPresetQuery(event.target.value)}
+                    placeholder={copy("pswitch.preset.search")}
+                    aria-label={copy("pswitch.preset.search")}
+                    className="w-36 rounded-lg border border-oai-gray-200 bg-white px-2.5 py-1 text-xs text-oai-black focus:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 dark:border-oai-gray-800 dark:bg-oai-gray-900 dark:text-white"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setSortAZ((current) => !current)}
+                    className="rounded-lg border border-oai-gray-200 px-2 py-1 text-xs text-oai-gray-500 transition-colors hover:text-oai-black dark:border-oai-gray-800 dark:text-oai-gray-400 dark:hover:text-white"
+                    aria-pressed={sortAZ}
+                  >
+                    {sortAZ ? copy("pswitch.preset.sort_default") : copy("pswitch.preset.sort_az")}
+                  </button>
+                </div>
+              </div>
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                {presets.map((preset) => {
+                {presetGrid.map((preset) => {
                   const selected = selectedPresetId === preset.id;
                   return (
                     <button
@@ -323,9 +825,7 @@ export function ProviderEditDialog({
                             {preset.nameKey ? copy(preset.nameKey) : preset.name}
                           </span>
                           <span className="rounded-full bg-oai-gray-100 px-1.5 py-0.5 text-[10px] text-oai-gray-500 dark:bg-oai-gray-800 dark:text-oai-gray-400">
-                            {preset.category === "official"
-                              ? copy("pswitch.provider.category.official")
-                              : copy("pswitch.provider.category.custom")}
+                            {copy(`pswitch.preset.badge.${preset.group}`)}
                           </span>
                         </span>
                         {preset.hintKey ? (
@@ -338,59 +838,121 @@ export function ProviderEditDialog({
                   );
                 })}
               </div>
+              <p className="mt-2 text-xs text-oai-gray-400 dark:text-oai-gray-500">{copy("pswitch.preset.hint")}</p>
             </div>
           ) : null}
 
           {fields.length ? (
             <div className="space-y-3">
-              {fields.map((field) => (
-                <div key={field.id}>
-                  <div className="mb-1 flex items-center justify-between gap-2">
-                    <label className="block text-sm font-medium text-oai-gray-700 dark:text-oai-gray-300">
-                      {copy(field.labelKey)}
-                    </label>
-                    {app === "claude" && field.id === "api_key" ? (
+              {fields.map((field) => {
+                if (field.id === "api_key") {
+                  return (
+                    <div key={field.id}>
+                      <FieldLabel label={copy(field.labelKey)} required>
+                        {app === "claude" ? (
+                          <select
+                            value={claudeApiKeyName}
+                            onChange={(event) => switchClaudeApiKeyName(event.target.value)}
+                            aria-label={copy("pswitch.field.api_key_name")}
+                            className="rounded-md border border-oai-gray-200 bg-white px-1.5 py-0.5 font-mono text-xs text-oai-gray-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 dark:border-oai-gray-800 dark:bg-oai-gray-900 dark:text-oai-gray-300"
+                          >
+                            <option value="ANTHROPIC_AUTH_TOKEN">{copy("pswitch.field.auth_token_option")}</option>
+                            <option value="ANTHROPIC_API_KEY">{copy("pswitch.field.api_key_option")}</option>
+                          </select>
+                        ) : null}
+                        {showApiKeyLink ? (
+                          <a
+                            href={apiKeyWebsite}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-1 text-xs font-medium text-oai-brand-600 hover:underline dark:text-oai-brand-400"
+                          >
+                            <ExternalLink className="h-3 w-3" />
+                            {copy("pswitch.field.get_api_key")}
+                          </a>
+                        ) : null}
+                      </FieldLabel>
+                      <SecretInput
+                        value={String(getPath(draft, field.path) ?? "")}
+                        onChange={(value) => setFieldValue(field, value)}
+                        placeholder={field.placeholder}
+                        ariaLabel={copy(field.labelKey)}
+                      />
+                      {field.hintKey ? (
+                        <p className="mt-1 text-xs text-oai-gray-400 dark:text-oai-gray-500">{copy(field.hintKey)}</p>
+                      ) : null}
+                    </div>
+                  );
+                }
+                if (field.id === "base_url") {
+                  return (
+                    <EndpointField
+                      key={field.id}
+                      label={copy("pswitch.field.endpoint")}
+                      value={String(getPath(draft, field.path) ?? "")}
+                      onChange={(value) => setDraft((current) => setPath(current, field.path, value))}
+                      isFullUrl={!!meta.isFullUrl}
+                      onFullUrlChange={(on) => setMetaValue("isFullUrl", on || undefined)}
+                      onManage={openSpeedTest}
+                      hint={endpointHint}
+                    />
+                  );
+                }
+                if (field.id === "model") {
+                  return (
+                    <ModelInput
+                      key={field.id}
+                      label={copy(field.labelKey)}
+                      value={String(getPath(draft, field.path) ?? "")}
+                      onChange={(value) => setDraft((current) => setPath(current, field.path, value))}
+                      models={fetchedModels}
+                      fetchState={fetchState}
+                      onFetch={fetchModels}
+                      hint={field.hintKey ? copy(field.hintKey) : null}
+                    />
+                  );
+                }
+                if (field.type === "select") {
+                  return (
+                    <div key={field.id}>
+                      <FieldLabel label={copy(field.labelKey)} />
                       <select
-                        value={claudeApiKeyName}
-                        onChange={(event) => switchClaudeApiKeyName(event.target.value)}
-                        aria-label={copy("pswitch.field.api_key_name")}
-                        className="rounded-md border border-oai-gray-200 bg-white px-1.5 py-0.5 font-mono text-xs text-oai-gray-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 dark:border-oai-gray-800 dark:bg-oai-gray-900 dark:text-oai-gray-300"
+                        value={String(getPath(draft, field.path) ?? "")}
+                        onChange={(event) => setDraft((current) => setPath(current, field.path, event.target.value))}
+                        aria-label={copy(field.labelKey)}
+                        className="w-full rounded-lg border border-oai-gray-200 bg-white px-3 py-2 text-sm text-oai-black focus:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 dark:border-oai-gray-800 dark:bg-oai-gray-900 dark:text-white"
                       >
-                        <option value="ANTHROPIC_AUTH_TOKEN">{copy("pswitch.field.auth_token_option")}</option>
-                        <option value="ANTHROPIC_API_KEY">{copy("pswitch.field.api_key_option")}</option>
+                        {(field.options || []).map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {copy(option.labelKey)}
+                          </option>
+                        ))}
                       </select>
-                    ) : null}
-                  </div>
-                  {field.type === "select" ? (
-                    <select
-                      value={String(fieldValue(field) ?? "")}
-                      onChange={(event) => setFieldValue(field, event.target.value)}
-                      aria-label={copy(field.labelKey)}
-                      className="w-full rounded-lg border border-oai-gray-200 bg-white px-3 py-2 text-sm text-oai-black focus:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 dark:border-oai-gray-800 dark:bg-oai-gray-900 dark:text-white"
-                    >
-                      {(field.options || []).map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {copy(option.labelKey)}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
+                      {field.hintKey ? (
+                        <p className="mt-1 text-xs text-oai-gray-400 dark:text-oai-gray-500">{copy(field.hintKey)}</p>
+                      ) : null}
+                    </div>
+                  );
+                }
+                return (
+                  <div key={field.id}>
+                    <FieldLabel label={copy(field.labelKey)} />
                     <input
                       type={field.secret ? "password" : "text"}
-                      value={String(fieldValue(field))}
-                      onChange={(event) => setFieldValue(field, event.target.value)}
+                      value={String(getPath(draft, field.path) ?? "")}
+                      onChange={(event) => setDraft((current) => setPath(current, field.path, event.target.value))}
                       placeholder={field.placeholder || ""}
                       autoComplete="off"
                       spellCheck={false}
                       aria-label={copy(field.labelKey)}
                       className="w-full rounded-lg border border-oai-gray-200 bg-white px-3 py-2 font-mono text-sm text-oai-black focus:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 dark:border-oai-gray-800 dark:bg-oai-gray-900 dark:text-white"
                     />
-                  )}
-                  {field.hintKey ? (
-                    <p className="mt-1 text-xs text-oai-gray-400 dark:text-oai-gray-500">{copy(field.hintKey)}</p>
-                  ) : null}
-                </div>
-              ))}
+                    {field.hintKey ? (
+                      <p className="mt-1 text-xs text-oai-gray-400 dark:text-oai-gray-500">{copy(field.hintKey)}</p>
+                    ) : null}
+                  </div>
+                );
+              })}
             </div>
           ) : null}
 
@@ -400,11 +962,267 @@ export function ProviderEditDialog({
             </p>
           ) : null}
 
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {showEndpointForAdd ? (
+            <EndpointField
+              label={copy("pswitch.field.endpoint")}
+              value={currentEndpoint}
+              onChange={(value) => setDraft((current) => setPath(current, ENDPOINT_PATH[app], value))}
+              isFullUrl={!!meta.isFullUrl}
+              onFullUrlChange={(on) => setMetaValue("isFullUrl", on || undefined)}
+              onManage={openSpeedTest}
+              hint={endpointHint}
+            />
+          ) : null}
+          {showModelForAdd ? (
+            <ModelInput
+              label={copy("pswitch.field.model")}
+              value={String(getPath(draft, DEFAULT_MODEL_PATH[app]) ?? "")}
+              onChange={(value) => setDraft((current) => setPath(current, DEFAULT_MODEL_PATH[app], value))}
+              models={fetchedModels}
+              fetchState={fetchState}
+              onFetch={fetchModels}
+              hint={copy("pswitch.field.model_hint")}
+            />
+          ) : null}
+
+          {showEndpointForEdit ? (
+            <EndpointField
+              label={copy("pswitch.field.endpoint")}
+              value={currentEndpoint}
+              onChange={(value) => setDraft((current) => setPath(current, ENDPOINT_PATH[app], value))}
+              isFullUrl={!!meta.isFullUrl}
+              onFullUrlChange={(on) => setMetaValue("isFullUrl", on || undefined)}
+              onManage={openSpeedTest}
+              hint={endpointHint}
+            />
+          ) : null}
+          {showModelForEdit ? (
+            <ModelInput
+              label={copy("pswitch.field.model")}
+              value={String(getPath(draft, DEFAULT_MODEL_PATH[app]) ?? "")}
+              onChange={(value) => setDraft((current) => setPath(current, DEFAULT_MODEL_PATH[app], value))}
+              models={fetchedModels}
+              fetchState={fetchState}
+              onFetch={fetchModels}
+              hint={copy("pswitch.field.model_hint")}
+            />
+          ) : null}
+
+          {showAdvancedToggle ? (
+            <div className="rounded-xl border border-oai-gray-200 dark:border-oai-gray-800">
+              <button
+                type="button"
+                onClick={() => setAdvancedOpen((current) => !current)}
+                className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
+                aria-expanded={advancedOpen}
+              >
+                <span className="text-sm font-medium text-oai-gray-700 dark:text-oai-gray-300">
+                  {copy("pswitch.advanced.title")}
+                </span>
+                {advancedOpen ? (
+                  <ChevronUp className="h-4 w-4 text-oai-gray-400" />
+                ) : (
+                  <ChevronDown className="h-4 w-4 text-oai-gray-400" />
+                )}
+              </button>
+              {claudeAdvancedOpen ? (
+                <div className="space-y-4 border-t border-oai-gray-100 px-4 py-4 dark:border-oai-gray-800">
+                  <div>
+                    <FieldLabel label={copy("pswitch.advanced.model_mapping")}>
+                      <button
+                        type="button"
+                        onClick={fillAllRoles}
+                        className="inline-flex items-center gap-1 text-xs font-medium text-oai-brand-600 hover:underline dark:text-oai-brand-400"
+                      >
+                        <Wand2 className="h-3.5 w-3.5" />
+                        {copy("pswitch.advanced.fill_all")}
+                      </button>
+                    </FieldLabel>
+                    <div className="space-y-2">
+                      {CLAUDE_MODEL_ROLES.map((role) => (
+                        <div
+                          key={role.key}
+                          className="grid grid-cols-[84px_1fr_1fr_auto] items-center gap-2 rounded-lg bg-oai-gray-50 px-2.5 py-2 dark:bg-oai-gray-900"
+                        >
+                          <span className="text-xs font-medium text-oai-gray-500 dark:text-oai-gray-400">
+                            {copy(role.labelKey)}
+                          </span>
+                          {role.namePath ? (
+                            <input
+                              type="text"
+                              value={String(getPath(draft, role.namePath) ?? "")}
+                              onChange={(event) => setDraft((current) => setPath(current, role.namePath, event.target.value))}
+                              placeholder={copy("pswitch.advanced.display_name")}
+                              aria-label={`${copy(role.labelKey)} ${copy("pswitch.advanced.display_name")}`}
+                              className="w-full rounded-md border border-oai-gray-200 bg-white px-2 py-1.5 text-xs text-oai-black focus:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 dark:border-oai-gray-800 dark:bg-oai-gray-950 dark:text-white"
+                            />
+                          ) : (
+                            <span className="text-xs text-oai-gray-400 dark:text-oai-gray-500">
+                              {copy("pswitch.advanced.no_display_name")}
+                            </span>
+                          )}
+                          <input
+                            type="text"
+                            value={withoutOneM(String(getPath(draft, role.modelPath) ?? ""))}
+                            onChange={(event) =>
+                              setDraft((current) => {
+                                const suffix = oneMOn(role) ? "[1m]" : "";
+                                return setPath(current, role.modelPath, `${event.target.value}${suffix}`);
+                              })
+                            }
+                            list={fetchedModels && fetchedModels.length ? `role-models-${role.key}` : undefined}
+                            placeholder="claude-sonnet-4-6"
+                            aria-label={`${copy(role.labelKey)} model`}
+                            className="w-full rounded-md border border-oai-gray-200 bg-white px-2 py-1.5 font-mono text-xs text-oai-black focus:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 dark:border-oai-gray-800 dark:bg-oai-gray-950 dark:text-white"
+                          />
+                          {fetchedModels && fetchedModels.length ? (
+                            <datalist id={`role-models-${role.key}`}>
+                              {fetchedModels.slice(0, 200).map((model) => (
+                                <option key={model} value={model} />
+                              ))}
+                            </datalist>
+                          ) : null}
+                          {role.supportsOneM ? (
+                            <label className="flex shrink-0 cursor-pointer items-center gap-1 text-xs text-oai-gray-500 dark:text-oai-gray-400">
+                              <input
+                                type="checkbox"
+                                checked={oneMOn(role)}
+                                onChange={(event) => toggleOneM(role, event.target.checked)}
+                                className="h-3.5 w-3.5 rounded border-oai-gray-300 accent-oai-brand-500"
+                              />
+                              {copy("pswitch.advanced.one_m")}
+                            </label>
+                          ) : (
+                            <span className="w-3" />
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    <p className="mt-1.5 text-xs text-oai-gray-400 dark:text-oai-gray-500">
+                      {copy("pswitch.advanced.mapping_hint")}
+                    </p>
+                  </div>
+                  <div>
+                    <FieldLabel label={copy("pswitch.advanced.api_format")}>
+                      <button
+                        type="button"
+                        onClick={() => void fetchModels()}
+                        disabled={fetchState === "loading"}
+                        className="inline-flex items-center gap-1 text-xs font-medium text-oai-brand-600 hover:underline disabled:opacity-50 dark:text-oai-brand-400"
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                        {fetchState === "loading" ? copy("pswitch.models.fetching") : copy("pswitch.models.fetch")}
+                      </button>
+                    </FieldLabel>
+                    <select
+                      value={meta.apiFormat || "anthropic"}
+                      onChange={(event) =>
+                        setMetaValue("apiFormat", event.target.value === "anthropic" ? undefined : event.target.value)
+                      }
+                      aria-label={copy("pswitch.advanced.api_format")}
+                      className="w-full rounded-lg border border-oai-gray-200 bg-white px-3 py-2 text-sm text-oai-black focus:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 dark:border-oai-gray-800 dark:bg-oai-gray-900 dark:text-white"
+                    >
+                      <option value="anthropic">{copy("pswitch.advanced.format_anthropic")}</option>
+                      <option value="openai_chat">{copy("pswitch.advanced.format_openai_chat")}</option>
+                      <option value="openai_responses">{copy("pswitch.advanced.format_openai_responses")}</option>
+                      <option value="gemini_native">{copy("pswitch.advanced.format_gemini_native")}</option>
+                    </select>
+                    <p className="mt-1 text-xs text-oai-gray-400 dark:text-oai-gray-500">
+                      {copy("pswitch.advanced.api_format_hint")}
+                    </p>
+                  </div>
+                  <ModelInput
+                    label={copy("pswitch.advanced.default_model")}
+                    value={withoutOneM(String(getPath(draft, DEFAULT_MODEL_PATH.claude) ?? ""))}
+                    onChange={(value) => setDraft((current) => setPath(current, DEFAULT_MODEL_PATH.claude, value))}
+                    models={fetchedModels}
+                    fetchState={fetchState}
+                    hint={copy("pswitch.advanced.default_model_hint")}
+                  />
+                  <div>
+                    <FieldLabel label={copy("pswitch.advanced.user_agent")} />
+                    <input
+                      type="text"
+                      value={meta.customUserAgent || ""}
+                      onChange={(event) => setMetaValue("customUserAgent", event.target.value)}
+                      placeholder="Mozilla/5.0 …"
+                      aria-label={copy("pswitch.advanced.user_agent")}
+                      className="w-full rounded-lg border border-oai-gray-200 bg-white px-3 py-2 font-mono text-sm text-oai-black focus:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 dark:border-oai-gray-800 dark:bg-oai-gray-900 dark:text-white"
+                    />
+                  </div>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div>
+                      <FieldLabel label={copy("pswitch.advanced.override_headers")} />
+                      <JsonTextarea
+                        value={(meta.localProxyRequestOverrides && meta.localProxyRequestOverrides.headers) || ""}
+                        onChange={(value) =>
+                          setMeta((current) => ({
+                            ...current,
+                            localProxyRequestOverrides: {
+                              ...(current.localProxyRequestOverrides || {}),
+                              headers: value || undefined,
+                            },
+                          }))
+                        }
+                        rows={3}
+                        label={copy("pswitch.advanced.override_headers")}
+                      />
+                    </div>
+                    <div>
+                      <FieldLabel label={copy("pswitch.advanced.override_body")} />
+                      <JsonTextarea
+                        value={(meta.localProxyRequestOverrides && meta.localProxyRequestOverrides.body) || ""}
+                        onChange={(value) =>
+                          setMeta((current) => ({
+                            ...current,
+                            localProxyRequestOverrides: {
+                              ...(current.localProxyRequestOverrides || {}),
+                              body: value || undefined,
+                            },
+                          }))
+                        }
+                        rows={3}
+                        label={copy("pswitch.advanced.override_body")}
+                      />
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+              {codexAdvancedOpen ? (
+                <div className="space-y-4 border-t border-oai-gray-100 px-4 py-4 dark:border-oai-gray-800">
+                  <div>
+                    <FieldLabel label={copy("pswitch.advanced.user_agent")} />
+                    <input
+                      type="text"
+                      value={meta.customUserAgent || ""}
+                      onChange={(event) => setMetaValue("customUserAgent", event.target.value)}
+                      placeholder="Mozilla/5.0 …"
+                      aria-label={copy("pswitch.advanced.user_agent")}
+                      className="w-full rounded-lg border border-oai-gray-200 bg-white px-3 py-2 font-mono text-sm text-oai-black focus:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 dark:border-oai-gray-800 dark:bg-oai-gray-900 dark:text-white"
+                    />
+                    <p className="mt-1 text-xs text-oai-gray-400 dark:text-oai-gray-500">
+                      {copy("pswitch.advanced.codex_ua_hint")}
+                    </p>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-[1fr_auto]">
             <div>
-              <label className="mb-1 block text-sm font-medium text-oai-gray-700 dark:text-oai-gray-300">
-                {copy("pswitch.provider.name")}
-              </label>
+              <FieldLabel label={copy("pswitch.provider.name")} required>
+                <button
+                  type="button"
+                  onClick={() => setIconPickerOpen(true)}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-oai-gray-200 px-2 py-1 text-xs text-oai-gray-500 transition-colors hover:border-oai-gray-300 hover:text-oai-black dark:border-oai-gray-800 dark:text-oai-gray-400 dark:hover:text-white"
+                >
+                  <span className={`flex h-4 w-4 items-center justify-center rounded ${presetAvatarClass(iconColor)}`}>
+                    <PresetIcon icon={avatarIconName} color={iconColor} className="h-3 w-3" />
+                  </span>
+                  {icon ? copy("pswitch.icon.change") : copy("pswitch.icon.select")}
+                </button>
+              </FieldLabel>
               <input
                 type="text"
                 value={name}
@@ -414,9 +1232,7 @@ export function ProviderEditDialog({
               />
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium text-oai-gray-700 dark:text-oai-gray-300">
-                {copy("pswitch.provider.website_url")}
-              </label>
+              <FieldLabel label={copy("pswitch.provider.website_url")} />
               <input
                 type="url"
                 value={websiteUrl}
@@ -428,13 +1244,12 @@ export function ProviderEditDialog({
           </div>
 
           <div>
-            <label className="mb-1 block text-sm font-medium text-oai-gray-700 dark:text-oai-gray-300">
-              {copy("pswitch.provider.notes")}
-            </label>
+            <FieldLabel label={copy("pswitch.provider.notes")} />
             <textarea
               value={notes}
               onChange={(event) => setNotes(event.target.value)}
               rows={2}
+              aria-label={copy("pswitch.provider.notes")}
               className="w-full resize-y rounded-lg border border-oai-gray-200 bg-white px-3 py-2 text-sm text-oai-black focus:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 dark:border-oai-gray-800 dark:bg-oai-gray-900 dark:text-white"
             />
           </div>
@@ -448,17 +1263,64 @@ export function ProviderEditDialog({
               {rawOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
               {copy("pswitch.provider.raw_json")}
             </button>
-            <Collapsible open={rawOpen}>
-              <textarea
-                value={rawText}
-                onChange={(event) => setRawText(event.target.value)}
-                spellCheck={false}
-                rows={10}
-                aria-label={copy("pswitch.provider.config")}
-                className="mt-2 w-full resize-y rounded-lg border border-oai-gray-200 bg-oai-gray-50 p-3 font-mono text-xs text-oai-black focus:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 dark:border-oai-gray-800 dark:bg-oai-gray-950 dark:text-oai-gray-100"
-              />
-            </Collapsible>
+            {rawOpen ? (
+              <div className="mt-2">
+                {showQuickToggles ? (
+                  <div className="mb-2 flex flex-wrap gap-x-4 gap-y-1.5">
+                    {quickToggles.map((toggle) => (
+                      <label
+                        key={toggle.key}
+                        className="flex cursor-pointer items-center gap-1.5 text-xs text-oai-gray-600 dark:text-oai-gray-300"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={toggle.get()}
+                          onChange={(event) => toggle.set(event.target.checked)}
+                          className="h-3.5 w-3.5 rounded border-oai-gray-300 accent-oai-brand-500"
+                        />
+                        {copy(toggle.labelKey)}
+                      </label>
+                    ))}
+                  </div>
+                ) : null}
+                <div className="mb-2 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={formatRaw}
+                    className="text-xs font-medium text-oai-brand-600 hover:underline dark:text-oai-brand-400"
+                  >
+                    {copy("pswitch.json.format")}
+                  </button>
+                </div>
+                <JsonTextarea
+                  value={rawText}
+                  onChange={(event) => setRawText(event.target.value)}
+                  rows={10}
+                  error={rawError}
+                  label={copy("pswitch.provider.config")}
+                />
+              </div>
+            ) : null}
           </div>
+
+          {pendingIssues ? (
+            <div className="rounded-lg border border-oai-amber-dark/30 bg-oai-amber-50 px-3 py-2.5 text-xs text-oai-amber-dark dark:border-oai-amber-dark/40 dark:bg-oai-amber-dark/15 dark:text-oai-amber-light">
+              <p className="font-medium">{copy("pswitch.validate.title")}</p>
+              <ul className="mt-1 list-inside list-disc space-y-0.5">
+                {pendingIssues.map((issue) => (
+                  <li key={issue}>{issue}</li>
+                ))}
+              </ul>
+              <div className="mt-2 flex gap-2">
+                <Button variant="secondary" size="sm" onClick={() => setPendingIssues(null)}>
+                  {copy("pswitch.validate.go_back")}
+                </Button>
+                <Button size="sm" onClick={() => void save(true)}>
+                  {copy("pswitch.validate.save_anyway")}
+                </Button>
+              </div>
+            </div>
+          ) : null}
 
           {error ? (
             <p className="text-sm text-red-600 dark:text-red-400" role="alert">
@@ -468,7 +1330,7 @@ export function ProviderEditDialog({
         </div>
 
         <div className="flex items-center justify-between gap-2 border-t border-oai-gray-100 px-5 py-3 dark:border-oai-gray-800">
-          {isEdit && editing?.websiteUrl ? (
+          {isEdit && editing && editing.websiteUrl ? (
             <a
               href={editing.websiteUrl}
               target="_blank"
@@ -485,12 +1347,32 @@ export function ProviderEditDialog({
             <Button variant="secondary" size="sm" disabled={busy} onClick={onClose}>
               {copy("pswitch.action.cancel")}
             </Button>
-            <Button size="sm" disabled={busy || loading || !name.trim()} onClick={() => void save()}>
+            <Button size="sm" disabled={busy || loading || !name.trim()} onClick={() => void save(false)}>
               {copy("pswitch.action.save")}
             </Button>
           </div>
         </div>
       </div>
+
+      <ProviderIconPicker
+        open={iconPickerOpen}
+        value={icon}
+        color={iconColor}
+        onPick={(picked, color) => {
+          setIcon(picked);
+          setIconColor(color);
+          setIconPickerOpen(false);
+        }}
+        onClose={() => setIconPickerOpen(false)}
+      />
+
+      <EndpointSpeedTestDialog
+        open={speedTestOpen}
+        app={app}
+        currentUrl={currentEndpoint}
+        presetCandidates={endpointCandidates}
+        onClose={closeSpeedTest}
+      />
     </div>
   );
 }

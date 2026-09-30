@@ -2278,3 +2278,78 @@ pswitch.provider.preset_no_fields,pswitch,ProviderSwitchPage,ProviderEditDialog,
 pswitch.provider.raw_json,pswitch,ProviderSwitchPage,ProviderEditDialog,raw_json,JSON config (advanced),,active
 pswitch.provider.saved,pswitch,ProviderSwitchPage,ProviderEditDialog,saved,"Saved ""{{name}}"".",,active
 pswitch.provider.website_url,pswitch,ProviderSwitchPage,ProviderEditDialog,website_url,Website,,active
+pswitch.field.endpoint,pswitch,ProviderSwitchPage,ProviderEditDialog,endpoint,API Endpoint,,active
+pswitch.field.endpoint_hint,pswitch,ProviderSwitchPage,ProviderEditDialog,endpoint_hint,"Compatible endpoint address, no trailing slash.",,active
+pswitch.field.full_url,pswitch,ProviderSwitchPage,ProviderEditDialog,full_url,Full URL,,active
+pswitch.field.get_api_key,pswitch,ProviderSwitchPage,ProviderEditDialog,get_api_key,Get API Key,,active
+pswitch.field.show_key,pswitch,ProviderSwitchPage,ProviderEditDialog,show_key,Show key,,active
+pswitch.field.hide_key,pswitch,ProviderSwitchPage,ProviderEditDialog,hide_key,Hide key,,active
+pswitch.field.codex_key_hint,pswitch,ProviderSwitchPage,ProviderEditDialog,codex_key_hint,Stored in auth.json for this provider.,,active
+pswitch.models.fetch,pswitch,ProviderSwitchPage,ProviderEditDialog,fetch,Fetch models,,active
+pswitch.models.fetching,pswitch,ProviderSwitchPage,ProviderEditDialog,fetching,Fetching…,,active
+pswitch.role.sonnet,pswitch,ProviderSwitchPage,ProviderEditDialog,sonnet,Sonnet,,active
+pswitch.role.opus,pswitch,ProviderSwitchPage,ProviderEditDialog,opus,Opus,,active
+pswitch.role.fable,pswitch,ProviderSwitchPage,ProviderEditDialog,fable,Fable,,active
+pswitch.role.haiku,pswitch,ProviderSwitchPage,ProviderEditDialog,haiku,Haiku,,active
+pswitch.role.subagent,pswitch,ProviderSwitchPage,ProviderEditDialog,subagent,Subagent,,active
+pswitch.advanced.title,pswitch,ProviderSwitchPage,ProviderEditDialog,title,Advanced options,,active
+pswitch.advanced.model_mapping,pswitch,ProviderSwitchPage,ProviderEditDialog,model_mapping,Model mapping,,active
+pswitch.advanced.fill_all,pswitch,ProviderSwitchPage,ProviderEditDialog,fill_all,Fill all roles,,active
+pswitch.advanced.display_name,pswitch,ProviderSwitchPage,ProviderEditDialog,display_name,Display name,,active
+pswitch.advanced.no_display_name,pswitch,ProviderSwitchPage,ProviderEditDialog,no_display_name,Not shown in /model menu,,active
+pswitch.advanced.mapping_hint,pswitch,ProviderSwitchPage,ProviderEditDialog,mapping_hint,Map Claude Code's model roles to this provider's model names.,,active
+pswitch.advanced.api_format,pswitch,ProviderSwitchPage,ProviderEditDialog,api_format,Upstream API format,,active
+pswitch.advanced.format_anthropic,pswitch,ProviderSwitchPage,ProviderEditDialog,format_anthropic,Anthropic (native),,active
+pswitch.advanced.format_openai_chat,pswitch,ProviderSwitchPage,ProviderEditDialog,format_openai_chat,OpenAI Chat Completions,,active
+pswitch.advanced.format_openai_responses,pswitch,ProviderSwitchPage,ProviderEditDialog,format_openai_responses,OpenAI Responses,,active
+pswitch.advanced.format_gemini_native,pswitch,ProviderSwitchPage,ProviderEditDialog,format_gemini_native,Gemini native,,active
+pswitch.advanced.api_format_hint,pswitch,ProviderSwitchPage,ProviderEditDialog,api_format_hint,Format conversions run through AiTool's proxy when routed through it.,,active
+pswitch.advanced.default_model,pswitch,ProviderSwitchPage,ProviderEditDialog,default_model,Default model,,active
+pswitch.advanced.default_model_hint,pswitch,ProviderSwitchPage,ProviderEditDialog,default_model_hint,Leave empty for official; recommended for relays.,,active
+pswitch.advanced.user_agent,pswitch,ProviderSwitchPage,ProviderEditDialog,user_agent,Custom User-Agent,,active
+pswitch.advanced.codex_ua_hint,pswitch,ProviderSwitchPage,ProviderEditDialog,codex_ua_hint,Sent as the User-Agent for requests routed through AiTool's proxy.,,active
+pswitch.advanced.override_headers,pswitch,ProviderSwitchPage,ProviderEditDialog,override_headers,Header overrides (JSON),,active
+pswitch.advanced.override_body,pswitch,ProviderSwitchPage,ProviderEditDialog,override_body,Body overrides (JSON),,active
+pswitch.advanced.one_m,pswitch,ProviderSwitchPage,ProviderEditDialog,one_m,1M,,active
+pswitch.quick.hide_attribution,pswitch,ProviderSwitchPage,ProviderEditDialog,hide_attribution,Hide AI attribution,,active
+pswitch.quick.teams,pswitch,ProviderSwitchPage,ProviderEditDialog,teams,Teammates mode,,active
+pswitch.quick.tool_search,pswitch,ProviderSwitchPage,ProviderEditDialog,tool_search,Enable Tool Search,,active
+pswitch.quick.max_effort,pswitch,ProviderSwitchPage,ProviderEditDialog,max_effort,Max effort level,,active
+pswitch.quick.disable_autoupdater,pswitch,ProviderSwitchPage,ProviderEditDialog,disable_autoupdater,Disable auto-updater,,active
+pswitch.quick.disable_artifact,pswitch,ProviderSwitchPage,ProviderEditDialog,disable_artifact,Disable Artifact tool,,active
+pswitch.json.format,pswitch,ProviderSwitchPage,ProviderEditDialog,format,Format,,active
+pswitch.validate.title,pswitch,ProviderSwitchPage,ProviderEditDialog,title,Save anyway?,,active
+pswitch.validate.name,pswitch,ProviderSwitchPage,ProviderEditDialog,name,Provider name is empty.,,active
+pswitch.validate.endpoint.claude,pswitch,ProviderSwitchPage,ProviderEditDialog,claude,Claude API endpoint is empty.,,active
+pswitch.validate.endpoint.codex,pswitch,ProviderSwitchPage,ProviderEditDialog,codex,Codex API endpoint is empty.,,active
+pswitch.validate.endpoint.gemini,pswitch,ProviderSwitchPage,ProviderEditDialog,gemini,Gemini API endpoint is empty.,,active
+pswitch.validate.key.claude,pswitch,ProviderSwitchPage,ProviderEditDialog,claude,Claude API key is empty.,,active
+pswitch.validate.key.codex,pswitch,ProviderSwitchPage,ProviderEditDialog,codex,Codex API key is empty.,,active
+pswitch.validate.key.gemini,pswitch,ProviderSwitchPage,ProviderEditDialog,gemini,Gemini API key is empty.,,active
+pswitch.validate.go_back,pswitch,ProviderSwitchPage,ProviderEditDialog,go_back,Go back,,active
+pswitch.validate.save_anyway,pswitch,ProviderSwitchPage,ProviderEditDialog,save_anyway,Save anyway,,active
+pswitch.preset.search,pswitch,ProviderSwitchPage,ProviderEditDialog,search,Search presets…,,active
+pswitch.preset.sort_az,pswitch,ProviderSwitchPage,ProviderEditDialog,sort_az,A→Z,,active
+pswitch.preset.sort_default,pswitch,ProviderSwitchPage,ProviderEditDialog,sort_default,Default,,active
+pswitch.preset.hint,pswitch,ProviderSwitchPage,ProviderEditDialog,hint,Community presets ship with relay endpoints and role mappings; pick Custom to start from blank.,,active
+pswitch.preset.badge.official,pswitch,ProviderSwitchPage,ProviderEditDialog,official,Official,,active
+pswitch.preset.badge.community,pswitch,ProviderSwitchPage,ProviderEditDialog,community,Community,,active
+pswitch.preset.badge.custom,pswitch,ProviderSwitchPage,ProviderEditDialog,custom,Custom,,active
+pswitch.speed.title,pswitch,ProviderSwitchPage,ProviderEditDialog,title,Endpoints,,active
+pswitch.speed.subtitle,pswitch,ProviderSwitchPage,ProviderEditDialog,subtitle,"Add candidate endpoints, test their latency, pick the fastest.",,active
+pswitch.speed.manage,pswitch,ProviderSwitchPage,ProviderEditDialog,manage,Manage & test,,active
+pswitch.speed.add,pswitch,ProviderSwitchPage,ProviderEditDialog,add,Add endpoint,,active
+pswitch.speed.invalid_url,pswitch,ProviderSwitchPage,ProviderEditDialog,invalid_url,Enter a valid http(s) URL.,,active
+pswitch.speed.duplicate,pswitch,ProviderSwitchPage,ProviderEditDialog,duplicate,This endpoint is already in the list.,,active
+pswitch.speed.empty,pswitch,ProviderSwitchPage,ProviderEditDialog,empty,No endpoints yet — add one above.,,active
+pswitch.speed.failed,pswitch,ProviderSwitchPage,ProviderEditDialog,failed,Failed,,active
+pswitch.speed.remove,pswitch,ProviderSwitchPage,ProviderEditDialog,remove,Remove endpoint,,active
+pswitch.speed.auto_select,pswitch,ProviderSwitchPage,ProviderEditDialog,auto_select,Auto-select the fastest endpoint after testing,,active
+pswitch.speed.test,pswitch,ProviderSwitchPage,ProviderEditDialog,test,Test,,active
+pswitch.speed.use_selected,pswitch,ProviderSwitchPage,ProviderEditDialog,use_selected,Use selected,,active
+pswitch.icon.picker_title,pswitch,ProviderSwitchPage,ProviderEditDialog,picker_title,Choose an icon,,active
+pswitch.icon.search_placeholder,pswitch,ProviderSwitchPage,ProviderEditDialog,search_placeholder,Search icons…,,active
+pswitch.icon.no_results,pswitch,ProviderSwitchPage,ProviderEditDialog,no_results,No icons match your search.,,active
+pswitch.icon.done,pswitch,ProviderSwitchPage,ProviderEditDialog,done,Done,,active
+pswitch.icon.select,pswitch,ProviderSwitchPage,ProviderEditDialog,select,Icon,,active
+pswitch.icon.change,pswitch,ProviderSwitchPage,ProviderEditDialog,change,Change icon,,active

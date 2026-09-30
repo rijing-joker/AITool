@@ -1580,6 +1580,14 @@ function createLocalApiHandler({ queuePath }) {
       if (handled) return;
     }
 
+    // --- Provider-switch layer (AI CLI config management, cc-switch port) ---
+    if (p === "/api/provider-switch" || p.startsWith("/api/provider-switch/")) {
+      const handled = await require("./provider-switch/api").handleProviderSwitchApiRequest(req, res, url, {
+        isAuthorizedLocalMutation,
+      });
+      if (handled) return;
+    }
+
     if (p === "/api/local-auth") {
       if (String(req.method || "GET").toUpperCase() !== "GET") {
         json(res, { error: "Method Not Allowed" }, 405);

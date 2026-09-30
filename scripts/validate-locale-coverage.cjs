@@ -47,6 +47,10 @@ const SOURCE_IDENTICAL_KEY_ALLOWLIST = [
   /^proxy[.]upstream[.]field[.]baseUrl$/,
   /^proxy[.]creds[.]settings[.]websockets$/,
   /^proxy[.]creds[.]models[.]rulesPlaceholder$/,
+  // Provider-switch page: CLI product names and live config file names stay
+  // verbatim in zh/zh-TW.
+  /^pswitch[.]tab[.]/,
+  /^pswitch[.]live[.]file[.](?:settings|config|auth|env)$/,
 ];
 
 // Developer-facing product terms stay in English in Chinese UI copy. Scope

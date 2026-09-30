@@ -2189,3 +2189,66 @@ quota.percent,ui,QuotaWidget,QuotaWidget,percent,"%",,active
 quota.reset_in,ui,QuotaWidget,QuotaWidget,reset_in,"Resets in {{time}}",,active
 quota.close,ui,QuotaWidget,QuotaWidget,close,"Close widget",,active
 quota.close_hint,ui,QuotaWidget,QuotaWidget,close_hint,"Close widget; reopen from the tray menu",,active
+nav.provider_switch,pswitch,ProviderSwitchPage,Sidebar,nav_provider_switch,Provider Configs,,active
+pswitch.title,pswitch,ProviderSwitchPage,ProviderSwitchPage,title,Provider Configs,,active
+pswitch.subtitle,pswitch,ProviderSwitchPage,ProviderSwitchPage,subtitle,Manage provider presets for your AI CLI tools and switch their live config files in one click. Ported from cc-switch.,,active
+pswitch.storage_path,pswitch,ProviderSwitchPage,ProviderSwitchPage,storage_path,Presets stored at {{path}},,active
+pswitch.error.load,pswitch,ProviderSwitchPage,ProviderSwitchPage,error_load,Failed to load provider switch status,,active
+pswitch.action.refresh,pswitch,ProviderSwitchPage,ProviderSwitchPage,action_refresh,Refresh,,active
+pswitch.action.close,pswitch,ProviderSwitchPage,ProviderSwitchPage,action_close,Close,,active
+pswitch.action.switch,pswitch,ProviderSwitchPage,ProviderSwitchPage,action_switch,Switch,,active
+pswitch.switch.done,pswitch,ProviderSwitchPage,ProviderSwitchPage,switch_done,Switched to {{name}}. Updated: {{files}},,active
+pswitch.switch.confirm_title,pswitch,ProviderSwitchPage,ProviderSwitchPage,switch_confirm_title,Switch provider,,active
+pswitch.switch.confirm_desc,pswitch,ProviderSwitchPage,ProviderSwitchPage,switch_confirm_desc,"Apply ""{{name}}"" to the live config files for {{app}}? The key fields it owns are replaced; a backup is taken first.",,active
+pswitch.action.add,pswitch,ProviderSwitchPage,ProviderSwitchPage,action_add,Add provider,,active
+pswitch.action.edit,pswitch,ProviderSwitchPage,ProviderSwitchPage,action_edit,Edit,,active
+pswitch.action.delete,pswitch,ProviderSwitchPage,ProviderSwitchPage,action_delete,Delete,,active
+pswitch.action.save,pswitch,ProviderSwitchPage,ProviderSwitchPage,action_save,Save,,active
+pswitch.action.cancel,pswitch,ProviderSwitchPage,ProviderSwitchPage,action_cancel,Cancel,,active
+pswitch.action.restore,pswitch,ProviderSwitchPage,ProviderSwitchPage,action_restore,Restore,,active
+pswitch.current_badge,pswitch,ProviderSwitchPage,ProviderSwitchPage,current_badge,Active,,active
+pswitch.section.providers,pswitch,ProviderSwitchPage,ProviderSwitchPage,section_providers,Providers,,active
+pswitch.section.live,pswitch,ProviderSwitchPage,ProviderSwitchPage,section_live,Live config files,,active
+pswitch.section.backups,pswitch,ProviderSwitchPage,ProviderSwitchPage,section_backups,Backups,,active
+pswitch.providers.empty,pswitch,ProviderSwitchPage,ProviderSwitchPage,providers_empty,No providers yet. Add one from a preset to get started.,,active
+pswitch.provider.name,pswitch,ProviderSwitchPage,ProviderSwitchPage,provider_name,Name,,active
+pswitch.provider.name_placeholder,pswitch,ProviderSwitchPage,ProviderSwitchPage,provider_name_placeholder,e.g. My Relay,,active
+pswitch.provider.category,pswitch,ProviderSwitchPage,ProviderSwitchPage,provider_category,Category,,active
+pswitch.provider.category.official,pswitch,ProviderSwitchPage,ProviderSwitchPage,provider_category_official,Official,,active
+pswitch.provider.category.custom,pswitch,ProviderSwitchPage,ProviderSwitchPage,provider_category_custom,Custom,,active
+pswitch.provider.preset,pswitch,ProviderSwitchPage,ProviderSwitchPage,provider_preset,Preset,,active
+pswitch.provider.preset.none,pswitch,ProviderSwitchPage,ProviderSwitchPage,provider_preset_none,Start from blank,,active
+pswitch.provider.config,pswitch,ProviderSwitchPage,ProviderSwitchPage,provider_config,Provider config (JSON),,active
+pswitch.provider.config_hint,pswitch,ProviderSwitchPage,ProviderSwitchPage,provider_config_hint,"Only key fields (endpoints, credentials, model names) are applied on switch; everything else in the live file is left untouched.",,active
+pswitch.provider.invalid_json,pswitch,ProviderSwitchPage,ProviderSwitchPage,provider_invalid_json,Config is not valid JSON: {{error}},,active
+pswitch.provider.dialog.add_title,pswitch,ProviderSwitchPage,ProviderSwitchPage,provider_dialog_add_title,Add provider,,active
+pswitch.provider.dialog.edit_title,pswitch,ProviderSwitchPage,ProviderSwitchPage,provider_dialog_edit_title,Edit provider,,active
+pswitch.live.file,pswitch,ProviderSwitchPage,ProviderSwitchPage,live_file,File,,active
+pswitch.live.file.settings,pswitch,ProviderSwitchPage,ProviderSwitchPage,live_file_settings,settings.json,,active
+pswitch.live.file.config,pswitch,ProviderSwitchPage,ProviderSwitchPage,live_file_config,config.toml,,active
+pswitch.live.file.auth,pswitch,ProviderSwitchPage,ProviderSwitchPage,live_file_auth,auth.json,,active
+pswitch.live.file.env,pswitch,ProviderSwitchPage,ProviderSwitchPage,live_file_env,.env,,active
+pswitch.live.missing,pswitch,ProviderSwitchPage,ProviderSwitchPage,live_missing,This file does not exist yet. Saving creates it.,,active
+pswitch.live.save,pswitch,ProviderSwitchPage,ProviderSwitchPage,live_save,Save file,,active
+pswitch.live.editor_label,pswitch,ProviderSwitchPage,ProviderSwitchPage,live_editor_label,File content,,active
+pswitch.live.saved,pswitch,ProviderSwitchPage,ProviderSwitchPage,live_saved,Saved {{file}}.,,active
+pswitch.live.conflict_title,pswitch,ProviderSwitchPage,ProviderSwitchPage,live_conflict_title,File changed on disk,,active
+pswitch.live.conflict_desc,pswitch,ProviderSwitchPage,ProviderSwitchPage,live_conflict_desc,"The file changed while you were editing. Keep your version, or load the one on disk?",,active
+pswitch.live.conflict_keep_mine,pswitch,ProviderSwitchPage,ProviderSwitchPage,live_conflict_keep_mine,Keep mine,,active
+pswitch.live.conflict_keep_theirs,pswitch,ProviderSwitchPage,ProviderSwitchPage,live_conflict_keep_theirs,Use disk version,,active
+pswitch.backups.empty,pswitch,ProviderSwitchPage,ProviderSwitchPage,backups_empty,No backups yet. A backup is taken before the first managed write to each file.,,active
+pswitch.backups.restore_confirm_title,pswitch,ProviderSwitchPage,ProviderSwitchPage,backups_restore_confirm_title,Restore backup,,active
+pswitch.backups.restore_confirm_desc,pswitch,ProviderSwitchPage,ProviderSwitchPage,backups_restore_confirm_desc,Overwrite the live {{target}} file with this backup? The current file is backed up first.,,active
+pswitch.backups.restored,pswitch,ProviderSwitchPage,ProviderSwitchPage,backups_restored,Restored from backup.,,active
+pswitch.delete.confirm_title,pswitch,ProviderSwitchPage,ProviderSwitchPage,delete_confirm_title,Delete provider,,active
+pswitch.delete.confirm_desc,pswitch,ProviderSwitchPage,ProviderSwitchPage,delete_confirm_desc,"Delete ""{{name}}""? The live config files are not touched.",,active
+pswitch.stash.notice,pswitch,ProviderSwitchPage,ProviderSwitchPage,stash_notice,Official Codex login stashed at {{time}} — switching back to the official provider restores it.,,active
+pswitch.tab.claude,pswitch,ProviderSwitchPage,ProviderSwitchPage,tab_claude,Claude Code,,active
+pswitch.tab.codex,pswitch,ProviderSwitchPage,ProviderSwitchPage,tab_codex,Codex CLI,,active
+pswitch.tab.gemini,pswitch,ProviderSwitchPage,ProviderSwitchPage,tab_gemini,Gemini CLI,,active
+pswitch.preset.claude_official,pswitch,ProviderSwitchPage,ProviderSwitchPage,preset_claude_official,Anthropic Official,,active
+pswitch.preset.claude_custom,pswitch,ProviderSwitchPage,ProviderSwitchPage,preset_claude_custom,Custom Relay,,active
+pswitch.preset.codex_official,pswitch,ProviderSwitchPage,ProviderSwitchPage,preset_codex_official,OpenAI Official (ChatGPT Login),,active
+pswitch.preset.codex_custom,pswitch,ProviderSwitchPage,ProviderSwitchPage,preset_codex_custom,Custom Relay,,active
+pswitch.preset.gemini_official,pswitch,ProviderSwitchPage,ProviderSwitchPage,preset_gemini_official,Google Official,,active
+pswitch.preset.gemini_custom,pswitch,ProviderSwitchPage,ProviderSwitchPage,preset_gemini_custom,Custom Relay,,active

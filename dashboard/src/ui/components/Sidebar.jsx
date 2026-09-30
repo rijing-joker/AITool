@@ -12,6 +12,7 @@ import {
   Puzzle,
   Activity,
   Network,
+  FolderCog,
   Settings as SettingsIcon,
   ChevronLeft,
   ChevronRight,
@@ -40,6 +41,7 @@ export function getNavGroups() {
       label: copy("nav.group.proxy"),
       items: [
         { id: "proxy", to: "/proxy", icon: Network, label: copy("nav.proxy") },
+        { id: "provider-switch", to: "/provider-switch", icon: FolderCog, label: copy("nav.provider_switch") },
       ],
     },
     {

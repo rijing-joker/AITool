@@ -869,7 +869,6 @@ export function ProviderEditDialog({
   };
 
   const save = async (force) => {
-  const save = async (force) => {
     if (savingRef.current) return;
     // The visible editor text is the save source (cc-switch keeps the config
     // text in its form state the same way) — it mirrors the draft exactly

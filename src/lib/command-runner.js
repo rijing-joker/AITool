@@ -247,7 +247,7 @@ function commonGlobalBinDirectories({ home = os.homedir(), platform = process.pl
 function statBinaryInDirs(binary, searchDirs, platform = process.platform) {
   for (const dir of searchDirs) {
     const candidate = path.join(dir, binary);
-    for (const suffix of platform === "win32" ? ["", ".cmd", ".exe"] : [""]) {
+    for (const suffix of platform === "win32" ? [".exe", ".cmd", ".bat", ""] : [""]) {
       try {
         if (fs.statSync(candidate + suffix).isFile()) return candidate + suffix;
       } catch (_error) {}

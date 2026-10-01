@@ -3,6 +3,7 @@ const path = require("node:path");
 const fs = require("node:fs/promises");
 const fssync = require("node:fs");
 const cp = require("node:child_process");
+const { writeFileAtomic } = require("./fs");
 
 const OPENCLAW_HOOK_NAME = "tokentracker-openclaw-sync";
 const OPENCLAW_HOOK_DIRNAME = "openclaw-hook";
@@ -215,7 +216,9 @@ async function removeOpenclawHookConfig({
   }
 
   if (changed) {
-    await fs.writeFile(openclawConfigPath, `${JSON.stringify(cfg, null, 2)}\n`, "utf8");
+    await fs.copyFile(openclawConfigPath, `${openclawConfigPath}.bak`);
+    await fs.chmod(`${openclawConfigPath}.bak`, 0o600);
+    await writeFileAtomic(openclawConfigPath, `${JSON.stringify(cfg, null, 2)}\n`, { mode: 0o600 });
   }
 
   await fs.rm(hookDir, { recursive: true, force: true }).catch(() => {});
@@ -251,7 +254,7 @@ function runOpenclawCli(args, env = process.env) {
     };
   }
 
-  if ((res.status || 0) !== 0) {
+  if (res.error || res.status !== 0) {
     return {
       code: Number(res.status || 1),
       skippedReason: "openclaw-hooks-install-failed",

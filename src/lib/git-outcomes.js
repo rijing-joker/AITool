@@ -186,7 +186,8 @@ async function buildGitOutcomesInternal(sessions, { home = os.homedir(), force =
   for (const [root, repoSessions] of groups) {
     const start = repoSessions.reduce((min, row) => !min || row.started_at < min ? row.started_at : min, "");
     const endMs = Math.max(...repoSessions.map((row) => Date.parse(row.ended_at))) + 60 * 60 * 1000;
-    const commits = await commitsForWindow(root, start, new Date(endMs).toISOString());
+    const from = new Date(Date.parse(start) - 10 * 60 * 1000).toISOString();
+    const commits = await commitsForWindow(root, from, new Date(endMs).toISOString());
     for (const commit of commits) {
       const commitMs = Date.parse(commit.timestamp);
       const candidates = repoSessions.filter((session) => {

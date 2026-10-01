@@ -377,6 +377,8 @@ export function ProviderEditDialog({
   const [error, setError] = useState(null);
   const [fromLive, setFromLive] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
   const [speedTestOpen, setSpeedTestOpen] = useState(false);
   const [fetchedModels, setFetchedModels] = useState(null);
@@ -435,6 +437,10 @@ export function ProviderEditDialog({
   // editor blank).
   useEffect(() => {
     if (!open) return;
+    let cancelled = false;
+    setClaudeApiKeyName("ANTHROPIC_AUTH_TOKEN");
+    setAdvancedOpen(false);
+    setLoading(false);
     setError(null);
     setRawError(null);
     setCodexAuthError(null);
@@ -471,8 +477,10 @@ export function ProviderEditDialog({
         providerSwitchApi
           .getEditorView(app, editing.id)
           .then((view) => {
+            if (cancelled) return;
             const nextDraft = JSON.parse(JSON.stringify(view.settingsConfig ?? {}));
             setDraft(nextDraft);
+            if (app === "claude") setClaudeApiKeyName("ANTHROPIC_API_KEY" in (nextDraft.env || {}) ? "ANTHROPIC_API_KEY" : "ANTHROPIC_AUTH_TOKEN");
             setFromLive(!!view.fromLive);
             if (app === "claude" && claudeHasAdvancedValues(nextDraft, editing.meta || {})) {
               setAdvancedOpen(true);
@@ -481,8 +489,8 @@ export function ProviderEditDialog({
               setAdvancedOpen(true);
             }
           })
-          .catch((err) => setError(err instanceof Error ? err.message : String(err)))
-          .finally(() => setLoading(false));
+          .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)); })
+          .finally(() => { if (!cancelled) setLoading(false); });
       }
     } else {
       setName("");
@@ -499,6 +507,7 @@ export function ProviderEditDialog({
       setSelectedPresetId(first ? first.id : null);
       setDraft(first ? JSON.parse(JSON.stringify(first.settingsConfig ?? {})) : {});
     }
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, editing, app, appState?.current]);
 
@@ -860,6 +869,8 @@ export function ProviderEditDialog({
   };
 
   const save = async (force) => {
+  const save = async (force) => {
+    if (savingRef.current) return;
     // The visible editor text is the save source (cc-switch keeps the config
     // text in its form state the same way) — it mirrors the draft exactly
     // unless the user is mid-edit on invalid text, which blocks saving.
@@ -899,6 +910,8 @@ export function ProviderEditDialog({
         return;
       }
     }
+    savingRef.current = true;
+    setSaving(true);
     setPendingIssues(null);
     const cleanMeta = {};
     for (const [key, value] of Object.entries(meta)) {
@@ -929,6 +942,9 @@ export function ProviderEditDialog({
       onClose();
     } catch (err) {
       onError(err instanceof Error ? err.message : String(err));
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
     }
   };
 
@@ -1668,7 +1684,7 @@ export function ProviderEditDialog({
                 <Button variant="secondary" size="sm" onClick={() => setPendingIssues(null)}>
                   {copy("pswitch.validate.go_back")}
                 </Button>
-                <Button size="sm" onClick={() => void save(true)}>
+                <Button size="sm" disabled={saving} onClick={() => void save(true)}>
                   {copy("pswitch.validate.save_anyway")}
                 </Button>
               </div>
@@ -1687,7 +1703,7 @@ export function ProviderEditDialog({
             <Button variant="secondary" size="sm" disabled={busy} onClick={onClose}>
               {copy("pswitch.action.cancel")}
             </Button>
-            <Button size="sm" disabled={busy || loading || !name.trim()} onClick={() => void save(false)}>
+            <Button size="sm" disabled={busy || loading || saving || !name.trim()} onClick={() => void save(false)}>
               {copy("pswitch.action.save")}
             </Button>
           </div>

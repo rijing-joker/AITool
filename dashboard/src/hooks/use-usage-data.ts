@@ -1,3 +1,4 @@
+import { copy } from "../lib/copy";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { isAccessTokenReady, resolveAuthAccessToken } from "../lib/auth-token";
 import { formatDateLocal, formatDateUTC } from "../lib/date-range";
@@ -152,7 +153,7 @@ export function useUsageData({
       // Cloud scope but the JWT could not be resolved/refreshed (refresh token
       // also dead). Surface an explicit error + stop loading instead of a bare
       // return, which previously left the panel stuck in a silent spinner.
-      setError("Your session expired. Please sign in again to view account data.");
+      setError(copy("dashboard.account.session_expired"));
       setLoading(false);
       return;
     }

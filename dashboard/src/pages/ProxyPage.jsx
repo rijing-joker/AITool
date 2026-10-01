@@ -135,6 +135,7 @@ function OverviewTab({ status, onRefresh }) {
     try {
       const data = await proxyApi.overview();
       setOverview(data.overview);
+      setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -207,9 +208,12 @@ function OverviewTab({ status, onRefresh }) {
                 type="button"
                 onClick={async () => {
                   setActionBusy(true);
+                  setError(null);
                   try {
                     await proxyApi.install();
                     onRefresh();
+                  } catch (e) {
+                    setError(e instanceof Error ? e.message : String(e));
                   } finally {
                     setActionBusy(false);
                   }

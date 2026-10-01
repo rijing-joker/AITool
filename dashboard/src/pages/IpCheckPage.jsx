@@ -743,7 +743,7 @@ export default function IpCheckPage() {
       const publicUdp = allUdp.filter((ip) =>
         !isIPv6(ip)
         && !ip.startsWith("192.168.") && !ip.startsWith("10.")
-        && !ip.startsWith("172.") && !ip.startsWith("198.18.")
+        && !/^172\.(1[6-9]|2[0-9]|3[01])\./.test(ip) && !ip.startsWith("198.18.")
         && !ip.startsWith("198.19.") && !ip.startsWith("100.64.")
         && !ip.startsWith("127.") && !ip.startsWith("0."));
 

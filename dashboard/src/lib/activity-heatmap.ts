@@ -86,19 +86,12 @@ export function buildActivityHeatmap({
   const end =
     parseDateString(to) ||
     new Date(Date.UTC(new Date().getFullYear(), new Date().getMonth(), new Date().getDate()));
-  const { from } = getHeatmapRangeLocal({
-    weeks,
-    now: end,
-    weekStartsOn,
-  });
-  const start = parseDateString(from) || addUtcDays(end, -(weeks * 7 - 1));
-
-  const startAligned = (() => {
-    const startDow = start.getUTCDay();
-    const desired = weekStartsOn === "mon" ? 1 : 0;
-    const delta = (startDow - desired + 7) % 7;
-    return addUtcDays(start, -delta);
-  })();
+  const desired = weekStartsOn === "mon" ? 1 : 0;
+  const endWeekStart = addUtcDays(end, -((end.getUTCDay() - desired + 7) % 7));
+  // `start` is already week-aligned (endWeekStart is on the desired weekday and
+  // we only subtract whole weeks), so it doubles as the grid's first column.
+  const start = addUtcDays(endWeekStart, -7 * (Math.max(1, weeks) - 1));
+  const from = formatDateUTC(start);
 
   const valuesByDay = new Map();
   for (const row of Array.isArray(dailyRows) ? dailyRows : []) {
@@ -111,12 +104,12 @@ export function buildActivityHeatmap({
     });
   }
 
-  const totalDays = diffUtcDays(startAligned, end) + 1;
+  const totalDays = diffUtcDays(start, end) + 1;
   const weekCount = Math.ceil(totalDays / 7);
 
   const allValues = [];
   for (let i = 0; i < totalDays; i++) {
-    const dt = addUtcDays(startAligned, i);
+    const dt = addUtcDays(start, i);
     const key = formatDateUTC(dt);
     const dayData = valuesByDay.get(key);
     const value = dayData ? dayData.value : 0;
@@ -141,7 +134,7 @@ export function buildActivityHeatmap({
     const week = [];
     for (let d = 0; d < 7; d++) {
       const idx = w * 7 + d;
-      const dt = addUtcDays(startAligned, idx);
+      const dt = addUtcDays(start, idx);
       if (dt.getTime() > end.getTime()) {
         week.push(null);
         continue;

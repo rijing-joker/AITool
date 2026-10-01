@@ -48,6 +48,7 @@ import {
   saveAuthFileSettings,
   saveOAuthModelSettings,
   setOAuthModelsExcluded,
+  setOAuthCredentialFileDisabled,
   normalizeOAuthExcludedRules,
   summarizeAuthFileCooldowns,
 } from "../lib/easy-auth";

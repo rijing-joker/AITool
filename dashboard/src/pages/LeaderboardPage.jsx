@@ -810,7 +810,7 @@ export function LeaderboardPage({
               <th className="px-3 sm:px-4 py-4 text-[11px] font-semibold uppercase tracking-wider text-oai-gray-400 dark:text-oai-gray-500 whitespace-nowrap text-right align-middle">
                 {copy("leaderboard.column.total")}
               </th>
-              <th className="hidden sm:table-cell px-3 sm:px-4 py-4 text-[11px] font-semibold uppercase tracking-wider text-oai-gray-400 dark:text-oai-gray-500 whitespace-nowrap text-right align-middle" title="Based on estimated API pricing, not actual billing">
+              <th className="hidden sm:table-cell px-3 sm:px-4 py-4 text-[11px] font-semibold uppercase tracking-wider text-oai-gray-400 dark:text-oai-gray-500 whitespace-nowrap text-right align-middle" title={copy("leaderboard.estimated_cost_hint")}>
                 {copy("leaderboard.column.est_cost")}
               </th>
               <SortableContext items={columnOrder} strategy={horizontalListSortingStrategy}>
@@ -918,7 +918,7 @@ export function LeaderboardPage({
                     <td className="px-3 sm:px-4 py-4 font-medium text-oai-black dark:text-oai-white whitespace-nowrap text-right tabular-nums bg-oai-brand-50 dark:bg-oai-brand-900/10">
                       <TotalTokens value={entry?.total_tokens} />
                     </td>
-                    <td className="hidden sm:table-cell px-3 sm:px-4 py-4 font-medium text-oai-brand-600 dark:text-oai-brand-400 whitespace-nowrap text-right tabular-nums bg-oai-brand-50 dark:bg-oai-brand-900/10" title="Based on estimated API pricing, not actual billing">
+                    <td className="hidden sm:table-cell px-3 sm:px-4 py-4 font-medium text-oai-brand-600 dark:text-oai-brand-400 whitespace-nowrap text-right tabular-nums bg-oai-brand-50 dark:bg-oai-brand-900/10" title={copy("leaderboard.estimated_cost_hint")}>
                       {formatCost(entry?.estimated_cost_usd, currency, rate)}
                     </td>
                     <LeaderboardTokenCells entry={entry} isMe orderedColumns={orderedColumns} />
@@ -967,7 +967,7 @@ export function LeaderboardPage({
                   <td className="px-3 sm:px-4 py-4 font-semibold text-oai-gray-800 dark:text-oai-gray-200 whitespace-nowrap text-right tabular-nums bg-white dark:bg-oai-gray-950 group-hover:bg-oai-gray-50 dark:group-hover:bg-oai-gray-900/60">
                     <TotalTokens value={entry?.total_tokens} />
                   </td>
-                  <td className="hidden sm:table-cell px-3 sm:px-4 py-4 text-oai-gray-500 dark:text-oai-gray-400 whitespace-nowrap text-right tabular-nums bg-white dark:bg-oai-gray-950 group-hover:bg-oai-gray-50 dark:group-hover:bg-oai-gray-900/60" title="Based on estimated API pricing, not actual billing">
+                  <td className="hidden sm:table-cell px-3 sm:px-4 py-4 text-oai-gray-500 dark:text-oai-gray-400 whitespace-nowrap text-right tabular-nums bg-white dark:bg-oai-gray-950 group-hover:bg-oai-gray-50 dark:group-hover:bg-oai-gray-900/60" title={copy("leaderboard.estimated_cost_hint")}>
                     {formatCost(entry?.estimated_cost_usd, currency, rate)}
                   </td>
                   <LeaderboardTokenCells entry={entry} isMe={false} orderedColumns={orderedColumns} />

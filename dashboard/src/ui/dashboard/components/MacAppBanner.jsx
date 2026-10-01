@@ -1,3 +1,4 @@
+import { copy } from "../../../lib/copy";
 import React, { useState, useCallback } from "react";
 import { motion } from "motion/react";
 import { useLoginModal } from "../../../contexts/LoginModalContext.jsx";
@@ -65,9 +66,9 @@ export function MacAppBanner({ todayTokens = 0, isSyncing = false, enterDelay = 
   let title, subtitle, buttonLabel, buttonIcon, onButtonClick, buttonHref;
 
   if (isNativeApp && cloudSignedIn) {
-    title = "View the Leaderboard";
-    subtitle = "Compare your usage globally";
-    buttonLabel = "Leaderboard";
+    title = copy("dashboard.banner.leaderboard_title");
+    subtitle = copy("dashboard.banner.leaderboard_subtitle");
+    buttonLabel = copy("nav.leaderboard");
     buttonIcon = (
       <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className="opacity-70">
         <path d="M2 8.5V10h8V8.5M6 1.5v6m0 0L3.5 5M6 7.5l2.5-2.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" transform="rotate(180 6 6)"/>
@@ -75,9 +76,9 @@ export function MacAppBanner({ todayTokens = 0, isSyncing = false, enterDelay = 
     );
     onButtonClick = () => { window.location.pathname = "/leaderboard"; };
   } else if (isNativeApp) {
-    title = "Join the Leaderboard";
-    subtitle = "Log in to compare your usage with others";
-    buttonLabel = "Log In";
+    title = copy("dashboard.banner.join_title");
+    subtitle = copy("dashboard.banner.join_subtitle");
+    buttonLabel = copy("dashboard.banner.join_cta");
     buttonIcon = (
       <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className="opacity-70">
         <path d="M6.5 1.5h3a1 1 0 011 1v7a1 1 0 01-1 1h-3M5 8.5L7.5 6 5 3.5M7.5 6H1.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
@@ -85,9 +86,9 @@ export function MacAppBanner({ todayTokens = 0, isSyncing = false, enterDelay = 
     );
     onButtonClick = openLoginModal;
   } else {
-    title = "Try the Menu Bar App";
-    subtitle = "Always-on stats with Clawd companion";
-    buttonLabel = "Download";
+    title = copy("dashboard.banner.download_title");
+    subtitle = copy("dashboard.banner.download_subtitle");
+    buttonLabel = copy("dashboard.banner.download_cta");
     buttonIcon = (
       <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className="opacity-70">
         <path d="M6 2v6m0 0L3.5 5.5M6 8l2.5-2.5M2 10h8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
@@ -135,7 +136,7 @@ export function MacAppBanner({ todayTokens = 0, isSyncing = false, enterDelay = 
             <button
               onClick={handleDismiss}
               className="p-1 text-oai-gray-400 hover:text-oai-gray-600 dark:hover:text-oai-gray-300 transition-colors"
-              aria-label="Dismiss"
+              aria-label={copy("shared.action.dismiss")}
             >
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
                 <path d="M4 4l6 6m0-6L4 10" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>

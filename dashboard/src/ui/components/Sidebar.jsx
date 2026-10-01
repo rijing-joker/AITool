@@ -241,9 +241,9 @@ function StarPill({ repo = "xiufengsun/TokenTracker", glassChrome = false }) {
  * Matches StarPill's h-7 height; popover opens upward (bottom-left anchored).
  */
 const THEME_OPTIONS = [
-  { value: "light", label: "Light", Icon: Sun },
-  { value: "dark", label: "Dark", Icon: Moon },
-  { value: "system", label: "System", Icon: Monitor },
+  { value: "light", label: "settings.appearance.theme.light", Icon: Sun },
+  { value: "dark", label: "settings.appearance.theme.dark", Icon: Moon },
+  { value: "system", label: "settings.appearance.theme.system", Icon: Monitor },
 ];
 
 function ThemePill({ theme, resolvedTheme, onSetTheme, glassChrome = false }) {
@@ -269,10 +269,10 @@ function ThemePill({ theme, resolvedTheme, onSetTheme, glassChrome = false }) {
     <div ref={wrapRef} className="relative">
       <button
         type="button"
-        aria-label="Theme"
+        aria-label={copy("settings.appearance.theme.label")}
         aria-expanded={open}
         aria-haspopup="menu"
-        title="Theme"
+        title={copy("settings.appearance.theme.label")}
         onClick={() => setOpen((o) => !o)}
         className={cn(
           "inline-flex h-7 w-7 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500",
@@ -304,7 +304,7 @@ function ThemePill({ theme, resolvedTheme, onSetTheme, glassChrome = false }) {
                 )}
               >
                 <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                <span>{label}</span>
+                <span>{copy(label)}</span>
               </button>
             );
           })}

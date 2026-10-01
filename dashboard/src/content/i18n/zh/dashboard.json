@@ -1338,5 +1338,19 @@
   "pswitch.models.none": "没有匹配的模型。",
   "pswitch.models.fetch_success": "获取到 {{count}} 个模型。",
   "pswitch.models.fetch_empty": "端点没有返回模型。",
-  "pswitch.models.fetch_failed": "获取模型列表失败：{{error}}"
+  "pswitch.models.fetch_failed": "获取模型列表失败：{{error}}",
+  "dashboard.banner.leaderboard_title": "查看排行榜",
+  "dashboard.banner.leaderboard_subtitle": "对比全球用户用量",
+  "dashboard.banner.join_title": "加入排行榜",
+  "dashboard.banner.join_subtitle": "登录后与其他用户对比用量",
+  "dashboard.banner.download_title": "试用菜单栏应用",
+  "dashboard.banner.download_subtitle": "随时查看统计，与 Clawd 相伴",
+  "dashboard.banner.join_cta": "登录",
+  "dashboard.banner.download_cta": "下载",
+  "dashboard.account.session_expired": "登录已过期，请重新登录以查看账户数据。",
+  "dashboard.context_breakdown.resources": "{{skills}} 个 Skill · {{servers}} 个 MCP 服务器 · {{agents}} 个 Agent · {{memories}} 个记忆文件",
+  "leaderboard.estimated_cost_hint": "依据 API 定价估算，并非实际账单",
+  "leaderboard.profile_modal.best_day.date": "于 {{date}}",
+  "leaderboard.summary.you_are_here": "你的位置",
+  "shared.list_separator": "，"
 }

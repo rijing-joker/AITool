@@ -2362,3 +2362,17 @@ pswitch.icon.no_results,pswitch,ProviderSwitchPage,ProviderEditDialog,no_results
 pswitch.icon.done,pswitch,ProviderSwitchPage,ProviderEditDialog,done,Done,,active
 pswitch.icon.select,pswitch,ProviderSwitchPage,ProviderEditDialog,select,Icon,,active
 pswitch.icon.change,pswitch,ProviderSwitchPage,ProviderEditDialog,change,Change icon,,active
+dashboard.banner.leaderboard_title,shared,*,Shared,leaderboard_title,View the Leaderboard,,active
+dashboard.banner.leaderboard_subtitle,shared,*,Shared,leaderboard_subtitle,Compare your usage globally,,active
+dashboard.banner.join_title,shared,*,Shared,join_title,Join the Leaderboard,,active
+dashboard.banner.join_subtitle,shared,*,Shared,join_subtitle,Log in to compare your usage with others,,active
+dashboard.banner.download_title,shared,*,Shared,download_title,Try the Menu Bar App,,active
+dashboard.banner.download_subtitle,shared,*,Shared,download_subtitle,Always-on stats with Clawd companion,,active
+dashboard.banner.join_cta,shared,*,Shared,join_cta,Sign in,Banner-owned login button label; don't reuse header.auth.sign_in_aria,active
+dashboard.banner.download_cta,shared,*,Shared,download_cta,Download,Banner-owned download button label; don't reuse leaderboard.profile.nav.download,active
+dashboard.account.session_expired,shared,*,Shared,session_expired,Your session expired. Please sign in again to view account data.,,active
+dashboard.context_breakdown.resources,shared,*,Shared,resources,{{skills}} skills · {{servers}} MCP servers · {{agents}} agents · {{memories}} memory files,,active
+leaderboard.estimated_cost_hint,shared,*,Shared,estimated_cost_hint,"Based on estimated API pricing, not actual billing",,active
+leaderboard.profile_modal.best_day.date,shared,*,Shared,date,on {{date}},,active
+leaderboard.summary.you_are_here,shared,*,Shared,you_are_here,You are here,,active
+shared.list_separator,shared,*,Shared,list_separator,", ",,active

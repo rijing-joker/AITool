@@ -298,7 +298,7 @@ export function DashboardView(props) {
                   animate={{ opacity: 1, y: 0 }}
                   className="text-xs text-oai-brand"
                 >
-                  {installCopied ? "Copied ✓" : "Copy"}
+                  {installCopied ? copy("settings.account.copied") : copy("settings.account.copy")}
                 </motion.span>
               </motion.button>
             </div>

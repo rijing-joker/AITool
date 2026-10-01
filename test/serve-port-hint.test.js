@@ -25,10 +25,10 @@ function mockPlatform(t, platform) {
 }
 
 test("serve port collision hint references the published npm package name", () => {
-  assert.equal(NPM_PACKAGE_NAME, "tokentracker-cli");
+  assert.equal(NPM_PACKAGE_NAME, require("../package.json").name);
   assert.equal(
     buildPortInUseHint(7681),
-    "Port 7681 is still in use after cleanup. Try: npx tokentracker-cli serve --port 7682\n",
+    `Port 7681 is still in use after cleanup. Try: npx ${require("../package.json").name} serve --port 7682\n`,
   );
 });
 

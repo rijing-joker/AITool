@@ -139,6 +139,7 @@ async function probe(request) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const startedAt = process.hrtime.bigint();
+  let reader;
   try {
     let response;
     try {
@@ -161,7 +162,7 @@ async function probe(request) {
     if (!isStreamingContentType(contentType)) {
       throw new Error("Upstream did not return a streaming response; time to first token cannot be measured");
     }
-    const reader = response.body.getReader();
+    reader = response.body.getReader();
     const received = [];
     let receivedBytes = 0;
     for (;;) {
@@ -184,6 +185,8 @@ async function probe(request) {
     }
     throw new Error("Health check did not receive the model's first token");
   } finally {
+    controller.abort();
+    if (reader) await reader.cancel().catch(() => {});
     clearTimeout(timer);
     releaseSlot();
   }

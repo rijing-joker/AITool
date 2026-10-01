@@ -176,8 +176,9 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
         window.contentView = container
         window.delegate = self
         window.isReleasedWhenClosed = false
-        window.setFrameAutosaveName("DashboardWindow")
         window.center()
+        window.setFrameAutosaveName("DashboardWindow")
+        window.setFrameUsingName("DashboardWindow")
         // Clear window so native glass / vibrancy + transparent WKWebView show material (not an opaque gray sheet).
         window.isOpaque = false
         window.backgroundColor = .clear

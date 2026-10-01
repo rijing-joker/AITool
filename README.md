@@ -36,7 +36,7 @@ The UI is TokenTracker's design language throughout — one dashboard for both w
         └── per-request records → ~/.aitool/proxy/usage/*.jsonl
 ```
 
-The core binary stays an external, independently updatable process (pinned in `core-version.txt`, same pattern as EasyCLIProxyAPI). The bridge folds every successful proxied request into TokenTracker's half-hour buckets, so **proxy usage shows up in the standard dashboard automatically** — trends, model breakdown, cost, heatmap — alongside Claude Code, Codex, Gemini, and the other 38 tracked tools.
+The core binary stays an external, independently updatable process (pinned in `core-version.txt`, same pattern as EasyCLIProxyAPI). The bridge folds every successful proxied request into TokenTracker's half-hour buckets, so **proxy usage shows up in the standard dashboard automatically** — trends, model breakdown, cost, heatmap — alongside Claude Code, Codex, Gemini, and the other 40 tracked tools.
 
 ## Quick start
 
@@ -93,7 +93,9 @@ A Node port of [cc-switch](https://github.com/farion1231/cc-switch)'s config-fil
 | --- | --- |
 | **Tools covered** | Claude Code (`~/.claude/settings.json`) · Codex CLI (`~/.codex/config.toml` + `auth.json`) · Gemini CLI (`~/.gemini/.env`) |
 | **Switch model** | Minimal-patch projection (cc-switch's "floor" key fields): only the provider's key fields — endpoint, credentials, model names — are written; user-owned content (hooks, permissions, comments) is never touched, and the previous provider's residue is removed only when you haven't changed it |
-| **Safety** | Atomic writes (`0600` for credential files), first-write backup per file restorable from the dashboard, disk-conflict detection in the live-file editor; Codex's official ChatGPT login is stashed when switching to a third-party relay and restored on switch-back |
+| **Editor** | The add/edit dialog shows the full config file as it would look after switching to this provider (cc-switch's editor view); on save, key fields go back to the provider row while other edits are written into the live files with three-way conflict detection (keep mine / keep theirs) |
+| **Codex credentials** | The relay key is written to `experimental_bearer_token` under `[model_providers.custom]` in `config.toml` — Codex CLI 0.149+ no longer reads relay keys from `auth.json`, which holds only the official ChatGPT login (the add/edit dialog's Codex editors are split accordingly: `auth.json` JSON + `config.toml` TOML) |
+| **Safety** | Atomic writes (`0600` for credential files), first-write backup per file restorable from the dashboard, and config-file editors built into the add/edit dialog; Codex's official ChatGPT login is stashed when switching to a third-party relay and restored on switch-back |
 | **Storage** | `~/.aitool/provider-switch/` — `providers.json` (presets + current pointer), `codex-auth-stash.json`, `backups/` |
 
 ## AI Proxy capabilities (from EasyCLIProxyAPI)
@@ -131,7 +133,7 @@ aitool status     # hook attachment status
 aitool doctor     # health check
 ```
 
-Advanced per-tool overrides (vendored from TokenTracker): `TOKENTRACKER_LMSTUDIO_HOME` (LM Studio data dir), `TOKENTRACKER_UNSLOTH_DB` (Unsloth Studio DB path), `TOKENTRACKER_DEVIN_DB` (Devin CLI DB path), `TOKENTRACKER_ACODE_HOME` (AStudio directory).
+Advanced per-tool overrides (vendored from TokenTracker): `TOKENTRACKER_LMSTUDIO_HOME` (LM Studio data dir), `TOKENTRACKER_UNSLOTH_DB` (Unsloth Studio DB path), `TOKENTRACKER_DEVIN_DB` (Devin CLI DB path), `TOKENTRACKER_ACODE_HOME` (AStudio directory), `TOKENTRACKER_TRAE_HOME` / `TOKENTRACKER_TRAE_DB` / `TOKENTRACKER_TRAE_SQLCIPHER_KEY` (TRAE international local usage — see [docs/trae.md](./docs/trae.md)).
 
 ## Project layout
 

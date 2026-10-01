@@ -10,7 +10,7 @@ If any project-specific instructions appear to conflict across files, follow `CL
 
 - **AI Proxy** — a Node re-implementation of EasyCLIProxyAPI's management layer that drives the external Go binary `cli-proxy-api` (pinned in `core-version.txt`, fetched by `scripts/fetch-core.cjs`, `AITOOL_CORE_BIN` to override). Exposes `/v1/chat/completions`, `/v1/messages`, `/v1beta/models` on `127.0.0.1:8318` (loopback-only; port configurable in `config.yaml`). Per-request usage lands in `~/.aitool/proxy/usage/*.jsonl`.
 - **Token Tracker analytics** — the vendored TokenTracker CLI + dashboard tracking 43 AI coding tools, unchanged.
-- **Provider config management** — a Node port of cc-switch's config-file module: per-app provider presets in `~/.aitool/provider-switch/providers.json`, one-click switch projects each provider's key fields into the AI CLIs' live config files (`~/.claude/settings.json`, `~/.codex/config.toml` + `auth.json`, `~/.gemini/.env`) with pre-write backups; dashboard page `/provider-switch`.
+- **Provider config management** — a Node port of cc-switch's config-file module: per-app provider presets in `~/.aitool/provider-switch/providers.json`, one-click switch projects each provider's key fields into the AI CLIs' live config files (`~/.claude/settings.json`, `~/.codex/config.toml` + `auth.json`, `~/.gemini/.env`) with pre-write backups; the add/edit dialog shows the full post-switch projection of each config file (cc-switch's editor view via `editor.js`) and saves floor keys to the provider row while writing other user edits straight into the live files with three-way conflict handling; dashboard page `/provider-switch`.
 
 Data flow: AI CLI hooks → `src/lib/rollout.js` parsers (`parse*Incremental`) → `~/.tokentracker/queue.jsonl` (UTC half-hour buckets, append-only) → local API (`src/lib/local-api.js`: `/functions/*` analytics + `/api/proxy/*` proxy + `/api/provider-switch/*` config switching) → dashboard. Proxied requests enter the same buckets with `source: "cliproxy"` via `src/lib/proxy/usage-bridge.js`.
 
@@ -20,7 +20,7 @@ Data flow: AI CLI hooks → `src/lib/rollout.js` parsers (`parse*Incremental`) �
 |---|---|
 | `bin/tracker.js` → `src/cli.js` | CLI (`aitool`), CommonJS, Node ≥20 |
 | `src/lib/proxy/` | proxy paths / config / core manager / management client / usage bridge / REST handlers; `src/commands/proxy.js` is the `aitool proxy …` command |
-| `src/lib/provider-switch/` | cc-switch port: key-field "floor" tables + minimal-patch projections (claude / codex / gemini), line-preserving TOML/.env editors, backups, presets; mounted under `/api/provider-switch/*`; page `dashboard/src/pages/ProviderSwitchPage.jsx` |
+| `src/lib/provider-switch/` | cc-switch port: key-field "floor" tables + minimal-patch projections (claude / codex / gemini), line-preserving TOML/.env editors, editor view + three-way save split (`editor.js`), backups, presets; mounted under `/api/provider-switch/*`; page `dashboard/src/pages/ProviderSwitchPage.jsx` |
 | `dashboard/` | React 18 + Vite 7 + TS strict + Tailwind; the AI Proxy page is `dashboard/src/pages/ProxyPage.jsx` (tab logic mirrors EasyCLIProxyAPI) |
 | `desktop/` | Tauri 2 shell: native window + tray around the dashboard; spawns `node bin/tracker.js serve` on a free loopback port (`AITOOL_ROOT` / `AITOOL_NODE` overrides) |
 | `TokenTrackerBar/`, `TokenTrackerWin/`, `TokenTrackerLinux/` | macOS (Swift menu bar, XcodeGen) / Windows (.NET 8 + WebView2) / Linux (Tauri 2) apps; each bundles a gitignored `EmbeddedServer/` built by its own bundle script |

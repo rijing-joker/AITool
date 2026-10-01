@@ -36,7 +36,7 @@ UI 全程使用 TokenTracker 的设计语言 —— 一个仪表盘覆盖两个�
         └── 请求级记录 → ~/.aitool/proxy/usage/*.jsonl
 ```
 
-core 二进制保持为外部可独立更新的进程（`core-version.txt` 钉住版本，与 EasyCLIProxyAPI 相同的模式）。用量桥把每个成功的代理请求折叠进 TokenTracker 的半小时桶，因此**代理用量会自动出现在标准仪表盘** —— 趋势、模型分解、成本、热力图 —— 与 Claude Code、Codex、Gemini 等其余 38 款被追踪工具并列。
+core 二进制保持为外部可独立更新的进程（`core-version.txt` 钉住版本，与 EasyCLIProxyAPI 相同的模式）。用量桥把每个成功的代理请求折叠进 TokenTracker 的半小时桶，因此**代理用量会自动出现在标准仪表盘** —— 趋势、模型分解、成本、热力图 —— 与 Claude Code、Codex、Gemini 等其余 40 款被追踪工具并列。
 
 ## 快速开始
 
@@ -88,7 +88,9 @@ docker compose up -d --build
 | --- | --- |
 | **覆盖工具** | Claude Code（`~/.claude/settings.json`）· Codex CLI（`~/.codex/config.toml` + `auth.json`）· Gemini CLI（`~/.gemini/.env`） |
 | **切换模型** | 最小补丁投影（cc-switch 的"关键字段"表）：只写入供应商的关键字段 —— 地址、凭据、模型名；用户自有内容（hooks、permissions、注释）一律不动，上一家供应商的残留仅在未被改动时清除 |
-| **安全性** | 原子写入（凭据文件 0600）、每文件首次写入前自动备份（可在仪表盘恢复）、配置文件编辑器的磁盘冲突检测；Codex 官方 ChatGPT 登录在切向第三方中转时自动暂存、切回时还原 |
+| **编辑器** | 添加/编辑弹窗显示切换到该供应商之后的完整配置文件（cc-switch 的编辑器视图）；保存时关键字段写回供应商行，其余改动经三方比对写入本机配置文件（保留我的 / 保留对方的） |
+| **Codex 凭据** | 中转密钥写入 `config.toml` 中 `[model_providers.custom]` 的 `experimental_bearer_token` —— Codex CLI 0.149+ 不再从 `auth.json` 读取中转密钥，`auth.json` 只保存官方 ChatGPT 登录（添加/编辑弹窗的 Codex 编辑器相应拆分：`auth.json` JSON + `config.toml` TOML） |
+| **安全性** | 原子写入（凭据文件 0600）、每文件首次写入前自动备份（可在仪表盘恢复）、配置文件编辑器内置于添加/编辑弹窗；Codex 官方 ChatGPT 登录在切向第三方中转时自动暂存、切回时还原 |
 | **存储位置** | `~/.aitool/provider-switch/` —— `providers.json`（预设 + 当前指针）、`codex-auth-stash.json`、`backups/` |
 
 ## AI 代理能力（来自 EasyCLIProxyAPI）

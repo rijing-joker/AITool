@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const crypto = require("node:crypto");
+const { updateJsonLocked } = require("./fs");
 const { execFileSync } = require("node:child_process");
 
 function resolveQueuePath() {
@@ -171,66 +172,49 @@ function computeStableMachineId({
  * fingerprint → random UUID. Existing config.json ids are never migrated —
  * their cloud device row is anchored to the old value.
  *
- * Returns null only when the id cannot be persisted (read-only home), in which
- * case the caller falls back to its own client id (prior behavior).
+ * If configuration cannot be read or updated, recover the existing seed when
+ * available; otherwise return null so the caller can use its own client id.
  */
-function getOrCreateMachineId(queuePath, { seedPath, stableMachineId } = {}) {
+// Resolved ids keyed by config.json path. Within a long-lived `serve` process
+// the dashboard polls the machine-id endpoint (and heartbeat/cloud-sync paths
+// re-resolve it) constantly; once the id is persisted the answer never changes,
+// so caching it avoids taking a file lock on every call. A purge+reinstall that
+// must re-derive the id happens across process restarts, where the cache starts
+// empty — so this never masks recovery in production.
+const resolvedMachineIds = new Map();
+
+function _resetMachineIdCache() {
+  resolvedMachineIds.clear();
+}
+
+async function getOrCreateMachineId(queuePath, { seedPath, stableMachineId } = {}) {
   const resolvedQueuePath = queuePath || resolveQueuePath();
   const configPath = path.join(path.dirname(resolvedQueuePath), "config.json");
   const resolvedSeedPath = seedPath || defaultSeedPath(resolvedQueuePath);
-  let config = {};
-  let raw = null;
+  const cached = resolvedMachineIds.get(configPath);
+  if (typeof cached === "string" && cached.length >= 8) return cached;
   try {
-    raw = fs.readFileSync(configPath, "utf8");
-  } catch (e) {
-    // Missing file is fine (fresh install → create config below). Any other
-    // read error means an existing config we must NOT clobber.
-    if (e && e.code !== "ENOENT") return null;
-  }
-  if (raw != null) {
-    try {
-      config = JSON.parse(raw) || {};
-    } catch {
-      // Corrupt / partially-written config.json — refuse to overwrite it (that
-      // would destroy deviceToken and other keys). Caller falls back to the
-      // per-browser client id.
-      return null;
+    const config = await updateJsonLocked(configPath, (current) => {
+      if (typeof current.machineId === "string" && current.machineId.length >= 8) return null;
+      const generated = readSeedFile(resolvedSeedPath)
+        || (stableMachineId === undefined ? computeStableMachineId() : stableMachineId)
+        || crypto.randomUUID();
+      return { ...current, machineId: generated };
+    });
+    mirrorSeedFile(resolvedSeedPath, config.machineId);
+    if (typeof config.machineId === "string" && config.machineId.length >= 8) {
+      resolvedMachineIds.set(configPath, config.machineId);
     }
-  }
-  const existing = config.machineId;
-  if (typeof existing === "string" && existing.length >= 8) {
-    // Migration for installs that predate the seed file: mirror the active id
-    // so it survives a future `uninstall --purge` (issue #176).
-    mirrorSeedFile(resolvedSeedPath, existing);
-    return existing;
-  }
-  // Fresh generation: recover the previous identity from the seed first, then
-  // fall back to the hardware fingerprint, then to a random UUID.
-  let generated = readSeedFile(resolvedSeedPath);
-  if (!generated) {
-    generated = stableMachineId === undefined ? computeStableMachineId() : stableMachineId;
-  }
-  if (!generated) {
-    try {
-      generated = crypto.randomUUID();
-    } catch {
-      generated = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-    }
-  }
-  try {
-    config.machineId = generated;
-    fs.mkdirSync(path.dirname(configPath), { recursive: true });
-    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-    try { fs.chmodSync(configPath, 0o600); } catch { /* best effort */ }
+    return config.machineId;
   } catch {
-    return null;
+    // Preserve unreadable/corrupt configuration instead of discarding tokens.
+    return readSeedFile(resolvedSeedPath);
   }
-  mirrorSeedFile(resolvedSeedPath, generated);
-  return generated;
 }
 
 module.exports = {
   getOrCreateMachineId,
+  _resetMachineIdCache,
   computeStableMachineId,
   isLinuxContainer,
   isValidLinuxMachineId,

@@ -122,7 +122,7 @@ async function maybeSendHeartbeat({
       return { sent: false, reason: "throttled", blockedUntilMs: decision.blockedUntilMs };
     }
 
-    const machineId = getOrCreateMachineId(path.join(trackerDir, "queue.jsonl"));
+    const machineId = await getOrCreateMachineId(path.join(trackerDir, "queue.jsonl"));
     if (!machineId) return { sent: false, reason: "no-machine-id" };
 
     const runtime = resolveRuntimeConfig({ config, env });

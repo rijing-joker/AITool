@@ -9,7 +9,7 @@
 AiTool 把三个开源项目融合为一个本地优先的产品：
 
 - **AI 代理**（来自 [EasyCLIProxyAPI](https://github.com/router-for-me/EasyCLIProxyAPI) / [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI)，MIT）—— 在本地运行网关，把你的服务提供方账号通过 OpenAI / Anthropic / Gemini 兼容端点暴露出去，并记录每次请求的用量。
-- **Token 用量分析**（来自 [TokenTracker](https://github.com/xiufengsun/TokenTracker)，MIT）—— 本地优先的仪表盘，追踪 42 款 AI 编码工具的 Token 用量与成本。
+- **Token 用量分析**（来自 [TokenTracker](https://github.com/xiufengsun/TokenTracker)，MIT）—— 本地优先的仪表盘，追踪 43 款 AI 编码工具的 Token 用量与成本。
 - **供应商配置管理**（来自 [cc-switch](https://github.com/farion1231/cc-switch)，MIT）—— 管理各工具的供应商预设，一键切换 Claude Code / Codex CLI / Gemini CLI 的配置文件，无需手改 JSON / TOML。
 
 UI 全程使用 TokenTracker 的设计语言 —— 一个仪表盘覆盖两个世界：代理请求会汇入与原生 CLI 工具相同的趋势、模型分解和成本视图。
@@ -25,7 +25,7 @@ UI 全程使用 TokenTracker 的设计语言 —— 一个仪表盘覆盖两个�
 │  侧边栏                                                                                       │
 │  ├── AI Proxy        ← 新增：代理生命周期、服务提供方、密钥、请求级记录、配置                    │
 │  ├── Provider Configs ← 新增：一键切换 AI CLI 配置文件（cc-switch 移植）                         │
-│  └── Tokens / Sessions / Limits / …  ← TokenTracker 分析（42 款 CLI 工具），保持不变            │
+│  └── Tokens / Sessions / Limits / …  ← TokenTracker 分析（43 款 CLI 工具），保持不变            │
 └──────────────┬──────────────────────────────────────────────────────────┬────────────────────┘
                │ /api/proxy/*                                             │ /functions/*（本地 API）
                ▼                                                          ▼
@@ -113,11 +113,11 @@ docker compose up -d --build
 
 | | |
 | --- | --- |
-| **支持的 AI 工具数** | **42** |
+| **支持的 AI 工具数** | **43** |
 | **仪表盘** | localhost:7680 —— 趋势、模型分解、成本、热力图 |
 | **代理用量来源** | `cliproxy` —— 自动汇入同一批视图 |
 
-并入的 TokenTracker CLI 全部功能继续可用：42 款 AI 编码工具（Claude Code、Codex、Gemini、Cursor、Droid、Cline、Command Code 等）的 hook 安装、本地 JSONL 解析、成本引擎、sessions、限额、成就、技能面板、桌面宠物、小组件 —— 同一个仪表盘在 `localhost:7680`。代理用量以 `cliproxy` 来源出现在同一批视图中。
+并入的 TokenTracker CLI 全部功能继续可用：43 款 AI 编码工具（Claude Code、Codex、Gemini、Cursor、Droid、Cline、Command Code、TRAE 等）的 hook 安装、本地 JSONL 解析、成本引擎、sessions、限额、成就、技能面板、桌面宠物、小组件 —— 同一个仪表盘在 `localhost:7680`。代理用量以 `cliproxy` 来源出现在同一批视图中。
 
 ```bash
 aitool            # 打开仪表盘

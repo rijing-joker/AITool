@@ -68,4 +68,9 @@ export const AGENT_LOGOS = [
     nameKey: "provider.display.command_code",
     provider: "command-code",
   },
+  {
+    id: 43,
+    nameKey: "provider.display.trae",
+    provider: "trae",
+  },
 ];

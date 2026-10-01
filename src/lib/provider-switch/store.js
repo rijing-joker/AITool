@@ -267,5 +267,6 @@ module.exports = {
   deleteProvider,
   reorderProviders,
   setCurrentProvider,
+  sanitizeProviderFields,
   sanitizeSettingsConfig,
 };

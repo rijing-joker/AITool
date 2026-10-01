@@ -55,10 +55,27 @@ function formatTomlString(value) {
   return `"${String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
-function formatTomlValue(value) {
+// Scalars, plus inline arrays/tables for the structured values the editor's
+// three-way save can write back ([mcp_servers] args/env and friends). The
+// switch projections only ever pass scalars; the richer shapes exist so a
+// user-edited global table survives a write without a full-file rewrite.
+function formatTomlValue(value, depth = 0) {
   if (typeof value === "string") return formatTomlString(value);
   if (typeof value === "boolean" || typeof value === "number") return String(value);
-  throw new Error(`Unsupported TOML value type: ${typeof value}`);
+  if (depth > 6) throw new Error("TOML value is nested too deeply to write");
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => formatTomlValue(item, depth + 1)).join(", ")}]`;
+  }
+  if (value !== null && typeof value === "object") {
+    const body = Object.entries(value)
+      .map(([key, item]) => {
+        const left = /^[A-Za-z0-9_-]+$/.test(key) ? key : formatTomlString(key);
+        return `${left} = ${formatTomlValue(item, depth + 1)}`;
+      })
+      .join(", ");
+    return `{ ${body} }`;
+  }
+  throw new Error(`Unsupported TOML value type: ${value === null ? "null" : typeof value}`);
 }
 
 function lineKey(line) {

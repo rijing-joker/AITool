@@ -687,7 +687,7 @@ test("provider-switch api: codex switch injects the row key into the route table
 // cc-switch interaction parity: editor view / import-live / reorder / apply
 // ---------------------------------------------------------------------------
 
-test("provider-switch editor-view: editing the current provider overlays live values", async () => {
+test("provider-switch editor-view: the full post-switch projection (floor from row, rest from live)", async () => {
   const { handleProviderSwitchApiRequest } = require("../src/lib/provider-switch/api");
   const handler = handleProviderSwitchApiRequest;
   const prefix = "/api/provider-switch";
@@ -708,21 +708,29 @@ test("provider-switch editor-view: editing the current provider overlays live va
     body: JSON.stringify({ app: "claude", id: created.body.provider.id }),
   });
 
-  // Hand-edit the live file after the switch.
+  // Hand-edit the live file after the switch: a floor key (row-owned) and a
+  // user-owned env var plus top-level hooks (live-owned).
   const livePath = path.join(tmpHome, ".claude", "settings.json");
   const live = JSON.parse(fs.readFileSync(livePath, "utf8"));
   live.env.ANTHROPIC_BASE_URL = "https://hand-edited.example.com";
+  live.env.MY_OWN_VAR = "keep-me";
+  live.hooks = { SessionStart: "echo hi" };
   fs.writeFileSync(livePath, JSON.stringify(live, null, 2) + "\n");
 
   const view = await call(handler, {
-    url: `${prefix}/editor-view?app=claude&id=${created.body.provider.id}`,
+    method: "POST",
+    url: `${prefix}/editor-view`,
+    body: JSON.stringify({ app: "claude", id: created.body.provider.id }),
   });
-  assert.equal(view.body.fromLive, true);
   assert.equal(view.body.isCurrent, true);
-  assert.equal(view.body.settingsConfig.env.ANTHROPIC_BASE_URL, "https://hand-edited.example.com");
-  assert.equal(view.body.settingsConfig.env.ANTHROPIC_AUTH_TOKEN, "sk-a");
+  // Floor keys come from the row (the row owns them), user keys from live.
+  assert.equal(view.body.settings.env.ANTHROPIC_BASE_URL, "https://a.example.com");
+  assert.equal(view.body.settings.env.ANTHROPIC_AUTH_TOKEN, "sk-a");
+  assert.equal(view.body.settings.env.MY_OWN_VAR, "keep-me");
+  assert.deepEqual(view.body.settings.hooks, { SessionStart: "echo hi" });
 
-  // Editing a non-current provider returns the stored config untouched.
+  // Editing a non-current provider shows the full file after switching to
+  // it: its floor keys replace the current provider's, user keys stay.
   const other = await call(handler, {
     method: "POST",
     url: `${prefix}/providers`,
@@ -734,10 +742,175 @@ test("provider-switch editor-view: editing the current provider overlays live va
     }),
   });
   const viewOther = await call(handler, {
-    url: `${prefix}/editor-view?app=claude&id=${other.body.provider.id}`,
+    method: "POST",
+    url: `${prefix}/editor-view`,
+    body: JSON.stringify({ app: "claude", id: other.body.provider.id }),
   });
-  assert.equal(viewOther.body.fromLive, false);
-  assert.equal(viewOther.body.settingsConfig.env.ANTHROPIC_BASE_URL, "https://x.example.com");
+  assert.equal(viewOther.body.isCurrent, false);
+  assert.equal(viewOther.body.settings.env.ANTHROPIC_BASE_URL, "https://x.example.com");
+  assert.equal(viewOther.body.settings.env.ANTHROPIC_AUTH_TOKEN, undefined);
+  assert.equal(viewOther.body.settings.env.MY_OWN_VAR, "keep-me");
+  assert.deepEqual(viewOther.body.settings.hooks, { SessionStart: "echo hi" });
+});
+
+test("provider-switch editor save: floor keys go to the row, other edits go to live", async () => {
+  const { handleProviderSwitchApiRequest } = require("../src/lib/provider-switch/api");
+  const handler = handleProviderSwitchApiRequest;
+  const prefix = "/api/provider-switch";
+
+  const created = await call(handler, {
+    method: "POST",
+    url: `${prefix}/providers`,
+    body: JSON.stringify({
+      app: "claude",
+      name: "Relay",
+      category: "custom",
+      settingsConfig: { env: { ANTHROPIC_BASE_URL: "https://a.example.com", ANTHROPIC_AUTH_TOKEN: "sk-a" } },
+    }),
+  });
+  const relayId = created.body.provider.id;
+  await call(handler, { method: "POST", url: `${prefix}/switch`, body: JSON.stringify({ app: "claude", id: relayId }) });
+
+  const livePath = path.join(tmpHome, ".claude", "settings.json");
+  const liveText = fs.readFileSync(livePath, "utf8");
+  const base = JSON.parse(liveText); // what the editor view showed
+
+  // User edits the full config: floor endpoint, a new global env flag, and
+  // a hooks change — while editing a NON-current provider.
+  const other = await call(handler, {
+    method: "POST",
+    url: `${prefix}/providers`,
+    body: JSON.stringify({
+      app: "claude",
+      name: "Other",
+      category: "custom",
+      settingsConfig: { env: { ANTHROPIC_BASE_URL: "https://x.example.com" } },
+    }),
+  });
+  const edited = JSON.parse(JSON.stringify(base));
+  edited.env.ANTHROPIC_BASE_URL = "https://x.example.com";
+  edited.env.MY_CUSTOM_FLAG = "1";
+  edited.hooks = { SessionStart: "echo edited" };
+
+  const saved = await call(handler, {
+    method: "PUT",
+    url: `${prefix}/providers/${other.body.provider.id}`,
+    body: JSON.stringify({
+      app: "claude",
+      name: "Other",
+      category: "custom",
+      settingsConfig: edited,
+      editor: { base },
+    }),
+  });
+  assert.equal(saved.status, 200);
+
+  // The row keeps only floor/exclusive keys.
+  const state = await call(handler, { url: `${prefix}/providers?app=claude` });
+  const row = state.body.providers.find((p) => p.id === other.body.provider.id);
+  assert.deepEqual(Object.keys(row.settingsConfig), ["env"]);
+  assert.equal(row.settingsConfig.env.ANTHROPIC_BASE_URL, "https://x.example.com");
+
+  // Global edits were written into the live file; the current provider's
+  // floor keys are untouched (the row change is not applied to live).
+  const liveNow = JSON.parse(fs.readFileSync(livePath, "utf8"));
+  assert.equal(liveNow.env.MY_CUSTOM_FLAG, "1");
+  assert.deepEqual(liveNow.hooks, { SessionStart: "echo edited" });
+  assert.equal(liveNow.env.ANTHROPIC_BASE_URL, "https://a.example.com");
+  assert.equal(liveNow.env.ANTHROPIC_AUTH_TOKEN, "sk-a");
+
+  // Saving the current provider applies its floor keys to live in one save.
+  const currentEdited = JSON.parse(JSON.stringify(liveNow));
+  currentEdited.env.ANTHROPIC_BASE_URL = "https://a2.example.com";
+  const currentSave = await call(handler, {
+    method: "PUT",
+    url: `${prefix}/providers/${relayId}`,
+    body: JSON.stringify({
+      app: "claude",
+      name: "Relay",
+      category: "custom",
+      settingsConfig: currentEdited,
+      editor: { base: liveNow },
+    }),
+  });
+  assert.equal(currentSave.status, 200);
+  assert.ok(currentSave.body.applied && currentSave.body.applied.wrote.length > 0, "current provider save applied");
+  const liveAfter = JSON.parse(fs.readFileSync(livePath, "utf8"));
+  assert.equal(liveAfter.env.ANTHROPIC_BASE_URL, "https://a2.example.com");
+  assert.equal(liveAfter.env.MY_CUSTOM_FLAG, "1");
+  assert.deepEqual(liveAfter.hooks, { SessionStart: "echo edited" });
+});
+
+test("provider-switch editor save: three-way conflict refuse / keepTheirs / keepMine", async () => {
+  const { handleProviderSwitchApiRequest } = require("../src/lib/provider-switch/api");
+  const handler = handleProviderSwitchApiRequest;
+  const prefix = "/api/provider-switch";
+
+  const livePath = path.join(tmpHome, ".claude", "settings.json");
+  fs.mkdirSync(path.dirname(livePath), { recursive: true });
+  fs.writeFileSync(livePath, `${JSON.stringify({ env: { MY_FLAG: "original" } }, null, 2)}\n`);
+  const base = JSON.parse(fs.readFileSync(livePath, "utf8"));
+
+  const created = await call(handler, {
+    method: "POST",
+    url: `${prefix}/providers`,
+    body: JSON.stringify({
+      app: "claude",
+      name: "Relay",
+      category: "custom",
+      settingsConfig: { env: { ANTHROPIC_BASE_URL: "https://a.example.com" } },
+    }),
+  });
+
+  // Another program changed the live value after the editor opened.
+  const edited = JSON.parse(JSON.stringify(base));
+  edited.env.MY_FLAG = "from-editor";
+
+  fs.writeFileSync(livePath, `${JSON.stringify({ env: { MY_FLAG: "changed-elsewhere" } }, null, 2)}\n`);
+
+  // Refuse (default): 409 with the conflicting key paths.
+  const refused = await call(handler, {
+    method: "PUT",
+    url: `${prefix}/providers/${created.body.provider.id}`,
+    body: JSON.stringify({
+      app: "claude",
+      name: "Relay",
+      category: "custom",
+      settingsConfig: edited,
+      editor: { base },
+    }),
+  });
+  assert.equal(refused.status, 409);
+  assert.deepEqual(refused.body.conflicts, ["env.MY_FLAG"]);
+  assert.equal(JSON.parse(fs.readFileSync(livePath, "utf8")).env.MY_FLAG, "changed-elsewhere");
+
+  // keepTheirs: the conflicting key keeps the external value.
+  await call(handler, {
+    method: "PUT",
+    url: `${prefix}/providers/${created.body.provider.id}`,
+    body: JSON.stringify({
+      app: "claude",
+      name: "Relay",
+      category: "custom",
+      settingsConfig: edited,
+      editor: { base, onConflict: "keepTheirs" },
+    }),
+  });
+  assert.equal(JSON.parse(fs.readFileSync(livePath, "utf8")).env.MY_FLAG, "changed-elsewhere");
+
+  // keepMine: the editor's value wins.
+  await call(handler, {
+    method: "PUT",
+    url: `${prefix}/providers/${created.body.provider.id}`,
+    body: JSON.stringify({
+      app: "claude",
+      name: "Relay",
+      category: "custom",
+      settingsConfig: edited,
+      editor: { base, onConflict: "keepMine" },
+    }),
+  });
+  assert.equal(JSON.parse(fs.readFileSync(livePath, "utf8")).env.MY_FLAG, "from-editor");
 });
 
 test("provider-switch update on the current provider re-applies the projection", async () => {
@@ -1123,4 +1296,147 @@ test("provider-switch api: switch writes the catalog file, import reads it back"
   await call(handler, { method: "POST", url: `${prefix}/switch`, body: JSON.stringify({ app: "codex", id: plain.body.provider.id }) });
   assert.ok(!fs.existsSync(catalogPath), "catalog file removed when the new provider has no rows");
   assert.doesNotMatch(fs.readFileSync(path.join(codexDir, "config.toml"), "utf8"), /model_catalog_json = "aitool-model-catalog\.json"/);
+});
+
+test("provider-switch codex editor: view projects the full toml, save splits global table edits", async () => {
+  const { handleProviderSwitchApiRequest } = require("../src/lib/provider-switch/api");
+  const { parse: tomlParse } = require("smol-toml");
+  const handler = handleProviderSwitchApiRequest;
+  const prefix = "/api/provider-switch";
+  const codexDir = path.join(tmpHome, ".codex");
+  fs.mkdirSync(codexDir, { recursive: true });
+  // A hand-maintained live config with a user-owned mcp server (arrays and
+  // comments) and a user env table.
+  fs.writeFileSync(
+    path.join(codexDir, "config.toml"),
+    `# my codex config\nmodel = "gpt-5.2"\nmodel_provider = "custom"\n\n[mcp_servers.fs]\ncommand = "npx"\nargs = ["-y", "@modelcontextprotocol/server-fs"]  # fs server\n\n[notice]\nmodel = "gpt-5.2-mini"\n`,
+  );
+
+  const relay = await call(handler, {
+    method: "POST",
+    url: `${prefix}/providers`,
+    body: JSON.stringify({
+      app: "codex",
+      name: "Codex Relay",
+      category: "custom",
+      settingsConfig: {
+        auth: { OPENAI_API_KEY: "sk-codex" },
+        config: { model_provider: "custom", model: "gpt-5.2", model_providers: { custom: { name: "R", base_url: "https://r/v1" } } },
+      },
+    }),
+  });
+  await call(handler, { method: "POST", url: `${prefix}/switch`, body: JSON.stringify({ app: "codex", id: relay.body.provider.id }) });
+
+  // View: the full projected config.toml keeps the user tables + comments.
+  const view = await call(handler, {
+    method: "POST",
+    url: `${prefix}/editor-view`,
+    body: JSON.stringify({ app: "codex", id: relay.body.provider.id }),
+  });
+  assert.equal(view.status, 200);
+  assert.match(view.body.configToml, /# my codex config/);
+  assert.match(view.body.configToml, /\[mcp_servers\.fs\]/);
+  assert.match(view.body.configToml, /args = \["-y", "@modelcontextprotocol\/server-fs"\]/);
+  assert.match(view.body.configToml, /experimental_bearer_token = "sk-codex"/);
+  assert.deepEqual(view.body.authJson, {});
+
+  const base = { auth: view.body.authJson, config: tomlParse(view.body.configToml) };
+
+  // Edit: change the model (floor → row), add a second mcp server and edit
+  // the [notice] model (global → live).
+  const editedConfig = JSON.parse(JSON.stringify(base.config));
+  editedConfig.model = "gpt-5.3";
+  editedConfig.mcp_servers.git = { command: "uvx", args: ["mcp-server-git"] };
+  editedConfig.notice.model = "gpt-5.2-nano";
+  const saved = await call(handler, {
+    method: "PUT",
+    url: `${prefix}/providers/${relay.body.provider.id}`,
+    body: JSON.stringify({
+      app: "codex",
+      name: "Codex Relay",
+      category: "custom",
+      settingsConfig: { auth: { OPENAI_API_KEY: "sk-codex" }, config: editedConfig },
+      editor: { base },
+    }),
+  });
+  assert.equal(saved.status, 200);
+  assert.ok(saved.body.applied && saved.body.applied.wrote.some((p) => p.endsWith("config.toml")));
+
+  const liveText = fs.readFileSync(path.join(codexDir, "config.toml"), "utf8");
+  assert.match(liveText, /# my codex config/);
+  assert.match(liveText, /\[mcp_servers\.git\]/);
+  assert.match(liveText, /args = \["mcp-server-git"\]/);
+  assert.match(liveText, /model = "gpt-5\.3"/);
+  assert.match(liveText, /\[notice\]/);
+  const liveParsed = tomlParse(liveText);
+  assert.equal(liveParsed.notice.model, "gpt-5.2-nano");
+  assert.equal(liveParsed.mcp_servers.fs.args[1], "@modelcontextprotocol/server-fs");
+
+  // The row keeps floors + the route table without the injected auth fields
+  // (the key lives in row.auth; requires_openai_auth is recomputed on switch).
+  const state = await call(handler, { url: `${prefix}/providers?app=codex` });
+  const row = state.body.providers.find((p) => p.id === relay.body.provider.id);
+  assert.equal(row.settingsConfig.config.model, "gpt-5.3");
+  assert.equal(row.settingsConfig.auth.OPENAI_API_KEY, "sk-codex");
+  assert.ok(!("requires_openai_auth" in row.settingsConfig.config.model_providers.custom));
+  assert.ok(!("experimental_bearer_token" in row.settingsConfig.config.model_providers.custom));
+  assert.ok(!("mcp_servers" in row.settingsConfig.config));
+});
+
+test("provider-switch gemini editor: view projects the full .env, save splits global vars", async () => {
+  const { handleProviderSwitchApiRequest } = require("../src/lib/provider-switch/api");
+  const handler = handleProviderSwitchApiRequest;
+  const prefix = "/api/provider-switch";
+  const geminiDir = path.join(tmpHome, ".gemini");
+  fs.mkdirSync(geminiDir, { recursive: true });
+  fs.writeFileSync(path.join(geminiDir, ".env"), "# gemini env\nGEMINI_API_KEY=old-key\nGEMINI_MODEL=gemini-2.5-pro\nMY_OWN_VAR=keep\n");
+
+  const relay = await call(handler, {
+    method: "POST",
+    url: `${prefix}/providers`,
+    body: JSON.stringify({
+      app: "gemini",
+      name: "Gemini Relay",
+      category: "custom",
+      settingsConfig: { env: { GEMINI_API_KEY: "new-key", GEMINI_MODEL: "gemini-3-pro" } },
+    }),
+  });
+  await call(handler, { method: "POST", url: `${prefix}/switch`, body: JSON.stringify({ app: "gemini", id: relay.body.provider.id }) });
+
+  const view = await call(handler, {
+    method: "POST",
+    url: `${prefix}/editor-view`,
+    body: JSON.stringify({ app: "gemini", id: relay.body.provider.id }),
+  });
+  assert.match(view.body.envText, /MY_OWN_VAR=keep/);
+  assert.match(view.body.envText, /GEMINI_API_KEY=new-key/);
+
+  // Parse the view text like the dialog does, edit, save with the base.
+  const parseEnv = (text) => {
+    const env = {};
+    for (const line of text.split(/\r?\n/)) {
+      const m = line.match(/^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/);
+      if (m) env[m[1]] = m[2];
+    }
+    return env;
+  };
+  const base = { env: parseEnv(view.body.envText) };
+  const edited = { env: { ...base.env, MY_OWN_VAR: "edited", GEMINI_API_KEY: "newer-key" } };
+  const saved = await call(handler, {
+    method: "PUT",
+    url: `${prefix}/providers/${relay.body.provider.id}`,
+    body: JSON.stringify({ app: "gemini", name: "Gemini Relay", category: "custom", settingsConfig: edited, editor: { base } }),
+  });
+  assert.equal(saved.status, 200);
+
+  const liveText = fs.readFileSync(path.join(geminiDir, ".env"), "utf8");
+  assert.match(liveText, /MY_OWN_VAR=edited/);
+  // The provider IS current — the floor key change rides the projection.
+  assert.equal(parseEnv(liveText).GEMINI_API_KEY, "newer-key");
+  assert.equal(parseEnv(liveText).GEMINI_MODEL, "gemini-3-pro");
+
+  const state = await call(handler, { url: `${prefix}/providers?app=gemini` });
+  const row = state.body.providers.find((p) => p.id === relay.body.provider.id);
+  assert.deepEqual(row.settingsConfig.env, { GEMINI_API_KEY: "newer-key", GEMINI_MODEL: "gemini-3-pro" });
+  assert.ok(!("MY_OWN_VAR" in row.settingsConfig.env));
 });

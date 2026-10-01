@@ -8,6 +8,7 @@ const presetsModule = require("./presets");
 const backup = require("./backup");
 const paths = require("./paths");
 const catalog = require("./catalog");
+const editor = require("./editor");
 
 // Dashboard-facing REST surface for the provider-switch layer, mounted by
 // local-api.js under /api/provider-switch/*. Mirrors the proxy/api.js
@@ -75,22 +76,25 @@ async function writeLiveFile(file, content) {
 // Switch orchestration
 // ---------------------------------------------------------------------------
 
-async function switchProvider({ app, id }) {
-  if (!store.isSupportedApp(app)) throw new Error(`Unsupported app: ${app}`);
-  const state = await store.listProviders(app);
-  const target = state.providers.find((p) => p.id === id);
-  if (!target) throw new Error(`Provider not found: ${id}`);
-  const prev = state.current
-    ? state.providers.find((p) => p.id === state.current) || null
-    : null;
-
-  const files = paths.targetFiles(app);
+async function readLives(app) {
   const lives = {};
-  for (const file of files) {
+  for (const file of paths.targetFiles(app)) {
     lives[file.id] = await readLiveFile(file);
   }
+  return lives;
+}
 
-  // 1) Compute every patch in memory; any failure here writes nothing.
+async function readCodexStash() {
+  const stash = await readJson(paths.codexAuthStashPath());
+  return stash && typeof stash === "object" ? stash.auth || null : null;
+}
+
+// Compute every live patch for a switch in memory (cc-switch's transaction
+// ordering: any parse failure aborts before touching disk). `lives` carries
+// the current file contents; the editor save passes pre-patched contents so
+// its global-setting changes and the floor projection land in one write.
+function computeSwitchPlan(app, prev, target, lives, stash) {
+  const files = paths.targetFiles(app);
   const writes = []; // { file, content, parsedBackup? }
   let stashWrite = null; // { content } to persist before clearing auth.json
   let stashRestore = false;
@@ -105,13 +109,12 @@ async function switchProvider({ app, id }) {
     const configFile = files.find((f) => f.id === "config");
     const authFile = files.find((f) => f.id === "auth");
     const liveAuth = lives.auth.exists ? JSON.parse(lives.auth.content) : {};
-    const stash = await readJson(paths.codexAuthStashPath());
     const { configToml, auth, catalog: sidecar } = targets.projectCodex({
       prev,
       target,
       liveToml: lives.config.exists ? lives.config.content : "",
       liveAuth,
-      stash: stash && typeof stash === "object" ? stash.auth || null : null,
+      stash,
     });
     catalogAction = sidecar;
     writes.push({ file: configFile, content: configToml });
@@ -136,41 +139,41 @@ async function switchProvider({ app, id }) {
     writes.push({ file: envFile, content: next });
   }
 
-  // 2) Backup each existing live file before the first managed write.
+  return { writes, stashWrite, stashRestore, catalogAction };
+}
+
+// Backup each existing live file, persist the auth stash, then publish all
+// file writes atomically (tmp+rename) and handle the catalog sidecar.
+async function persistSwitchPlan(app, plan) {
   const backups = [];
-  for (const write of writes) {
-    if (!write.skipBackupIfMissing || lives[write.file.id].exists) {
+  for (const write of plan.writes) {
+    if (!write.skipBackupIfMissing || (await liveExists(write.file))) {
       const created = await backup.createBackup(app, write.file.path);
       if (created) backups.push(created);
     }
   }
 
-  // 3) Persist the auth stash before clearing auth.json so a crash between
-  //    the two writes never loses the official login.
-  if (stashWrite) {
+  if (plan.stashWrite) {
     await ensureDir(paths.providerSwitchRoot());
     await writeFileAtomic(
       paths.codexAuthStashPath(),
-      `${JSON.stringify({ auth: stashWrite, stashedAt: new Date().toISOString() }, null, 2)}\n`,
+      `${JSON.stringify({ auth: plan.stashWrite, stashedAt: new Date().toISOString() }, null, 2)}\n`,
       { mode: 0o600 },
     );
   }
 
-  // 4) Publish all file writes atomically.
   const wrote = [];
-  for (const write of writes) {
+  for (const write of plan.writes) {
     await writeLiveFile(write.file, write.content);
     wrote.push(write.file.path);
   }
 
-  // 4b) Codex model catalog sidecar: write the file the config.toml pointer
-  //     references, or remove ours when the previous provider owned it.
-  if (catalogAction.action === "write") {
+  if (plan.catalogAction.action === "write") {
     const catalogPath = paths.codexModelCatalogPath();
     await ensureDir(path.dirname(catalogPath));
-    await writeFileAtomic(catalogPath, catalog.buildCodexCatalog(catalogAction.models));
+    await writeFileAtomic(catalogPath, catalog.buildCodexCatalog(plan.catalogAction.models));
     wrote.push(catalogPath);
-  } else if (catalogAction.action === "remove") {
+  } else if (plan.catalogAction.action === "remove") {
     try {
       await fs.unlink(paths.codexModelCatalogPath());
     } catch {
@@ -178,7 +181,7 @@ async function switchProvider({ app, id }) {
     }
   }
 
-  if (stashRestore) {
+  if (plan.stashRestore) {
     try {
       await fs.unlink(paths.codexAuthStashPath());
     } catch {
@@ -186,10 +189,140 @@ async function switchProvider({ app, id }) {
     }
   }
 
-  // 5) Commit the pointer only after every write landed.
-  await store.setCurrentProvider(app, id);
+  return { wrote, backups };
+}
 
+async function liveExists(file) {
+  try {
+    await fs.stat(file.path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function switchProvider({ app, id }) {
+  if (!store.isSupportedApp(app)) throw new Error(`Unsupported app: ${app}`);
+  const state = await store.listProviders(app);
+  const target = state.providers.find((p) => p.id === id);
+  if (!target) throw new Error(`Provider not found: ${id}`);
+  const prev = state.current
+    ? state.providers.find((p) => p.id === state.current) || null
+    : null;
+
+  const lives = await readLives(app);
+  const stash = app === "codex" ? await readCodexStash() : null;
+  const plan = computeSwitchPlan(app, prev, target, lives, stash);
+  const { wrote, backups } = await persistSwitchPlan(app, plan);
+
+  // Commit the pointer only after every write landed.
+  await store.setCurrentProvider(app, id);
   return { app, current: id, wrote, backups };
+}
+
+// ---------------------------------------------------------------------------
+// Editor save (cc-switch's update_from_editor / add_from_editor): the dialog
+// edits the full projected config; floor/exclusive keys go back into the
+// provider row, every other user change is written into the live files
+// (three-way compared against the base the editor opened with).
+// ---------------------------------------------------------------------------
+
+const CONFLICT_POLICIES = ["keepMine", "keepTheirs"];
+
+async function saveProvider({ app, id, body }) {
+  if (!store.isSupportedApp(app)) throw new Error(`Unsupported app: ${app}`);
+  const editorInput = body.editor && body.editor.base ? body.editor : null;
+
+  if (!editorInput) {
+    // Legacy payload (fragment-shaped settingsConfig, no editor base).
+    const provider = id
+      ? await store.updateProvider(app, id, body)
+      : await store.createProvider(app, body);
+    let applied = null;
+    if (id) {
+      const state = await store.listProviders(app);
+      if (state.current === id) {
+        // cc-switch interaction: editing the *current* provider takes effect
+        // immediately — re-run the projection so the live files follow.
+        applied = await switchProvider({ app, id });
+      }
+    }
+    return { ok: true, provider, applied };
+  }
+
+  const policy = CONFLICT_POLICIES.includes(body.editor.onConflict) ? body.editor.onConflict : "refuse";
+  const existing = id ? await store.getProvider(app, id) : null;
+  const plan = editor.planSave(app, existing ? existing.settingsConfig : null, body.settingsConfig, editorInput.base);
+
+  const state = await store.listProviders(app);
+  const isCurrent = !!id && state.current === id;
+  const lives = await readLives(app);
+
+  const marked = editor.resolveConflicts(app, plan.changes, lives);
+  const conflicts = marked.filter((entry) => entry.conflict).map((entry) => editor.pathKey(entry.change.path));
+  if (conflicts.length > 0 && policy === "refuse") {
+    return { ok: false, conflict: true, conflicts };
+  }
+  const accepted = policy === "keepTheirs" ? marked.filter((entry) => !entry.conflict).map((entry) => entry.change) : plan.changes;
+
+  // Patch the live contents in memory first; the floor projection below
+  // reads the patched files so both land as one write per file.
+  const patchedLives = editor.applyChanges(app, lives, accepted);
+
+  let wrote = [];
+  let backups = [];
+  let applied = null;
+  if (isCurrent) {
+    const clean = store.sanitizeProviderFields(app, {
+      name: body.name !== undefined ? body.name : existing.name,
+      category: body.category !== undefined ? body.category : existing.category,
+      settingsConfig: plan.rowSettings,
+      notes: body.notes !== undefined ? body.notes : existing.notes,
+      websiteUrl: body.websiteUrl !== undefined ? body.websiteUrl : existing.websiteUrl,
+      icon: body.icon !== undefined ? body.icon : existing.icon,
+      iconColor: body.iconColor !== undefined ? body.iconColor : existing.iconColor,
+      meta: body.meta !== undefined ? body.meta : existing.meta,
+    });
+    const target = { ...existing, ...clean };
+    const stash = app === "codex" ? await readCodexStash() : null;
+    const switchPlan = computeSwitchPlan(app, existing, target, patchedLives, stash);
+    ({ wrote, backups } = await persistSwitchPlan(app, switchPlan));
+    applied = { wrote: wrote.slice(), backups };
+  } else if (accepted.length > 0) {
+    // Global-settings changes reach live regardless of which provider row is
+    // being edited (the row only owns its floor keys).
+    ({ wrote, backups } = await persistEditorChanges(app, patchedLives, lives, accepted));
+  }
+
+  const provider = id
+    ? await store.updateProvider(app, id, { ...body, settingsConfig: plan.rowSettings })
+    : await store.createProvider(app, { ...body, settingsConfig: plan.rowSettings });
+  return { ok: true, provider, applied, wrote, backups };
+}
+
+// Write only the files the editor's global changes touched (backup first).
+async function persistEditorChanges(app, patchedLives, originalLives, accepted) {
+  const touchedFiles = new Set();
+  for (const change of accepted) {
+    if (app === "claude") touchedFiles.add("settings");
+    else if (app === "codex") touchedFiles.add("config");
+    else touchedFiles.add("env");
+  }
+  const wrote = [];
+  const backups = [];
+  for (const fileId of touchedFiles) {
+    const file = paths.targetFile(app, fileId);
+    const patched = patchedLives[fileId];
+    const original = originalLives[fileId];
+    if (!patched || patched.content === (original ? original.content : null)) continue;
+    if (original && original.exists) {
+      const created = await backup.createBackup(app, file.path);
+      if (created) backups.push(created);
+    }
+    await writeLiveFile(file, patched.content);
+    wrote.push(file.path);
+  }
+  return { wrote, backups };
 }
 
 // ---------------------------------------------------------------------------
@@ -323,21 +456,22 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
       if (!requireMutation()) return true;
       if (method === "POST" && !providerId) {
         const body = await readJsonBody(req);
-        const provider = await store.createProvider(body.app, body);
-        json(res, { ok: true, provider });
+        const result = await saveProvider({ app: body.app, id: null, body });
+        if (result.conflict) {
+          json(res, { ok: false, error: "conflict", conflicts: result.conflicts }, 409);
+          return true;
+        }
+        json(res, result);
         return true;
       }
       if (method === "PUT" && providerId) {
         const body = await readJsonBody(req);
-        const provider = await store.updateProvider(body.app, providerId, body);
-        // cc-switch interaction: editing the *current* provider takes effect
-        // immediately — re-run the projection so the live files follow.
-        let applied = null;
-        const state = await store.listProviders(body.app);
-        if (state.current === providerId) {
-          applied = await switchProvider({ app: body.app, id: providerId });
+        const result = await saveProvider({ app: body.app, id: providerId, body });
+        if (result.conflict) {
+          json(res, { ok: false, error: "conflict", conflicts: result.conflicts }, 409);
+          return true;
         }
-        json(res, { ok: true, provider, applied });
+        json(res, result);
         return true;
       }
       if (method === "DELETE" && providerId) {
@@ -348,10 +482,14 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
       }
     }
 
-    if (p === `${prefix}/editor-view` && method === "GET") {
-      const app = url.searchParams.get("app") || "claude";
-      const id = url.searchParams.get("id") || "";
-      json(res, await buildEditorView(app, id));
+    // Editor view: the FULL config file as it would look after switching to
+    // this provider (cc-switch's get_provider_editor_view). The dialog posts
+    // the draft it is editing (row for edit mode, preset fragment or empty
+    // object for the add dialog).
+    if (p === `${prefix}/editor-view` && method === "POST") {
+      const body = await readJsonBody(req);
+      const app = body.app || "claude";
+      json(res, await editor.buildEditorView(app, { settingsConfig: body.settingsConfig, id: body.id }));
       return true;
     }
 
@@ -448,33 +586,6 @@ async function importCodexCatalogMeta(config) {
   const rows = catalog.parseCodexCatalog(text);
   delete config.model_catalog_json;
   return rows.length > 0 ? { codexCatalogModels: rows } : null;
-}
-
-// Editor view for one provider. When it is the current one, the live files
-// may have been hand-edited since the switch — the returned settingsConfig
-// overlays the live value on every key the provider owns (fromLive: true),
-// mirroring cc-switch's read_live_provider_settings.
-async function buildEditorView(app, id) {
-  if (!store.isSupportedApp(app)) throw new Error(`Unsupported app: ${app}`);
-  const state = await store.listProviders(app);
-  const provider = state.providers.find((p) => p.id === id);
-  if (!provider) throw new Error(`Provider not found: ${id}`);
-  const isCurrent = state.current === id;
-  let settingsConfig = provider.settingsConfig;
-  let fromLive = false;
-  if (isCurrent) {
-    const lives = {};
-    for (const file of paths.targetFiles(app)) {
-      lives[file.id] = await readLiveFile(file);
-    }
-    settingsConfig = targets.mergeLiveIntoSettingsConfig(app, provider.settingsConfig, {
-      claude: lives.settings?.exists ? JSON.parse(lives.settings.content) : null,
-      codex: lives.config?.exists ? lives.config.content : "",
-      gemini: lives.env?.exists ? lives.env.content : "",
-    }[app]);
-    fromLive = true;
-  }
-  return { ok: true, app, isCurrent, fromLive, settingsConfig };
 }
 
 // ---------------------------------------------------------------------------

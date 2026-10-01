@@ -185,6 +185,47 @@ function setCodexApiKeyInDraft(draft, value) {
 }
 
 // ---------------------------------------------------------------------------
+// Gemini .env text (the dialog edits the real ~/.gemini/.env content)
+// ---------------------------------------------------------------------------
+
+function parseEnvText(text) {
+  const env = {};
+  for (const line of String(text || "").split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const match = trimmed.match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+    if (!match) return null;
+    let value = match[2].trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1);
+    }
+    env[match[1]] = value;
+  }
+  return env;
+}
+
+function envTextOf(envObject) {
+  const entries = envObject && typeof envObject === "object" ? Object.entries(envObject) : [];
+  if (entries.length === 0) return "";
+  return `${entries.map(([key, value]) => `${key}=${String(value ?? "")}`).join("\n")}\n`;
+}
+
+// The editor view payload → the dialog's draft (and save base): the FULL
+// config file as it would look after switching to this provider. Claude is
+// the projected settings.json object, codex is auth.json + the parsed full
+// config.toml, gemini is the parsed full .env.
+function viewToConfig(app, view) {
+  if (app === "claude") return JSON.parse(JSON.stringify(view.settings ?? {}));
+  if (app === "codex") {
+    return {
+      auth: JSON.parse(JSON.stringify(view.authJson ?? {})),
+      config: tomlParse(view.configToml || ""),
+    };
+  }
+  return { env: parseEnvText(view.envText || "") ?? {} };
+}
+
+// ---------------------------------------------------------------------------
 // Shared small controls
 // ---------------------------------------------------------------------------
 
@@ -373,15 +414,28 @@ export function ProviderEditDialog({
   const [codexAuthError, setCodexAuthError] = useState(null);
   const [codexTomlText, setCodexTomlText] = useState("");
   const [codexTomlError, setCodexTomlError] = useState(null);
+  // Gemini edits the real ~/.gemini/.env content (same two-way mirror
+  // contract as rawText / the codex editors).
+  const [envText, setEnvText] = useState("");
+  const [envError, setEnvError] = useState(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [error, setError] = useState(null);
-  const [fromLive, setFromLive] = useState(false);
   const [loading, setLoading] = useState(false);
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
   const [speedTestOpen, setSpeedTestOpen] = useState(false);
   const [fetchedModels, setFetchedModels] = useState(null);
   const [fetchState, setFetchState] = useState("idle");
   const [pendingIssues, setPendingIssues] = useState(null);
+  // cc-switch's editor view: the full post-switch config the dialog opened
+  // with (save base for the three-way split), the row fields that do not
+  // take effect on switch, and the fallback notice when the live files
+  // cannot be projected (the dialog then edits the row fragment only).
+  const [editorBase, setEditorBase] = useState(null);
+  const [inactive, setInactive] = useState([]);
+  const [editorFallback, setEditorFallback] = useState(null);
+  const [conflictKeys, setConflictKeys] = useState(null);
+  const [conflictPolicy, setConflictPolicy] = useState(null);
+  const viewRequestRef = useRef(0);
 
   const isEdit = !!editing;
   const selectedPreset = useMemo(() => {
@@ -416,9 +470,46 @@ export function ProviderEditDialog({
     return [...new Set(list.filter(Boolean))];
   }, [selectedPreset, meta.customEndpoints, editing, app]);
 
+  // Load the cc-switch editor view for a draft: the full post-switch config
+  // becomes both the dialog's draft and the save base (editor.base for the
+  // three-way split on save). Only the latest request applies — preset picks
+  // can race the fetch.
+  const loadEditorView = useCallback(
+    (settingsConfig, opts) => {
+      const token = viewRequestRef.current + 1;
+      viewRequestRef.current = token;
+      setLoading(true);
+      providerSwitchApi
+        .getEditorView(app, settingsConfig ?? {}, opts)
+        .then((view) => {
+          if (viewRequestRef.current !== token) return;
+          const full = viewToConfig(app, view);
+          setDraft(full);
+          setEditorBase(JSON.parse(JSON.stringify(full)));
+          setInactive(Array.isArray(view.inactive) ? view.inactive : []);
+          setEditorFallback(null);
+        })
+        .catch((err) => {
+          if (viewRequestRef.current !== token) return;
+          // No live file (or it does not parse): fall back to editing the
+          // row fragment only, like cc-switch's toast + fallback.
+          setEditorBase(null);
+          setInactive([]);
+          setEditorFallback(
+            copy("pswitch.provider.editor_view_failed", { error: err instanceof Error ? err.message : String(err) }),
+          );
+        })
+        .finally(() => {
+          if (viewRequestRef.current === token) setLoading(false);
+        });
+    },
+    [app],
+  );
+
   const applyPreset = useCallback((preset) => {
     // cc-switch's handlePresetChange: picking a preset resets the basic
-    // fields to the preset's values, not only the config template.
+    // fields to the preset's values, not only the config template. The
+    // editor view is re-projected for the preset's draft.
     setSelectedPresetId(preset.id);
     setDraft(JSON.parse(JSON.stringify(preset.settingsConfig ?? {})));
     setCategory(preset.group === "official" ? "official" : "custom");
@@ -427,7 +518,11 @@ export function ProviderEditDialog({
     setIcon(preset.icon || "");
     setIconColor(preset.color || "");
     setError(null);
-  }, []);
+    loadEditorView(preset.settingsConfig ?? {}, {
+      category: preset.group === "official" ? "official" : "custom",
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadEditorView]);
 
   // Initialize each time the dialog opens. rawText is intentionally not
   // touched here — the mirror effect below repopulates it from the new draft
@@ -439,12 +534,18 @@ export function ProviderEditDialog({
     setRawError(null);
     setCodexAuthError(null);
     setCodexTomlError(null);
+    setEnvError(null);
     setPendingIssues(null);
     setFetchedModels(null);
     setFetchState("idle");
     setIconPickerOpen(false);
     setSpeedTestOpen(false);
-    setFromLive(false);
+    setEditorBase(null);
+    setInactive([]);
+    setEditorFallback(null);
+    setConflictKeys(null);
+    setConflictPolicy(null);
+    viewRequestRef.current += 1;
     if (editing) {
       setName(editing.name);
       setCategory(editing.category);
@@ -464,26 +565,10 @@ export function ProviderEditDialog({
       if (app === "codex" && codexHasAdvancedValues(editingMeta)) {
         setAdvancedOpen(true);
       }
-      // cc-switch's read_live_provider_settings: editing the current provider
-      // starts from what is actually in the live files.
-      if (appState?.current === editing.id) {
-        setLoading(true);
-        providerSwitchApi
-          .getEditorView(app, editing.id)
-          .then((view) => {
-            const nextDraft = JSON.parse(JSON.stringify(view.settingsConfig ?? {}));
-            setDraft(nextDraft);
-            setFromLive(!!view.fromLive);
-            if (app === "claude" && claudeHasAdvancedValues(nextDraft, editing.meta || {})) {
-              setAdvancedOpen(true);
-            }
-            if (app === "codex" && codexHasAdvancedValues(editing.meta || {})) {
-              setAdvancedOpen(true);
-            }
-          })
-          .catch((err) => setError(err instanceof Error ? err.message : String(err)))
-          .finally(() => setLoading(false));
-      }
+      // cc-switch's editor view: the dialog shows the full config file as it
+      // would look after switching to this provider (floor keys from the
+      // row, everything else from the live files).
+      loadEditorView(editing.settingsConfig ?? {}, { id: editing.id, category: editing.category });
     } else {
       setName("");
       setCategory("custom");
@@ -498,6 +583,7 @@ export function ProviderEditDialog({
       const first = presets.find((preset) => preset.group === "custom") || presets[0] || null;
       setSelectedPresetId(first ? first.id : null);
       setDraft(first ? JSON.parse(JSON.stringify(first.settingsConfig ?? {})) : {});
+      loadEditorView(first ? first.settingsConfig ?? {} : {});
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, editing, app, appState?.current]);
@@ -709,8 +795,9 @@ export function ProviderEditDialog({
   const configInvalid = (err) =>
     copy("pswitch.provider.invalid_json", { error: err instanceof Error ? err.message : String(err) });
   useEffect(() => {
-    // Codex uses the two cc-switch editors below (auth.json + config.toml).
-    if (app === "codex") return;
+    // Codex uses the two cc-switch editors below (auth.json + config.toml)
+    // and gemini edits the real .env text — claude keeps the JSON editor.
+    if (app !== "claude") return;
     let parsed = null;
     try {
       parsed = JSON.parse(rawText);
@@ -748,6 +835,44 @@ export function ProviderEditDialog({
     } catch (err) {
       setRawError(configInvalid(err));
     }
+  };
+
+  // --- Gemini: the real .env content as text ---
+  // Same two-way mirror contract: form edits re-serialize the env object,
+  // typed edits parse back into draft.env once every line is KEY=VALUE.
+  const envTextRef = useRef("");
+  const envInvalid = copy("pswitch.provider.invalid_env");
+  useEffect(() => {
+    if (app !== "gemini") return;
+    const next = envTextOf(draft && typeof draft === "object" ? draft.env ?? {} : {});
+    if (next !== envTextRef.current) {
+      envTextRef.current = next;
+      setEnvText(next);
+      setEnvError(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft, app]);
+  const handleEnvTextChange = (text) => {
+    envTextRef.current = text;
+    setEnvText(text);
+    const parsed = parseEnvText(text);
+    if (parsed) {
+      setDraft((current) => ({ ...(current || {}), env: parsed }));
+      setEnvError(null);
+    } else {
+      setEnvError(envInvalid);
+    }
+  };
+  const formatEnvText = () => {
+    const parsed = parseEnvText(envTextRef.current);
+    if (!parsed) {
+      setEnvError(envInvalid);
+      return;
+    }
+    const next = envTextOf(parsed);
+    envTextRef.current = next;
+    setEnvText(next);
+    setEnvError(null);
   };
 
   // --- Codex: auth.json (JSON) + config.toml (TOML) editors ---
@@ -859,7 +984,7 @@ export function ProviderEditDialog({
     return issues;
   };
 
-  const save = async (force) => {
+  const save = async (force, policyOverride) => {
     // The visible editor text is the save source (cc-switch keeps the config
     // text in its form state the same way) — it mirrors the draft exactly
     // unless the user is mid-edit on invalid text, which blocks saving.
@@ -884,6 +1009,13 @@ export function ProviderEditDialog({
         return;
       }
       payloadConfig = { auth: authObject, config: configObject };
+    } else if (app === "gemini") {
+      const parsed = parseEnvText(envTextRef.current || "");
+      if (!parsed) {
+        setEnvError(envInvalid);
+        return;
+      }
+      payloadConfig = { env: parsed };
     } else {
       try {
         payloadConfig = JSON.parse(rawTextRef.current);
@@ -915,6 +1047,12 @@ export function ProviderEditDialog({
         iconColor,
         meta: cleanMeta,
       };
+      // cc-switch's EditorSave: the base is the full projected config the
+      // dialog opened with; the backend splits floor keys (row) from the
+      // user's other edits (three-way write into the live files).
+      if (editorBase) {
+        payload.editor = { base: editorBase, ...(policyOverride || conflictPolicy ? { onConflict: policyOverride || conflictPolicy } : {}) };
+      }
       if (isEdit) {
         const res = await providerSwitchApi.updateProvider(app, editing.id, payload);
         onSaved(
@@ -928,8 +1066,21 @@ export function ProviderEditDialog({
       }
       onClose();
     } catch (err) {
+      // Three-way conflict (cc-switch's LiveEditConflictDialog): offer to
+      // keep the editor's values or the ones written by another program.
+      const conflicts = err && typeof err === "object" && err.payload && err.payload.error === "conflict" ? err.payload.conflicts : null;
+      if (Array.isArray(conflicts) && conflicts.length > 0) {
+        setConflictKeys(conflicts);
+        return;
+      }
       onError(err instanceof Error ? err.message : String(err));
     }
+  };
+
+  const resolveConflict = (policy) => {
+    setConflictPolicy(policy);
+    setConflictKeys(null);
+    void save(true, policy);
   };
 
   // Preset grid: search + official → community → custom order, with an A→Z
@@ -964,6 +1115,12 @@ export function ProviderEditDialog({
   const showEndpointField = !officialSelected && (app === "claude" || app === "codex" || app === "gemini");
   const showAdvancedToggle = app === "claude" || app === "codex";
   const showQuickToggles = app === "claude";
+  // Precomputed so the config-editor block below has no ternary chains after
+  // closing tags (the ui-hardcode JSX text scan would see them as raw text).
+  const showCodexEditors = app === "codex";
+  const showEnvEditor = app === "gemini";
+  const showJsonEditor = !showCodexEditors && !showEnvEditor;
+  const hasInactiveFields = inactive.length > 0;
   const apiKeyWebsite = selectedPreset?.websiteUrl || websiteUrl;
   const showApiKeyLink = !!apiKeyWebsite && selectedPreset?.group === "community";
   const endpointHint =
@@ -1014,9 +1171,9 @@ export function ProviderEditDialog({
           {loading ? (
             <p className="text-sm text-oai-gray-400 dark:text-oai-gray-500">{copy("pswitch.provider.loading_live")}</p>
           ) : null}
-          {fromLive ? (
+          {editorFallback ? (
             <div className="rounded-lg border border-oai-amber-dark/30 bg-oai-amber-50 px-3 py-2 text-xs text-oai-amber-dark dark:border-oai-amber-dark/40 dark:bg-oai-amber-dark/15 dark:text-oai-amber-light">
-              {copy("pswitch.provider.live_prefill_hint")}
+              {editorFallback}
             </div>
           ) : null}
 
@@ -1571,7 +1728,7 @@ export function ProviderEditDialog({
             </div>
           ) : null}
 
-          {app === "codex" ? (
+          {showCodexEditors ? (
             <div className="space-y-4">
               <div>
                 <FieldLabel label={copy("pswitch.codex.auth_json")} />
@@ -1613,7 +1770,34 @@ export function ProviderEditDialog({
                 </div>
               </div>
             </div>
-          ) : (
+          ) : null}
+
+          {showEnvEditor ? (
+            <div>
+              <FieldLabel label={copy("pswitch.provider.config")} />
+              <p className="mt-1 text-xs text-oai-gray-400 dark:text-oai-gray-500">
+                {copy("pswitch.provider.config_editor_hint")}
+              </p>
+              <div className="mt-2 flex justify-end">
+                <button
+                  type="button"
+                  onClick={formatEnvText}
+                  className="text-xs font-medium text-oai-brand-600 hover:underline dark:text-oai-brand-400"
+                >
+                  {copy("pswitch.json.format")}
+                </button>
+              </div>
+              <JsonTextarea
+                value={envText}
+                onChange={handleEnvTextChange}
+                rows={12}
+                error={envError}
+                label={copy("pswitch.provider.config")}
+              />
+            </div>
+          ) : null}
+
+          {showJsonEditor ? (
             <div>
               <FieldLabel label={copy("pswitch.provider.config")} />
               <p className="mt-1 text-xs text-oai-gray-400 dark:text-oai-gray-500">
@@ -1654,7 +1838,43 @@ export function ProviderEditDialog({
                 label={copy("pswitch.provider.config")}
               />
             </div>
-          )}
+          ) : null}
+
+          {hasInactiveFields ? (
+            <div className="rounded-lg border border-oai-amber-dark/30 bg-oai-amber-50 px-3 py-2 text-xs text-oai-amber-dark dark:border-oai-amber-dark/40 dark:bg-oai-amber-dark/15 dark:text-oai-amber-light">
+              <p className="font-medium">{copy("pswitch.provider.inactive_title")}</p>
+              <ul className="mt-1 list-inside list-disc font-mono">
+                {inactive.map((field) => (
+                  <li key={field.path.join(".")}>{field.path.join(".")}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          {conflictKeys ? (
+            <div
+              className="rounded-lg border border-red-300 bg-red-50 px-3 py-2.5 text-xs text-red-700 dark:border-red-800/60 dark:bg-red-950/40 dark:text-red-300"
+              role="alert"
+            >
+              <p className="font-medium">{copy("pswitch.conflict.title")}</p>
+              <ul className="mt-1 list-inside list-disc font-mono">
+                {conflictKeys.map((key) => (
+                  <li key={key}>{key}</li>
+                ))}
+              </ul>
+              <div className="mt-2 flex gap-2">
+                <Button size="sm" onClick={() => resolveConflict("keepMine")}>
+                  {copy("pswitch.conflict.keep_mine")}
+                </Button>
+                <Button variant="secondary" size="sm" onClick={() => resolveConflict("keepTheirs")}>
+                  {copy("pswitch.conflict.keep_theirs")}
+                </Button>
+                <Button variant="secondary" size="sm" onClick={() => setConflictKeys(null)}>
+                  {copy("pswitch.validate.go_back")}
+                </Button>
+              </div>
+            </div>
+          ) : null}
 
           {pendingIssues ? (
             <div className="rounded-lg border border-oai-amber-dark/30 bg-oai-amber-50 px-3 py-2.5 text-xs text-oai-amber-dark dark:border-oai-amber-dark/40 dark:bg-oai-amber-dark/15 dark:text-oai-amber-light">

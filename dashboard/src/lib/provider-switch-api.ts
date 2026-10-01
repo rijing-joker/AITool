@@ -138,6 +138,26 @@ export interface ProviderSwitchProviderPayload {
   icon?: string;
   iconColor?: string;
   meta?: ProviderSwitchProviderMeta;
+  // cc-switch's EditorSave: the full projected config the dialog opened with;
+  // on save the backend splits floor keys (row) from the user's other edits
+  // (three-way write into the live files).
+  editor?: { base: unknown; onConflict?: ProviderSwitchConflictPolicy };
+}
+
+export type ProviderSwitchConflictPolicy = "keepMine" | "keepTheirs";
+
+// The full post-switch projection (cc-switch's ProviderEditorView): the
+// config file as it would look after switching to the provider. Exactly one
+// of settings / configToml+authJson / envText is present, per app.
+export interface ProviderSwitchEditorView {
+  ok: true;
+  app: ProviderSwitchApp;
+  isCurrent: boolean;
+  inactive: Array<{ path: string[]; value: unknown }>;
+  settings?: Record<string, unknown>;
+  configToml?: string;
+  authJson?: unknown;
+  envText?: string;
 }
 
 export const providerSwitchApi = {
@@ -151,11 +171,15 @@ export const providerSwitchApi = {
 
   getEditorView(
     app: ProviderSwitchApp,
-    id: string,
-  ): Promise<{ ok: true; app: string; isCurrent: boolean; fromLive: boolean; settingsConfig: unknown }> {
-    return get(
-      `/api/provider-switch/editor-view?app=${encodeURIComponent(app)}&id=${encodeURIComponent(id)}`,
-    );
+    settingsConfig: unknown,
+    opts?: { id?: string; category?: string },
+  ): Promise<ProviderSwitchEditorView> {
+    return mutate(`/api/provider-switch/editor-view`, "POST", {
+      app,
+      settingsConfig,
+      ...(opts?.id ? { id: opts.id } : {}),
+      ...(opts?.category ? { category: opts.category } : {}),
+    });
   },
 
   importFromLive(

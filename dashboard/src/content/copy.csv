@@ -2221,7 +2221,7 @@ pswitch.provider.category.custom,pswitch,ProviderSwitchPage,ProviderSwitchPage,p
 pswitch.provider.preset,pswitch,ProviderSwitchPage,ProviderSwitchPage,provider_preset,Preset,,active
 pswitch.provider.preset.none,pswitch,ProviderSwitchPage,ProviderSwitchPage,provider_preset_none,Start from blank,,active
 pswitch.provider.config,pswitch,ProviderSwitchPage,ProviderEditDialog,provider_config,Config file,,active
-pswitch.provider.config_editor_hint,pswitch,ProviderSwitchPage,ProviderEditDialog,provider_config_editor_hint,"Form edits sync into this JSON in real time; you can also edit the JSON directly — this is exactly what gets saved.",,active
+pswitch.provider.config_editor_hint,pswitch,ProviderSwitchPage,ProviderEditDialog,provider_config_editor_hint,"Shows the full config file as it would look after switching to this provider; key fields are saved with the provider and other edits are written back to the local config files.",,active
 pswitch.provider.invalid_json,pswitch,ProviderSwitchPage,ProviderSwitchPage,provider_invalid_json,Config is not valid JSON: {{error}},,active
 pswitch.provider.invalid_toml,pswitch,ProviderSwitchPage,ProviderEditDialog,invalid_toml,Invalid TOML: {{error}},,active
 pswitch.provider.auth_object_required,pswitch,ProviderSwitchPage,ProviderEditDialog,auth_object_required,auth.json must be a JSON object,,active
@@ -2254,7 +2254,7 @@ pswitch.field.default_model_hint,pswitch,ProviderSwitchPage,ProviderEditDialog,d
 pswitch.field.codex_endpoint_hint,pswitch,ProviderSwitchPage,ProviderEditDialog,codex_endpoint_hint,💡 Fill in a server endpoint compatible with the OpenAI Responses format,,active
 pswitch.field.codex_key_placeholder,pswitch,ProviderSwitchPage,ProviderEditDialog,codex_key_placeholder,Only fill in here; the auth.json below is filled automatically,,active
 pswitch.codex.auth_json,pswitch,ProviderSwitchPage,ProviderEditDialog,codex_auth_json,auth.json (JSON),,active
-pswitch.codex.auth_json_hint,pswitch,ProviderSwitchPage,ProviderEditDialog,codex_auth_json_hint,Contents of the Codex auth.json,,active
+pswitch.codex.auth_json_hint,pswitch,ProviderSwitchPage,ProviderEditDialog,codex_auth_json_hint,"Contents of the Codex auth.json — the official ChatGPT login lives here; third-party API keys belong in the API Key field above.",,active
 pswitch.codex.config_toml,pswitch,ProviderSwitchPage,ProviderEditDialog,codex_config_toml,config.toml (TOML),,active
 pswitch.field.model,pswitch,ProviderSwitchPage,ProviderEditDialog,model,Model,,active
 pswitch.field.model_hint,pswitch,ProviderSwitchPage,ProviderEditDialog,model_hint,Leave empty to use the relay's default model.,,active
@@ -2278,10 +2278,15 @@ pswitch.models.fetch_failed,pswitch,ProviderSwitchPage,ProviderEditDialog,models
 pswitch.hint.claude_official,pswitch,ProviderSwitchPage,ProviderEditDialog,claude_official,Uses the Claude login on this machine — no key needed.,,active
 pswitch.hint.codex_official,pswitch,ProviderSwitchPage,ProviderEditDialog,codex_official,Uses the ChatGPT login for Codex; AiTool stashes and restores it across switches.,,active
 pswitch.provider.applied_live,pswitch,ProviderSwitchPage,ProviderEditDialog,applied_live,"Saved ""{{name}}"" and applied it to the live config files.",,active
+pswitch.provider.editor_view_failed,pswitch,ProviderSwitchPage,ProviderEditDialog,editor_view_failed,"Could not read the live config files — showing only this provider's own settings: {{error}}",,active
+pswitch.provider.invalid_env,pswitch,ProviderSwitchPage,ProviderEditDialog,provider_invalid_env,Config is not a valid env file,,active
+pswitch.provider.inactive_title,pswitch,ProviderSwitchPage,ProviderEditDialog,provider_inactive_title,Saved with this provider but not applied on switch:,,active
+pswitch.conflict.title,pswitch,ProviderSwitchPage,ProviderEditDialog,conflict_title,The config files were changed by another program:,,active
+pswitch.conflict.keep_mine,pswitch,ProviderSwitchPage,ProviderEditDialog,conflict_keep_mine,Keep my changes,,active
+pswitch.conflict.keep_theirs,pswitch,ProviderSwitchPage,ProviderEditDialog,conflict_keep_theirs,Keep the external changes,,active
 pswitch.provider.created,pswitch,ProviderSwitchPage,ProviderEditDialog,created,"Added ""{{name}}"".",,active
 pswitch.provider.drag_handle,pswitch,ProviderSwitchPage,ProviderEditDialog,drag_handle,Drag to reorder {{name}},,active
 pswitch.provider.imported,pswitch,ProviderSwitchPage,ProviderEditDialog,imported,"Imported ""{{name}}"" from the live config.",,active
-pswitch.provider.live_prefill_hint,pswitch,ProviderSwitchPage,ProviderEditDialog,live_prefill_hint,This provider is active — the form was prefilled from the live config files.,,active
 pswitch.provider.loading_live,pswitch,ProviderSwitchPage,ProviderEditDialog,loading_live,Reading the live config files…,,active
 pswitch.provider.notes,pswitch,ProviderSwitchPage,ProviderEditDialog,notes,Notes,,active
 pswitch.provider.preset_no_fields,pswitch,ProviderSwitchPage,ProviderEditDialog,preset_no_fields,This preset has no fields to fill in.,,active

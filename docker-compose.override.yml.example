@@ -46,6 +46,14 @@ services:
       # machine, `docker compose up -d` may carry its old volumes over on
       # recreate — run `docker compose down && docker compose up -d` once to
       # apply this list cleanly.
+      # Upgrading the image when the pinned core version changed
+      # (core-version.txt): the proxy manager installs the core binary only
+      # when ~/.aitool/proxy/bin/cli-proxy-api is absent, so a bind-mounted
+      # data dir keeps the old binary forever. `rm` it and let the proxy
+      # start path copy the new one from /opt/aitool/cli-proxy-api:
+      #   rm ~/.aitool/proxy/bin/cli-proxy-api
+      #   docker compose up -d --build
+      #   docker compose exec aitool node bin/tracker.js proxy start
       #
       # Tracker state: usage history queue, scan cursors, hooks.
       - ${HOME}/.tokentracker:/home/node/.tokentracker

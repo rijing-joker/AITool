@@ -10,6 +10,12 @@
 # so keep it off public interfaces unless you front it with an authenticating
 # reverse proxy. To expose on your LAN, change the port bindings to 0.0.0.0
 # and make sure you understand that trust model first.
+#
+# Stock volumes are named volumes, so a fresh container starts with empty
+# tracker state and cannot see native AI-CLI data — the usage dashboard will
+# read zeros. If this machine has native usage to show, copy
+# docker-compose.override.yml.example to docker-compose.override.yml and
+# `docker compose up -d` again.
 
 services:
   aitool:

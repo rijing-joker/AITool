@@ -1,0 +1,70 @@
+# Template for machine-local compose overrides. Copy it next to this file as
+# `docker-compose.override.yml` (gitignored) and `docker compose up -d` will
+# merge it on top of docker-compose.yml automatically:
+#
+#   cp docker-compose.override.yml.example docker-compose.override.yml
+#   docker compose up -d
+#
+# WHEN YOU NEED THIS: with the stock named volumes a fresh container starts
+# empty on both fronts — (1) the usage/Sessions dashboards read zeros because
+# the tracker cannot see the host's tracker state or local AI-CLI data
+# (ZCode db, Claude Code session files, Codex rollouts), and (2) the
+# provider-switch page (供应商配置) either fails or silently does nothing,
+# because it projects provider presets into the host AI CLIs' live config
+# files (~/.claude/settings.json, ~/.codex/config.toml + auth.json,
+# ~/.gemini/.env) and edits container-local copies instead. Skip this file on
+# machines with no native AI-CLI usage and no interest in provider switching.
+#
+# ${HOME} keeps this template user-agnostic; run compose from a shell that
+# has $HOME set (any normal login shell). The service runs as uid 1000 (the
+# image's `node` user / a typical first Linux account) so everything it
+# writes through the binds stays owned by the host user — a root container
+# would rewrite e.g. ~/.codex/config.toml as root:600 and lock the host
+# account out of its own config. Adjust the uid/gid if yours differs.
+
+services:
+  aitool:
+    user: "1000:1000"
+    environment:
+      HOME: /home/node
+    volumes:
+      # The base file mounts named volumes at /root/.tokentracker and
+      # /root/.aitool (image VOLUME targets). This override moves the real
+      # data to /home/node/* (the service's $HOME), so those base entries
+      # would only seed an unused 68MB core-binary copy per volume. Shadow
+      # their exact targets with tiny tmpfs mounts — same-target entries
+      # from a later file win in the compose merge, deterministically.
+      - type: tmpfs
+        target: /root/.tokentracker
+        tmpfs:
+          size: 1048576
+      - type: tmpfs
+        target: /root/.aitool
+        tmpfs:
+          size: 1048576
+      # Note: if a stock (named-volume) container already exists on this
+      # machine, `docker compose up -d` may carry its old volumes over on
+      # recreate — run `docker compose down && docker compose up -d` once to
+      # apply this list cleanly.
+      #
+      # Tracker state: usage history queue, scan cursors, hooks.
+      - ${HOME}/.tokentracker:/home/node/.tokentracker
+      # ZCode usage comes from scanning ~/.zcode/cli/db/db.sqlite, resolved
+      # from the container's $HOME. No :ro — SQLite WAL readers need write
+      # access to the -shm file while the host writer is live; the tracker
+      # only issues SELECTs against the database.
+      - ${HOME}/.zcode:/home/node/.zcode
+      # Claude Code: session files under projects/ feed the usage and
+      # Sessions pages; settings.json is the provider-switch projection
+      # target. Read-write so switching actually lands on the host config.
+      - ${HOME}/.claude:/home/node/.claude
+      # Codex CLI: sessions/ + archived_sessions/ feed the Sessions page;
+      # config.toml and auth.json are what provider-switch rewrites — the
+      # host's real files must be visible here, not container-local copies.
+      - ${HOME}/.codex:/home/node/.codex
+      # Gemini CLI: provider-switch writes ~/.gemini/.env.
+      - ${HOME}/.gemini:/home/node/.gemini
+      # AITool's own data plane (proxy config/auths/usage records and the
+      # provider-switch preset SSOT), replacing the `aitool-proxy` named
+      # volume so native and Docker runs share one store.
+      - ${HOME}/.aitool:/home/node/.aitool

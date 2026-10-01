@@ -146,3 +146,6 @@ TokenTrackerLinux/packaging/arch/tokentracker-linux/pkg/
 TokenTrackerLinux/packaging/arch/tokentracker-linux/src/
 TokenTrackerLinux/packaging/arch/tokentracker-linux/*.pkg.tar.*
 TokenTrackerLinux/packaging/arch/tokentracker-linux/*.log
+
+# machine-local compose overrides — do not commit; template: docker-compose.override.yml.example
+docker-compose.override.yml

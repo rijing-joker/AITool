@@ -363,7 +363,7 @@ describe("updateSkills", () => {
         return { ok: true, status: 200, json: async () => ({ tree: TREE }) };
       }
       calls.raw += 1;
-      return { ok: true, status: 200, text: async () => "---\nname: Foo\ndescription: d\n---\n" };
+      return { ok: true, status: 200, arrayBuffer: async () => new TextEncoder().encode("---\nname: Foo\ndescription: d\n---\n").buffer };
     };
     return calls;
   }
@@ -515,7 +515,7 @@ describe("updateSkills cache priming", () => {
         if (override) return override;
         return { ok: true, status: 200, json: async () => ({ tree: TREE }) };
       }
-      return { ok: true, status: 200, text: async () => "---\nname: Foo\ndescription: d\n---\n" };
+      return { ok: true, status: 200, arrayBuffer: async () => new TextEncoder().encode("---\nname: Foo\ndescription: d\n---\n").buffer };
     };
     return calls;
   }
@@ -628,7 +628,7 @@ describe("updateSkills cache priming", () => {
         reg.skills = reg.skills.filter((s) => s.id !== "o/r:c");
         fs.writeFileSync(file, JSON.stringify(reg));
       }
-      return { ok: true, status: 200, text: async () => "---\nname: Foo\ndescription: d\n---\n" };
+      return { ok: true, status: 200, arrayBuffer: async () => new TextEncoder().encode("---\nname: Foo\ndescription: d\n---\n").buffer };
     };
     try {
       seed([entry("o/r:a", "STALE_SIGNATURE"), entry("o/r:c", "STALE_SIGNATURE")]);
@@ -706,7 +706,7 @@ describe("checkUpdates when a repo cannot be reached", () => {
     // Every tree call fails the way an offline box or a 404'd repo does.
     global.fetch = async (url) => {
       if (isGitHubApi(url)) return { ok: false, status: 404, json: async () => ({}) };
-      return { ok: true, status: 200, text: async () => "" };
+      return { ok: true, status: 200, arrayBuffer: async () => new TextEncoder().encode("").buffer };
     };
     try {
       fs.mkdirSync(skillsDir, { recursive: true });
@@ -798,7 +798,7 @@ describe("updateSkills race under the skill's own download", () => {
         fired = true;
         onFirstDownload();
       }
-      return { ok: true, status: 200, text: async () => "---\nname: Foo\ndescription: d\n---\n" };
+      return { ok: true, status: 200, arrayBuffer: async () => new TextEncoder().encode("---\nname: Foo\ndescription: d\n---\n").buffer };
     };
   }
 
@@ -906,7 +906,7 @@ describe("updateSkills rate-limit result rows", () => {
     fs.rmSync(path.join(skillsDir(), "updates-cache.json"), { force: true });
     fs.rmSync(path.join(skillsDir(), "ssot"), { recursive: true, force: true });
   }
-  const LIMITED = { ok: false, status: 403, json: async () => ({}), text: async () => "" };
+  const LIMITED = { ok: false, status: 403, json: async () => ({}), arrayBuffer: async () => new TextEncoder().encode("").buffer };
 
   // Grok's three repros. In each, both requested ids must come back with a row.
   const CASES = [
@@ -932,7 +932,7 @@ describe("updateSkills rate-limit result rows", () => {
               ? { ok: true, status: 200, json: async () => ({ tree: TREE }) }
               : LIMITED;
           }
-          return { ok: true, status: 200, text: async () => "---\nname: Foo\ndescription: d\n---\n" };
+          return { ok: true, status: 200, arrayBuffer: async () => new TextEncoder().encode("---\nname: Foo\ndescription: d\n---\n").buffer };
         };
       },
       updated: 1,
@@ -1025,7 +1025,7 @@ describe("updateSkills partial cache prime", () => {
   // Repo o/r always answers; o/r2 answers or fails per scenario.
   function stub({ secondRepo = "ok" } = {}) {
     global.fetch = async (url) => {
-      const text = { ok: true, status: 200, text: async () => "---\nname: Foo\ndescription: d\n---\n" };
+      const text = { ok: true, status: 200, arrayBuffer: async () => new TextEncoder().encode("---\nname: Foo\ndescription: d\n---\n").buffer };
       if (!isGitHubApi(url)) return text;
       const isSecond = String(url).includes("/o/r2/");
       if (isSecond && secondRepo !== "ok") {
@@ -1118,7 +1118,7 @@ describe("updateSkills partial cache prime", () => {
         }),
       );
       global.fetch = async (url) => {
-        if (!isGitHubApi(url)) return { ok: true, status: 200, text: async () => "---\nname: Foo\ndescription: d\n---\n" };
+        if (!isGitHubApi(url)) return { ok: true, status: 200, arrayBuffer: async () => new TextEncoder().encode("---\nname: Foo\ndescription: d\n---\n").buffer };
         trees += 1;
         return { ok: true, status: 200, json: async () => ({ tree: String(url).includes("/o/r2/") ? TREE_C : TREE_A }) };
       };
@@ -1165,4 +1165,18 @@ describe("updateSkills partial cache prime", () => {
       clean();
     }
   });
+});
+
+it("installs binary skill assets without UTF-8 conversion", async () => {
+  const originalFetch = global.fetch;
+  const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 0xff, 0xfe, 0x80]);
+  const tree = [{ type: "blob", path: "binary/SKILL.md", sha: "md" }, { type: "blob", path: "binary/icon.png", sha: "png" }];
+  global.fetch = async (url) => new Response(String(url).endsWith("icon.png") ? bytes : "---\nname: Binary\n---\n");
+  try {
+    const skill = await skills.installSkill({ repoOwner: "fixture", repoName: "skills", directory: "binary" }, [], { branch: "main", tree });
+    const installed = path.join(sandboxHome, ".tokentracker/skills/managed", skill.directory, "icon.png");
+    assert.deepEqual(fs.readFileSync(installed), bytes);
+  } finally {
+    global.fetch = originalFetch;
+  }
 });

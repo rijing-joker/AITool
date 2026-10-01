@@ -49,30 +49,58 @@ function b64urlToBytes(s: string): Uint8Array {
 async function verifiedUserIdFromJwt(authHeader: string | null): Promise<string | null> {
   if (!authHeader) return null;
   const token = authHeader.replace(/^Bearer\s+/i, "").trim();
-  const secret = Deno.env.get("JWT_SECRET");
+  if (!token) return null;
   const parts = token.split(".");
-  if (!token || !secret || parts.length !== 3) return null;
+  if (parts.length !== 3) return null;
   try {
-    const key = await crypto.subtle.importKey(
-      "raw",
-      new TextEncoder().encode(secret),
-      { name: "HMAC", hash: "SHA-256" },
-      false,
-      ["verify"],
-    );
-    const ok = await crypto.subtle.verify(
-      "HMAC",
-      key,
-      b64urlToBytes(parts[2]),
-      new TextEncoder().encode(`${parts[0]}.${parts[1]}`),
-    );
+    const header = JSON.parse(
+      new TextDecoder().decode(b64urlToBytes(parts[0])),
+    ) as Record<string, unknown>;
+    const data = new TextEncoder().encode(`${parts[0]}.${parts[1]}`);
+    const sig = b64urlToBytes(parts[2]);
+    let ok = false;
+    if (header.alg === "HS256") {
+      const secret = Deno.env.get("JWT_SECRET");
+      if (!secret) return null;
+      const key = await crypto.subtle.importKey(
+        "raw",
+        new TextEncoder().encode(secret),
+        { name: "HMAC", hash: "SHA-256" },
+        false,
+        ["verify"],
+      );
+      ok = await crypto.subtle.verify("HMAC", key, sig, data);
+    } else if (header.alg === "RS256") {
+      const publicKeyPem = Deno.env.get("JWT_PUBLIC_KEY");
+      if (!publicKeyPem) return null;
+      const publicKeyDer = Uint8Array.from(
+        atob(publicKeyPem.replace(/-----[^-]+-----|\s/g, "")),
+        (char) => char.charCodeAt(0),
+      );
+      const key = await crypto.subtle.importKey(
+        "spki",
+        publicKeyDer,
+        { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+        false,
+        ["verify"],
+      );
+      ok = await crypto.subtle.verify(
+        "RSASSA-PKCS1-v1_5",
+        key,
+        sig,
+        data,
+      );
+    } else {
+      return null;
+    }
     if (!ok) return null;
     const payload = JSON.parse(new TextDecoder().decode(b64urlToBytes(parts[1]))) as Record<string, unknown>;
-    if (typeof payload.exp !== "number" || !Number.isFinite(payload.exp)) return null;
-    if (Date.now() / 1000 > payload.exp) return null;
-    if (typeof payload.sub === "string" && payload.sub) return payload.sub;
-    if (typeof payload.user_id === "string" && payload.user_id) return payload.user_id;
-  } catch { /* invalid token */ }
+    if (typeof payload.exp !== "number" || !Number.isFinite(payload.exp) || Date.now() / 1000 >= payload.exp) return null;
+    const sub = payload.sub;
+    if (typeof sub === "string" && sub.length > 0) return sub;
+    const uid = payload.user_id;
+    if (typeof uid === "string" && uid.length > 0) return uid;
+  } catch { /* ignore */ }
   return null;
 }
 

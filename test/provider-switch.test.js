@@ -260,6 +260,44 @@ test("provider-switch codex projection: table replaced/removed, managed keys res
   assert.match(outC.configToml, /base_url = "https:\/\/new\.example\.com\/v1"/);
   assert.doesNotMatch(outC.configToml, /old\.example\.com/);
   assert.equal(outC.auth.action, "keep");
+
+  // cc-switch's current projection: the row's key rides into the route table
+  // as experimental_bearer_token (Codex 0.149+ ignores auth.json keys for
+  // custom providers), and requires_openai_auth is recomputed — with no login
+  // left on disk it is written false so Codex doesn't sit at the login screen.
+  const withKey = {
+    category: "custom",
+    settingsConfig: {
+      auth: { OPENAI_API_KEY: "sk-relay" },
+      config: {
+        model: "gpt-5.2",
+        model_provider: "custom",
+        model_providers: {
+          custom: { name: "New", base_url: "https://new.example.com/v1", wire_api: "responses", requires_openai_auth: true },
+        },
+      },
+    },
+  };
+  const outKey = targets.projectCodex({ prev, target: withKey, liveToml, liveAuth: {} });
+  assert.match(outKey.configToml, /experimental_bearer_token = "sk-relay"/);
+  assert.match(outKey.configToml, /requires_openai_auth = false/);
+  assert.equal(outKey.auth.action, "keep", "the row key never lands in auth.json");
+
+  // A table that carries its own credentials (env_key / Authorization header)
+  // gets no injected key; headers routes also drop requires_openai_auth.
+  const withEnvKey = {
+    category: "custom",
+    settingsConfig: {
+      auth: { OPENAI_API_KEY: "sk-relay" },
+      config: {
+        model_provider: "custom",
+        model_providers: { custom: { name: "New", base_url: "https://new.example.com/v1", env_key: "RELAY_KEY" } },
+      },
+    },
+  };
+  const outEnvKey = targets.projectCodex({ prev, target: withEnvKey, liveToml, liveAuth: {} });
+  assert.doesNotMatch(outEnvKey.configToml, /experimental_bearer_token/);
+  assert.match(outEnvKey.configToml, /env_key = "RELAY_KEY"/);
 });
 
 test("provider-switch codex auth: stashed when leaving official, restored when switching back", async () => {
@@ -285,17 +323,29 @@ test("provider-switch codex auth: stashed when leaving official, restored when s
   const freshLogin = targets.resolveCodexAuth({ prev: relay, target: official, liveAuth: chatgptLogin, stash: chatgptLogin });
   assert.equal(freshLogin.action, "keep");
 
-  // Preset carrying explicit auth: written as-is.
-  const withAuth = targets.resolveCodexAuth({
+  // A third-party row's key never reaches auth.json (cc-switch's current
+  // projection writes it into config.toml's route table instead).
+  const rowWithKey = targets.resolveCodexAuth({
     prev: null,
     target: { category: "custom", settingsConfig: { auth: { OPENAI_API_KEY: "sk-z" }, config: {} } },
     liveAuth: {},
     stash: null,
   });
-  assert.deepEqual(withAuth.content, { OPENAI_API_KEY: "sk-z" });
-  assert.equal(withAuth.action, "write");
+  assert.equal(rowWithKey.action, "keep");
 
-  // Third-party -> third-party: untouched.
+  // A live login is stashed on ANY third-party switch, not only when leaving
+  // the official card.
+  const relayAfterRelay = targets.resolveCodexAuth({ prev: relay, target: relay, liveAuth: chatgptLogin, stash: null });
+  assert.equal(relayAfterRelay.action, "stash");
+  assert.deepEqual(relayAfterRelay.stashContent, chatgptLogin);
+
+  // auth.json holding only OPENAI_API_KEY is stale third-party residue from
+  // the old projection: cleared, but never stashed as if it were a login.
+  const residue = targets.resolveCodexAuth({ prev: relay, target: relay, liveAuth: { OPENAI_API_KEY: "sk-old" }, stash: null });
+  assert.equal(residue.action, "write");
+  assert.deepEqual(residue.content, {});
+
+  // Third-party -> third-party with a clean auth.json: untouched.
   const relayToRelay = targets.resolveCodexAuth({ prev: relay, target: relay, liveAuth: {}, stash: null });
   assert.equal(relayToRelay.action, "keep");
 });
@@ -595,6 +645,44 @@ test("provider-switch api: codex switch stashes official login and restores it",
   assert.equal(fs.existsSync(stashFile), false);
 });
 
+test("provider-switch api: codex switch injects the row key into the route table, not auth.json", async () => {
+  const { handleProviderSwitchApiRequest } = require("../src/lib/provider-switch/api");
+  const handler = handleProviderSwitchApiRequest;
+  const prefix = "/api/provider-switch";
+
+  const relay = await call(handler, {
+    method: "POST",
+    url: `${prefix}/providers`,
+    body: JSON.stringify({
+      app: "codex",
+      name: "Relay Key",
+      category: "custom",
+      settingsConfig: {
+        auth: { OPENAI_API_KEY: "sk-e2e" },
+        config: { model: "gpt-5.2", model_provider: "custom", model_providers: { custom: { name: "R", base_url: "https://rk.example.com/v1" } } },
+      },
+    }),
+  });
+
+  const codexDir = path.join(tmpHome, ".codex");
+  fs.mkdirSync(codexDir, { recursive: true });
+  fs.writeFileSync(path.join(codexDir, "config.toml"), 'model = "gpt-5"\n');
+  // Stale residue from the old auth.json projection must be cleared, not
+  // carried into the new provider's live auth.
+  fs.writeFileSync(path.join(codexDir, "auth.json"), JSON.stringify({ OPENAI_API_KEY: "sk-old" }));
+
+  const switched = await call(handler, {
+    method: "POST",
+    url: `${prefix}/switch`,
+    body: JSON.stringify({ app: "codex", id: relay.body.provider.id }),
+  });
+  assert.equal(switched.status, 200);
+  const configToml = fs.readFileSync(path.join(codexDir, "config.toml"), "utf8");
+  assert.match(configToml, /experimental_bearer_token = "sk-e2e"/);
+  assert.match(configToml, /requires_openai_auth = false/);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(codexDir, "auth.json"), "utf8")), {});
+});
+
 // ---------------------------------------------------------------------------
 // cc-switch interaction parity: editor view / import-live / reorder / apply
 // ---------------------------------------------------------------------------
@@ -746,10 +834,11 @@ test("provider-switch presets carry declarative formFields and reorder persists 
 
   const presets = await call(handler, { url: `${prefix}/presets?app=codex` });
   const custom = presets.body.presets.find((preset) => preset.id === "codex_custom");
-  assert.ok(custom.formFields.length >= 4, "custom preset carries structured fields");
-  const wireApi = custom.formFields.find((field) => field.id === "wire_api");
-  assert.equal(wireApi.type, "select");
-  assert.equal(wireApi.options.length, 2);
+  assert.deepEqual(
+    custom.formFields.map((field) => field.id),
+    ["api_key", "base_url", "model"],
+    "codex custom mirrors cc-switch's CodexFormFields: API key, endpoint, default model"
+  );
   const official = presets.body.presets.find((preset) => preset.id === "codex_official");
   assert.deepEqual(official.formFields, [], "official login preset has no fields");
 

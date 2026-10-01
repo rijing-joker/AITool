@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, ChevronUp, Download, ExternalLink, Eye, EyeOff, Wand2, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Download, ExternalLink, Eye, EyeOff, Wand2, X } from "lucide-react";
 import { copy } from "../lib/copy";
 import { providerSwitchApi } from "../lib/provider-switch-api";
 import { Button } from "../ui/components";
@@ -133,6 +133,55 @@ function withoutOneM(value) {
   return String(value || "").replace(/\[1m\]$/, "");
 }
 
+// cc-switch's pickCodexApiKey: the row's key lives in auth.OPENAI_API_KEY,
+// falling back to an experimental_bearer_token already present in the stored
+// config (route table first, then top level — the Codex Mobile 兼容形态).
+function codexBearerTokenOf(config) {
+  if (!config || typeof config !== "object") return "";
+  const providers = config.model_providers;
+  const table = providers && typeof providers === "object" ? providers.custom : null;
+  if (table && typeof table === "object") {
+    const token = String(table.experimental_bearer_token ?? "").trim();
+    if (token) return token;
+  }
+  return String(config.experimental_bearer_token ?? "").trim();
+}
+
+function codexApiKeyOf(draft) {
+  const authKey = String(getPath(draft, "auth.OPENAI_API_KEY") ?? "").trim();
+  return authKey || codexBearerTokenOf(draft && draft.config);
+}
+
+// cc-switch's handleCodexApiKeyChange: the input always writes
+// auth.OPENAI_API_KEY, and additionally updates an experimental_bearer_token
+// that already exists in the stored config (route table / top level) — an
+// empty value deletes it so the read fallback cannot resurrect the old token.
+// Never adds a new bearer token: plain rows keep the key in auth and the
+// switch projection injects it into the live route table.
+function setCodexApiKeyInDraft(draft, value) {
+  const auth = { ...(draft.auth || {}) };
+  auth.OPENAI_API_KEY = value;
+  let config = draft.config && typeof draft.config === "object" ? { ...draft.config } : {};
+  const syncEntry = (holder, key) => {
+    if (!holder || typeof holder !== "object" || !(key in holder)) return holder;
+    const next = { ...holder };
+    if (String(value).trim()) next[key] = value;
+    else delete next[key];
+    return next;
+  };
+  if (config.model_providers && typeof config.model_providers === "object" && config.model_providers.custom && typeof config.model_providers.custom === "object") {
+    config = {
+      ...config,
+      model_providers: {
+        ...config.model_providers,
+        custom: syncEntry(config.model_providers.custom, "experimental_bearer_token"),
+      },
+    };
+  }
+  config = syncEntry(config, "experimental_bearer_token");
+  return { ...draft, auth, config };
+}
+
 // ---------------------------------------------------------------------------
 // Shared small controls
 // ---------------------------------------------------------------------------
@@ -214,7 +263,11 @@ function EndpointField({ label, value, onChange, isFullUrl, onFullUrlChange, onM
         aria-label={label}
         className="w-full rounded-lg border border-oai-gray-200 bg-white px-3 py-2 font-mono text-sm text-oai-black focus:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 dark:border-oai-gray-800 dark:bg-oai-gray-900 dark:text-white"
       />
-      {hint ? <p className="mt-1 text-xs text-oai-gray-400 dark:text-oai-gray-500">{hint}</p> : null}
+      {hint ? (
+        <div className="mt-2 rounded-lg border border-oai-amber-dark/30 bg-oai-amber-50 px-3 py-2 dark:border-oai-amber-dark/40 dark:bg-oai-amber-dark/15">
+          <p className="text-xs text-oai-amber-dark dark:text-oai-amber-light">{hint}</p>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -341,7 +394,9 @@ export function ProviderEditDialog({
   const currentApiKey =
     app === "claude"
       ? String(getPath(draft, `env.${claudeApiKeyName}`) ?? "")
-      : String(getPath(draft, API_KEY_PATH[app]) ?? "");
+      : app === "codex"
+        ? codexApiKeyOf(draft)
+        : String(getPath(draft, API_KEY_PATH[app]) ?? "");
 
   const endpointCandidates = useMemo(() => {
     const list = [...(selectedPreset?.endpointCandidates || []), ...(meta.customEndpoints || [])];
@@ -352,18 +407,18 @@ export function ProviderEditDialog({
     return [...new Set(list.filter(Boolean))];
   }, [selectedPreset, meta.customEndpoints, editing, app]);
 
-  const applyPreset = useCallback(
-    (preset) => {
-      setSelectedPresetId(preset.id);
-      setDraft(JSON.parse(JSON.stringify(preset.settingsConfig ?? {})));
-      setCategory(preset.group === "official" ? "official" : "custom");
-      if (!name.trim()) {
-        setName(preset.nameKey ? copy(preset.nameKey) : preset.name);
-      }
-      setError(null);
-    },
-    [name],
-  );
+  const applyPreset = useCallback((preset) => {
+    // cc-switch's handlePresetChange: picking a preset resets the basic
+    // fields to the preset's values, not only the config template.
+    setSelectedPresetId(preset.id);
+    setDraft(JSON.parse(JSON.stringify(preset.settingsConfig ?? {})));
+    setCategory(preset.group === "official" ? "official" : "custom");
+    setName(preset.nameKey ? copy(preset.nameKey) : preset.name);
+    setWebsiteUrl(preset.websiteUrl || "");
+    setIcon(preset.icon || "");
+    setIconColor(preset.color || "");
+    setError(null);
+  }, []);
 
   // Initialize each time the dialog opens. rawText is intentionally not
   // touched here — the mirror effect below repopulates it from the new draft
@@ -427,7 +482,9 @@ export function ProviderEditDialog({
       setIconColor("");
       setMeta({});
       setPresetQuery("");
-      const first = presets[0] || null;
+      // cc-switch opens the add dialog on the Custom template, not the first
+      // preset card.
+      const first = presets.find((preset) => preset.group === "custom") || presets[0] || null;
       setSelectedPresetId(first ? first.id : null);
       setDraft(first ? JSON.parse(JSON.stringify(first.settingsConfig ?? {})) : {});
     }
@@ -478,6 +535,10 @@ export function ProviderEditDialog({
         env[claudeApiKeyName] = value;
         return { ...current, env };
       });
+      return;
+    }
+    if (app === "codex" && field.id === "api_key") {
+      setDraft((current) => setCodexApiKeyInDraft(current, value));
       return;
     }
     setDraft((current) => setPath(current, field.path, value));
@@ -680,11 +741,10 @@ export function ProviderEditDialog({
   const collectIssues = () => {
     const issues = [];
     if (!name.trim()) issues.push(copy("pswitch.validate.name"));
-    const needsEndpoint = !selectedPreset || selectedPreset.group !== "official";
-    if (showEndpointField && needsEndpoint && !currentEndpoint.trim()) {
+    if (!officialSelected && showEndpointField && !currentEndpoint.trim()) {
       issues.push(copy(`pswitch.validate.endpoint.${app}`));
     }
-    if (showApiKeyField && !currentApiKey.trim()) {
+    if (!officialSelected && showApiKeyField && !currentApiKey.trim()) {
       issues.push(copy(`pswitch.validate.key.${app}`));
     }
     return issues;
@@ -761,19 +821,22 @@ export function ProviderEditDialog({
   // (the ui-hardcode JSX text scan would otherwise see them as raw text).
   const showPresetGrid = !isEdit && presets.length !== 0;
   const showNoFieldsHint = !isEdit && fields.length === 0 && !!selectedPresetId;
+  // cc-switch gates the endpoint/model/key fields on the provider category:
+  // official providers authenticate by their own login and never show them.
+  const officialSelected = isEdit ? editing.category === "official" : !!selectedPreset && selectedPreset.group === "official";
   // Written as a loop: an arrow function here leaves a bare `>` in source
   // that the ui-hardcode JSX text scan reads as raw text.
   let showApiKeyField = false;
   for (const field of fields) {
     if (field.id === "api_key") showApiKeyField = true;
   }
-  const showEndpointField =
-    app === "claude" ? !selectedPreset || selectedPreset.group !== "official" : app === "codex" || app === "gemini";
+  const showEndpointField = !officialSelected && (app === "claude" || app === "codex" || app === "gemini");
   const showAdvancedToggle = app === "claude" || app === "codex";
   const showQuickToggles = app === "claude";
   const apiKeyWebsite = selectedPreset?.websiteUrl || websiteUrl;
   const showApiKeyLink = !!apiKeyWebsite && selectedPreset?.group === "community";
-  const endpointHint = app === "claude" ? copy("pswitch.field.endpoint_hint") : null;
+  const endpointHint =
+    app === "codex" ? copy("pswitch.field.codex_endpoint_hint") : app === "claude" ? copy("pswitch.field.endpoint_hint") : null;
   const avatarIconName = icon || (selectedPreset ? selectedPreset.icon : "") || "";
   // cc-switch renders the endpoint (and model) field for every non-official
   // preset even when the template pre-fills it — community presets carry
@@ -804,9 +867,6 @@ export function ProviderEditDialog({
             <h2 className="text-base font-semibold text-oai-black dark:text-white">
               {isEdit ? copy("pswitch.provider.dialog.edit_title") : copy("pswitch.provider.dialog.add_title")}
             </h2>
-            <p className="mt-0.5 truncate text-sm text-oai-gray-500 dark:text-oai-gray-400">
-              {copy("pswitch.provider.config_hint")}
-            </p>
           </div>
           <button
             type="button"
@@ -892,9 +952,68 @@ export function ProviderEditDialog({
                   );
                 })}
               </div>
-              <p className="mt-2 text-xs text-oai-gray-400 dark:text-oai-gray-500">{copy("pswitch.preset.hint")}</p>
             </div>
           ) : null}
+
+          {/* Basic info (cc-switch's BasicFormFields): centered icon picker,
+              then name + notes, then website URL — always ahead of the
+              credential fields. */}
+          <div>
+            <div className="mb-4 flex justify-center">
+              <button
+                type="button"
+                onClick={() => setIconPickerOpen(true)}
+                className={`flex h-20 w-20 items-center justify-center rounded-xl border-2 bg-oai-gray-50 transition-colors hover:border-oai-brand-500 dark:bg-oai-gray-900 ${
+                  avatarIconName ? "border-oai-gray-200 dark:border-oai-gray-800" : "border-dashed border-oai-gray-300 dark:border-oai-gray-700"
+                }`}
+                title={icon ? copy("pswitch.icon.change") : copy("pswitch.icon.select")}
+                aria-label={icon ? copy("pswitch.icon.change") : copy("pswitch.icon.select")}
+              >
+                {avatarIconName ? (
+                  <PresetIcon icon={avatarIconName} color={iconColor} className="h-10 w-10" />
+                ) : (
+                  <span className={`text-xl font-semibold ${presetAvatarClass(iconColor)}`}>
+                    {name.trim() ? name.trim().charAt(0).toUpperCase() : "P"}
+                  </span>
+                )}
+              </button>
+            </div>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div>
+                <FieldLabel label={copy("pswitch.provider.name")} />
+                <input
+                  type="text"
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  placeholder={copy("pswitch.provider.name_placeholder")}
+                  aria-label={copy("pswitch.provider.name")}
+                  className="w-full rounded-lg border border-oai-gray-200 bg-white px-3 py-2 text-sm text-oai-black focus:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 dark:border-oai-gray-800 dark:bg-oai-gray-900 dark:text-white"
+                />
+              </div>
+              <div>
+                <FieldLabel label={copy("pswitch.provider.notes")} />
+                <input
+                  type="text"
+                  value={notes}
+                  onChange={(event) => setNotes(event.target.value)}
+                  placeholder={copy("pswitch.provider.notes_placeholder")}
+                  aria-label={copy("pswitch.provider.notes")}
+                  className="w-full rounded-lg border border-oai-gray-200 bg-white px-3 py-2 text-sm text-oai-black focus:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 dark:border-oai-gray-800 dark:bg-oai-gray-900 dark:text-white"
+                />
+              </div>
+            </div>
+            <div className="mt-4">
+              <FieldLabel label={copy("pswitch.provider.website_url")} />
+              <input
+                type="url"
+                value={websiteUrl}
+                onChange={(event) => setWebsiteUrl(event.target.value)}
+                placeholder={copy("pswitch.provider.website_placeholder")}
+                aria-label={copy("pswitch.provider.website_url")}
+                className="w-full rounded-lg border border-oai-gray-200 bg-white px-3 py-2 text-sm text-oai-black focus:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 dark:border-oai-gray-800 dark:bg-oai-gray-900 dark:text-white"
+              />
+            </div>
+          </div>
 
           {fields.length ? (
             <div className="space-y-3">
@@ -902,7 +1021,7 @@ export function ProviderEditDialog({
                 if (field.id === "api_key") {
                   return (
                     <div key={field.id}>
-                      <FieldLabel label={copy(field.labelKey)} required>
+                      <FieldLabel label={copy(field.labelKey)}>
                         {app === "claude" ? (
                           <select
                             value={claudeApiKeyName}
@@ -927,9 +1046,9 @@ export function ProviderEditDialog({
                         ) : null}
                       </FieldLabel>
                       <SecretInput
-                        value={String(getPath(draft, field.path) ?? "")}
+                        value={app === "codex" ? codexApiKeyOf(draft) : String(getPath(draft, field.path) ?? "")}
                         onChange={(value) => setFieldValue(field, value)}
-                        placeholder={field.placeholder}
+                        placeholder={field.placeholderKey ? copy(field.placeholderKey) : field.placeholder}
                         ariaLabel={copy(field.labelKey)}
                       />
                       {field.hintKey ? (
@@ -1067,17 +1186,17 @@ export function ProviderEditDialog({
               <button
                 type="button"
                 onClick={() => setAdvancedOpen((current) => !current)}
-                className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
+                className="flex w-full items-center gap-1.5 px-4 py-3 text-left"
                 aria-expanded={advancedOpen}
               >
+                {advancedOpen ? (
+                  <ChevronDown className="h-4 w-4 shrink-0 text-oai-gray-400" />
+                ) : (
+                  <ChevronRight className="h-4 w-4 shrink-0 text-oai-gray-400" />
+                )}
                 <span className="text-sm font-medium text-oai-gray-700 dark:text-oai-gray-300">
                   {copy("pswitch.advanced.title")}
                 </span>
-                {advancedOpen ? (
-                  <ChevronUp className="h-4 w-4 text-oai-gray-400" />
-                ) : (
-                  <ChevronDown className="h-4 w-4 text-oai-gray-400" />
-                )}
               </button>
               {claudeAdvancedOpen ? (
                 <div className="space-y-4 border-t border-oai-gray-100 px-4 py-4 dark:border-oai-gray-800">
@@ -1321,51 +1440,6 @@ export function ProviderEditDialog({
             </div>
           ) : null}
 
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-[1fr_auto]">
-            <div>
-              <FieldLabel label={copy("pswitch.provider.name")} required>
-                <button
-                  type="button"
-                  onClick={() => setIconPickerOpen(true)}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-oai-gray-200 px-2 py-1 text-xs text-oai-gray-500 transition-colors hover:border-oai-gray-300 hover:text-oai-black dark:border-oai-gray-800 dark:text-oai-gray-400 dark:hover:text-white"
-                >
-                  <span className={`flex h-4 w-4 items-center justify-center rounded ${presetAvatarClass(iconColor)}`}>
-                    <PresetIcon icon={avatarIconName} color={iconColor} className="h-3 w-3" />
-                  </span>
-                  {icon ? copy("pswitch.icon.change") : copy("pswitch.icon.select")}
-                </button>
-              </FieldLabel>
-              <input
-                type="text"
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                placeholder={copy("pswitch.provider.name_placeholder")}
-                className="w-full rounded-lg border border-oai-gray-200 bg-white px-3 py-2 text-sm text-oai-black focus:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 dark:border-oai-gray-800 dark:bg-oai-gray-900 dark:text-white"
-              />
-            </div>
-            <div>
-              <FieldLabel label={copy("pswitch.provider.website_url")} />
-              <input
-                type="url"
-                value={websiteUrl}
-                onChange={(event) => setWebsiteUrl(event.target.value)}
-                placeholder="https://…"
-                className="w-full rounded-lg border border-oai-gray-200 bg-white px-3 py-2 text-sm text-oai-black focus:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 dark:border-oai-gray-800 dark:bg-oai-gray-900 dark:text-white"
-              />
-            </div>
-          </div>
-
-          <div>
-            <FieldLabel label={copy("pswitch.provider.notes")} />
-            <textarea
-              value={notes}
-              onChange={(event) => setNotes(event.target.value)}
-              rows={2}
-              aria-label={copy("pswitch.provider.notes")}
-              className="w-full resize-y rounded-lg border border-oai-gray-200 bg-white px-3 py-2 text-sm text-oai-black focus:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 dark:border-oai-gray-800 dark:bg-oai-gray-900 dark:text-white"
-            />
-          </div>
-
           <div>
             <FieldLabel label={copy("pswitch.provider.config")} />
             <p className="mt-1 text-xs text-oai-gray-400 dark:text-oai-gray-500">
@@ -1433,20 +1507,7 @@ export function ProviderEditDialog({
           ) : null}
         </div>
 
-        <div className="flex items-center justify-between gap-2 border-t border-oai-gray-100 px-5 py-3 dark:border-oai-gray-800">
-          {isEdit && editing && editing.websiteUrl ? (
-            <a
-              href={editing.websiteUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex min-w-0 items-center gap-1 text-xs text-oai-gray-400 hover:text-oai-brand-600 dark:text-oai-gray-500 dark:hover:text-oai-brand-400"
-            >
-              <ExternalLink className="h-3.5 w-3.5 shrink-0" />
-              <span className="truncate">{editing.websiteUrl}</span>
-            </a>
-          ) : (
-            <span />
-          )}
+        <div className="flex items-center justify-end gap-2 border-t border-oai-gray-100 px-5 py-3 dark:border-oai-gray-800">
           <div className="flex shrink-0 gap-2">
             <Button variant="secondary" size="sm" disabled={busy} onClick={onClose}>
               {copy("pswitch.action.cancel")}

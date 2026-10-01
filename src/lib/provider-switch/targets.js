@@ -69,9 +69,12 @@ function projectClaude({ prev, target, live }) {
 
 // settingsConfig shape: { auth: object|null, config: { ...floor keys,
 // model_providers?: { custom?: { base_url, wire_api, ... } } } }.
-// auth.json belongs to the official ChatGPT login only: switching away from
-// the official provider stashes it (restored when switching back); a preset
-// may also carry explicit auth content which is written as-is.
+// auth.json belongs to the official ChatGPT login only (cc-switch's current
+// model, required since Codex 0.149 stopped reading auth.json keys for custom
+// providers): the third-party key is injected into the route table as
+// `experimental_bearer_token`, a live login is stashed on third-party switch
+// (restored when switching back), and `requires_openai_auth` is recomputed
+// from the credential kind + whether a login remains on disk.
 function projectCodex({ prev, target, liveToml, liveAuth, stash }) {
   if (typeof liveToml !== "string") {
     throw new Error("Live ~/.codex/config.toml is missing (create it or run Codex once)");
@@ -106,6 +109,16 @@ function projectCodex({ prev, target, liveToml, liveAuth, stash }) {
     text = toml.setTopLevelKey(text, key, targetConfig[key]);
   }
 
+  // Auth decision first: whether a login remains on disk after the switch
+  // feeds requires_openai_auth on the route table.
+  const liveAuthObject = liveAuth && typeof liveAuth === "object" && Object.keys(liveAuth).length > 0 ? liveAuth : null;
+  const auth = resolveCodexAuth({ prev, target, liveAuth, stash });
+  const targetOfficial = !!target && target.category === "official";
+  const loginOnDiskAfter =
+    targetOfficial &&
+    (liveAuthObject !== null ||
+      (auth.action === "write" && auth.content && Object.keys(auth.content).length > 0));
+
   // [model_providers.custom] is owned wholesale by the switcher.
   const targetTable = targetConfig.model_providers && targetConfig.model_providers.custom;
   const prevTable = prevConfig.model_providers && prevConfig.model_providers.custom;
@@ -116,6 +129,7 @@ function projectCodex({ prev, target, liveToml, liveAuth, stash }) {
         entries[key] = value;
       }
     }
+    applyCodexRouteAuth(entries, codexRowKey(target, entries), loginOnDiskAfter);
     text = toml.setTable(text, floor.CODEX_PROVIDER_TABLE, entries);
   } else {
     // Remove when the previous provider wrote one and the target has none.
@@ -134,7 +148,7 @@ function projectCodex({ prev, target, liveToml, liveAuth, stash }) {
       ? { action: "remove" }
       : { action: "keep" };
 
-  return { configToml: text, auth: resolveCodexAuth({ prev, target, liveAuth, stash }), catalog: catalogAction };
+  return { configToml: text, auth, catalog: catalogAction };
 }
 
 function normalizeTable(entries) {
@@ -147,15 +161,80 @@ function normalizeTable(entries) {
   return out;
 }
 
+// The provider row's key (cc-switch codex.rs row_key): auth.OPENAI_API_KEY
+// first, then an experimental_bearer_token already written in the stored
+// route table, then a top-level one (legacy Mobile 兼容形态).
+function codexRowKey(target, tableEntries) {
+  const rowAuth = target && target.settingsConfig && target.settingsConfig.auth;
+  const fromAuth = rowAuth && typeof rowAuth === "object" ? String(rowAuth.OPENAI_API_KEY ?? "").trim() : "";
+  if (fromAuth) return fromAuth;
+  const fromTable = String((tableEntries && tableEntries.experimental_bearer_token) ?? "").trim();
+  if (fromTable) return fromTable;
+  const config = target && target.settingsConfig && target.settingsConfig.config;
+  const fromTop = config && typeof config === "object" ? String(config.experimental_bearer_token ?? "").trim() : "";
+  return fromTop;
+}
+
+function declaresAuthorizationHeader(headers) {
+  if (!headers || typeof headers !== "object") return false;
+  return Object.keys(headers).some((key) => key.toLowerCase() === "authorization");
+}
+
+// Where the route table's credentials come from (cc-switch declared_auth):
+// the table may declare env_key or its own auth/headers; otherwise a row key
+// rides in as experimental_bearer_token.
+function codexRouteAuth(entries) {
+  if ("env_key" in entries) return "env_key";
+  if ("auth" in entries || "aws" in entries) return "headers";
+  const requires = entries.requires_openai_auth === true;
+  if (!requires && (declaresAuthorizationHeader(entries.http_headers) || declaresAuthorizationHeader(entries.env_http_headers))) {
+    return "headers";
+  }
+  return "none";
+}
+
+// Mutates the route-table entries that will be written live: inject the row
+// key as experimental_bearer_token, and recompute requires_openai_auth from
+// the credential kind + whether a login remains on disk after the switch
+// (cc-switch requires_openai_auth()). Codex 0.149+ ignores auth.json keys for
+// custom providers — the table must carry the key itself.
+function applyCodexRouteAuth(entries, rowKey, loginOnDiskAfter) {
+  const declared = codexRouteAuth(entries);
+  if (declared === "env_key") {
+    entries.requires_openai_auth = !!loginOnDiskAfter;
+    return;
+  }
+  if (declared === "headers") {
+    delete entries.requires_openai_auth;
+    return;
+  }
+  if (rowKey) {
+    entries.experimental_bearer_token = rowKey;
+    entries.requires_openai_auth = !!loginOnDiskAfter;
+    return;
+  }
+  delete entries.requires_openai_auth;
+}
+
+// An auth.json holding only OPENAI_API_KEY is residue from the pre-bearer-
+// token projection (or a stray key), not a ChatGPT login — clear it without
+// stashing so switching back to official never restores a relay key.
+function isCodexThirdPartyAuthResidue(auth) {
+  if (!auth || typeof auth !== "object" || Array.isArray(auth)) return false;
+  if (Object.keys(auth).length === 0) return false;
+  if (auth.tokens || auth.auth_mode === "chatgpt") return false;
+  return Object.keys(auth).every((key) => key === "OPENAI_API_KEY");
+}
+
 // Decision: "keep" | { action: "write", content } — stash file handling is
 // done by the caller (it is a separate 0600 file).
-function resolveCodexAuth({ prev, target, liveAuth, stash }) {
-  const targetAuth = (target && target.settingsConfig && target.settingsConfig.auth) || null;
+// auth.json belongs to the official ChatGPT login only: the target row's
+// OPENAI_API_KEY is projected into config.toml's route table instead (see
+// applyCodexRouteAuth), and any live login is stashed on a third-party switch.
+function resolveCodexAuth({ target, liveAuth, stash }) {
   const targetOfficial = !!target && target.category === "official";
-  const prevOfficial = !!prev && prev.category === "official";
   const liveAuthObject = liveAuth && typeof liveAuth === "object" && Object.keys(liveAuth).length > 0 ? liveAuth : null;
 
-  if (targetAuth) return { action: "write", content: targetAuth };
   if (targetOfficial) {
     // Switching back to the official provider: restore the stashed login if
     // the live auth file is empty; never clobber a fresh login.
@@ -164,9 +243,12 @@ function resolveCodexAuth({ prev, target, liveAuth, stash }) {
     }
     return { action: "keep" };
   }
-  // Leaving the official provider (or first switch) with a live login:
-  // stash it and clear auth.json so stale tokens never reach a third party.
-  if (liveAuthObject && (!prev || prevOfficial)) {
+  // Third-party: clear the live login (stash it for the official card), and
+  // drop stale third-party key residue without stashing it.
+  if (liveAuthObject) {
+    if (isCodexThirdPartyAuthResidue(liveAuthObject)) {
+      return { action: "write", content: {} };
+    }
     return { action: "stash", content: {}, stashContent: liveAuthObject };
   }
   return { action: "keep" };

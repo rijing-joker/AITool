@@ -2223,6 +2223,8 @@ pswitch.provider.preset.none,pswitch,ProviderSwitchPage,ProviderSwitchPage,provi
 pswitch.provider.config,pswitch,ProviderSwitchPage,ProviderEditDialog,provider_config,Config file,,active
 pswitch.provider.config_editor_hint,pswitch,ProviderSwitchPage,ProviderEditDialog,provider_config_editor_hint,"Form edits sync into this JSON in real time; you can also edit the JSON directly — this is exactly what gets saved.",,active
 pswitch.provider.invalid_json,pswitch,ProviderSwitchPage,ProviderSwitchPage,provider_invalid_json,Config is not valid JSON: {{error}},,active
+pswitch.provider.invalid_toml,pswitch,ProviderSwitchPage,ProviderEditDialog,invalid_toml,Invalid TOML: {{error}},,active
+pswitch.provider.auth_object_required,pswitch,ProviderSwitchPage,ProviderEditDialog,auth_object_required,auth.json must be a JSON object,,active
 pswitch.provider.dialog.add_title,pswitch,ProviderSwitchPage,ProviderSwitchPage,provider_dialog_add_title,Add provider,,active
 pswitch.provider.dialog.edit_title,pswitch,ProviderSwitchPage,ProviderSwitchPage,provider_dialog_edit_title,Edit provider,,active
 pswitch.backups.empty,pswitch,ProviderSwitchPage,ProviderSwitchPage,backups_empty,No backups yet. A backup is taken before the first managed write to each file.,,active
@@ -2251,6 +2253,9 @@ pswitch.field.default_model,pswitch,ProviderSwitchPage,ProviderEditDialog,defaul
 pswitch.field.default_model_hint,pswitch,ProviderSwitchPage,ProviderEditDialog,default_model_hint,The model Codex requests by default; change it any time without waiting for preset updates.,,active
 pswitch.field.codex_endpoint_hint,pswitch,ProviderSwitchPage,ProviderEditDialog,codex_endpoint_hint,💡 Fill in a server endpoint compatible with the OpenAI Responses format,,active
 pswitch.field.codex_key_placeholder,pswitch,ProviderSwitchPage,ProviderEditDialog,codex_key_placeholder,Only fill in here; the auth.json below is filled automatically,,active
+pswitch.codex.auth_json,pswitch,ProviderSwitchPage,ProviderEditDialog,codex_auth_json,auth.json (JSON),,active
+pswitch.codex.auth_json_hint,pswitch,ProviderSwitchPage,ProviderEditDialog,codex_auth_json_hint,Contents of the Codex auth.json,,active
+pswitch.codex.config_toml,pswitch,ProviderSwitchPage,ProviderEditDialog,codex_config_toml,config.toml (TOML),,active
 pswitch.field.model,pswitch,ProviderSwitchPage,ProviderEditDialog,model,Model,,active
 pswitch.field.model_hint,pswitch,ProviderSwitchPage,ProviderEditDialog,model_hint,Leave empty to use the relay's default model.,,active
 pswitch.catalog.title,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_title,Model mapping,,active

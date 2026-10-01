@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, Download, ExternalLink, Eye, EyeOff, Wand2, X } from "lucide-react";
+import { parse as tomlParse, stringify as tomlStringify } from "smol-toml";
 import { copy } from "../lib/copy";
 import { providerSwitchApi } from "../lib/provider-switch-api";
 import { Button } from "../ui/components";
@@ -15,11 +16,12 @@ import { ModelDropdown, ModelInputAction } from "./provider-model-dropdown";
 // settingsConfig template at dotted paths, per-app advanced sections
 // (endpoint speed test, full-URL switch, claude model mapping with 1M flags
 // and one-click fill, model list fetching, apiFormat, custom User-Agent,
-// request overrides), the always-visible config-file JSON editor with quick
-// toggles + format above the action buttons (cc-switch's CommonConfigEditor),
-// an icon picker, and soft validation before save. When editing the
-// currently-active provider the initial values are read back from the live
-// config files (read_live_provider_settings).
+// request overrides), the always-visible config editor above the action
+// buttons — cc-switch's CodexConfigEditor for codex (auth.json JSON +
+// config.toml TOML) and CommonConfigEditor (JSON with quick toggles + format)
+// for claude/gemini — plus an icon picker and soft validation before save.
+// When editing the currently-active provider the initial values are read back
+// from the live config files (read_live_provider_settings).
 
 const AVATAR_COLORS = {
   orange: "bg-orange-100 text-orange-600 dark:bg-orange-500/15 dark:text-orange-400",
@@ -364,6 +366,13 @@ export function ProviderEditDialog({
   const [claudeApiKeyName, setClaudeApiKeyName] = useState("ANTHROPIC_AUTH_TOKEN");
   const [rawText, setRawText] = useState("");
   const [rawError, setRawError] = useState(null);
+  // Codex (cc-switch's CodexConfigEditor): two editors instead of the merged
+  // JSON one — auth.json as JSON, config.toml as TOML. Both mirror the draft
+  // two-way and are the save source (same contract as rawText).
+  const [codexAuthText, setCodexAuthText] = useState("");
+  const [codexAuthError, setCodexAuthError] = useState(null);
+  const [codexTomlText, setCodexTomlText] = useState("");
+  const [codexTomlError, setCodexTomlError] = useState(null);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [error, setError] = useState(null);
   const [fromLive, setFromLive] = useState(false);
@@ -428,6 +437,8 @@ export function ProviderEditDialog({
     if (!open) return;
     setError(null);
     setRawError(null);
+    setCodexAuthError(null);
+    setCodexTomlError(null);
     setPendingIssues(null);
     setFetchedModels(null);
     setFetchState("idle");
@@ -698,6 +709,8 @@ export function ProviderEditDialog({
   const configInvalid = (err) =>
     copy("pswitch.provider.invalid_json", { error: err instanceof Error ? err.message : String(err) });
   useEffect(() => {
+    // Codex uses the two cc-switch editors below (auth.json + config.toml).
+    if (app === "codex") return;
     let parsed = null;
     try {
       parsed = JSON.parse(rawText);
@@ -737,6 +750,102 @@ export function ProviderEditDialog({
     }
   };
 
+  // --- Codex: auth.json (JSON) + config.toml (TOML) editors ---
+  // Same two-way mirror contract as rawText: form edits re-serialize, typed
+  // edits parse back into the draft once valid, in-progress invalid text
+  // stays flagged until it parses or a form edit re-serializes over it.
+  const codexAuthTextRef = useRef("");
+  const codexTomlTextRef = useRef("");
+  const tomlInvalid = (err) =>
+    copy("pswitch.provider.invalid_toml", { error: err instanceof Error ? err.message : String(err) });
+  useEffect(() => {
+    if (app !== "codex") return;
+    let parsed = null;
+    try {
+      parsed = JSON.parse(codexAuthText);
+    } catch {
+      parsed = null;
+    }
+    if (JSON.stringify(parsed) !== JSON.stringify(draft.auth ?? {})) {
+      const next = JSON.stringify(draft.auth ?? {}, null, 2);
+      codexAuthTextRef.current = next;
+      setCodexAuthText(next);
+      setCodexAuthError(null);
+    }
+    // codexAuthText is read, not tracked (same reasoning as rawText above).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft, app]);
+  useEffect(() => {
+    if (app !== "codex") return;
+    let parsed = null;
+    try {
+      parsed = tomlParse(codexTomlText);
+    } catch {
+      parsed = null;
+    }
+    if (JSON.stringify(parsed) !== JSON.stringify(draft.config ?? {})) {
+      let next = "";
+      try {
+        next = tomlStringify(draft.config ?? {});
+      } catch {
+        // Config values that cannot be TOML (shouldn't happen for floor
+        // keys): fall back to JSON so nothing is lost while editing.
+        next = JSON.stringify(draft.config ?? {}, null, 2);
+      }
+      codexTomlTextRef.current = next;
+      setCodexTomlText(next);
+      setCodexTomlError(null);
+    }
+    // codexTomlText is read, not tracked (same reasoning as rawText above).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft, app]);
+  const handleCodexAuthChange = (text) => {
+    codexAuthTextRef.current = text;
+    setCodexAuthText(text);
+    try {
+      const parsed = JSON.parse(text || "{}");
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        setCodexAuthError(copy("pswitch.provider.auth_object_required"));
+        return;
+      }
+      setDraft((current) => ({ ...current, auth: parsed }));
+      setCodexAuthError(null);
+    } catch (err) {
+      setCodexAuthError(configInvalid(err));
+    }
+  };
+  const handleCodexTomlChange = (text) => {
+    codexTomlTextRef.current = text;
+    setCodexTomlText(text);
+    try {
+      const parsed = tomlParse(text || "");
+      setDraft((current) => ({ ...current, config: parsed }));
+      setCodexTomlError(null);
+    } catch (err) {
+      setCodexTomlError(tomlInvalid(err));
+    }
+  };
+  const formatCodexAuth = () => {
+    try {
+      const next = JSON.stringify(JSON.parse(codexAuthTextRef.current || "{}"), null, 2);
+      codexAuthTextRef.current = next;
+      setCodexAuthText(next);
+      setCodexAuthError(null);
+    } catch (err) {
+      setCodexAuthError(configInvalid(err));
+    }
+  };
+  const formatCodexToml = () => {
+    try {
+      const next = tomlStringify(tomlParse(codexTomlTextRef.current || ""));
+      codexTomlTextRef.current = next;
+      setCodexTomlText(next);
+      setCodexTomlError(null);
+    } catch (err) {
+      setCodexTomlError(tomlInvalid(err));
+    }
+  };
+
   // --- soft validation (cc-switch aggregates missing name/key/endpoint) ---
   const collectIssues = () => {
     const issues = [];
@@ -751,15 +860,37 @@ export function ProviderEditDialog({
   };
 
   const save = async (force) => {
-    // The visible JSON text is the save source (cc-switch keeps the config
-    // string in its form state the same way) — it mirrors the draft exactly
-    // unless the user is mid-edit on invalid JSON, which blocks saving.
+    // The visible editor text is the save source (cc-switch keeps the config
+    // text in its form state the same way) — it mirrors the draft exactly
+    // unless the user is mid-edit on invalid text, which blocks saving.
     let payloadConfig;
-    try {
-      payloadConfig = JSON.parse(rawTextRef.current);
-    } catch (err) {
-      setRawError(configInvalid(err));
-      return;
+    if (app === "codex") {
+      let authObject;
+      try {
+        authObject = JSON.parse(codexAuthTextRef.current || "{}");
+      } catch (err) {
+        setCodexAuthError(configInvalid(err));
+        return;
+      }
+      if (!authObject || typeof authObject !== "object" || Array.isArray(authObject)) {
+        setCodexAuthError(copy("pswitch.provider.auth_object_required"));
+        return;
+      }
+      let configObject;
+      try {
+        configObject = tomlParse(codexTomlTextRef.current || "");
+      } catch (err) {
+        setCodexTomlError(tomlInvalid(err));
+        return;
+      }
+      payloadConfig = { auth: authObject, config: configObject };
+    } else {
+      try {
+        payloadConfig = JSON.parse(rawTextRef.current);
+      } catch (err) {
+        setRawError(configInvalid(err));
+        return;
+      }
     }
     if (!force) {
       const issues = collectIssues();
@@ -1440,46 +1571,90 @@ export function ProviderEditDialog({
             </div>
           ) : null}
 
-          <div>
-            <FieldLabel label={copy("pswitch.provider.config")} />
-            <p className="mt-1 text-xs text-oai-gray-400 dark:text-oai-gray-500">
-              {copy("pswitch.provider.config_editor_hint")}
-            </p>
-            {showQuickToggles ? (
-              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1.5">
-                {quickToggles.map((toggle) => (
-                  <label
-                    key={toggle.key}
-                    className="flex cursor-pointer items-center gap-1.5 text-xs text-oai-gray-600 dark:text-oai-gray-300"
+          {app === "codex" ? (
+            <div className="space-y-4">
+              <div>
+                <FieldLabel label={copy("pswitch.codex.auth_json")} />
+                <JsonTextarea
+                  value={codexAuthText}
+                  onChange={handleCodexAuthChange}
+                  rows={4}
+                  error={codexAuthError}
+                  label={copy("pswitch.codex.auth_json")}
+                />
+                <div className="mt-1 flex items-center justify-between gap-2">
+                  <p className="text-xs text-oai-gray-400 dark:text-oai-gray-500">{copy("pswitch.codex.auth_json_hint")}</p>
+                  <button
+                    type="button"
+                    onClick={formatCodexAuth}
+                    className="shrink-0 text-xs font-medium text-oai-brand-600 hover:underline dark:text-oai-brand-400"
                   >
-                    <input
-                      type="checkbox"
-                      checked={toggle.get()}
-                      onChange={(event) => toggle.set(event.target.checked)}
-                      className="h-3.5 w-3.5 rounded border-oai-gray-300 accent-oai-brand-500"
-                    />
-                    {copy(toggle.labelKey)}
-                  </label>
-                ))}
+                    {copy("pswitch.json.format")}
+                  </button>
+                </div>
               </div>
-            ) : null}
-            <div className="mt-2 flex justify-end">
-              <button
-                type="button"
-                onClick={formatConfigText}
-                className="text-xs font-medium text-oai-brand-600 hover:underline dark:text-oai-brand-400"
-              >
-                {copy("pswitch.json.format")}
-              </button>
+              <div>
+                <FieldLabel label={copy("pswitch.codex.config_toml")} />
+                <JsonTextarea
+                  value={codexTomlText}
+                  onChange={handleCodexTomlChange}
+                  rows={12}
+                  error={codexTomlError}
+                  label={copy("pswitch.codex.config_toml")}
+                />
+                <div className="mt-1 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={formatCodexToml}
+                    className="text-xs font-medium text-oai-brand-600 hover:underline dark:text-oai-brand-400"
+                  >
+                    {copy("pswitch.json.format")}
+                  </button>
+                </div>
+              </div>
             </div>
-            <JsonTextarea
-              value={rawText}
-              onChange={handleConfigTextChange}
-              rows={12}
-              error={rawError}
-              label={copy("pswitch.provider.config")}
-            />
-          </div>
+          ) : (
+            <div>
+              <FieldLabel label={copy("pswitch.provider.config")} />
+              <p className="mt-1 text-xs text-oai-gray-400 dark:text-oai-gray-500">
+                {copy("pswitch.provider.config_editor_hint")}
+              </p>
+              {showQuickToggles ? (
+                <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1.5">
+                  {quickToggles.map((toggle) => (
+                    <label
+                      key={toggle.key}
+                      className="flex cursor-pointer items-center gap-1.5 text-xs text-oai-gray-600 dark:text-oai-gray-300"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={toggle.get()}
+                        onChange={(event) => toggle.set(event.target.checked)}
+                        className="h-3.5 w-3.5 rounded border-oai-gray-300 accent-oai-brand-500"
+                      />
+                      {copy(toggle.labelKey)}
+                    </label>
+                  ))}
+                </div>
+              ) : null}
+              <div className="mt-2 flex justify-end">
+                <button
+                  type="button"
+                  onClick={formatConfigText}
+                  className="text-xs font-medium text-oai-brand-600 hover:underline dark:text-oai-brand-400"
+                >
+                  {copy("pswitch.json.format")}
+                </button>
+              </div>
+              <JsonTextarea
+                value={rawText}
+                onChange={handleConfigTextChange}
+                rows={12}
+                error={rawError}
+                label={copy("pswitch.provider.config")}
+              />
+            </div>
+          )}
 
           {pendingIssues ? (
             <div className="rounded-lg border border-oai-amber-dark/30 bg-oai-amber-50 px-3 py-2.5 text-xs text-oai-amber-dark dark:border-oai-amber-dark/40 dark:bg-oai-amber-dark/15 dark:text-oai-amber-light">

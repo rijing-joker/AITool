@@ -51,6 +51,8 @@ const SOURCE_IDENTICAL_KEY_ALLOWLIST = [
   /^pswitch[.]tab[.]/,
   // Provider-switch form fields: env/protocol identifiers stay verbatim.
   /^pswitch[.]field[.]/,
+  // Codex editor headings are literal config-file names.
+  /^pswitch[.]codex[.]/,
   // Codex reasoning-effort level names stay verbatim.
   /^pswitch[.]field[.]effort[.]/,
   // The 1M context checkbox label is a unit, not a word.

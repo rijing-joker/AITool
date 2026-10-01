@@ -25,6 +25,7 @@ const ACCOUNT_FUNCTIONS = [
 
 const USER_JWT_FUNCTIONS = [
   ...ACCOUNT_FUNCTIONS,
+  "tokentracker-account-skills.ts",
   "tokentracker-account-devices.ts",
   "tokentracker-device-flow-grant.ts",
   "tokentracker-device-rename.ts",
@@ -167,13 +168,42 @@ test("single-scan account candidate preserves dedup and pricing without rereadin
   assert.match(source, /COALESCE\(dm\.machine_cluster_id, h\.device_id::text\)/u);
   assert.match(source, /h\.source = 'cursor'/u);
   assert.match(source, /FROM public\.tokentracker_account_session_states s/u);
-  assert.match(source, /THEN 'peak' ELSE 'off_peak'/u);
+  assert.match(source, /public\.leaderboard_pricing_tier\(model, hour_start\) AS pricing_tier/u);
   assert.doesNotMatch(source, /account_usage_grouped_legacy_v1\(/u);
   assert.doesNotMatch(source, /account_usage_deepseek_v4_grouped\(/u);
   assert.match(
     source,
     /REVOKE ALL ON FUNCTION public\.account_usage_grouped_single_scan_candidate[\s\S]*FROM PUBLIC, anon, authenticated/u,
   );
+});
+
+test("pricing dependencies precede consumers and forward repairs match canonical SQL", () => {
+  const dependencies = read("db/leaderboard-pricing-dependencies.sql").trim();
+  const initialName = "20260904063000_restore-leaderboard-pricing-dependencies.sql";
+  const initial = read(`migrations/${initialName}`);
+  const forward = readMigrationBySuffix("repair-pricing-and-badge-rollups");
+  assert.ok(initialName < "20260904064000_cache-leaderboard-total-rollup.sql");
+  assert.ok(initial.includes(dependencies), "fresh installs need the full canonical dependencies");
+  assert.ok(forward.includes(dependencies), "existing installs need the same repair");
+
+  for (const model of ["deepseek-v4-flash", "deepseek-v4.1-flash", "deepseek-flash", "deepseek-v4-pro"]) {
+    assert.ok(dependencies.includes(`'%${model}%'`), `missing time-priced model ${model}`);
+  }
+  assert.match(dependencies, /2026-08-22T16:00:00Z/);
+  assert.match(dependencies, /extract\(isodow FROM p_hour_start AT TIME ZONE 'Asia\/Shanghai'\) IN \(6, 7\)/);
+  assert.match(dependencies, /PRIMARY KEY \(user_id, source, model, day, pricing_tier\)/);
+  assert.match(dependencies, /SET TimeZone TO 'UTC'/);
+
+  const definition = (source, name) => {
+    const match = source.match(new RegExp(`CREATE OR REPLACE FUNCTION public\\.${name}\\([\\s\\S]*?\\$func\\$;`));
+    assert.ok(match, `missing function ${name}`);
+    return match[0];
+  };
+  assert.equal(definition(forward, "user_badges_refresh"), definition(read("db/user-badges.sql"), "user_badges_refresh"));
+  const candidate = readMigrationBySuffix("add-single-scan-account-usage-candidate");
+  assert.equal(definition(forward, "account_usage_grouped"),
+    definition(candidate, "account_usage_grouped_single_scan_candidate")
+      .replace("account_usage_grouped_single_scan_candidate(", "account_usage_grouped("));
 });
 
 test("single-scan account aggregation is promoted without invalidating the shared cache", () => {

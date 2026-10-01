@@ -14,7 +14,7 @@
 --   3. user_badges_refresh() — pure-SQL compute + threshold evaluation +
 --      monotonic upsert, called directly by pg_cron (same shape as
 --      leaderboard_rollup_daily_rebuild; no edge function on the write path).
---      Facts come from tokentracker_leaderboard_rollup_daily UNION ALL a
+--      Facts come from tokentracker_leaderboard_rollup_daily_v2 UNION ALL a
 --      live-deduped tail — the exact base/tail cut leaderboard_usage_grouped
 --      uses, so badge numbers agree with leaderboard numbers.
 --   4. user_badges_compact(uuid[]) / user_badges_full(uuid, boolean) — read
@@ -289,7 +289,7 @@ BEGIN
   END IF;
 
   SELECT m.through INTO v_through
-  FROM tokentracker_leaderboard_rollup_meta m
+  FROM tokentracker_leaderboard_rollup_meta_v2 m
   WHERE m.id = 1;
   v_through := COALESCE(v_through, '-infinity'::timestamptz);
 
@@ -303,11 +303,12 @@ BEGIN
            SUM(x.output_tokens) AS output_tokens
     FROM (
       SELECT r.user_id, r.source, r.model, r.day, r.total_tokens, r.output_tokens
-      FROM tokentracker_leaderboard_rollup_daily r
+      FROM tokentracker_leaderboard_rollup_daily_v2 r
+      WHERE r.day < (v_through AT TIME ZONE 'UTC')::date
       UNION ALL
       SELECT t.user_id, t.source, t.model,
              (t.hour_start AT TIME ZONE 'UTC')::date AS day, t.total_tokens, t.output_tokens
-      FROM leaderboard_hourly_dedup(v_through, now()) t
+      FROM leaderboard_hourly_dedup_v2(v_through, now()) t
     ) x
     GROUP BY x.user_id, x.source, x.model, x.day
   ),

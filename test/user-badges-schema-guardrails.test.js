@@ -96,8 +96,9 @@ test("momentum compares ADJACENT ISO weeks with a prior-week floor", () => {
 
 test("refresh claims the shared lock and reads the rollup + live tail", () => {
   assert.match(sql, /leaderboard_refresh_try_claim\('badges', 300\)/);
-  assert.match(sql, /tokentracker_leaderboard_rollup_daily/);
-  assert.match(sql, /leaderboard_hourly_dedup\(v_through, now\(\)\)/);
+  assert.match(sql, /tokentracker_leaderboard_rollup_daily_v2/);
+  assert.match(sql, /tokentracker_leaderboard_rollup_meta_v2/);
+  assert.match(sql, /leaderboard_hourly_dedup_v2\(v_through, now\(\)\)/);
 });
 
 test("catalog seeds exactly the twelve cloud badges with 4-tier thresholds", () => {

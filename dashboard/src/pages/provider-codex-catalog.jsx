@@ -1,5 +1,5 @@
 import React from "react";
-import { ChevronDown, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, Download, Plus, Trash2 } from "lucide-react";
 import { copy } from "../lib/copy";
 import { ModelDropdown } from "./provider-model-dropdown";
 

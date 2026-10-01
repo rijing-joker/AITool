@@ -9,7 +9,7 @@
 AiTool merges three open-source projects into a single local-first product:
 
 - **AI Proxy** (from [EasyCLIProxyAPI](https://github.com/router-for-me/EasyCLIProxyAPI) / [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI), MIT) — run a local gateway that exposes your provider accounts through OpenAI / Anthropic / Gemini compatible endpoints, with per-request usage records.
-- **Token usage analytics** (from [TokenTracker](https://github.com/xiufengsun/TokenTracker), MIT) — the local-first dashboard that tracks token usage and cost across 42 AI coding tools.
+- **Token usage analytics** (from [TokenTracker](https://github.com/xiufengsun/TokenTracker), MIT) — the local-first dashboard that tracks token usage and cost across 43 AI coding tools.
 - **Provider config management** (from [cc-switch](https://github.com/farion1231/cc-switch), MIT) — manage per-tool provider presets and one-click switch the live config files of Claude Code / Codex CLI / Gemini CLI, without hand-editing JSON / TOML.
 
 The UI is TokenTracker's design language throughout — one dashboard for both worlds: proxied requests flow into the same trends, model breakdown, and cost views as your native CLI tools.
@@ -25,7 +25,7 @@ The UI is TokenTracker's design language throughout — one dashboard for both w
 │  Sidebar                                                                                     │
 │  ├── AI Proxy        ← NEW: proxy lifecycle, providers, keys, per-request records, config    │
 │  ├── Provider Configs ← NEW: one-click AI-CLI config-file switching (cc-switch port)         │
-│  └── Tokens / Sessions / Limits / …  ← TokenTracker analytics (42 CLI tools), unchanged      │
+│  └── Tokens / Sessions / Limits / …  ← TokenTracker analytics (43 CLI tools), unchanged      │
 └──────────────┬──────────────────────────────────────────────────────────┬────────────────────┘
                │ /api/proxy/*                                             │ /functions/* (local API)
                ▼                                                          ▼
@@ -118,11 +118,11 @@ Default endpoint: `http://127.0.0.1:8318` (loopback-only; port configurable in c
 
 | | |
 | --- | --- |
-| **AI tools supported** | **42** |
+| **AI tools supported** | **43** |
 | **Dashboard** | localhost:7680 — trends, model breakdown, cost, heatmap |
 | **Proxy usage source** | `cliproxy` — folded into the same views automatically |
 
-Everything in the vendored TokenTracker CLI keeps working: hook installation for 42 AI coding tools (Claude Code, Codex, Gemini, Cursor, Droid, Cline, Command Code, …), local JSONL parsing, the cost engine, sessions, limits, achievements, skills panel, desktop pet, widgets — with the same dashboard at `localhost:7680`. Proxy usage appears as a `cliproxy` source in the same views.
+Everything in the vendored TokenTracker CLI keeps working: hook installation for 43 AI coding tools (Claude Code, Codex, Gemini, Cursor, Droid, Cline, Command Code, TRAE, …), local JSONL parsing, the cost engine, sessions, limits, achievements, skills panel, desktop pet, widgets — with the same dashboard at `localhost:7680`. Proxy usage appears as a `cliproxy` source in the same views.
 
 ```bash
 aitool            # open the dashboard

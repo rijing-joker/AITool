@@ -700,6 +700,8 @@ usage.overview.antigravity_notice_title,ui,DashboardPage,UsageOverview,antigravi
 usage.overview.antigravity_notice_body,ui,DashboardPage,UsageOverview,antigravity_notice_body,"Exact token usage and prompt-cache hits are parsed from Antigravity session metadata when available. Fallback transcripts without metadata are estimated from text length (~4 chars/token).",,active
 usage.overview.devin_notice_title,ui,DashboardPage,UsageOverview,devin_notice_title,"Cost not estimated",,active
 usage.overview.devin_notice_body,ui,DashboardPage,UsageOverview,devin_notice_body,"Devin reports real local token counts, but swe-2, swe-2-high and compactor have no pricing data in this build, so they are excluded from dollar estimates. A $0 figure does not mean the usage was free.",,active
+usage.overview.trae_notice_title,ui,DashboardPage,UsageOverview,trae_notice_title,"TRAE cost is partial",,active
+usage.overview.trae_notice_body,ui,DashboardPage,UsageOverview,trae_notice_body,"In multi-step turns, TRAE splits cached input for the final step, not the earlier ones. Input without a cache split counts toward token totals but not toward cost. Costs use model prices, not billed amounts.",,active
 usage.overview.week_cross_month_hint,ui,DashboardPage,UsageOverview,week_cross_month_hint,"This week spans two calendar months, so its total is not directly comparable with a single month's usage",,active
 limits.panel.title,ui,LimitsPage,UsageLimitsPanel,title,"Usage Limits",,active
 limits.panel.mode_separator,ui,LimitsPage,UsageLimitsPanel,title_separator," · ",,active
@@ -747,6 +749,7 @@ provider.display.omo,ui,*,ProviderDisplay,omo,"OmO",,active
 provider.display.minimax_code,ui,*,ProviderDisplay,minimax_code,"MiniMax Code",,active
 provider.display.command_code,ui,*,ProviderDisplay,command_code,"Command Code",,active
 provider.display.deepseek_harness,ui,*,ProviderDisplay,deepseek_harness,"DeepSeek Harness",,active
+provider.display.trae,ui,*,ProviderDisplay,trae,"TRAE",,active
 provider.display.trae_work_cn,ui,*,ProviderDisplay,trae_work_cn,"TRAE Work CN",,active
 provider.display.cline,ui,*,ProviderDisplay,cline,"Cline",,active
 limits.label.zcode_glm52,ui,LimitsPage,UsageLimitsPanel,zcode_glm52,"GLM-5.2",,active
@@ -2219,7 +2222,6 @@ pswitch.provider.preset,pswitch,ProviderSwitchPage,ProviderSwitchPage,provider_p
 pswitch.provider.preset.none,pswitch,ProviderSwitchPage,ProviderSwitchPage,provider_preset_none,Start from blank,,active
 pswitch.provider.config,pswitch,ProviderSwitchPage,ProviderEditDialog,provider_config,Config file,,active
 pswitch.provider.config_editor_hint,pswitch,ProviderSwitchPage,ProviderEditDialog,provider_config_editor_hint,"Form edits sync into this JSON in real time; you can also edit the JSON directly — this is exactly what gets saved.",,active
-pswitch.provider.config_hint,pswitch,ProviderSwitchPage,ProviderSwitchPage,provider_config_hint,"Only key fields (endpoints, credentials, model names) are applied on switch; everything else in the live file is left untouched.",,active
 pswitch.provider.invalid_json,pswitch,ProviderSwitchPage,ProviderSwitchPage,provider_invalid_json,Config is not valid JSON: {{error}},,active
 pswitch.provider.dialog.add_title,pswitch,ProviderSwitchPage,ProviderSwitchPage,provider_dialog_add_title,Add provider,,active
 pswitch.provider.dialog.edit_title,pswitch,ProviderSwitchPage,ProviderSwitchPage,provider_dialog_edit_title,Edit provider,,active
@@ -2245,21 +2247,12 @@ pswitch.field.api_key_name,pswitch,ProviderSwitchPage,ProviderEditDialog,api_key
 pswitch.field.api_key_option,pswitch,ProviderSwitchPage,ProviderEditDialog,api_key_option,ANTHROPIC_API_KEY,,active
 pswitch.field.auth_token_option,pswitch,ProviderSwitchPage,ProviderEditDialog,auth_token_option,ANTHROPIC_AUTH_TOKEN,,active
 pswitch.field.base_url,pswitch,ProviderSwitchPage,ProviderEditDialog,base_url,Base URL,,active
+pswitch.field.default_model,pswitch,ProviderSwitchPage,ProviderEditDialog,default_model,Default model,,active
+pswitch.field.default_model_hint,pswitch,ProviderSwitchPage,ProviderEditDialog,default_model_hint,The model Codex requests by default; change it any time without waiting for preset updates.,,active
+pswitch.field.codex_endpoint_hint,pswitch,ProviderSwitchPage,ProviderEditDialog,codex_endpoint_hint,💡 Fill in a server endpoint compatible with the OpenAI Responses format,,active
+pswitch.field.codex_key_placeholder,pswitch,ProviderSwitchPage,ProviderEditDialog,codex_key_placeholder,Only fill in here; the auth.json below is filled automatically,,active
 pswitch.field.model,pswitch,ProviderSwitchPage,ProviderEditDialog,model,Model,,active
 pswitch.field.model_hint,pswitch,ProviderSwitchPage,ProviderEditDialog,model_hint,Leave empty to use the relay's default model.,,active
-pswitch.field.relay_name,pswitch,ProviderSwitchPage,ProviderEditDialog,relay_name,Relay name,,active
-pswitch.field.wire_api,pswitch,ProviderSwitchPage,ProviderEditDialog,wire_api,Wire protocol,,active
-pswitch.field.wire_api_chat,pswitch,ProviderSwitchPage,ProviderEditDialog,wire_api_chat,chat,,active
-pswitch.field.wire_api_hint,pswitch,ProviderSwitchPage,ProviderEditDialog,wire_api_hint,responses is Codex's default protocol; use chat for Chat Completions relays.,,active
-pswitch.field.wire_api_responses,pswitch,ProviderSwitchPage,ProviderEditDialog,wire_api_responses,responses,,active
-pswitch.field.reasoning_effort,pswitch,ProviderSwitchPage,ProviderEditDialog,reasoning_effort,Reasoning effort,,active
-pswitch.field.reasoning_effort_hint,pswitch,ProviderSwitchPage,ProviderEditDialog,reasoning_effort_hint,Codex's reasoning depth (model_reasoning_effort in config.toml).,,active
-pswitch.field.effort.minimal,pswitch,ProviderSwitchPage,ProviderEditDialog,effort_minimal,minimal,,active
-pswitch.field.effort.low,pswitch,ProviderSwitchPage,ProviderEditDialog,effort_low,low,,active
-pswitch.field.effort.medium,pswitch,ProviderSwitchPage,ProviderEditDialog,effort_medium,medium,,active
-pswitch.field.effort.high,pswitch,ProviderSwitchPage,ProviderEditDialog,effort_high,high,,active
-pswitch.field.effort.xhigh,pswitch,ProviderSwitchPage,ProviderEditDialog,effort_xhigh,xhigh,,active
-pswitch.field.effort.max,pswitch,ProviderSwitchPage,ProviderEditDialog,effort_max,max,,active
 pswitch.catalog.title,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_title,Model mapping,,active
 pswitch.catalog.hint,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_hint,"Rows generate the Codex model catalog file (model_catalog_json): the /model menu lists these models with their display names, context windows, and reasoning levels. Leave empty to skip the catalog.",,active
 pswitch.catalog.add_model,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_add_model,Add model,,active
@@ -2289,13 +2282,14 @@ pswitch.provider.notes,pswitch,ProviderSwitchPage,ProviderEditDialog,notes,Notes
 pswitch.provider.preset_no_fields,pswitch,ProviderSwitchPage,ProviderEditDialog,preset_no_fields,This preset has no fields to fill in.,,active
 pswitch.provider.saved,pswitch,ProviderSwitchPage,ProviderEditDialog,saved,"Saved ""{{name}}"".",,active
 pswitch.provider.website_url,pswitch,ProviderSwitchPage,ProviderEditDialog,website_url,Website,,active
+pswitch.provider.notes_placeholder,pswitch,ProviderSwitchPage,ProviderEditDialog,notes_placeholder,e.g. Dedicated company account,,active
+pswitch.provider.website_placeholder,pswitch,ProviderSwitchPage,ProviderEditDialog,website_placeholder,https://example.com (optional),,active
 pswitch.field.endpoint,pswitch,ProviderSwitchPage,ProviderEditDialog,endpoint,API Endpoint,,active
 pswitch.field.endpoint_hint,pswitch,ProviderSwitchPage,ProviderEditDialog,endpoint_hint,"Compatible endpoint address, no trailing slash.",,active
 pswitch.field.full_url,pswitch,ProviderSwitchPage,ProviderEditDialog,full_url,Full URL,,active
 pswitch.field.get_api_key,pswitch,ProviderSwitchPage,ProviderEditDialog,get_api_key,Get API Key,,active
 pswitch.field.show_key,pswitch,ProviderSwitchPage,ProviderEditDialog,show_key,Show key,,active
 pswitch.field.hide_key,pswitch,ProviderSwitchPage,ProviderEditDialog,hide_key,Hide key,,active
-pswitch.field.codex_key_hint,pswitch,ProviderSwitchPage,ProviderEditDialog,codex_key_hint,Stored in auth.json for this provider.,,active
 pswitch.models.fetch,pswitch,ProviderSwitchPage,ProviderEditDialog,fetch,Fetch models,,active
 pswitch.models.fetching,pswitch,ProviderSwitchPage,ProviderEditDialog,fetching,Fetching…,,active
 pswitch.role.sonnet,pswitch,ProviderSwitchPage,ProviderEditDialog,sonnet,Sonnet,,active
@@ -2342,7 +2336,6 @@ pswitch.validate.save_anyway,pswitch,ProviderSwitchPage,ProviderEditDialog,save_
 pswitch.preset.search,pswitch,ProviderSwitchPage,ProviderEditDialog,search,Search presets…,,active
 pswitch.preset.sort_az,pswitch,ProviderSwitchPage,ProviderEditDialog,sort_az,A→Z,,active
 pswitch.preset.sort_default,pswitch,ProviderSwitchPage,ProviderEditDialog,sort_default,Default,,active
-pswitch.preset.hint,pswitch,ProviderSwitchPage,ProviderEditDialog,hint,Community presets ship with relay endpoints and role mappings; pick Custom to start from blank.,,active
 pswitch.preset.badge.official,pswitch,ProviderSwitchPage,ProviderEditDialog,official,Official,,active
 pswitch.preset.badge.community,pswitch,ProviderSwitchPage,ProviderEditDialog,community,Community,,active
 pswitch.preset.badge.custom,pswitch,ProviderSwitchPage,ProviderEditDialog,custom,Custom,,active

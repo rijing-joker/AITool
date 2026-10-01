@@ -175,6 +175,11 @@ const CODEX_OFFICIAL = {
   formFields: [],
 };
 
+// Field set mirrors cc-switch's CodexFormFields: API Key, endpoint, default
+// model — nothing else. wire_api stays "responses" in the template (cc-switch
+// forces the same); relays that need another protocol are edited through the
+// config editor. Relay display name, wire protocol and reasoning effort are
+// template keys without dedicated inputs.
 const CODEX_CUSTOM = {
   id: "codex_custom",
   name: "Custom Relay",
@@ -190,7 +195,7 @@ const CODEX_CUSTOM = {
       model_reasoning_effort: "high",
       model_providers: {
         custom: {
-          name: "",
+          name: "custom",
           base_url: "",
           wire_api: "responses",
         },
@@ -202,15 +207,8 @@ const CODEX_CUSTOM = {
       id: "api_key",
       path: "auth.OPENAI_API_KEY",
       labelKey: "pswitch.field.api_key",
-      placeholder: "sk-…",
+      placeholderKey: "pswitch.field.codex_key_placeholder",
       secret: true,
-      hintKey: "pswitch.field.codex_key_hint",
-    },
-    {
-      id: "relay_name",
-      path: "config.model_providers.custom.name",
-      labelKey: "pswitch.field.relay_name",
-      placeholder: "",
     },
     {
       id: "base_url",
@@ -219,36 +217,11 @@ const CODEX_CUSTOM = {
       placeholder: "https://your-relay.example.com/v1",
     },
     {
-      id: "wire_api",
-      path: "config.model_providers.custom.wire_api",
-      labelKey: "pswitch.field.wire_api",
-      type: "select",
-      options: [
-        { value: "responses", labelKey: "pswitch.field.wire_api_responses" },
-        { value: "chat", labelKey: "pswitch.field.wire_api_chat" },
-      ],
-      hintKey: "pswitch.field.wire_api_hint",
-    },
-    {
-      id: "reasoning_effort",
-      path: "config.model_reasoning_effort",
-      labelKey: "pswitch.field.reasoning_effort",
-      type: "select",
-      options: [
-        { value: "minimal", labelKey: "pswitch.field.effort.minimal" },
-        { value: "low", labelKey: "pswitch.field.effort.low" },
-        { value: "medium", labelKey: "pswitch.field.effort.medium" },
-        { value: "high", labelKey: "pswitch.field.effort.high" },
-        { value: "xhigh", labelKey: "pswitch.field.effort.xhigh" },
-        { value: "max", labelKey: "pswitch.field.effort.max" },
-      ],
-      hintKey: "pswitch.field.reasoning_effort_hint",
-    },
-    {
       id: "model",
       path: "config.model",
-      labelKey: "pswitch.field.model",
+      labelKey: "pswitch.field.default_model",
       placeholder: "",
+      hintKey: "pswitch.field.default_model_hint",
     },
   ],
 };

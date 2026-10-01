@@ -1,7 +1,7 @@
 {
   "name": "aitool",
   "version": "0.1.0",
-  "description": "All-in-one AI toolbox: multi-provider AI gateway (EasyCLIProxyAPI / CLIProxyAPI) + local-first token usage and cost tracking for 42 tools (AI coding CLIs and agents), with a dashboard, desktop pet, widgets, and achievements.",
+  "description": "All-in-one AI toolbox: multi-provider AI gateway (EasyCLIProxyAPI / CLIProxyAPI) + local-first token usage and cost tracking for 43 tools (AI coding CLIs and agents), with a dashboard, desktop pet, widgets, and achievements.",
   "main": "src/cli.js",
   "bin": {
     "aitool": "bin/tracker.js"
@@ -47,6 +47,7 @@
     "version": "node scripts/sync-versions.cjs && git add TokenTrackerBar/project.yml TokenTrackerWin/TokenTrackerWin.csproj TokenTrackerLinux/package.json TokenTrackerLinux/package-lock.json TokenTrackerLinux/src-tauri/Cargo.toml TokenTrackerLinux/src-tauri/Cargo.lock TokenTrackerLinux/src-tauri/tauri.conf.json TokenTrackerLinux/packaging/arch/tokentracker-linux/PKGBUILD"
   },
   "dependencies": {
+    "@journeyapps/wa-sqlite": "2.0.6",
     "@mongodb-js/zstd": "^2.0.1",
     "undici": "8.11.2",
     "yaml": "^2.9.1",
@@ -55,7 +56,8 @@
   "devDependencies": {
     "@sourcegraph/scip-typescript": "^0.4.0",
     "esbuild": "0.28.2",
-    "pngjs": "^7.0.0"
+    "pngjs": "^7.0.0",
+    "sql.js": "1.14.2"
   },
   "repository": {
     "type": "git",

@@ -101,7 +101,7 @@ function getZonedParts(date, timeZoneContext = {}) {
   }
 
   if (Number.isFinite(offsetMinutes)) {
-    const shifted = new Date(dt.getTime() - Number(offsetMinutes) * 60_000);
+    const shifted = new Date(dt.getTime() + Number(offsetMinutes) * 60_000);
     return [
       { type: "year", value: String(shifted.getUTCFullYear()).padStart(4, "0") },
       { type: "month", value: String(shifted.getUTCMonth() + 1).padStart(2, "0") },
@@ -197,10 +197,10 @@ function metadataRangeBounds(from, to, timeZoneContext) {
     const toUtcExclusive = afterTo ? Date.parse(`${afterTo}T00:00:00.000Z`) : null;
     return {
       fromMs: Number.isFinite(fromUtc)
-        ? fromUtc + offsetMinutes * 60_000 - dstGuardMs
+        ? fromUtc - offsetMinutes * 60_000 - dstGuardMs
         : null,
       toMs: Number.isFinite(toUtcExclusive)
-        ? toUtcExclusive + offsetMinutes * 60_000 + dstGuardMs
+        ? toUtcExclusive - offsetMinutes * 60_000 + dstGuardMs
         : null,
     };
   }

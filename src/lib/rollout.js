@@ -318,7 +318,6 @@ async function parseRolloutIncremental({
       newEventKeySet.add(key);
       newEventKeys.push(key);
       if (seenEvents) seenEvents.add(key);
-      externalEventStore?.add(key);
     };
     const getAppendOnlyEvents = () => {
       if (!appendOnlyEvents) {
@@ -363,8 +362,9 @@ async function parseRolloutIncremental({
       getAppendOnlyEvents,
       getHistoricalEvents,
       persist() {
-        if (!externalEventStore) {
-          for (const key of newEventKeys || []) previousHashes.push(key);
+        for (const key of newEventKeys || []) {
+          if (externalEventStore) externalEventStore.add(key);
+          else previousHashes.push(key);
         }
       },
       size() {
@@ -1268,9 +1268,9 @@ async function parseGeminiIncremental({
       }
       continue;
     }
-    let startIndex = prev && prev.inode === inode ? Number(prev.lastIndex || -1) : -1;
-    let lastTotals = prev && prev.inode === inode ? prev.lastTotals || null : null;
-    let lastModel = prev && prev.inode === inode ? prev.lastModel || null : null;
+    let startIndex = Number(prev?.lastIndex ?? -1);
+    let lastTotals = prev?.lastTotals || null;
+    let lastModel = prev?.lastModel || null;
 
     const projectContext = projectEnabled
       ? await resolveProjectContextForFile({
@@ -1314,6 +1314,7 @@ async function parseGeminiIncremental({
       startIndex,
       lastTotals,
       lastModel,
+      seenMessages: prev?.seenMessages,
       projectCursor,
       hourlyState,
       touchedBuckets,
@@ -1331,6 +1332,7 @@ async function parseGeminiIncremental({
       lastIndex: result.lastIndex,
       lastTotals: result.lastTotals,
       lastModel: result.lastModel,
+      seenMessages: result.seenMessages,
       updatedAt: new Date().toISOString(),
     };
     if (projectKey) {
@@ -1340,6 +1342,7 @@ async function parseGeminiIncremental({
         lastIndex: result.projectLastIndex,
         lastTotals: result.projectLastTotals,
         lastModel: result.projectLastModel,
+        seenMessages: result.projectSeenMessages,
         updatedAt: new Date().toISOString(),
       };
     } else if (prev?.project) {
@@ -2786,129 +2789,75 @@ async function parseClaudeFile({
 }
 
 async function parseGeminiFile({
-  filePath,
-  startIndex,
-  lastTotals,
-  lastModel,
-  projectCursor,
-  hourlyState,
-  touchedBuckets,
-  source,
-  projectState,
-  projectTouchedBuckets,
-  projectRef,
-  projectKey,
+  filePath, startIndex, lastTotals, lastModel, seenMessages, projectCursor,
+  hourlyState, touchedBuckets, source, projectState, projectTouchedBuckets, projectRef, projectKey,
 }) {
-  const raw = await fs.readFile(filePath, "utf8").catch(() => "");
-  if (!raw.trim()) return { lastIndex: startIndex, lastTotals, lastModel, eventsAggregated: 0 };
-
+  const unchanged = {
+    lastIndex: startIndex, lastTotals, lastModel, seenMessages,
+    projectLastIndex: projectCursor?.lastIndex,
+    projectLastTotals: projectCursor?.lastTotals,
+    projectLastModel: projectCursor?.lastModel,
+    projectSeenMessages: projectCursor?.seenMessages,
+    eventsAggregated: 0,
+  };
   let session;
-  try {
-    session = JSON.parse(raw);
-  } catch (_e) {
-    return { lastIndex: startIndex, lastTotals, lastModel, eventsAggregated: 0 };
-  }
-
+  try { session = JSON.parse(await fs.readFile(filePath, "utf8")); } catch { return unchanged; }
   const messages = Array.isArray(session?.messages) ? session.messages : [];
-  if (startIndex >= messages.length) {
-    startIndex = -1;
-    lastTotals = null;
-    lastModel = null;
-  }
-
-  let eventsAggregated = 0;
-  let model = typeof lastModel === "string" ? lastModel : null;
-  let totals = lastTotals && typeof lastTotals === "object" ? lastTotals : null;
+  const hourlySeen = { ...seenMessages };
+  const projectSeen = { ...projectCursor?.seenMessages };
   const projectActive = Boolean(projectKey && projectState && projectTouchedBuckets);
-  let projectStartIndex =
-    projectActive && Number.isFinite(projectCursor?.lastIndex)
-      ? Number(projectCursor.lastIndex)
-      : -1;
-  let projectModel =
-    projectActive && typeof projectCursor?.lastModel === "string"
-      ? projectCursor.lastModel
-      : null;
-  let projectTotals =
-    projectActive && projectCursor?.lastTotals && typeof projectCursor.lastTotals === "object"
-      ? projectCursor.lastTotals
-      : null;
-  if (projectActive && projectStartIndex >= messages.length) {
-    projectStartIndex = -1;
-    projectTotals = null;
-    projectModel = null;
-  }
-  const hourlyBegin = Number.isFinite(startIndex) ? startIndex + 1 : 0;
-  const projectBegin = projectActive ? projectStartIndex + 1 : Number.POSITIVE_INFINITY;
-  const begin = Math.min(hourlyBegin, projectBegin);
+  let totals = lastTotals || null;
+  let projectTotals = projectCursor?.lastTotals || null;
+  let model = lastModel || null;
+  let eventsAggregated = 0;
+  const occurrences = new Map();
 
-  for (let idx = begin; idx < messages.length; idx++) {
+  // Rewritten/pruned transcripts retain their cumulative baseline and seen
+  // message identities. Removing either prefix or suffix must not replay usage.
+  for (let idx = 0; idx < messages.length; idx++) {
     const msg = messages[idx];
     if (!msg || typeof msg !== "object") continue;
-
-    const normalizedModel = normalizeModelInput(msg.model);
-    if (normalizedModel && idx >= hourlyBegin) model = normalizedModel;
-    if (normalizedModel && idx >= projectBegin) projectModel = normalizedModel;
-
-    const timestamp = typeof msg.timestamp === "string" ? msg.timestamp : null;
-    const currentTotals = normalizeGeminiTokens(msg.tokens);
-    if (idx >= hourlyBegin && (!timestamp || !currentTotals)) {
-      totals = currentTotals || totals;
-    }
-    if (idx >= projectBegin && (!timestamp || !currentTotals)) {
-      projectTotals = currentTotals || projectTotals;
-    }
-    if (!timestamp || !currentTotals) {
-      continue;
-    }
-
-    let bucketStart = null;
-    if (idx >= hourlyBegin) {
-      const delta = diffGeminiTotals(currentTotals, totals);
-      if (!delta || isAllZeroUsage(delta)) {
-        totals = currentTotals;
-      } else {
-        delta.conversation_count = 1;
-        bucketStart = toUtcHalfHourStart(timestamp);
-        if (bucketStart) {
+    model = normalizeModelInput(msg.model) || model;
+    const current = normalizeGeminiTokens(msg.tokens);
+    if (!current) continue;
+    const identity = String(msg.id || msg.timestamp || idx);
+    const occurrence = occurrences.get(identity) || 0;
+    occurrences.set(identity, occurrence + 1);
+    const key = JSON.stringify([session.sessionId || "", identity, occurrence]);
+    const bucketStart = toUtcHalfHourStart(msg.timestamp);
+    if (!hourlySeen[key]) {
+      hourlySeen[key] = true;
+      // Seed the already-counted prefix when upgrading an index-only cursor.
+      if (seenMessages || idx > startIndex) {
+        const delta = diffGeminiTotals(current, totals);
+        totals = current;
+        if (bucketStart && delta && !isAllZeroUsage(delta)) {
+          delta.conversation_count = 1;
           const bucket = getHourlyBucket(hourlyState, source, model, bucketStart);
           addTotals(bucket.totals, delta);
           touchedBuckets.add(bucketKey(source, model, bucketStart));
-          eventsAggregated += 1;
+          eventsAggregated++;
         }
-        totals = currentTotals;
       }
     }
-
-    if (idx >= projectBegin) {
-      const projectDelta = diffGeminiTotals(currentTotals, projectTotals);
-      if (!projectDelta || isAllZeroUsage(projectDelta)) {
-        projectTotals = currentTotals;
-        continue;
+    if (projectActive && !projectSeen[key]) {
+      projectSeen[key] = true;
+      if (projectCursor?.seenMessages || idx > (projectCursor?.lastIndex ?? -1)) {
+        const delta = diffGeminiTotals(current, projectTotals);
+        projectTotals = current;
+        if (bucketStart && delta && !isAllZeroUsage(delta)) {
+          delta.conversation_count = 1;
+          const bucket = getProjectBucket(projectState, projectKey, source, bucketStart, projectRef);
+          addTotals(bucket.totals, delta);
+          projectTouchedBuckets.add(projectBucketKey(projectKey, source, bucketStart));
+        }
       }
-      projectDelta.conversation_count = 1;
-      bucketStart = bucketStart || toUtcHalfHourStart(timestamp);
-      if (bucketStart) {
-        const projectBucket = getProjectBucket(
-          projectState,
-          projectKey,
-          source,
-          bucketStart,
-          projectRef,
-        );
-        addTotals(projectBucket.totals, projectDelta);
-        projectTouchedBuckets.add(projectBucketKey(projectKey, source, bucketStart));
-      }
-      projectTotals = currentTotals;
     }
   }
-
   return {
-    lastIndex: messages.length - 1,
-    lastTotals: totals,
-    lastModel: model,
+    lastIndex: messages.length - 1, lastTotals: totals, lastModel: model, seenMessages: hourlySeen,
     projectLastIndex: projectActive ? messages.length - 1 : null,
-    projectLastTotals: projectTotals,
-    projectLastModel: projectModel,
+    projectLastTotals: projectTotals, projectLastModel: model, projectSeenMessages: projectSeen,
     eventsAggregated,
   };
 }
@@ -3002,7 +2951,7 @@ async function parseOpencodeMessageFile({
   // Its prior totals were removed from the buckets, so re-add the full current
   // snapshot instead of only the delta from the suppressed value.
   const effectiveLastTotals = prev?.dedupedForkCopy === true ? null : lastTotals;
-  const delta = diffGeminiTotals(currentTotals, effectiveLastTotals);
+  const delta = diffOpencodeTotals(currentTotals, effectiveLastTotals);
   if (!delta || isAllZeroUsage(delta)) {
     return {
       messageKey,
@@ -3013,7 +2962,7 @@ async function parseOpencodeMessageFile({
       shouldUpdate: true,
     };
   }
-  delta.conversation_count = 1;
+  delta.conversation_count = effectiveLastTotals ? 0 : 1;
 
   const timestampMs = coerceEpochMs(msg?.time?.completed) || coerceEpochMs(msg?.time?.created);
   if (!timestampMs) {
@@ -10874,15 +10823,16 @@ async function parseWorkbuddyIncremental({
         AND su.updated_at > 0
     `.trim();
     let rows = [];
-    const snap = snapshotSqliteDb(dbPath);
+    let snap = null;
+    try { snap = snapshotSqliteDb(dbPath); } catch { /* read the live DB below */ }
     try {
-      rows = await readSqliteJsonRowsAsync(snap.path, query, {
+      rows = await readSqliteJsonRowsAsync(snap?.path || dbPath, query, {
         label: "WorkBuddy",
         timeout: 10_000,
         maxBuffer: 16 * 1024 * 1024,
       });
     } finally {
-      snap.cleanup();
+      snap?.cleanup();
     }
 
     try {
@@ -12420,12 +12370,13 @@ async function parseZedIncremental({
   // Snapshot via the shared helper so we get WAL/SHM/journal sidecar copies
   // too. Without sidecars, an active Zed write that's still in the WAL
   // would be missed (the .db has older pages until checkpoint).
-  const snap = snapshotSqliteDb(resolvedDb);
+  let snap = null;
+  try { snap = snapshotSqliteDb(resolvedDb); } catch { /* read the live DB below */ }
   let rows = [];
   try {
-    rows = readZedThreadRowsFromSqlite(snap.path, cursorUpdatedAt, sqliteOptions);
+    rows = readZedThreadRowsFromSqlite(snap?.path || resolvedDb, cursorUpdatedAt, sqliteOptions);
   } finally {
-    snap.cleanup();
+    snap?.cleanup();
   }
 
   if (rows.length === 0) {
@@ -12524,11 +12475,7 @@ async function parseZedIncremental({
     }
   }
 
-  // Compute nextCursor BEFORE the 10k cap. If we capped first, a low-volume
-  // zed.dev thread evicted in the cap step would no longer be in
-  // threadTotals, so its updated_at would not advance the cursor — and the
-  // next sync's WHERE filter would re-read & re-decode the same blob forever.
-  // We record everything we touched this run regardless of post-cap eviction.
+  // Advance the query cursor for every decoded thread.
   let nextCursor = cursorUpdatedAt;
   for (const r of rows) {
     if (
@@ -12540,17 +12487,7 @@ async function parseZedIncremental({
     }
   }
 
-  const entries = Object.entries(threadTotals);
-  if (entries.length > 10_000) {
-    entries.sort((a, b) => {
-      const ta = a[1].input + a[1].output + a[1].cache_read + a[1].cache_write;
-      const tb = b[1].input + b[1].output + b[1].cache_read + b[1].cache_write;
-      return tb - ta;
-    });
-    const capped = Object.fromEntries(entries.slice(0, 10_000));
-    for (const k of Object.keys(threadTotals)) delete threadTotals[k];
-    Object.assign(threadTotals, capped);
-  }
+  // Keep lifetime baselines even for quiet threads that can resume later.
 
   const bucketsQueued = await enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets });
   const updatedAt = new Date().toISOString();
@@ -14371,12 +14308,13 @@ async function parseGooseIncremental({
 
   // Snapshot via the shared helper to capture WAL/SHM sidecars — Goose
   // writes async, so without them an in-flight session would read stale.
-  const snap = snapshotSqliteDb(resolvedDb);
+  let snap = null;
+  try { snap = snapshotSqliteDb(resolvedDb); } catch { /* read the live DB below */ }
   let rows = [];
   try {
-    rows = readGooseSessionsFromSqlite(snap.path, sqliteOptions);
+    rows = readGooseSessionsFromSqlite(snap?.path || resolvedDb, sqliteOptions);
   } finally {
-    snap.cleanup();
+    snap?.cleanup();
   }
 
   if (rows.length === 0) {
@@ -14472,14 +14410,7 @@ async function parseGooseIncremental({
     }
   }
 
-  // Cap cursor at 10k sessions (largest by lifetime usage).
-  const entries = Object.entries(sessionTotals);
-  if (entries.length > 10_000) {
-    entries.sort((a, b) => b[1].total - a[1].total);
-    const capped = Object.fromEntries(entries.slice(0, 10_000));
-    for (const k of Object.keys(sessionTotals)) delete sessionTotals[k];
-    Object.assign(sessionTotals, capped);
-  }
+  // Keep lifetime baselines even for quiet sessions that can resume later.
 
   const bucketsQueued = await enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets });
   const updatedAt = new Date().toISOString();
@@ -19452,28 +19383,6 @@ function grokEventId(value, fallback) {
   return fallback;
 }
 
-function grokFileEndsWithNewline(filePath, size) {
-  if (!(size > 0)) return false;
-  let fd;
-  try {
-    fd = fssync.openSync(filePath, "r");
-    const buf = Buffer.alloc(1);
-    const read = fssync.readSync(fd, buf, 0, 1, size - 1);
-    return read === 1 && buf[0] === 0x0a; // trailing "\n"
-  } catch {
-    return false;
-  } finally {
-    if (fd !== undefined) {
-      try {
-        fssync.closeSync(fd);
-      } catch {
-        /* ignore close failure */
-      }
-    }
-  }
-}
-
-
 function canonicalizeGrokUsageModel(model) {
   const raw = normalizeModelInput(model) || "grok-build";
   const lower = raw.toLowerCase();
@@ -19584,54 +19493,40 @@ async function readGrokUpdateTokenEvents(updatesPath, fallbackTimestamp, prevOff
   // line. If Grok is mid-write, the final JSONL line has no trailing "\n" yet;
   // its bytes are left unconsumed so the next scan re-reads the line once it is
   // complete instead of skipping it forever (which would undercount tokens).
-  const endsWithNewline = grokFileEndsWithNewline(updatesPath, stat.size);
 
   const turnEvents = [];
   const contextEvents = [];
   let lineIndex = 0;
-  let lastLine = "";
+  let committedSize = startOffset;
   const input = fssync.createReadStream(updatesPath, {
-    encoding: "utf8",
     start: startOffset,
-    end: stat.size - 1, // inclusive; bound the read to the stat'd size
+    end: stat.size - 1,
   });
-  const rl = readline.createInterface({ input, crlfDelay: Infinity });
+  let pending = Buffer.alloc(0);
   try {
-    for await (const line of rl) {
-      lineIndex++;
-      lastLine = line;
-      if (!line || !line.trim()) continue;
-      let record;
-      try {
-        record = JSON.parse(line);
-      } catch {
-        continue;
+    for await (const chunk of input) {
+      pending = Buffer.concat([pending, chunk]);
+      let newline;
+      while ((newline = pending.indexOf(0x0a)) !== -1) {
+        const line = pending.subarray(0, newline).toString("utf8");
+        pending = pending.subarray(newline + 1);
+        committedSize += newline + 1;
+        lineIndex++;
+        if (!line.trim()) continue;
+        let record;
+        try { record = JSON.parse(line); } catch { continue; }
+        const turns = extractGrokTurnUsageEvents(record, fallbackTimestamp, fallbackModel, lineIndex);
+        if (turns.length > 0) turnEvents.push(...turns);
+        else {
+          const contextEvent = extractGrokContextTokenEvent(record, fallbackTimestamp, lineIndex);
+          if (contextEvent) contextEvents.push(contextEvent);
+        }
       }
-      const turns = extractGrokTurnUsageEvents(
-        record,
-        fallbackTimestamp,
-        fallbackModel,
-        lineIndex,
-      );
-      if (turns.length > 0) {
-        turnEvents.push(...turns);
-        continue;
-      }
-      const contextEvent = extractGrokContextTokenEvent(record, fallbackTimestamp, lineIndex);
-      if (contextEvent) contextEvents.push(contextEvent);
     }
   } catch {
-    // Stream error mid-read: discard partial events and do not advance the
-    // offset, so the next sync re-extracts from the same range exactly once
-    // instead of double-counting already-parsed turn events.
     return { turnEvents: [], contextEvents: [], offsetEntry: prevOffsetEntry || null };
   }
 
-  // When the file does not end on a newline, the final emitted line is a
-  // partial tail still being written. Exclude its bytes so the committed offset
-  // stays on a complete-line boundary and the line is re-read once finished.
-  const trailingPartialBytes = endsWithNewline ? 0 : Buffer.byteLength(lastLine, "utf8");
-  const committedSize = Math.max(startOffset, stat.size - trailingPartialBytes);
   return {
     turnEvents,
     contextEvents,
@@ -24369,8 +24264,53 @@ async function parseCommandCodeIncremental({
   };
 }
 
+// Queue rows are cumulative replacements, so replaying a successful append is
+// idempotent. Publish cursor changes only after every queue append succeeds.
+// Clone branches lazily to avoid copying unrelated providers' message indexes.
+function withCursorTransaction(parse) {
+  return async function parseTransaction(options = {}) {
+    const original = options.cursors;
+    if (!original || typeof original !== "object") return parse(options);
+    const staged = {};
+    for (const key of Object.keys(original)) {
+      Object.defineProperty(staged, key, {
+        enumerable: true,
+        configurable: true,
+        get() {
+          // codexHashes/acodeHashes are production-scale (tens of MiB) immutable
+          // history arrays. They are shared by reference — never copied — because
+          // the only mutation site, codexEventDedup.persist(), runs strictly
+          // AFTER the awaited enqueueTouchedBuckets() queue writes (see the
+          // persist() call sites, e.g. parseRolloutIncremental ~line 685). A
+          // failed queue write rejects before persist() is reached, so the live
+          // cursor is never touched on the rollback path. The 60 MiB hot-path
+          // tests in codex-sync-hot-path.test.js enforce the no-copy contract;
+          // every other branch gets a deep clone for rollback isolation.
+          const raw = original[key];
+          const value = key === "codexHashes" || key === "acodeHashes"
+            ? raw
+            : structuredClone(raw);
+          Object.defineProperty(staged, key, { value, writable: true, enumerable: true, configurable: true });
+          return value;
+        },
+        set(value) {
+          Object.defineProperty(staged, key, { value, writable: true, enumerable: true, configurable: true });
+        },
+      });
+    }
+    const result = await parse({ ...options, cursors: staged });
+    for (const key of Object.keys(original)) {
+      if (!Object.hasOwn(staged, key)) delete original[key];
+    }
+    for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(staged))) {
+      if (Object.hasOwn(descriptor, "value")) original[key] = descriptor.value;
+    }
+    return result;
+  };
+}
+
 module.exports = {
-  parseTraeIncremental,
+  parseTraeIncremental: withCursorTransaction(parseTraeIncremental),
   listRolloutFiles,
   listRolloutFilesDeep,
   codexSessionIdFromPath,
@@ -24390,7 +24330,7 @@ module.exports = {
   resolveQoderProjectsDir,
   resolveQoderCnProjectsDir,
   listQoderNewSessionFiles,
-  parseQoderNewIncremental,
+  parseQoderNewIncremental: withCursorTransaction(parseQoderNewIncremental),
   resolveKiroBasePath,
   resolveKiroDbPath,
   resolveKiroJsonlPath,
@@ -24411,14 +24351,14 @@ module.exports = {
   readCopilotSessionStoreUsageRows,
   normalizeCopilotSessionStoreUsage,
   readCopilotAppSessionsFromSqlite,
-  parseRolloutIncremental,
-  parseClaudeIncremental,
-  parseGeminiIncremental,
-  parseOpencodeIncremental,
-  parseOpencodeDbIncremental,
-  parseQoderDbIncremental,
+  parseRolloutIncremental: withCursorTransaction(parseRolloutIncremental),
+  parseClaudeIncremental: withCursorTransaction(parseClaudeIncremental),
+  parseGeminiIncremental: withCursorTransaction(parseGeminiIncremental),
+  parseOpencodeIncremental: withCursorTransaction(parseOpencodeIncremental),
+  parseOpencodeDbIncremental: withCursorTransaction(parseOpencodeDbIncremental),
+  parseQoderDbIncremental: withCursorTransaction(parseQoderDbIncremental),
   openclawCursorKey,
-  parseOpenclawIncremental,
+  parseOpenclawIncremental: withCursorTransaction(parseOpenclawIncremental),
   resolveOpenclawHome,
   resolveOpenclawHomes,
   resolveOpenclawSessionFiles,
@@ -24426,10 +24366,10 @@ module.exports = {
   resolveClaudeScienceDbPaths,
   buildClaudeScienceFramesQuery,
   readClaudeScienceFrames,
-  parseClaudeScienceIncremental,
-  parseCursorApiIncremental,
-  parseKiroIncremental,
-  parseHermesIncremental,
+  parseClaudeScienceIncremental: withCursorTransaction(parseClaudeScienceIncremental),
+  parseCursorApiIncremental: withCursorTransaction(parseCursorApiIncremental),
+  parseKiroIncremental: withCursorTransaction(parseKiroIncremental),
+  parseHermesIncremental: withCursorTransaction(parseHermesIncremental),
   gooseInstallOwnsCursor,
   zedInstallOwnsCursor,
   hermesInstallOwnsCursor,
@@ -24437,49 +24377,49 @@ module.exports = {
   kiroCliInstallOwnsCursor,
   copilotOtelCursorHasLegacyCliUsage,
   pruneCopilotUsageClaims,
-  parseCopilotIncremental,
-  parseCopilotSessionStoreIncremental,
-  parseCopilotAppDbIncremental,
+  parseCopilotIncremental: withCursorTransaction(parseCopilotIncremental),
+  parseCopilotSessionStoreIncremental: withCursorTransaction(parseCopilotSessionStoreIncremental),
+  parseCopilotAppDbIncremental: withCursorTransaction(parseCopilotAppDbIncremental),
   resolveKimiHome,
   resolveKimiWireFiles,
   resolveKimiDefaultModel,
-  parseKimiIncremental,
+  parseKimiIncremental: withCursorTransaction(parseKimiIncremental),
   resolveKimiCodeHome,
   resolveKimiCodeWireFiles,
   resolveKimiCodeDefaultModel,
-  parseKimiCodeIncremental,
+  parseKimiCodeIncremental: withCursorTransaction(parseKimiCodeIncremental),
   resolveCodebuddyHome,
   codebuddyJsonlHasUsage,
   resolveCodebuddyProjectFiles,
   resolveCodebuddyDefaultModel,
-  parseCodebuddyIncremental,
+  parseCodebuddyIncremental: withCursorTransaction(parseCodebuddyIncremental),
   resolveWorkbuddyHome,
   resolveWorkbuddyProjectFiles,
   resolveWorkbuddyDefaultModel,
-  parseWorkbuddyIncremental,
+  parseWorkbuddyIncremental: withCursorTransaction(parseWorkbuddyIncremental),
   resolveKiroCliSessionFiles,
   resolveKiroCliDbPath,
-  parseKiroCliIncremental,
+  parseKiroCliIncremental: withCursorTransaction(parseKiroCliIncremental),
   resolveOmpHome,
   resolveOmpAgentDir,
   resolveOmpSessionFiles,
   resolveOmpSubagentFiles,
   resolveOmpDefaultModel,
-  parseOmpIncremental,
+  parseOmpIncremental: withCursorTransaction(parseOmpIncremental),
   resolveOmoHome,
   resolveOmoAgentDir,
   resolveOmoSessionFiles,
   resolveOmoSubagentFiles,
   resolveOmoDefaultModel,
-  parseOmoIncremental,
+  parseOmoIncremental: withCursorTransaction(parseOmoIncremental),
   resolveKilocodeRoots,
   resolveKilocodeTaskFiles,
   normalizeKilocodeProviderToModel,
-  parseKilocodeIncremental,
+  parseKilocodeIncremental: withCursorTransaction(parseKilocodeIncremental),
   resolveRoocodeTaskFiles,
   readRoocodeTaskModel,
   normalizeRoocodeModel,
-  parseRoocodeIncremental,
+  parseRoocodeIncremental: withCursorTransaction(parseRoocodeIncremental),
   resolveClineSessionsDir,
   resolveClineSessionsDirs,
   listClineSessionFiles,
@@ -24487,33 +24427,33 @@ module.exports = {
   resolveClineSessionFilesWithStatus,
   readClineSessionModel,
   normalizeClineModel,
-  parseClineIncremental,
+  parseClineIncremental: withCursorTransaction(parseClineIncremental),
   resolveZedDbPath,
   decodeZedThreadBlob,
   extractZedTotals,
   sumZedRequestUsage,
   readZedUsage,
-  parseZedIncremental,
+  parseZedIncremental: withCursorTransaction(parseZedIncremental),
   resolveLmstudioHome,
   resolveLmstudioLogFiles,
   normalizeLocalStudioTokens,
   readLmstudioFileRecords,
-  parseLmstudioIncremental,
+  parseLmstudioIncremental: withCursorTransaction(parseLmstudioIncremental),
   resolveUnslothDbPath,
   readUnslothUsageRows,
   normalizeUnslothUsageRow,
-  parseUnslothIncremental,
+  parseUnslothIncremental: withCursorTransaction(parseUnslothIncremental),
   resolveAnythingllmDbPath,
   parseAnythingllmTimestamp,
   readAnythingllmUsageRows,
-  parseAnythingllmIncremental,
+  parseAnythingllmIncremental: withCursorTransaction(parseAnythingllmIncremental),
   resolveDevinDbPath,
   readDevinUsageRows,
-  parseDevinIncremental,
+  parseDevinIncremental: withCursorTransaction(parseDevinIncremental),
   resolveGooseDbPath,
   parseGooseModelName,
   parseGooseCreatedAt,
-  parseGooseIncremental,
+  parseGooseIncremental: withCursorTransaction(parseGooseIncremental),
   resolveDroidSessionsDir,
   resolveDroidSessionsDirs,
   listDroidSettingsFiles,
@@ -24526,32 +24466,32 @@ module.exports = {
   applyDroidTotalFallback,
   resolveDroidModel,
   dedupeDroidSettingsFilesBySession,
-  parseDroidIncremental,
+  parseDroidIncremental: withCursorTransaction(parseDroidIncremental),
   resolvePiHome,
   resolvePiAgentDir,
   resolvePiSessionFiles,
   resolvePiDefaultModel,
-  parsePiIncremental,
+  parsePiIncremental: withCursorTransaction(parsePiIncremental),
   piAgentDirCollidesWithOmp,
   omoAgentDirCollidesWithOmp,
   resolvePrimeAgentHome,
   resolvePrimeAgentDir,
   resolvePrimeAgentSessionFiles,
   resolvePrimeAgentDefaultModel,
-  parsePrimeAgentIncremental,
+  parsePrimeAgentIncremental: withCursorTransaction(parsePrimeAgentIncremental),
   resolveMinimaxCodeHome,
   resolveMinimaxCodeSessionsDir,
   resolveMinimaxCodeSessionFiles,
-  parseMinimaxCodeIncremental,
+  parseMinimaxCodeIncremental: withCursorTransaction(parseMinimaxCodeIncremental),
   resolveCraftConfigDir,
   resolveCraftWorkspaceRoots,
   resolveCraftSessionFiles,
   resolveCraftDefaultModel,
-  parseCraftIncremental,
+  parseCraftIncremental: withCursorTransaction(parseCraftIncremental),
   resolveReasonixHome,
   resolveReasonixTelemetryFiles,
   normalizeReasonixModel,
-  parseReasonixIncremental,
+  parseReasonixIncremental: withCursorTransaction(parseReasonixIncremental),
   // Exposed for regression tests covering cache-token accounting.
   normalizeGeminiTokens,
   normalizeOpencodeTokens,
@@ -24574,7 +24514,7 @@ module.exports = {
   // Grok Build (xAI) — SessionEnd hook + passive updates.jsonl/signals.json reader
   resolveGrokBuildHome,
   resolveGrokBuildSessions,
-  parseGrokBuildIncremental,
+  parseGrokBuildIncremental: withCursorTransaction(parseGrokBuildIncremental),
 
   // Antigravity (Google Gemini) - Session logs parser
   ANTIGRAVITY_CURSOR_VERSION,
@@ -24583,7 +24523,7 @@ module.exports = {
   listAntigravitySessionFiles,
   listAntigravityTranscripts,
   listAntigravityTranscriptsWithStatus,
-  parseAntigravityIncremental,
+  parseAntigravityIncremental: withCursorTransaction(parseAntigravityIncremental),
   estimateAntigravityTokens,
   isCjkCodePoint,
   resolveAntigravityDbPath,
@@ -24594,7 +24534,7 @@ module.exports = {
   resolveTraePath,
   resolveTraeStoragePath,
   readTraeEntitlementFromStorage,
-  parseTraeCnApiIncremental,
+  parseTraeCnApiIncremental: withCursorTransaction(parseTraeCnApiIncremental),
   // DeepSeek Harness (dsh) — passive session-log reader
   resolveDshHome,
   resolveDshHomes,
@@ -24607,7 +24547,7 @@ module.exports = {
   normalizeDshModelName,
   dshUsageToTotals,
   extractDshSessionUsage,
-  parseDshIncremental,
+  parseDshIncremental: withCursorTransaction(parseDshIncremental),
   // Command Code (`cmd`) — passive session-log reader
   resolveCommandCodeHome,
   resolveCommandCodeHomes,
@@ -24616,5 +24556,5 @@ module.exports = {
   normalizeCommandCodeModelName,
   commandCodeUsageToTotals,
   extractCommandCodeSessionUsage,
-  parseCommandCodeIncremental,
+  parseCommandCodeIncremental: withCursorTransaction(parseCommandCodeIncremental),
 };

@@ -104,7 +104,7 @@ function dayKeyFromIso(iso, timeZoneContext) {
     }
   }
   if (Number.isFinite(offsetMinutes)) {
-    const shifted = new Date(dt.getTime() - Number(offsetMinutes) * 60_000);
+    const shifted = new Date(dt.getTime() + Number(offsetMinutes) * 60_000);
     return `${String(shifted.getUTCFullYear()).padStart(4, "0")}-${String(shifted.getUTCMonth() + 1).padStart(2, "0")}-${String(shifted.getUTCDate()).padStart(2, "0")}`;
   }
   return iso.slice(0, 10);

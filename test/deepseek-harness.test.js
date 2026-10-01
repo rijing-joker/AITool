@@ -529,8 +529,8 @@ test("parseDshIncremental does not commit cursor state when queue append fails",
       /EISDIR|directory/i,
     );
     assert.equal(cursors.hourly, undefined);
-    assert.equal(cursors.dsh.files, undefined);
-    assert.equal(cursors.dsh.sessions, undefined);
+    assert.equal(cursors.dsh?.files, undefined);
+    assert.equal(cursors.dsh?.sessions, undefined);
 
     fs.rmSync(queuePath, { recursive: true, force: true });
     const recovered = await parseDshIncremental({ sessionFiles: [logPath], cursors, queuePath });

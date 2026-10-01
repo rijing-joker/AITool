@@ -797,3 +797,28 @@ test("sync.js does not skip cursor commit when Grok only queues project buckets"
   assert.match(src, /grokScanResult\.projectBucketsQueued/);
   assert.match(src, /!\(grokResult\.projectBucketsQueued > 0\)/);
 });
+
+test("turn usage in an unterminated JSONL tail is consumed only after its newline", async () => {
+  const fixture = makeSession({ turns: [
+    { usage: { inputTokens: 100, outputTokens: 10, totalTokens: 110 } },
+    { usage: { inputTokens: 200, outputTokens: 20, totalTokens: 220 } },
+  ] });
+  try {
+    const updates = path.join(fixture.sessionDir, "updates.jsonl");
+    fs.writeFileSync(updates, fs.readFileSync(updates, "utf8").trimEnd());
+    const queuePath = path.join(fixture.root, "queue.jsonl");
+    const cursors = {};
+    const options = { sessions: resolveGrokBuildSessions(fixture.env), cursors, queuePath, env: fixture.env };
+    await parseGrokBuildIncremental(options);
+    const first = fs.readFileSync(queuePath, "utf8").trim().split("\n").map(JSON.parse).at(-1);
+    assert.equal(first.total_tokens, 110);
+    await parseGrokBuildIncremental(options);
+    fs.appendFileSync(updates, "\n");
+    await parseGrokBuildIncremental(options);
+    const last = fs.readFileSync(queuePath, "utf8").trim().split("\n").map(JSON.parse).at(-1);
+    assert.equal(last.total_tokens, 330);
+    assert.equal((await parseGrokBuildIncremental(options)).eventsAggregated, 0);
+  } finally {
+    fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});

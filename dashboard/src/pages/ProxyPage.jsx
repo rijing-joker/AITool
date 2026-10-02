@@ -16,12 +16,15 @@ import {
 } from "lucide-react";
 import { copy } from "../lib/copy";
 import { proxyApi } from "../lib/proxy-api";
+import { ConfirmModal } from "../ui/components";
+import { showToast } from "../ui/components/Toast";
 import { UpstreamsTab } from "./upstreams-tab";
 import { AuthFilesTab } from "./auth-files-tab";
 import { ModelAliasesTab } from "./model-aliases-tab";
 import { KeysTab } from "./keys-tab";
 import { RequestsTab } from "./requests-tab";
 import { SettingsTab } from "./settings-tab";
+import { CoreInstallDialog } from "./core-install-dialog";
 
 // AiTool proxy management — the CLIProxyAPI control surface, styled after the
 // TokenTracker dashboard design language (oai palette, card list, status dots).
@@ -126,7 +129,7 @@ function CopyButton({ text }) {
 // Overview tab
 // ---------------------------------------------------------------------------
 
-function OverviewTab({ status, onRefresh }) {
+function OverviewTab({ status, onRefresh, onInstallCore }) {
   const [overview, setOverview] = useState(null);
   const [actionBusy, setActionBusy] = useState(false);
   const [error, setError] = useState(null);
@@ -206,19 +209,7 @@ function OverviewTab({ status, onRefresh }) {
             {!status?.core.installed ? (
               <button
                 type="button"
-                onClick={async () => {
-                  setActionBusy(true);
-                  setError(null);
-                  try {
-                    await proxyApi.install();
-                    onRefresh();
-                  } catch (e) {
-                    setError(e instanceof Error ? e.message : String(e));
-                  } finally {
-                    setActionBusy(false);
-                  }
-                }}
-                disabled={actionBusy}
+                onClick={onInstallCore}
                 className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-oai-brand-600 px-3.5 text-sm font-medium text-white transition-colors hover:bg-oai-brand-700 disabled:opacity-50"
               >
                 <Upload className="h-4 w-4" />
@@ -353,6 +344,12 @@ export function ProxyPage() {
     return TABS.some((entry) => entry.id === hash) ? hash : "overview";
   });
   const [status, setStatus] = useState(null);
+  // Core-binary install flow (EasyCLIProxyAPI's stop-and-update): confirm →
+  // background task → progress dialog polling GET /api/proxy/install.
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [installTask, setInstallTask] = useState(null);
+  const [installActive, setInstallActive] = useState(false);
 
   const refreshStatus = useCallback(async () => {
     try {
@@ -367,6 +364,59 @@ export function ProxyPage() {
     const timer = setInterval(() => void refreshStatus(), 15_000);
     return () => clearInterval(timer);
   }, [refreshStatus]);
+
+  const openCoreInstall = useCallback(() => setConfirmOpen(true), []);
+
+  const beginCoreInstall = useCallback(async () => {
+    setConfirmOpen(false);
+    try {
+      const data = await proxyApi.install();
+      setInstallTask(data.task);
+      setDialogOpen(true);
+      setInstallActive(true);
+    } catch (e) {
+      showToast({ title: copy("proxy.core.toast_start_failed", { error: e instanceof Error ? e.message : String(e) }) });
+    }
+  }, []);
+
+  const finishCoreInstall = useCallback(
+    (finished) => {
+      void refreshStatus();
+      // Auto-close on success (like the EasyCLIProxyAPI dialog); keep it open
+      // on failure/cancel so the reason stays visible.
+      if (finished.phase === "complete") {
+        setDialogOpen(false);
+        showToast({
+          title: finished.result?.skipped
+            ? copy("proxy.core.toast_latest", { version: finished.result.version })
+            : copy("proxy.core.toast_updated", { version: finished.result?.version ?? "?" }),
+        });
+      }
+    },
+    [refreshStatus],
+  );
+
+  useEffect(() => {
+    if (!installActive) return undefined;
+    let alive = true;
+    const timer = setInterval(async () => {
+      try {
+        const data = await proxyApi.installStatus();
+        if (!alive || !data.task) return;
+        setInstallTask(data.task);
+        if (!data.task.running) {
+          setInstallActive(false);
+          finishCoreInstall(data.task);
+        }
+      } catch {
+        /* transient poll errors are fine; the next tick retries */
+      }
+    }, 500);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [installActive, finishCoreInstall]);
 
   const selectTab = useCallback((next) => {
     setTab(next);
@@ -412,15 +462,38 @@ export function ProxyPage() {
             ))}
           </div>
 
-          {tab === "overview" ? <OverviewTab status={status} onRefresh={refreshStatus} /> : null}
+          {tab === "overview" ? <OverviewTab status={status} onRefresh={refreshStatus} onInstallCore={openCoreInstall} /> : null}
           {tab === "upstreams" ? <UpstreamsTab /> : null}
           {tab === "providers" ? <AuthFilesTab onDirty={refreshStatus} /> : null}
           {tab === "keys" ? <KeysTab status={status} /> : null}
           {tab === "aliases" ? <ModelAliasesTab /> : null}
           {tab === "requests" ? <RequestsTab /> : null}
-          {tab === "settings" ? <SettingsTab status={status} onRefresh={refreshStatus} /> : null}
+          {tab === "settings" ? <SettingsTab status={status} onRefresh={refreshStatus} onInstallCore={openCoreInstall} /> : null}
         </div>
       </main>
+
+      <ConfirmModal
+        open={confirmOpen}
+        title={copy("proxy.core.confirm_title")}
+        description={copy("proxy.core.confirm_desc")}
+        confirmLabel={copy("proxy.core.confirm_action")}
+        cancelLabel={copy("proxy.core.confirm_dismiss")}
+        onConfirm={() => void beginCoreInstall()}
+        onCancel={() => setConfirmOpen(false)}
+      />
+      <CoreInstallDialog
+        open={dialogOpen}
+        task={installTask}
+        onCancel={() => {
+          proxyApi
+            .installCancel()
+            .then((data) => {
+              if (data.task) setInstallTask(data.task);
+            })
+            .catch(() => {});
+        }}
+        onClose={() => setDialogOpen(false)}
+      />
     </div>
   );
 }

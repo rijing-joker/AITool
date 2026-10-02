@@ -1,12 +1,12 @@
 {
-  "generatedAt": "2026-09-29T11:07:16.238Z",
+  "generatedAt": "2026-10-02T04:16:00.296Z",
   "root": "dashboard/src",
   "rules": {
     "colors": "hex/rgb(a) literals",
     "rawText": "JSX text nodes containing letters or digits"
   },
   "totals": {
-    "colors": 410,
+    "colors": 412,
     "rawText": 199
   },
   "files": {
@@ -229,6 +229,11 @@
         "note",
         "rule.includes(\"*\") && modelMatchesRule(model.id, rule)); return ("
       ]
+    },
+    "dashboard/src/pages/core-install-dialog.jsx": {
+      "colors": 2,
+      "rawText": 0,
+      "rawTextTokens": []
     },
     "dashboard/src/pages/keys-tab.jsx": {
       "colors": 1,

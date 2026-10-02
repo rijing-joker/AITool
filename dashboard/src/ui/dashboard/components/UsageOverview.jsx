@@ -189,7 +189,7 @@ function ProviderDistributionSkeleton() {
       className="space-y-6"
     >
       <div className="h-1.5 w-full rounded-full bg-oai-gray-100 dark:bg-oai-gray-800 animate-pulse motion-reduce:animate-none" />
-      <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-3">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-[repeat(auto-fill,minmax(140px,1fr))] sm:gap-3">
         {[0, 1, 2, 3].map((index) => (
           <div
             key={index}
@@ -562,7 +562,7 @@ export function UsageOverview({
 
             {/* Provider Cards — responsive grid keeps cells equal-width so the
                 last row never stretches when the count doesn't divide evenly. */}
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-3">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-[repeat(auto-fill,minmax(140px,1fr))] sm:gap-3">
               <button
                 type="button"
                 aria-expanded={activeProvider === ALL_PROVIDERS_KEY}
@@ -577,13 +577,13 @@ export function UsageOverview({
                     activeProvider === ALL_PROVIDERS_KEY ? null : ALL_PROVIDERS_KEY,
                   )
                 }
-                className={`min-w-0 text-left p-3 rounded-lg border transition-colors duration-200 ${
+                className={`min-w-0 flex items-center justify-between gap-2 text-left p-3 rounded-lg border transition-colors duration-200 sm:block ${
                   activeProvider === ALL_PROVIDERS_KEY
                     ? "border-oai-gray-300 dark:border-oai-gray-600 bg-oai-gray-50 dark:bg-oai-gray-800"
                     : "border-oai-gray-200 dark:border-oai-gray-700 hover:border-oai-gray-300 dark:hover:border-oai-gray-600"
                 }`}
               >
-                <div className="flex items-center gap-1.5 mb-1 min-w-0">
+                <div className="flex flex-1 items-center gap-1.5 sm:mb-1 min-w-0">
                   <AllToolsIcon size={15} className="shrink-0 text-oai-brand dark:text-oai-white" />
                   <span className="text-sm font-medium text-oai-black dark:text-oai-white truncate">
                     {copy("usage.overview.all_tools")}
@@ -592,7 +592,7 @@ export function UsageOverview({
                 <div className="text-lg font-semibold text-oai-black dark:text-oai-white tabular-nums">
                   {FULL_SHARE_LABEL}
                 </div>
-                <div className="mt-0.5 text-[11px] text-oai-gray-400 dark:text-oai-gray-400 tabular-nums">
+                <div className="hidden sm:block mt-0.5 text-[11px] text-oai-gray-400 dark:text-oai-gray-400 tabular-nums">
                   {copy("usage.overview.model_count", { count: allModels.length })}
                 </div>
               </button>
@@ -615,20 +615,20 @@ export function UsageOverview({
                       action: copy(isExpanded ? "usage.overview.collapse" : "usage.overview.expand"),
                     })}
                     onClick={() => setExpandedProvider(isExpanded ? null : provider.label)}
-                    className={`min-w-0 text-left p-3 rounded-lg border transition-colors duration-200 ${
+                    className={`min-w-0 flex items-center justify-between gap-2 text-left p-3 rounded-lg border transition-colors duration-200 sm:block ${
                       isExpanded
                         ? "border-oai-gray-300 dark:border-oai-gray-600 bg-oai-gray-50 dark:bg-oai-gray-800"
                         : "border-oai-gray-200 dark:border-oai-gray-700 hover:border-oai-gray-300 dark:hover:border-oai-gray-600"
                     }`}
                   >
-                    <div className="flex items-center gap-1.5 mb-1 min-w-0">
+                    <div className="flex flex-1 items-center gap-1.5 sm:mb-1 min-w-0">
                       <ProviderIcon provider={provider.label} size={15} color={color} className="text-oai-gray-700 dark:text-oai-gray-300 shrink-0" />
                       <span className="text-sm font-medium text-oai-black dark:text-oai-white truncate" title={displayLabel}>{displayLabel}</span>
                     </div>
                     <div className="text-lg font-semibold text-oai-black dark:text-oai-white tabular-nums">
                       {percentLabel}%
                     </div>
-                    <div className="mt-0.5 text-[11px] text-oai-gray-400 dark:text-oai-gray-400 tabular-nums">
+                    <div className="hidden sm:block mt-0.5 text-[11px] text-oai-gray-400 dark:text-oai-gray-400 tabular-nums">
                       {copy("usage.overview.model_count", { count: provider.models.length })}
                     </div>
                   </button>

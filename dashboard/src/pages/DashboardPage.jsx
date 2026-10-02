@@ -67,16 +67,16 @@ const DETAILS_PAGED_PERIODS = new Set(["day", "total", "custom"]);
 
 // Default Overview card order — each column is dragged/persisted independently.
 const LEFT_CARD_ORDER_DEFAULTS = [
-  "islandOnboarding",
-  "macAppBanner",
   "statsPanel",
-  "widgetOnboarding",
-  "installCopy",
+  "trendMonitor",
   "activityHeatmap",
   "deviceUsage",
-  "trendMonitor",
   "qualityPerDollar",
   "sessionInsights",
+  "installCopy",
+  "islandOnboarding",
+  "macAppBanner",
+  "widgetOnboarding",
 ];
 const RIGHT_CARD_ORDER_DEFAULTS = ["usageOverview", "dataDetails"];
 

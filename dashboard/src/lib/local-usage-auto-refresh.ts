@@ -23,7 +23,7 @@ export function startLocalUsageAutoRefresh({
   onError = () => {},
 }: AutoRefreshOptions) {
   let stopped = false;
-  let inFlight: Promise<void> | null = null;
+  let inFlight: Promise<unknown> | null = null;
   let lastInteractionAt = Date.now();
   let nextDueAt = 0;
 
@@ -33,7 +33,6 @@ export function startLocalUsageAutoRefresh({
     const pending = Promise.resolve()
       .then(() => refresh())
       .catch((error) => onError(error))
-      .then(() => undefined)
       .finally(() => {
         if (inFlight === pending) inFlight = null;
       });

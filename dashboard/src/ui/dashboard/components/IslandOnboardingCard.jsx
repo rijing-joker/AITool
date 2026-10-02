@@ -168,7 +168,7 @@ export function IslandOnboardingCard({ enterDelay = 0 }) {
     available && Boolean(settings?.dynamicIslandSupported) && !settings?.dynamicIslandEnabled;
   // Browser preview gate: no bridge at all (excludes the Windows and Linux
   // apps, which have no macOS bridge but must not see mac-only promos).
-  const showAsBrowserPreview = !available && !isNativeWindowsApp() && !isNativeLinuxApp();
+  const showAsBrowserPreview = !available && !isNativeWindowsApp() && !isNativeLinuxApp() && /Macintosh|MacIntel/.test(navigator.userAgent + navigator.platform) && Number(navigator.maxTouchPoints || 0) <= 1;
   const show = !dismissed && (showInNativeApp || showAsBrowserPreview);
 
   return (

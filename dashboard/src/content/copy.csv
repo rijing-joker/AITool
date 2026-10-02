@@ -2435,3 +2435,26 @@ proxy.upstream.groups.sharedHint,proxy,ProxyPage,Upstreams,groups_shared_hint,"T
 proxy.upstream.groups.sharedToggleHint,proxy,ProxyPage,Upstreams,groups_shared_toggle_hint,"Toggles the group's shared models. Per-key model exclusions still take precedence.",,active
 proxy.upstream.groups.partial,proxy,ProxyPage,Upstreams,groups_partial,Some keys disabled,,active
 proxy.upstream.groups.healthKey,proxy,ProxyPage,Upstreams,groups_health_key,Health-check key,,active
+shared.unsaved.title,shared,Shared,Shared,title,Unsaved changes,,active
+shared.unsaved.description,shared,Shared,Shared,description,"Keep editing to save your changes, or discard them to continue.",,active
+shared.unsaved.discard,shared,Shared,Shared,discard,Discard changes,,active
+shared.unsaved.keep_editing,shared,Shared,Shared,keep_editing,Keep editing,,active
+shared.copy_failed,shared,Shared,Shared,copy_failed,Could not copy. Try again or select and copy the text.,,active
+shared.action.retry,shared,Shared,Shared,retry,Retry,,active
+proxy.state.unknown,proxy,Shared,Shared,unknown,Status unavailable,,active
+proxy.status.waiting,proxy,Shared,Shared,waiting,The proxy status must be available before managing the core.,,active
+proxy.status.failed,proxy,Shared,Shared,failed,Could not update proxy status. Any previous status shown may be out of date.,,active
+proxy.setup.title,proxy,Shared,Shared,title,Ready for your first request,,active
+proxy.setup.description,proxy,Shared,Shared,description,"Add an upstream API or account, then connect your CLI using an access key. Requests will appear here.",,active
+proxy.setup.upstream,proxy,Shared,Shared,upstream,Add an upstream,,active
+proxy.setup.connect,proxy,Shared,Shared,connect,Connect a client,,active
+proxy.settings.edit_mode_hint,proxy,Shared,Shared,edit_mode_hint,Save or revert changes in one editor before using the other. This keeps the form and YAML in sync.,,active
+proxy.requests.range.invalid,proxy,Shared,Shared,invalid,"Choose a valid start and end time, with the end after the start.",,active
+proxy.requests.clear_filters,proxy,Shared,Shared,clear_filters,Clear filters,,active
+proxy.requests.no_matches,proxy,Shared,Shared,no_matches,No requests match these filters.,,active
+proxy.requests.stale,proxy,Shared,Shared,stale,Update failed. Showing the last successful result.,,active
+proxy.requests.count,proxy,Shared,Shared,count,{{count}} requests,,active
+pswitch.provider.appearance,pswitch,Shared,Shared,appearance,Notes and appearance,,active
+pswitch.preset.change,pswitch,Shared,Shared,change,Change preset,,active
+pswitch.provider.save_effect,pswitch,Shared,Shared,save_effect,Saves this preset. Changes to shared settings also update the live configuration.,,active
+pswitch.provider.save_effect_active,pswitch,Shared,Shared,save_effect_active,Saving also applies changes to the configuration currently in use.,,active

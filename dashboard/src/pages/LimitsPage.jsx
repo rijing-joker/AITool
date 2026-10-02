@@ -125,11 +125,11 @@ export function LimitsPage() {
 
   return (
     <div className="flex flex-col flex-1 text-oai-black dark:text-oai-white font-oai antialiased">
-      <main className="flex-1 pt-8 sm:pt-10 pb-12 sm:pb-16">
+      <main className="flex-1 pt-6 sm:pt-8 pb-12 sm:pb-16">
         <div className="mx-auto max-w-6xl px-4 sm:px-6">
           <div className="flex flex-row items-start justify-between gap-4 mb-8">
             <div className="min-w-0">
-              <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight text-oai-black dark:text-white mb-3">
+              <h1 className="text-2xl sm:text-[28px] font-semibold tracking-tight text-oai-black dark:text-white mb-3">
                 {copy("nav.limits")}
               </h1>
               <p className="text-oai-gray-500 dark:text-oai-gray-400 text-sm sm:text-base">

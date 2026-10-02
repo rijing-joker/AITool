@@ -58,7 +58,7 @@ export function MacAppBanner({ enterDelay = 0 }) {
 
   if (dismissed) return null;
   // The Linux app would otherwise fall through to the macOS download CTA.
-  if (!isNativeApp && isNativeLinuxApp()) return null;
+  if (!isNativeApp && (isNativeLinuxApp() || !/Macintosh|MacIntel/.test(navigator.userAgent + navigator.platform) || navigator.maxTouchPoints > 1)) return null;
 
   // Determine banner content based on context
   let title, subtitle, buttonLabel, buttonIcon, onButtonClick, buttonHref;

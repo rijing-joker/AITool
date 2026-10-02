@@ -10,8 +10,9 @@ import { copy } from "../../lib/copy";
 // headless Toast primitive (timeout, swipe-to-dismiss, enter/exit handled for us).
 export const toastManager = Toast.createToastManager();
 
-export function showToast(options) {
-  return toastManager.add(options);
+export function showToast(options, type) {
+  // Management pages also use the concise (message, type) form.
+  return toastManager.add(typeof options === "string" ? { title: options, type } : options);
 }
 
 export function ToastProvider({ children }) {

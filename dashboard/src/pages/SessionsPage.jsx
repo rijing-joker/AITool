@@ -633,7 +633,7 @@ export function SessionsPage() {
 
   return (
     <div className="flex flex-col flex-1 text-oai-black dark:text-oai-white font-oai antialiased">
-      <main className="flex-1 pt-8 sm:pt-10 pb-12 sm:pb-16">
+      <main className="flex-1 pt-6 sm:pt-8 pb-12 sm:pb-16">
         <div className="mx-auto max-w-6xl px-4 sm:px-6">
           <div className="mb-8 flex flex-row items-start justify-between gap-4">
             <div className="min-w-0">

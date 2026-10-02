@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Activity,
   AlertTriangle,
@@ -14,9 +14,12 @@ import {
   Users,
   Zap,
 } from "lucide-react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { copy } from "../lib/copy";
 import { proxyApi } from "../lib/proxy-api";
 import { useVisiblePolling } from "../hooks/use-visible-polling";
+import { PageHeader } from "../ui/components/PageHeader";
+import { PageTabs } from "../ui/components/PageTabs";
 import { ConfirmModal } from "../ui/components";
 import { showToast } from "../ui/components/Toast";
 import { UpstreamsTab } from "./upstreams-tab";
@@ -63,7 +66,7 @@ function StatusDot({ state }) {
   return (
     <span className="relative flex h-2 w-2" aria-hidden>
       {state === "ok" || state === "error" ? (
-        <span className={`absolute inline-flex h-full w-full animate-ping rounded-full opacity-75 ${color}`} />
+        <span className={`absolute inline-flex h-full w-full rounded-full opacity-25 ${color}`} />
       ) : null}
       <span className={`relative inline-flex h-2 w-2 rounded-full ${color}`} />
     </span>
@@ -95,7 +98,7 @@ function formatLatency(ms) {
 
 function MetricTile({ label, value, hint }) {
   return (
-    <Card>
+    <Card className="!p-3 sm:!p-4">
       <p className="text-xs font-semibold tracking-wide text-oai-gray-500 dark:text-oai-gray-400">{label}</p>
       <p className="mt-1.5 text-2xl font-semibold tabular-nums tracking-tight">{value}</p>
       {hint ? <p className="mt-1 text-xs text-oai-gray-400 dark:text-oai-gray-500">{hint}</p> : null}
@@ -105,6 +108,8 @@ function MetricTile({ label, value, hint }) {
 
 function CopyButton({ text }) {
   const [copied, setCopied] = useState(false);
+  const timeout = useRef(null);
+  useEffect(() => { return () => { clearTimeout(timeout.current); }; }, []);
   return (
     <button
       type="button"
@@ -114,12 +119,15 @@ function CopyButton({ text }) {
         try {
           await navigator.clipboard.writeText(text);
         } catch {
-          /* clipboard unavailable — feedback still shows the attempt */
+          setCopied(false);
+          showToast({ title: copy("shared.copy_failed"), type: "error" });
+          return;
         }
         setCopied(true);
-        setTimeout(() => setCopied(false), 1200);
+        clearTimeout(timeout.current);
+        timeout.current = setTimeout(() => setCopied(false), 1200);
       }}
-      className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-oai-gray-400 hover:bg-oai-gray-100 dark:hover:bg-oai-gray-800 hover:text-oai-black dark:hover:text-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500"
+      className="inline-flex h-10 w-10 sm:h-7 sm:w-7 shrink-0 items-center justify-center rounded-md text-oai-gray-400 hover:bg-oai-gray-100 dark:hover:bg-oai-gray-800 hover:text-oai-black dark:hover:text-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500"
     >
       {copied ? <Check className="h-3.5 w-3.5 text-oai-brand-600" /> : <CopyIcon className="h-3.5 w-3.5" />}
     </button>
@@ -130,7 +138,7 @@ function CopyButton({ text }) {
 // Overview tab
 // ---------------------------------------------------------------------------
 
-function OverviewTab({ status, onRefresh, onInstallCore }) {
+function OverviewTab({ status, statusError, onRefresh, onInstallCore, onSelectTab }) {
   const [overview, setOverview] = useState(null);
   const [actionBusy, setActionBusy] = useState(false);
   const [error, setError] = useState(null);
@@ -166,7 +174,9 @@ function OverviewTab({ status, onRefresh, onInstallCore }) {
   }, [status, onRefresh, refreshOverview]);
 
   const running = status?.core.running ?? false;
-  const endpoint = status ? `http://${status.core.host}:${status.core.port}` : "";
+  const connectHost = status && ["0.0.0.0", "::", "[::]"].includes(status.core.host)
+    ? window.location.hostname : status?.core.host;
+  const endpoint = status ? `http://${connectHost.includes(":") && !connectHost.startsWith("[") ? `[${connectHost}]` : connectHost}:${status.core.port}` : "";
   const timeline = overview?.timeline ?? [];
   const timelinePeak = Math.max(1, ...timeline.map((point) => point.total_tokens));
 
@@ -183,9 +193,9 @@ function OverviewTab({ status, onRefresh, onInstallCore }) {
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">
             <div className="flex items-center gap-2.5">
-              <StatusDot state={running ? "ok" : "idle"} />
+              <StatusDot state={statusError ? "warn" : running ? "ok" : "idle"} />
               <span className="text-base font-semibold">
-                {running ? copy("proxy.state.running") : copy("proxy.state.stopped")}
+                {!status ? copy(statusError ? "proxy.state.unknown" : "proxy.loading") : running ? copy("proxy.state.running") : copy("proxy.state.stopped")}
               </span>
               {status?.core.version ? (
                 <span className="rounded-md bg-oai-gray-100 dark:bg-oai-gray-800 px-1.5 py-0.5 text-xs font-medium text-oai-gray-500 dark:text-oai-gray-400">
@@ -194,7 +204,7 @@ function OverviewTab({ status, onRefresh, onInstallCore }) {
               ) : null}
             </div>
             <p className="mt-2 text-sm text-oai-gray-500 dark:text-oai-gray-400">
-              {status?.core.installed ? copy("proxy.core.installed_hint") : copy("proxy.core.missing_hint")}
+              {status ? (status.core.installed ? copy("proxy.core.installed_hint") : copy("proxy.core.missing_hint")) : copy("proxy.status.waiting")}
             </p>
             {running ? (
               <div className="mt-2.5 flex items-center gap-1.5 text-sm">
@@ -205,11 +215,12 @@ function OverviewTab({ status, onRefresh, onInstallCore }) {
             ) : null}
           </div>
           <div className="flex items-center gap-2">
-            {!status?.core.installed ? (
+            {!status ? null : !status.core.installed ? (
               <button
                 type="button"
                 onClick={onInstallCore}
-                className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-oai-brand-600 px-3.5 text-sm font-medium text-white transition-colors hover:bg-oai-brand-700 disabled:opacity-50"
+                disabled={!!statusError}
+                className="inline-flex h-10 items-center gap-1.5 rounded-lg bg-oai-brand-600 px-3.5 text-sm font-medium text-white transition-colors hover:bg-oai-brand-700 disabled:opacity-50"
               >
                 <Upload className="h-4 w-4" />
                 {copy("proxy.action.install_core")}
@@ -218,8 +229,8 @@ function OverviewTab({ status, onRefresh, onInstallCore }) {
               <button
                 type="button"
                 onClick={() => void toggleCore()}
-                disabled={actionBusy}
-                className={`inline-flex h-9 items-center gap-1.5 rounded-lg px-3.5 text-sm font-medium text-white transition-colors disabled:opacity-50 ${
+                disabled={actionBusy || !!statusError}
+                className={`inline-flex h-10 items-center gap-1.5 rounded-lg px-3.5 text-sm font-medium text-white transition-colors disabled:opacity-50 ${
                   running ? "bg-red-600 hover:bg-red-700" : "bg-oai-brand-600 hover:bg-oai-brand-700"
                 }`}
               >
@@ -253,8 +264,8 @@ function OverviewTab({ status, onRefresh, onInstallCore }) {
         ) : null}
       </Card>
 
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
-        <MetricTile label={copy("proxy.metric.requests")} value={fullTokens.format(overview?.total_requests ?? 0)} />
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+        <MetricTile label={copy("proxy.metric.requests")} value={overview ? fullTokens.format(overview.total_requests) : "—"} />
         <MetricTile
           label={copy("proxy.metric.success_rate")}
           value={overview?.success_rate != null ? `${overview.success_rate}%` : "—"}
@@ -264,7 +275,17 @@ function OverviewTab({ status, onRefresh, onInstallCore }) {
         <MetricTile label={copy("proxy.metric.avg_latency")} value={formatLatency(overview?.average_latency_ms)} />
       </div>
 
-      {timeline.length > 0 ? (
+      {overview?.total_requests === 0 && running && !statusError ? (
+        <Card>
+          <p className="text-sm font-semibold">{copy("proxy.setup.title")}</p>
+          <p className="mt-1 text-sm text-oai-gray-500 dark:text-oai-gray-400">{copy("proxy.setup.description")}</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button type="button" className="rounded-lg bg-oai-brand-600 px-3 py-2 text-sm font-medium text-white" onClick={() => onSelectTab("upstreams")}>{copy("proxy.setup.upstream")}</button>
+            <button type="button" className="rounded-lg border border-oai-gray-200 px-3 py-2 text-sm dark:border-oai-gray-700" onClick={() => onSelectTab("keys")}>{copy("proxy.setup.connect")}</button>
+          </div>
+        </Card>
+      ) : null}
+      {timeline.length > 0 && overview?.total_requests > 0 ? (
         <Card>
           <p className="text-xs font-semibold tracking-wide text-oai-gray-500 dark:text-oai-gray-400">
             {copy("proxy.metric.timeline_24h")}
@@ -338,10 +359,11 @@ function OverviewTab({ status, onRefresh, onInstallCore }) {
 // ---------------------------------------------------------------------------
 
 export function ProxyPage() {
-  const [tab, setTab] = useState(() => {
-    const hash = typeof window !== "undefined" ? window.location.hash.replace("#", "") : "";
-    return TABS.some((entry) => entry.id === hash) ? hash : "overview";
-  });
+  const location = useLocation();
+  const navigate = useNavigate();
+  const hash = location.hash.replace("#", "");
+  const tab = TABS.some((entry) => entry.id === hash) ? hash : "overview";
+  const [statusError, setStatusError] = useState(null);
   const [status, setStatus] = useState(null);
   // Core-binary install flow (EasyCLIProxyAPI's stop-and-update): confirm →
   // background task → progress dialog polling GET /api/proxy/install.
@@ -353,9 +375,9 @@ export function ProxyPage() {
   const loadStatus = useCallback(async (signal) => {
     try {
       const data = await proxyApi.status(signal);
-      if (!signal.aborted) setStatus(data);
-    } catch {
-      if (!signal.aborted) setStatus(null);
+      if (!signal.aborted) { setStatus(data); setStatusError(null); }
+    } catch (error) {
+      if (!signal.aborted) setStatusError(error instanceof Error ? error.message : String(error));
     }
   }, []);
 
@@ -415,56 +437,33 @@ export function ProxyPage() {
   }, [installActive, finishCoreInstall]);
 
   const selectTab = useCallback((next) => {
-    setTab(next);
-    if (typeof window !== "undefined") {
-      window.history.replaceState(null, "", `#${next}`);
-    }
-  }, []);
+    navigate({ pathname: location.pathname, search: location.search, hash: `#${next}` }, { replace: true });
+  }, [navigate, location.pathname, location.search]);
 
   return (
     <div className="flex flex-col flex-1 text-oai-black dark:text-oai-white font-oai antialiased">
-      <main className="flex-1 pt-8 sm:pt-10 pb-12 sm:pb-16">
+      <main className="flex-1 pt-6 sm:pt-8 pb-10 sm:pb-12">
         <div className="mx-auto max-w-6xl px-4 sm:px-6">
+          <PageHeader title={copy("nav.proxy")} description={copy("proxy.page.subtitle")} />
           <div className="mb-6">
-            <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight text-oai-black dark:text-white mb-3">
-              {copy("nav.proxy")}
-            </h1>
-            <p className="text-oai-gray-500 dark:text-oai-gray-400 text-sm sm:text-base">
-              {copy("proxy.page.subtitle")}
-            </p>
+            <PageTabs options={TABS.map((item) => ({ ...item, label: copy(item.labelKey) }))} value={tab} onChange={selectTab} label={copy("nav.proxy")} panelId="proxy-panel" />
           </div>
-
-          <div
-            role="tablist"
-            aria-label={copy("nav.proxy")}
-            className="mb-6 inline-flex max-w-full flex-wrap rounded-xl border border-oai-gray-200 dark:border-oai-gray-800 bg-oai-gray-50 dark:bg-oai-gray-800/60 p-1"
-          >
-            {TABS.map(({ id, labelKey, icon: Icon }) => (
-              <button
-                key={id}
-                role="tab"
-                aria-selected={tab === id}
-                type="button"
-                onClick={() => selectTab(id)}
-                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 ${
-                  tab === id
-                    ? "bg-white dark:bg-oai-gray-900 shadow-oai-sm text-oai-black dark:text-white"
-                    : "text-oai-gray-500 hover:text-oai-black dark:hover:text-white"
-                }`}
-              >
-                <Icon className="h-4 w-4" />
-                {copy(labelKey)}
-              </button>
-            ))}
-          </div>
-
-          {tab === "overview" ? <OverviewTab status={status} onRefresh={refreshStatus} onInstallCore={openCoreInstall} /> : null}
+          <section id="proxy-panel" role="tabpanel" aria-labelledby={`proxy-panel-${tab}`}>
+          {statusError ? (
+            <div role="alert" className="mb-4 flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <div className="min-w-0 flex-1"><p>{copy("proxy.status.failed")}</p><p className="mt-1 break-words text-xs">{statusError}</p></div>
+              <button type="button" className="shrink-0 rounded-lg px-2 py-1 font-medium" onClick={() => void refreshStatus()}>{copy("shared.action.retry")}</button>
+            </div>
+          ) : null}
+          {tab === "overview" ? <OverviewTab status={status} statusError={statusError} onRefresh={refreshStatus} onInstallCore={openCoreInstall} onSelectTab={selectTab} /> : null}
           {tab === "upstreams" ? <UpstreamsTab /> : null}
           {tab === "providers" ? <AuthFilesTab onDirty={refreshStatus} /> : null}
           {tab === "keys" ? <KeysTab status={status} /> : null}
           {tab === "aliases" ? <ModelAliasesTab /> : null}
           {tab === "requests" ? <RequestsTab /> : null}
-          {tab === "settings" ? <SettingsTab status={status} onRefresh={refreshStatus} onInstallCore={openCoreInstall} /> : null}
+          {tab === "settings" ? <SettingsTab status={statusError ? null : status} onRefresh={refreshStatus} onInstallCore={openCoreInstall} /> : null}
+          </section>
         </div>
       </main>
 

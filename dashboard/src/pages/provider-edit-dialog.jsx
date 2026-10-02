@@ -3,7 +3,8 @@ import { ChevronDown, ChevronRight, Download, ExternalLink, Eye, EyeOff, Wand2, 
 import { parse as tomlParse, stringify as tomlStringify } from "smol-toml";
 import { copy } from "../lib/copy";
 import { providerSwitchApi } from "../lib/provider-switch-api";
-import { Button } from "../ui/components";
+import { Button, ConfirmModal } from "../ui/components";
+import { ModalFrame } from "../ui/components/ModalFrame";
 import { showToast } from "../ui/components/Toast";
 import { EndpointSpeedTestDialog } from "./provider-speed-test";
 import { ProviderIconPicker, iconComponentFor } from "./provider-icon-picker";
@@ -392,8 +393,10 @@ export function ProviderEditDialog({
   onClose,
   onSaved,
   onError,
+  onDirtyChange,
 }) {
   const [selectedPresetId, setSelectedPresetId] = useState(null);
+  const [presetOpen, setPresetOpen] = useState(false);
   const [presetQuery, setPresetQuery] = useState("");
   const [sortAZ, setSortAZ] = useState(false);
   const [draft, setDraft] = useState({});
@@ -439,6 +442,17 @@ export function ProviderEditDialog({
   const [conflictPolicy, setConflictPolicy] = useState(null);
   const viewRequestRef = useRef(0);
 
+  const [initialSnapshot, setInitialSnapshot] = useState(null);
+  const [discardOpen, setDiscardOpen] = useState(false);
+  const snapshot = JSON.stringify({ name, category, notes, websiteUrl, icon, iconColor, meta, draft });
+  const dirty = open && initialSnapshot !== null && (snapshot !== initialSnapshot || !!rawError || !!codexAuthError || !!codexTomlError || !!envError);
+  useEffect(() => { onDirtyChange?.(dirty, saving); }, [dirty, saving, onDirtyChange]);
+  const requestClose = () => {
+    if (busy || savingRef.current) return;
+    if (dirty) setDiscardOpen(true);
+    else onClose();
+  };
+
   const isEdit = !!editing;
   const selectedPreset = useMemo(() => {
     return presets.find((preset) => preset.id === selectedPresetId) || null;
@@ -477,7 +491,7 @@ export function ProviderEditDialog({
   // three-way split on save). Only the latest request applies — preset picks
   // can race the fetch.
   const loadEditorView = useCallback(
-    (settingsConfig, opts) => {
+    (settingsConfig, opts, initial) => {
       const token = viewRequestRef.current + 1;
       viewRequestRef.current = token;
       setLoading(true);
@@ -487,6 +501,7 @@ export function ProviderEditDialog({
           if (viewRequestRef.current !== token) return;
           const full = viewToConfig(app, view);
           setDraft(full);
+          if (initial) setInitialSnapshot(JSON.stringify({ ...initial, draft: full }));
           if (app === "claude") {
             setClaudeApiKeyName("ANTHROPIC_API_KEY" in (full.env || {}) ? "ANTHROPIC_API_KEY" : "ANTHROPIC_AUTH_TOKEN");
           }
@@ -498,6 +513,7 @@ export function ProviderEditDialog({
           if (viewRequestRef.current !== token) return;
           // No live file (or it does not parse): fall back to editing the
           // row fragment only, like cc-switch's toast + fallback.
+          if (initial) setInitialSnapshot(JSON.stringify({ ...initial, draft: settingsConfig ?? {} }));
           setEditorBase(null);
           setInactive([]);
           setEditorFallback(
@@ -515,6 +531,7 @@ export function ProviderEditDialog({
     // cc-switch's handlePresetChange: picking a preset resets the basic
     // fields to the preset's values, not only the config template. The
     // editor view is re-projected for the preset's draft.
+    setPresetOpen(false);
     setSelectedPresetId(preset.id);
     setDraft(JSON.parse(JSON.stringify(preset.settingsConfig ?? {})));
     setCategory(preset.group === "official" ? "official" : "custom");
@@ -535,6 +552,14 @@ export function ProviderEditDialog({
   // editor blank).
   useEffect(() => {
     if (!open) return;
+    setPresetOpen(false);
+    setInitialSnapshot(null);
+    setDiscardOpen(false);
+    const initial = {
+      name: editing?.name || "", category: editing?.category || "custom",
+      notes: editing?.notes || "", websiteUrl: editing?.websiteUrl || "",
+      icon: editing?.icon || "", iconColor: editing?.iconColor || "", meta: { ...(editing?.meta || {}) },
+    };
     setClaudeApiKeyName("ANTHROPIC_AUTH_TOKEN");
     setAdvancedOpen(false);
     setLoading(false);
@@ -576,7 +601,7 @@ export function ProviderEditDialog({
       // cc-switch's editor view: the dialog shows the full config file as it
       // would look after switching to this provider (floor keys from the
       // row, everything else from the live files).
-      loadEditorView(editing.settingsConfig ?? {}, { id: editing.id, category: editing.category });
+      loadEditorView(editing.settingsConfig ?? {}, { id: editing.id, category: editing.category }, initial);
     } else {
       setName("");
       setCategory("custom");
@@ -591,7 +616,7 @@ export function ProviderEditDialog({
       const first = presets.find((preset) => preset.group === "custom") || presets[0] || null;
       setSelectedPresetId(first ? first.id : null);
       setDraft(first ? JSON.parse(JSON.stringify(first.settingsConfig ?? {})) : {});
-      loadEditorView(first ? first.settingsConfig ?? {} : {});
+      loadEditorView(first ? first.settingsConfig ?? {} : {}, undefined, initial);
     }
     return () => { viewRequestRef.current += 1; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1085,7 +1110,7 @@ export function ProviderEditDialog({
         setConflictKeys(conflicts);
         return;
       }
-      onError(err instanceof Error ? err.message : String(err));
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       savingRef.current = false;
       setSaving(false);
@@ -1158,14 +1183,9 @@ export function ProviderEditDialog({
   const codexAdvancedOpen = advancedOpen && app === "codex";
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4 backdrop-blur-[2px]">
-      <div
-        className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-oai-gray-200 dark:bg-oai-gray-950 dark:ring-oai-gray-800"
-        role="dialog"
-        aria-modal="true"
-        aria-label={isEdit ? copy("pswitch.provider.dialog.edit_title") : copy("pswitch.provider.dialog.add_title")}
-      >
-        <div className="flex items-start justify-between gap-3 border-b border-oai-gray-100 px-5 py-4 dark:border-oai-gray-800">
+    <ModalFrame open={open} onClose={requestClose} busy={busy || saving}
+      label={isEdit ? copy("pswitch.provider.dialog.edit_title") : copy("pswitch.provider.dialog.add_title")}>
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-oai-gray-100 px-5 py-4 dark:border-oai-gray-800">
           <div className="min-w-0">
             <h2 className="text-base font-semibold text-oai-black dark:text-white">
               {isEdit ? copy("pswitch.provider.dialog.edit_title") : copy("pswitch.provider.dialog.add_title")}
@@ -1173,8 +1193,8 @@ export function ProviderEditDialog({
           </div>
           <button
             type="button"
-            onClick={onClose}
-            disabled={busy}
+            onClick={requestClose}
+            disabled={busy || saving}
             className="shrink-0 rounded-md p-1.5 text-oai-gray-400 transition-colors hover:bg-oai-gray-100 hover:text-oai-black disabled:opacity-50 dark:hover:bg-oai-gray-800 dark:hover:text-white"
             aria-label={copy("pswitch.action.close")}
           >
@@ -1182,7 +1202,8 @@ export function ProviderEditDialog({
           </button>
         </div>
 
-        <div className="space-y-5 overflow-y-auto px-5 py-4">
+        <div className="min-h-0 flex-1 overflow-y-auto">
+        <fieldset disabled={loading || saving || busy} className="min-w-0 space-y-5 px-5 py-4">
           {loading ? (
             <p className="text-sm text-oai-gray-400 dark:text-oai-gray-500">{copy("pswitch.provider.loading_live")}</p>
           ) : null}
@@ -1193,7 +1214,11 @@ export function ProviderEditDialog({
           ) : null}
 
           {showPresetGrid ? (
-            <div>
+            <details open={presetOpen} onToggle={(event) => setPresetOpen(event.currentTarget.open)} className="rounded-xl border border-oai-gray-200 px-3 py-2 dark:border-oai-gray-800">
+              <summary className="flex min-h-10 cursor-pointer list-none items-center justify-between gap-3 text-sm">
+                <span className="min-w-0 truncate font-medium">{selectedPreset ? (selectedPreset.nameKey ? copy(selectedPreset.nameKey) : selectedPreset.name) : copy("pswitch.provider.preset")}</span>
+                <span className="inline-flex shrink-0 items-center gap-1 text-xs text-oai-gray-500">{copy("pswitch.preset.change")}<ChevronDown className="h-4 w-4" /></span>
+              </summary>
               <div className="mb-2 flex items-center justify-between gap-2">
                 <label className="block text-sm font-medium text-oai-gray-700 dark:text-oai-gray-300">
                   {copy("pswitch.provider.preset")}
@@ -1255,33 +1280,9 @@ export function ProviderEditDialog({
                   );
                 })}
               </div>
-            </div>
+            </details>
           ) : null}
 
-          {/* Basic info (cc-switch's BasicFormFields): centered icon picker,
-              then name + notes, then website URL — always ahead of the
-              credential fields. */}
-          <div>
-            <div className="mb-4 flex justify-center">
-              <button
-                type="button"
-                onClick={() => setIconPickerOpen(true)}
-                className={`flex h-20 w-20 items-center justify-center rounded-xl border-2 bg-oai-gray-50 transition-colors hover:border-oai-brand-500 dark:bg-oai-gray-900 ${
-                  avatarIconName ? "border-oai-gray-200 dark:border-oai-gray-800" : "border-dashed border-oai-gray-300 dark:border-oai-gray-700"
-                }`}
-                title={icon ? copy("pswitch.icon.change") : copy("pswitch.icon.select")}
-                aria-label={icon ? copy("pswitch.icon.change") : copy("pswitch.icon.select")}
-              >
-                {avatarIconName ? (
-                  <PresetIcon icon={avatarIconName} color={iconColor} className="h-10 w-10" />
-                ) : (
-                  <span className={`text-xl font-semibold ${presetAvatarClass(iconColor)}`}>
-                    {name.trim() ? name.trim().charAt(0).toUpperCase() : "P"}
-                  </span>
-                )}
-              </button>
-            </div>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <FieldLabel label={copy("pswitch.provider.name")} />
                 <input
@@ -1293,30 +1294,6 @@ export function ProviderEditDialog({
                   className="w-full rounded-lg border border-oai-gray-200 bg-white px-3 py-2 text-sm text-oai-black focus:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 dark:border-oai-gray-800 dark:bg-oai-gray-900 dark:text-white"
                 />
               </div>
-              <div>
-                <FieldLabel label={copy("pswitch.provider.notes")} />
-                <input
-                  type="text"
-                  value={notes}
-                  onChange={(event) => setNotes(event.target.value)}
-                  placeholder={copy("pswitch.provider.notes_placeholder")}
-                  aria-label={copy("pswitch.provider.notes")}
-                  className="w-full rounded-lg border border-oai-gray-200 bg-white px-3 py-2 text-sm text-oai-black focus:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 dark:border-oai-gray-800 dark:bg-oai-gray-900 dark:text-white"
-                />
-              </div>
-            </div>
-            <div className="mt-4">
-              <FieldLabel label={copy("pswitch.provider.website_url")} />
-              <input
-                type="url"
-                value={websiteUrl}
-                onChange={(event) => setWebsiteUrl(event.target.value)}
-                placeholder={copy("pswitch.provider.website_placeholder")}
-                aria-label={copy("pswitch.provider.website_url")}
-                className="w-full rounded-lg border border-oai-gray-200 bg-white px-3 py-2 text-sm text-oai-black focus:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 dark:border-oai-gray-800 dark:bg-oai-gray-900 dark:text-white"
-              />
-            </div>
-          </div>
 
           {fields.length ? (
             <div className="space-y-3">
@@ -1743,6 +1720,51 @@ export function ProviderEditDialog({
             </div>
           ) : null}
 
+          <details className="rounded-xl border border-oai-gray-200 p-3 dark:border-oai-gray-800">
+            <summary className="min-h-10 cursor-pointer text-sm font-medium leading-10">{copy("pswitch.provider.appearance")}</summary>
+            <div className="mb-4 flex justify-start">
+              <button
+                type="button"
+                onClick={() => setIconPickerOpen(true)}
+                className={`flex h-12 w-12 items-center justify-center rounded-xl border-2 bg-oai-gray-50 transition-colors hover:border-oai-brand-500 dark:bg-oai-gray-900 ${
+                  avatarIconName ? "border-oai-gray-200 dark:border-oai-gray-800" : "border-dashed border-oai-gray-300 dark:border-oai-gray-700"
+                }`}
+                title={icon ? copy("pswitch.icon.change") : copy("pswitch.icon.select")}
+                aria-label={icon ? copy("pswitch.icon.change") : copy("pswitch.icon.select")}
+              >
+                {avatarIconName ? (
+                  <PresetIcon icon={avatarIconName} color={iconColor} className="h-6 w-6" />
+                ) : (
+                  <span className={`text-xl font-semibold ${presetAvatarClass(iconColor)}`}>
+                    {name.trim() ? name.trim().charAt(0).toUpperCase() : "P"}
+                  </span>
+                )}
+              </button>
+            </div>
+              <div>
+                <FieldLabel label={copy("pswitch.provider.notes")} />
+                <input
+                  type="text"
+                  value={notes}
+                  onChange={(event) => setNotes(event.target.value)}
+                  placeholder={copy("pswitch.provider.notes_placeholder")}
+                  aria-label={copy("pswitch.provider.notes")}
+                  className="w-full rounded-lg border border-oai-gray-200 bg-white px-3 py-2 text-sm text-oai-black focus:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 dark:border-oai-gray-800 dark:bg-oai-gray-900 dark:text-white"
+                />
+              </div>
+            <div className="mt-4">
+              <FieldLabel label={copy("pswitch.provider.website_url")} />
+              <input
+                type="url"
+                value={websiteUrl}
+                onChange={(event) => setWebsiteUrl(event.target.value)}
+                placeholder={copy("pswitch.provider.website_placeholder")}
+                aria-label={copy("pswitch.provider.website_url")}
+                className="w-full rounded-lg border border-oai-gray-200 bg-white px-3 py-2 text-sm text-oai-black focus:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 dark:border-oai-gray-800 dark:bg-oai-gray-900 dark:text-white"
+              />
+            </div>
+          </details>
+
           {showCodexEditors ? (
             <div className="space-y-4">
               <div>
@@ -1915,11 +1937,13 @@ export function ProviderEditDialog({
               {error}
             </p>
           ) : null}
+        </fieldset>
         </div>
 
-        <div className="flex items-center justify-end gap-2 border-t border-oai-gray-100 px-5 py-3 dark:border-oai-gray-800">
-          <div className="flex shrink-0 gap-2">
-            <Button variant="secondary" size="sm" disabled={busy} onClick={onClose}>
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-oai-gray-100 px-5 py-3 dark:border-oai-gray-800">
+          <p className="min-w-0 flex-1 basis-48 text-xs leading-5 text-oai-gray-500 dark:text-oai-gray-400">{copy(isEdit && appState?.current === editing?.id ? "pswitch.provider.save_effect_active" : "pswitch.provider.save_effect")}</p>
+          <div className="ml-auto flex shrink-0 gap-2">
+            <Button variant="secondary" size="sm" disabled={busy || saving} onClick={requestClose}>
               {copy("pswitch.action.cancel")}
             </Button>
             <Button size="sm" disabled={busy || loading || saving || !name.trim()} onClick={() => void save(false)}>
@@ -1927,7 +1951,10 @@ export function ProviderEditDialog({
             </Button>
           </div>
         </div>
-      </div>
+      <ConfirmModal open={discardOpen}
+        title={copy("shared.unsaved.title")} description={copy("shared.unsaved.description")}
+        confirmLabel={copy("shared.unsaved.discard")} cancelLabel={copy("shared.unsaved.keep_editing")}
+        onConfirm={() => { setDiscardOpen(false); onClose(); }} onCancel={() => setDiscardOpen(false)} />
 
       <ProviderIconPicker
         open={iconPickerOpen}
@@ -1948,7 +1975,7 @@ export function ProviderEditDialog({
         presetCandidates={endpointCandidates}
         onClose={closeSpeedTest}
       />
-    </div>
+    </ModalFrame>
   );
 }
 

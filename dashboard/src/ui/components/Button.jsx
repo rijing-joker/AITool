@@ -1,4 +1,5 @@
 import React from "react";
+import { cn } from "../../lib/cn";
 
 /**
  * Button - OpenAI 风格的按钮组件
@@ -23,7 +24,7 @@ export function Button({
   ...props
 }) {
   const baseStyles =
-    "inline-flex items-center justify-center font-medium transition-all duration-200 rounded-md focus:outline-none focus:ring-2 focus:ring-oai-blue/30 active:scale-[0.98] active:duration-100";
+    "inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap font-medium transition-all duration-200 motion-reduce:transition-none rounded-lg focus:outline-none focus:ring-2 focus:ring-oai-blue/30 active:scale-[0.98] active:duration-100";
 
   const variantStyles = {
     primary:
@@ -35,7 +36,7 @@ export function Button({
   };
 
   const sizeStyles = {
-    sm: "h-8 px-3 text-sm",
+    sm: "h-10 sm:h-8 px-3 text-sm",
     md: "h-10 px-4 text-sm",
     lg: "h-12 px-6 text-base",
   };
@@ -44,7 +45,7 @@ export function Button({
     ? "cursor-not-allowed opacity-60"
     : "cursor-pointer";
 
-  const mergedClassName = `${baseStyles} ${variantStyles[variant]} ${sizeStyles[size]} ${disabledStyles} ${className}`;
+  const mergedClassName = cn(baseStyles, variantStyles[variant], sizeStyles[size], disabledStyles, className);
 
   return (
     <Component

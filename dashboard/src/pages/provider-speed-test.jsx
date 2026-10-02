@@ -1,3 +1,4 @@
+import { ModalFrame } from "../ui/components/ModalFrame";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, LoaderCircle, Plus, X } from "lucide-react";
 import { copy } from "../lib/copy";
@@ -118,13 +119,7 @@ export function EndpointSpeedTestDialog({ open, app, currentUrl, presetCandidate
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/40 p-4 backdrop-blur-[2px]">
-      <div
-        className="flex max-h-[80vh] w-full max-w-xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-oai-gray-200 dark:bg-oai-gray-950 dark:ring-oai-gray-800"
-        role="dialog"
-        aria-modal="true"
-        aria-label={copy("pswitch.speed.title")}
-      >
+    <ModalFrame open={open} onClose={() => finish(false)} label={copy("pswitch.speed.title")} className="max-w-xl">
         <div className="flex items-start justify-between gap-3 border-b border-oai-gray-100 px-5 py-4 dark:border-oai-gray-800">
           <div className="min-w-0">
             <h2 className="text-base font-semibold text-oai-black dark:text-white">{copy("pswitch.speed.title")}</h2>
@@ -255,8 +250,7 @@ export function EndpointSpeedTestDialog({ open, app, currentUrl, presetCandidate
             </Button>
           </div>
         </div>
-      </div>
-    </div>
+    </ModalFrame>
   );
 }
 

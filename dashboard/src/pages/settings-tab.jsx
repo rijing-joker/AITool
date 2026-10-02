@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { copy } from "../lib/copy";
 import { proxyApi } from "../lib/proxy-api";
 import { Button, Card } from "../ui/components";
+import { UnsavedChangesGuard } from "../ui/components/UnsavedChangesGuard";
 
 // ---------------------------------------------------------------------------
 // Settings tab (设置) — EasyCLIProxyAPI's ConfigPanel general/network/routing/
@@ -26,6 +27,7 @@ function Toggle({ checked, onChange, label, hint, disabled }) {
         type="button"
         role="switch"
         aria-checked={checked}
+        aria-label={label}
         disabled={disabled}
         onClick={() => onChange(!checked)}
         className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 disabled:opacity-50 ${
@@ -67,6 +69,33 @@ const integerOrNull = (value) => {
   return Number.isSafeInteger(parsed) ? parsed : undefined;
 };
 
+function normalizedDrafts(next) {
+  const read = (key, fallback) => next[key] ?? fallback;
+  return {
+    network: {
+      host: String(read("server.host", "127.0.0.1")),
+      port: String(read("server.port", 8318)),
+      proxyUrl: String(read("proxy-url", "")),
+    },
+    routing: {
+      strategy: String(read("routing.strategy", "round-robin")),
+      sessionAffinity: Boolean(read("routing.session-affinity", false)),
+      sessionTtl: String(read("routing.session-affinity-ttl", "")),
+      disableCooling: Boolean(read("routing.cooldown.disable-cooling", false)),
+      requestRetry: String(read("routing.retry.request-retry", 0)),
+      maxRetryCredentials: String(read("routing.retry.max-retry-credentials", 0)),
+      maxRetryInterval: String(read("routing.retry.max-retry-interval", 30)),
+      streamingBootstrapRetries: String(read("routing.retry.streaming-bootstrap-retries", 0)),
+    },
+    diagnostics: {
+      debug: Boolean(read("debug", false)),
+      loggingToFile: Boolean(read("logging-to-file", false)),
+      usageStatistics: Boolean(read("observability.usage.usage-statistics-enabled", true)),
+      redisRetention: String(read("observability.usage.redis-usage-queue-retention-seconds", 3600)),
+    },
+  };
+}
+
 export function SettingsTab({ status, onRefresh, onInstallCore }) {
   const [fields, setFields] = useState(null);
   const [loadError, setLoadError] = useState(null);
@@ -79,7 +108,10 @@ export function SettingsTab({ status, onRefresh, onInstallCore }) {
   }, [status?.core?.autoStart]);
   const [yaml, setYaml] = useState(null);
   const [yamlDirty, setYamlDirty] = useState(false);
-  const dirtyRef = useRef(new Set());
+  const [yamlError, setYamlError] = useState(null);
+  const yamlReadVersion = useRef(0);
+  const [savedDrafts, setSavedDrafts] = useState(null);
+  const busyRef = useRef(false);
 
   // Drafts (strings for inputs; null = not loaded)
   const [host, setHost] = useState("");
@@ -98,23 +130,36 @@ export function SettingsTab({ status, onRefresh, onInstallCore }) {
   const [usageStatistics, setUsageStatistics] = useState(true);
   const [redisRetention, setRedisRetention] = useState("");
 
+  const drafts = {
+    network: { host, port, proxyUrl },
+    routing: { strategy, sessionAffinity, sessionTtl, disableCooling, requestRetry, maxRetryCredentials, maxRetryInterval, streamingBootstrapRetries },
+    diagnostics: { debug, loggingToFile, usageStatistics, redisRetention },
+  };
+  const dirtySections = Object.keys(drafts).filter((section) => savedDrafts &&
+    JSON.stringify(drafts[section]) !== JSON.stringify(savedDrafts[section]));
+  const structuredDirty = dirtySections.length > 0;
+  const revertSection = (section) => {
+    const setters = { host: setHost, port: setPort, proxyUrl: setProxyUrl, strategy: setStrategy, sessionAffinity: setSessionAffinity, sessionTtl: setSessionTtl, disableCooling: setDisableCooling, requestRetry: setRequestRetry, maxRetryCredentials: setMaxRetryCredentials, maxRetryInterval: setMaxRetryInterval, streamingBootstrapRetries: setStreamingBootstrapRetries, debug: setDebug, loggingToFile: setLoggingToFile, usageStatistics: setUsageStatistics, redisRetention: setRedisRetention };
+    for (const [key, value] of Object.entries(savedDrafts[section])) setters[key](value);
+  };
   const applyFields = useCallback((next) => {
-    const read = (key, fallback) => (next[key] === undefined || next[key] === null ? fallback : next[key]);
-    setHost(String(read("server.host", "127.0.0.1")));
-    setPort(String(read("server.port", 8318)));
-    setProxyUrl(String(read("proxy-url", "")));
-    setStrategy(String(read("routing.strategy", "round-robin")));
-    setSessionAffinity(Boolean(read("routing.session-affinity", false)));
-    setSessionTtl(String(read("routing.session-affinity-ttl", "")));
-    setDisableCooling(Boolean(read("routing.cooldown.disable-cooling", false)));
-    setRequestRetry(String(read("routing.retry.request-retry", 0)));
-    setMaxRetryCredentials(String(read("routing.retry.max-retry-credentials", 0)));
-    setMaxRetryInterval(String(read("routing.retry.max-retry-interval", 30)));
-    setStreamingBootstrapRetries(String(read("routing.retry.streaming-bootstrap-retries", 0)));
-    setDebug(Boolean(read("debug", false)));
-    setLoggingToFile(Boolean(read("logging-to-file", false)));
-    setUsageStatistics(Boolean(read("observability.usage.usage-statistics-enabled", true)));
-    setRedisRetention(String(read("observability.usage.redis-usage-queue-retention-seconds", 3600)));
+    const normalized = normalizedDrafts(next);
+    setHost(normalized.network.host);
+    setPort(normalized.network.port);
+    setProxyUrl(normalized.network.proxyUrl);
+    setStrategy(normalized.routing.strategy);
+    setSessionAffinity(normalized.routing.sessionAffinity);
+    setSessionTtl(normalized.routing.sessionTtl);
+    setDisableCooling(normalized.routing.disableCooling);
+    setRequestRetry(normalized.routing.requestRetry);
+    setMaxRetryCredentials(normalized.routing.maxRetryCredentials);
+    setMaxRetryInterval(normalized.routing.maxRetryInterval);
+    setStreamingBootstrapRetries(normalized.routing.streamingBootstrapRetries);
+    setDebug(normalized.diagnostics.debug);
+    setLoggingToFile(normalized.diagnostics.loggingToFile);
+    setUsageStatistics(normalized.diagnostics.usageStatistics);
+    setRedisRetention(normalized.diagnostics.redisRetention);
+    setSavedDrafts(normalized);
   }, []);
 
   const loadFields = useCallback(async () => {
@@ -133,22 +178,37 @@ export function SettingsTab({ status, onRefresh, onInstallCore }) {
     void loadFields();
   }, [loadFields]);
 
-  useEffect(() => {
-    let alive = true;
-    proxyApi
-      .configYaml()
-      .then((data) => {
-        if (alive) setYaml(data.yaml);
-      })
-      .catch((e) => {
-        if (alive) setLoadError(e instanceof Error ? e.message : String(e));
-      });
-    return () => {
-      alive = false;
-    };
+  const loadYaml = useCallback(async () => {
+    const version = ++yamlReadVersion.current;
+    try {
+      const data = await proxyApi.configYaml();
+      if (version !== yamlReadVersion.current) return;
+      setYaml(data.yaml);
+      setYamlDirty(false);
+      setYamlError(null);
+    } catch (error) {
+      if (version === yamlReadVersion.current) {
+        setYaml(null);
+        setYamlError(error instanceof Error ? error.message : String(error));
+      }
+    }
   }, []);
+  useEffect(() => {
+    void loadYaml();
+    return () => { yamlReadVersion.current += 1; };
+  }, [loadYaml]);
+  const revertYaml = async () => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusyField("yaml-read");
+    try { await loadYaml(); }
+    finally { busyRef.current = false; setBusyField(""); }
+  };
 
   const patchFields = async (section, patch) => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    const submittedDraft = drafts[section];
     setBusyField(section);
     setError(null);
     setNotice(null);
@@ -161,21 +221,27 @@ export function SettingsTab({ status, onRefresh, onInstallCore }) {
       });
       const data = await response.json().catch(() => null);
       if (!data?.ok) throw new Error(data?.error || `HTTP ${response.status}`);
-      applyFields(data.fields);
-      dirtyRef.current.clear();
+      setFields(data.fields);
+      setSavedDrafts((previous) => ({ ...previous, [section]: submittedDraft }));
+      // Keep the YAML view in sync; it cannot be edited while a section saves.
+      await loadYaml();
+      onRefresh?.();
       setNotice(copy("proxy.settings.sectionSaved"));
       return true;
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-      await loadFields();
-      dirtyRef.current.clear();
+      // Preserve every draft on failure so the user can retry.
       return false;
     } finally {
+      busyRef.current = false;
       setBusyField("");
     }
   };
 
   const toggleAutoStart = async () => {
+    if (busyRef.current) return;
+    busyRef.current = true;
+    setBusyField("autostart");
     const next = !autoStart;
     setAutoStart(next);
     try {
@@ -183,6 +249,9 @@ export function SettingsTab({ status, onRefresh, onInstallCore }) {
     } catch (e) {
       setAutoStart(!next);
       setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      busyRef.current = false;
+      setBusyField("");
     }
   };
 
@@ -211,6 +280,7 @@ export function SettingsTab({ status, onRefresh, onInstallCore }) {
 
   return (
     <div className="flex flex-col gap-4">
+      <UnsavedChangesGuard dirty={structuredDirty || yamlDirty} busy={busyField !== ""} />
       {loadError || error ? (
         <div className="flex items-start gap-2 rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-3.5 py-2.5 text-sm text-amber-800 dark:text-amber-300">
           <span className="break-words">{error || loadError}</span>
@@ -224,6 +294,7 @@ export function SettingsTab({ status, onRefresh, onInstallCore }) {
 
       <Card>
         <Toggle
+          disabled={!status || busyField !== ""}
           checked={autoStart}
           onChange={() => void toggleAutoStart()}
           label={copy("proxy.settings.autostart")}
@@ -238,12 +309,12 @@ export function SettingsTab({ status, onRefresh, onInstallCore }) {
             <p className="mt-1 text-xs text-oai-gray-500 dark:text-oai-gray-400">
               {status?.core.version
                 ? copy("proxy.settings.core_version", { version: status.core.version })
-                : copy("proxy.core.missing_hint")}
+                : !status ? copy("proxy.state.unknown") : copy("proxy.core.missing_hint")}
             </p>
           </div>
           <Button
             variant="secondary"
-            disabled={busyField !== ""}
+            disabled={busyField !== "" || !status}
             onClick={onInstallCore}
           >
             {copy("proxy.settings.fetch_core")}
@@ -251,6 +322,7 @@ export function SettingsTab({ status, onRefresh, onInstallCore }) {
         </div>
       </Card>
 
+      <fieldset disabled={busyField !== "" || fields === null || yamlDirty} className="min-w-0 space-y-4">
       {/* Network (server.host / server.port / proxy-url) */}
       <Card>
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -258,8 +330,10 @@ export function SettingsTab({ status, onRefresh, onInstallCore }) {
             <p className="text-sm font-semibold">{copy("proxy.settings.network.title")}</p>
             <p className="mt-1 text-xs text-oai-gray-500 dark:text-oai-gray-400">{copy("proxy.settings.network.hint")}</p>
           </div>
+          <div className="flex items-center gap-2">
+            {dirtySections.includes("network") ? <Button variant="ghost" size="sm" onClick={() => revertSection("network")}>{copy("proxy.action.revert")}</Button> : null}
           <Button
-            disabled={Boolean(portError || hostError) || busyField !== "" || fields === null}
+            disabled={Boolean(portError || hostError) || busyField !== "" || fields === null || !dirtySections.includes("network")}
             onClick={() => void patchFields("network", {
               "server.host": host.trim(),
               "server.port": portValue,
@@ -268,6 +342,7 @@ export function SettingsTab({ status, onRefresh, onInstallCore }) {
           >
             {busyField === "network" ? copy("proxy.settings.saving") : copy("proxy.action.save_config")}
           </Button>
+          </div>
         </div>
         <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
           <label className="block space-y-1">
@@ -304,8 +379,10 @@ export function SettingsTab({ status, onRefresh, onInstallCore }) {
             <p className="text-sm font-semibold">{copy("proxy.settings.routing.title")}</p>
             <p className="mt-1 text-xs text-oai-gray-500 dark:text-oai-gray-400">{copy("proxy.settings.routing.hint")}</p>
           </div>
+          <div className="flex items-center gap-2">
+            {dirtySections.includes("routing") ? <Button variant="ghost" size="sm" onClick={() => revertSection("routing")}>{copy("proxy.action.revert")}</Button> : null}
           <Button
-            disabled={retryErrors.some(Boolean) || busyField !== "" || fields === null}
+            disabled={retryErrors.some(Boolean) || busyField !== "" || fields === null || !dirtySections.includes("routing")}
             onClick={() => void patchFields("routing", {
               ...(strategy === "round-robin" ? { "routing.strategy": null } : { "routing.strategy": strategy }),
               "routing.session-affinity": sessionAffinity,
@@ -319,6 +396,7 @@ export function SettingsTab({ status, onRefresh, onInstallCore }) {
           >
             {busyField === "routing" ? copy("proxy.settings.saving") : copy("proxy.action.save_config")}
           </Button>
+          </div>
         </div>
         <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
           <label className="block space-y-1">
@@ -393,8 +471,10 @@ export function SettingsTab({ status, onRefresh, onInstallCore }) {
             <p className="text-sm font-semibold">{copy("proxy.settings.diagnostics.title")}</p>
             <p className="mt-1 text-xs text-oai-gray-500 dark:text-oai-gray-400">{copy("proxy.settings.diagnostics.hint")}</p>
           </div>
+          <div className="flex items-center gap-2">
+            {dirtySections.includes("diagnostics") ? <Button variant="ghost" size="sm" onClick={() => revertSection("diagnostics")}>{copy("proxy.action.revert")}</Button> : null}
           <Button
-            disabled={Boolean(redisError) || busyField !== "" || fields === null}
+            disabled={Boolean(redisError) || busyField !== "" || fields === null || !dirtySections.includes("diagnostics")}
             onClick={() => void patchFields("diagnostics", {
               debug,
               "logging-to-file": loggingToFile,
@@ -404,6 +484,7 @@ export function SettingsTab({ status, onRefresh, onInstallCore }) {
           >
             {busyField === "diagnostics" ? copy("proxy.settings.saving") : copy("proxy.action.save_config")}
           </Button>
+          </div>
         </div>
         <div className="mt-3 space-y-3">
           <Toggle checked={debug} onChange={setDebug} label={copy("proxy.settings.diagnostics.debug")} hint={copy("proxy.settings.diagnostics.debugHint")} />
@@ -419,42 +500,41 @@ export function SettingsTab({ status, onRefresh, onInstallCore }) {
         </div>
       </Card>
 
+      </fieldset>
+
       {/* Raw YAML (advanced escape hatch) */}
       <Card>
+        <p className="mb-3 text-xs text-oai-gray-500 dark:text-oai-gray-400">{copy("proxy.settings.edit_mode_hint")}</p>
         <div className="flex items-center justify-between gap-3">
           <p className="text-sm font-semibold">{copy("proxy.settings.config")}</p>
           <div className="flex items-center gap-2">
             {yamlDirty ? (
               <button
                 type="button"
-                onClick={() => {
-                  if (yaml === null) return;
-                  proxyApi
-                    .configYaml()
-                    .then((data) => {
-                      setYaml(data.yaml);
-                      setYamlDirty(false);
-                    })
-                    .catch(() => {});
-                }}
+                disabled={busyField !== ""}
+                onClick={() => void revertYaml()}
                 className="text-xs font-medium text-oai-gray-500 hover:text-oai-black dark:hover:text-white"
               >
                 {copy("proxy.action.revert")}
               </button>
             ) : null}
             <Button
-              disabled={!yamlDirty || busyField !== ""}
+              disabled={!yamlDirty || busyField !== "" || structuredDirty}
               onClick={async () => {
-                if (yaml === null) return;
+                if (yaml === null || busyRef.current) return;
+                busyRef.current = true;
                 setBusyField("yaml");
                 setError(null);
                 try {
                   await proxyApi.putConfigYaml(yaml);
                   setYamlDirty(false);
+                  await loadFields();
+                  onRefresh?.();
                   setNotice(copy("proxy.settings.config_saved"));
                 } catch (e) {
                   setError(e instanceof Error ? e.message : String(e));
                 } finally {
+                  busyRef.current = false;
                   setBusyField("");
                 }
               }}
@@ -463,7 +543,13 @@ export function SettingsTab({ status, onRefresh, onInstallCore }) {
             </Button>
           </div>
         </div>
+        {yamlError ? <div role="alert" className="mt-3 flex items-center justify-between gap-3 text-sm text-amber-700 dark:text-amber-300">
+          <span className="break-words">{yamlError}</span>
+          <Button size="sm" variant="secondary" disabled={busyField !== ""} onClick={() => void revertYaml()}>{copy("shared.action.retry")}</Button>
+        </div> : null}
         <textarea
+          aria-label={copy("proxy.settings.config")}
+          disabled={structuredDirty || busyField !== "" || yaml === null}
           value={yaml ?? ""}
           onChange={(event) => {
             setYaml(event.currentTarget.value);

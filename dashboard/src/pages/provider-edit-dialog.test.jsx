@@ -99,3 +99,18 @@ it("ignores the previous editor response after closing and reopening", async () 
   await act(async () => stale.resolve({ settings: base }));
   expect(JSON.parse(screen.getByRole("textbox", { name: "pswitch.provider.config" }).value)).toEqual(freshConfig);
 });
+
+it("keeps a dirty draft when closing is canceled and discards only after confirmation", async () => {
+  const callbacks = props();
+  render(<ProviderEditDialog {...callbacks} />);
+  const name = screen.getByRole("textbox", { name: "pswitch.provider.name" });
+  await waitFor(() => expect(name).toBeEnabled());
+  fireEvent.change(name, { target: { value: "Unsaved name" } });
+  fireEvent.click(screen.getByRole("button", { name: "pswitch.action.close" }));
+  expect(callbacks.onClose).not.toHaveBeenCalled();
+  fireEvent.click(await screen.findByRole("button", { name: "shared.unsaved.keep_editing" }));
+  expect(name).toHaveValue("Unsaved name");
+  fireEvent.click(screen.getByRole("button", { name: "pswitch.action.close" }));
+  fireEvent.click(await screen.findByRole("button", { name: "shared.unsaved.discard" }));
+  expect(callbacks.onClose).toHaveBeenCalledTimes(1);
+});

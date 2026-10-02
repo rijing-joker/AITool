@@ -1,3 +1,4 @@
+import { ModalFrame } from "../ui/components/ModalFrame";
 import React, { useMemo, useState } from "react";
 import {
   Activity,
@@ -164,13 +165,7 @@ export function ProviderIconPicker({ open, value, color, onPick, onClose }) {
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/40 p-4 backdrop-blur-[2px]">
-      <div
-        className="flex max-h-[70vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-oai-gray-200 dark:bg-oai-gray-950 dark:ring-oai-gray-800"
-        role="dialog"
-        aria-modal="true"
-        aria-label={copy("pswitch.icon.picker_title")}
-      >
+    <ModalFrame open={open} onClose={onClose} label={copy("pswitch.icon.picker_title")} className="max-w-lg">
         <div className="flex items-center justify-between gap-3 border-b border-oai-gray-100 px-5 py-3 dark:border-oai-gray-800">
           <h3 className="text-sm font-semibold text-oai-black dark:text-white">
             {copy("pswitch.icon.picker_title")}
@@ -231,8 +226,7 @@ export function ProviderIconPicker({ open, value, color, onPick, onClose }) {
             {copy("pswitch.icon.done")}
           </Button>
         </div>
-      </div>
-    </div>
+    </ModalFrame>
   );
 }
 

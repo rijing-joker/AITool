@@ -30,6 +30,9 @@ import {
 import { copy } from "../lib/copy";
 import { providerSwitchApi } from "../lib/provider-switch-api";
 import { Button, Card, ConfirmModal } from "../ui/components";
+import { PageHeader } from "../ui/components/PageHeader";
+import { PageTabs } from "../ui/components/PageTabs";
+import { UnsavedChangesGuard } from "../ui/components/UnsavedChangesGuard";
 import { PresetIcon, presetAvatarClass, ProviderEditDialog } from "./provider-edit-dialog";
 
 // Provider config management — an interaction port of cc-switch's provider
@@ -77,7 +80,7 @@ function SortableProviderCard({ provider, isCurrent, busy, dragLabel, onSwitch, 
           : "border-oai-gray-200 dark:border-oai-gray-800"
       } ${isDragging ? "shadow-lg" : ""}`}
     >
-      <div className="flex items-start gap-3">
+      <div className="flex flex-wrap items-start gap-3 sm:flex-nowrap">
         <button
           type="button"
           className="-ml-1 mt-0.5 cursor-grab touch-none rounded-md p-1 text-oai-gray-300 transition-colors hover:bg-oai-gray-100 hover:text-oai-gray-500 active:cursor-grabbing disabled:opacity-40 dark:text-oai-gray-600 dark:hover:bg-oai-gray-800 dark:hover:text-oai-gray-300"
@@ -103,7 +106,7 @@ function SortableProviderCard({ provider, isCurrent, busy, dragLabel, onSwitch, 
                 : copy("pswitch.provider.category.custom")}
             </span>
             {isCurrent ? (
-              <span className="inline-flex items-center gap-1 rounded-full bg-oai-brand-50 px-2 py-0.5 text-xs font-medium text-oai-brand-600 dark:bg-oai-brand-950/50 dark:text-oai-brand-400">
+              <span className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-oai-brand-50 px-2 py-0.5 text-xs font-medium text-oai-brand-600 dark:bg-oai-brand-950/50 dark:text-oai-brand-400">
                 <Check className="h-3 w-3" />
                 {copy("pswitch.current_badge")}
               </span>
@@ -126,7 +129,7 @@ function SortableProviderCard({ provider, isCurrent, busy, dragLabel, onSwitch, 
             </a>
           ) : null}
         </div>
-        <div className="flex shrink-0 items-center gap-1.5">
+        <div className="ml-auto flex w-full shrink-0 items-center justify-end gap-1.5 sm:w-auto">
           <Button
             variant={isCurrent ? "ghost" : "primary"}
             size="sm"
@@ -156,6 +159,9 @@ export function ProviderSwitchPage() {
 
   // dialog state
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [dialogDirty, setDialogDirty] = useState(false);
+  const [dialogSaving, setDialogSaving] = useState(false);
+  const onDialogDirty = useCallback((dirty, saving) => { setDialogDirty(dirty); setDialogSaving(saving); }, []);
   const [editingProvider, setEditingProvider] = useState(null);
   const [presets, setPresets] = useState([]);
 
@@ -326,24 +332,12 @@ export function ProviderSwitchPage() {
   }, [activeApp, refreshBackups, restoreTarget]);
 
   return (
-    <div className="mx-auto w-full max-w-5xl px-4 py-6 sm:px-6">
-      <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold text-oai-black dark:text-white">{copy("pswitch.title")}</h1>
-          <p className="mt-1 max-w-2xl text-sm text-oai-gray-500 dark:text-oai-gray-400">
-            {copy("pswitch.subtitle")}
-          </p>
-          {status ? (
-            <p className="mt-1 font-mono text-xs text-oai-gray-400 dark:text-oai-gray-500">
-              {copy("pswitch.storage_path", { path: status.storagePath })}
-            </p>
-          ) : null}
-        </div>
-        <Button variant="secondary" size="sm" onClick={() => void refreshStatus()} disabled={busy}>
-          <RefreshCw className={`h-4 w-4 ${busy ? "animate-spin" : ""}`} />
-          {copy("pswitch.action.refresh")}
-        </Button>
-      </div>
+    <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
+      <UnsavedChangesGuard dirty={dialogOpen && dialogDirty} busy={dialogOpen && dialogSaving} />
+      <PageHeader title={copy("pswitch.title")} description={copy("pswitch.subtitle")}
+        actions={<Button variant="secondary" size="sm" onClick={() => void refreshStatus()} disabled={busy}>
+          <RefreshCw className="h-4 w-4" />{copy("pswitch.action.refresh")}
+        </Button>} />
 
       {loadError ? (
         <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
@@ -360,24 +354,7 @@ export function ProviderSwitchPage() {
       ) : null}
 
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-        <div className="inline-flex rounded-xl bg-oai-gray-100 p-1 dark:bg-oai-gray-900" role="tablist">
-          {APPS.map(({ id, labelKey }) => (
-            <button
-              key={id}
-              role="tab"
-              aria-selected={activeApp === id}
-              type="button"
-              onClick={() => setActiveApp(id)}
-              className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 ${
-                activeApp === id
-                  ? "bg-white text-oai-black shadow-sm dark:bg-oai-gray-800 dark:text-white"
-                  : "text-oai-gray-500 hover:text-oai-black dark:hover:text-white"
-              }`}
-            >
-              {copy(labelKey)}
-            </button>
-          ))}
-        </div>
+        <PageTabs options={APPS.map((item) => ({ ...item, label: copy(item.labelKey) }))} value={activeApp} onChange={setActiveApp} label={copy("pswitch.title")} panelId="provider-panel" />
         <div className="flex items-center gap-2">
           <Button variant="secondary" size="sm" disabled={busy} onClick={() => void importFromLive()}>
             <Import className="h-4 w-4" />
@@ -390,11 +367,12 @@ export function ProviderSwitchPage() {
         </div>
       </div>
 
+      <div role="tabpanel" id="provider-panel" aria-labelledby={`provider-panel-${activeApp}`}>
       <section className="mb-8">
         <SectionTitle>{copy("pswitch.section.providers")}</SectionTitle>
         {!appState || appState.providers.length === 0 ? (
           <Card>
-            <p className="text-sm text-oai-gray-500 dark:text-oai-gray-400">{copy("pswitch.providers.empty")}</p>
+            <p className="text-sm text-oai-gray-500 dark:text-oai-gray-400">{loadError || copy(!status ? "proxy.loading" : "pswitch.providers.empty")}</p>
           </Card>
         ) : (
           <DndContext
@@ -455,6 +433,8 @@ export function ProviderSwitchPage() {
         </Card>
       </section>
 
+      </div>
+      {status ? <p className="mb-3 break-all font-mono text-xs text-oai-gray-500">{copy("pswitch.storage_path", { path: status.storagePath })}</p> : null}
       {status?.codexAuthStash ? (
         <p className="text-xs text-oai-gray-400 dark:text-oai-gray-500">
           {copy("pswitch.stash.notice", { time: status.codexAuthStash.stashedAt || "" })}
@@ -462,6 +442,7 @@ export function ProviderSwitchPage() {
       ) : null}
 
       <ProviderEditDialog
+        onDirtyChange={onDialogDirty}
         open={dialogOpen}
         busy={busy}
         app={activeApp}

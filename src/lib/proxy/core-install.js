@@ -35,41 +35,39 @@ function createCoreInstallService({ manager, bridge, fetchCoreModule }) {
     return manager.pidAlive(pid);
   }
 
-  // Best-effort restart after a stop-for-install; a failure is surfaced as a
-  // message on the task (EasyCLIProxyAPI does the same: "Kernel installed,
-  // but failed to automatically resume operation"). `terminalPhase` is shown
-  // again once the restart settles, so the outcome (complete/failed/canceled)
-  // is what the dialog ends on, not the transient restart step.
+  // The task stays active until the proxy is usable again. A restart failure
+  // must leave the dialog open with an error, rather than a success toast.
   async function restartCoreAfterInstall(terminalPhase) {
     applyProgress({ phase: "restarting" });
     try {
       await manager.start();
       bridge.startBridge();
+      applyProgress({ phase: terminalPhase });
     } catch (error) {
-      task.message = `core installed, but the automatic restart failed: ${error?.message || error}`;
-    } finally {
-      if (terminalPhase) applyProgress({ phase: terminalPhase });
+      const message = `automatic core restart failed: ${error?.message || error}`;
+      task.error = task.error ? `${task.error}; ${message}` : message;
+      applyProgress({ phase: "failed" });
     }
   }
 
   async function run(signal, force) {
     let stoppedForInstall = false;
-    const wasRunning = await coreRunning();
     try {
+      const wasRunning = await coreRunning();
       const release = await fetchCoreModule.resolveRelease({ signal });
-      if (!force && fetchCoreModule.installedVersion() === release.version) {
+      signal.throwIfAborted();
+      if (!force && manager.binaryExists() && fetchCoreModule.installedVersion() === release.version) {
         task.result = { skipped: true, version: release.version, path: paths.binPath, source: "already-installed" };
         applyProgress({ phase: "complete" });
       } else {
         if (wasRunning) {
           applyProgress({ phase: "stopping" });
-          try {
-            bridge.stopBridge();
-            await manager.stop();
-            stoppedForInstall = true;
-          } catch (error) {
-            task.message = `failed to stop the running core: ${error?.message || error}`;
-          }
+          // Restore the bridge even if stopping the core fails after the
+          // bridge has stopped. Never replace a binary while stop failed.
+          stoppedForInstall = true;
+          bridge.stopBridge();
+          await manager.stop();
+          if (await coreRunning()) throw new Error("failed to stop the running core");
         }
         const result = await fetchCoreModule.downloadAndInstall(release, { signal, onProgress: applyProgress });
         task.result = result;

@@ -114,6 +114,15 @@ Managed through the dashboard's **AI Proxy** page (tabs) or the core's managemen
 
 On-disk layout: `~/.aitool/proxy/` — `bin/` (core), `config.yaml`, `auths/` (provider credentials), `usage/` (per-request records + bucket state), `logs/core.log`.
 
+The usage bridge ignores RESP control notifications such as `support_refresh`.
+On startup, AiTool repairs historical notifications saved by older versions:
+it backs up affected files under `usage/control-notification-backup-*`, removes
+the notifications, and appends corrected cumulative totals to the tracker queue.
+Real zero-token requests are retained. To run the repair manually, first stop
+any AiTool dashboard/desktop/container using these data directories, then run
+`node bin/tracker.js proxy repair-usage` before restarting it. Repeating the
+repair is safe; it does not contact an AI provider.
+
 Default endpoint: `http://127.0.0.1:8318` (loopback-only; port configurable in config.yaml). The plaintext management key lives in `~/.aitool/proxy/settings.json` — the core hashes its own copy on first load.
 
 ## Token usage analytics (from TokenTracker)

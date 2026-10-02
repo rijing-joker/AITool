@@ -185,3 +185,69 @@ test("an abort mid-download stops the stream and removes the partial archive", a
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("download write errors reject cleanly and preserve the installed core", async (t) => {
+  const root = makeHome();
+  try {
+    fs.mkdirSync(paths.binDir, { recursive: true });
+    fs.writeFileSync(paths.binPath, "previous core");
+    const open = t.mock.method(fs, "open", (...args) => {
+      process.nextTick(() => args.at(-1)(Object.assign(new Error("disk full"), { code: "ENOSPC" })));
+    });
+    await assert.rejects(core.downloadAndInstall({ version: "8.0.9", source: "gitcode" }, {
+      fetchImpl: async () => binaryResponse(Buffer.from("archive")),
+    }), /all core download sources failed.*disk full/);
+    open.mock.restore();
+    assert.equal(fs.readFileSync(paths.binPath, "utf8"), "previous core");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a partial install copy leaves the previous core and version intact", async (t) => {
+  const root = makeHome();
+  try {
+    const { archive } = makeArchive(root, "8.0.9");
+    const bytes = fs.readFileSync(archive);
+    fs.mkdirSync(paths.binDir, { recursive: true });
+    fs.writeFileSync(paths.binPath, "previous core");
+    fs.writeFileSync(paths.coreVersionPath, "v8.0.8\n");
+    t.mock.method(fs, "copyFileSync", (_source, destination) => {
+      fs.writeFileSync(destination, "partial");
+      throw new Error("disk full copying binary");
+    });
+    await assert.rejects(core.downloadAndInstall({ version: "8.0.9", source: "gitcode" }, {
+      fetchImpl: async () => binaryResponse(bytes),
+    }), /disk full copying binary/);
+    assert.equal(fs.readFileSync(paths.binPath, "utf8"), "previous core");
+    assert.equal(fs.readFileSync(paths.coreVersionPath, "utf8"), "v8.0.8\n");
+    assert.deepEqual(fs.readdirSync(paths.binDir), [path.basename(paths.binPath)]);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("overlapping downloads use independent temporary files and clean them up", async (t) => {
+  const root = makeHome();
+  try {
+    const { archive } = makeArchive(root, "8.0.9");
+    const bytes = fs.readFileSync(archive);
+    const dirs = [];
+    const mkdtemp = fs.mkdtempSync;
+    t.mock.method(fs, "mkdtempSync", (...args) => {
+      const dir = mkdtemp(...args);
+      dirs.push(dir);
+      return dir;
+    });
+    const fetchImpl = async () => chunkedResponse(bytes);
+    await Promise.all([
+      core.downloadAndInstall({ version: "8.0.9", source: "gitcode" }, { fetchImpl }),
+      core.downloadAndInstall({ version: "8.0.9", source: "gitcode" }, { fetchImpl }),
+    ]);
+    assert.equal(new Set(dirs).size, 2);
+    assert.ok(dirs.every((dir) => !fs.existsSync(dir)));
+    assert.match(fs.readFileSync(paths.binPath, "utf8"), /8\.0\.9/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

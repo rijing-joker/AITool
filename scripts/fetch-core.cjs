@@ -20,7 +20,8 @@ const path = require("node:path");
 const os = require("node:os");
 const { execFileSync } = require("node:child_process");
 const { createWriteStream } = require("node:fs");
-const { once } = require("node:events");
+const { pipeline } = require("node:stream/promises");
+const crypto = require("node:crypto");
 const paths = require("../src/lib/proxy/paths");
 
 const REPO_ROOT = path.resolve(__dirname, "..");
@@ -115,22 +116,21 @@ function downloadCandidates({ version }, { prefer = "gitcode" } = {}) {
 // Global fetch (Node 20+) follows redirects, which GitHub releases and the
 // GitCode signed-CDN handoff both need.
 async function streamToFile(body, destination, { onProgress, signal } = {}) {
-  const file = createWriteStream(destination);
   let downloaded = 0;
-  try {
-    for await (const chunk of body) {
-      if (signal?.aborted) {
-        const error = new Error("download canceled");
-        error.name = "AbortError";
-        throw error;
+  // pipeline observes write/open errors for the entire stream lifetime and
+  // closes the file on cancellation, including while waiting for body data.
+  await pipeline(
+    body,
+    async function* trackProgress(source) {
+      for await (const chunk of source) {
+        downloaded += chunk.length;
+        onProgress?.({ downloaded });
+        yield chunk;
       }
-      downloaded += chunk.length;
-      if (!file.write(chunk)) await once(file, "drain");
-      onProgress?.({ downloaded });
-    }
-  } finally {
-    await new Promise((resolve) => file.end(resolve));
-  }
+    },
+    createWriteStream(destination, { mode: 0o600 }),
+    { signal },
+  );
   if (downloaded === 0) throw new Error("empty response body");
   return downloaded;
 }
@@ -189,43 +189,48 @@ async function downloadAndInstall(release, { onProgress = null, signal, fetchImp
   const asset = platformAsset(version);
 
   fs.mkdirSync(paths.binDir, { recursive: true });
-  const archivePath = path.join(os.tmpdir(), asset.name);
-  const failures = [];
-  let downloadedFrom = null;
-  for (const candidate of downloadCandidates(asset, { prefer: release.source === "gitcode" ? "gitcode" : "github" })) {
-    try {
-      emit({ phase: "downloading", source: candidate.label, downloaded: 0, total: null });
-      await downloadWithProgress(candidate.url, archivePath, {
-        signal,
-        fetchImpl,
-        onProgress: ({ downloaded, total }) => emit({ phase: "downloading", source: candidate.label, downloaded, total }),
-      });
-      downloadedFrom = candidate.label;
-      break;
-    } catch (error) {
-      fs.rmSync(archivePath, { force: true });
-      if (isAbort(error)) throw error;
-      failures.push(`${candidate.label}: ${error?.message || error}`);
-      emit({ phase: "switching", source: candidate.label, message: `${candidate.label} download failed: ${error?.message || error}` });
-    }
-  }
-  if (!downloadedFrom) throw new Error(`all core download sources failed — ${failures.join("; ")}`);
-
-  emit({ phase: "extracting", source: downloadedFrom });
-  const extractDir = path.join(os.tmpdir(), `aitool-core-${version}`);
-  fs.rmSync(extractDir, { recursive: true, force: true });
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "aitool-core-"));
+  const archivePath = path.join(tempDir, asset.name);
+  const stagedBinary = path.join(paths.binDir, `.cli-proxy-api-${crypto.randomUUID()}.tmp`);
   try {
+    const failures = [];
+    let downloadedFrom = null;
+    for (const candidate of downloadCandidates(asset, { prefer: release.source === "gitcode" ? "gitcode" : "github" })) {
+      try {
+        emit({ phase: "downloading", source: candidate.label, downloaded: 0, total: null });
+        await downloadWithProgress(candidate.url, archivePath, {
+          signal,
+          fetchImpl,
+          onProgress: ({ downloaded, total }) => emit({ phase: "downloading", source: candidate.label, downloaded, total }),
+        });
+        downloadedFrom = candidate.label;
+        break;
+      } catch (error) {
+        fs.rmSync(archivePath, { force: true });
+        if (isAbort(error)) throw error;
+        failures.push(`${candidate.label}: ${error?.message || error}`);
+        emit({ phase: "switching", source: candidate.label, message: `${candidate.label} download failed: ${error?.message || error}` });
+      }
+    }
+    if (!downloadedFrom) throw new Error(`all core download sources failed — ${failures.join("; ")}`);
+
+    signal?.throwIfAborted();
+    emit({ phase: "extracting", source: downloadedFrom });
+    const extractDir = path.join(tempDir, "extracted");
     extract(archivePath, extractDir);
     const binary = findBinary(extractDir);
     if (!binary) throw new Error("core binary not found inside release archive");
-    fs.copyFileSync(binary, paths.binPath);
-    fs.chmodSync(paths.binPath, 0o755);
+    // A failed copy (for example disk full) must leave the installed binary
+    // intact so the orchestration can restart the previous version.
+    fs.copyFileSync(binary, stagedBinary);
+    fs.chmodSync(stagedBinary, 0o755);
+    fs.renameSync(stagedBinary, paths.binPath);
     fs.writeFileSync(paths.coreVersionPath, `v${version}\n`);
+    return { skipped: false, version, path: paths.binPath, source: downloadedFrom };
   } finally {
-    fs.rmSync(extractDir, { recursive: true, force: true });
-    fs.rmSync(archivePath, { force: true });
+    fs.rmSync(stagedBinary, { force: true });
+    fs.rmSync(tempDir, { recursive: true, force: true });
   }
-  return { skipped: false, version, path: paths.binPath, source: downloadedFrom };
 }
 
 // Full one-shot flow (CLI / spawn path): resolve → reuse-if-current → download.

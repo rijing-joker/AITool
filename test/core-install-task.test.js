@@ -164,3 +164,59 @@ test("progress events flow into the polled snapshot", async () => {
   assert.ok(await waitFor(() => service.snapshot()?.running === false));
   assert.equal(service.snapshot().percent, 100);
 });
+
+test("a stale version marker does not skip installation when the binary is missing", async () => {
+  const fakes = makeFakes({ installed: "8.0.9" });
+  fakes.manager.binaryExists = () => false;
+  const service = createCoreInstallService(fakes);
+  service.startInstall();
+  assert.ok(await waitFor(() => service.snapshot()?.running === false));
+  assert.equal(service.snapshot().result.skipped, false);
+  assert.ok(fakes.log.includes("download-done"));
+});
+
+test("stop failure prevents installation and restores the usage bridge", async () => {
+  const fakes = makeFakes({ running: true });
+  fakes.manager.stop = async () => { throw new Error("stop denied"); };
+  const service = createCoreInstallService(fakes);
+  service.startInstall();
+  assert.ok(await waitFor(() => service.snapshot()?.running === false));
+  assert.equal(service.snapshot().phase, "failed");
+  assert.match(service.snapshot().error, /stop denied/);
+  assert.ok(!fakes.log.includes("download-start"));
+  assert.ok(fakes.log.includes("bridge-start"));
+});
+
+test("a core that survives stop is not overwritten", async () => {
+  const fakes = makeFakes({ running: true });
+  fakes.manager.stop = async () => ({ stopped: false });
+  const service = createCoreInstallService(fakes);
+  service.startInstall();
+  assert.ok(await waitFor(() => service.snapshot()?.running === false));
+  assert.equal(service.snapshot().phase, "failed");
+  assert.ok(!fakes.log.includes("download-start"));
+});
+
+test("restart failure is a failed task instead of a completed update", async () => {
+  const fakes = makeFakes({ running: true });
+  fakes.manager.start = async () => { throw new Error("port in use"); };
+  const service = createCoreInstallService(fakes);
+  service.startInstall();
+  assert.ok(await waitFor(() => service.snapshot()?.running === false));
+  assert.equal(service.snapshot().phase, "failed");
+  assert.match(service.snapshot().error, /restart failed.*port in use/);
+});
+
+test("a status failure settles the task and allows retry", async () => {
+  const fakes = makeFakes();
+  fakes.manager.readPid = () => { throw new Error("unreadable pid file"); };
+  const service = createCoreInstallService(fakes);
+  service.startInstall();
+  assert.ok(await waitFor(() => service.snapshot()?.running === false));
+  assert.equal(service.snapshot().phase, "failed");
+  assert.match(service.snapshot().error, /unreadable pid/);
+  fakes.manager.readPid = () => null;
+  service.startInstall();
+  assert.ok(await waitFor(() => service.snapshot()?.running === false));
+  assert.equal(service.snapshot().phase, "complete");
+});

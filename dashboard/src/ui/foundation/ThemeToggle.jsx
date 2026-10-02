@@ -1,3 +1,4 @@
+import { copy } from "../../lib/copy";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
 const ICON_SIZE = 18;
@@ -32,9 +33,9 @@ function MonitorIcon() {
 }
 
 const OPTIONS = [
-  { value: "light", label: "Light", Icon: SunIcon },
-  { value: "dark", label: "Dark", Icon: MoonIcon },
-  { value: "system", label: "System", Icon: MonitorIcon },
+  { value: "light", label: "settings.appearance.theme.light", Icon: SunIcon },
+  { value: "dark", label: "settings.appearance.theme.dark", Icon: MoonIcon },
+  { value: "system", label: "settings.appearance.theme.system", Icon: MonitorIcon },
 ];
 
 function currentIcon(resolvedTheme) {
@@ -75,7 +76,7 @@ export function ThemeToggle({ theme, resolvedTheme, onSetTheme, className = "", 
     <div ref={ref} className={`relative ${className}`}>
       <button
         type="button"
-        aria-label="Theme"
+        aria-label={copy("settings.appearance.theme.label")}
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
         className="flex items-center justify-center w-9 h-9 rounded-lg text-oai-gray-600 dark:text-oai-gray-400 hover:bg-oai-gray-100 dark:hover:bg-oai-gray-800 hover:text-oai-black dark:hover:text-white transition-colors"
@@ -103,7 +104,7 @@ export function ThemeToggle({ theme, resolvedTheme, onSetTheme, className = "", 
                 }`}
               >
                 <Icon />
-                <span>{label}</span>
+                <span>{copy(label)}</span>
               </button>
             );
           })}

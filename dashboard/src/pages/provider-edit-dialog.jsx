@@ -421,6 +421,8 @@ export function ProviderEditDialog({
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
   const [speedTestOpen, setSpeedTestOpen] = useState(false);
   const [fetchedModels, setFetchedModels] = useState(null);
@@ -485,6 +487,9 @@ export function ProviderEditDialog({
           if (viewRequestRef.current !== token) return;
           const full = viewToConfig(app, view);
           setDraft(full);
+          if (app === "claude") {
+            setClaudeApiKeyName("ANTHROPIC_API_KEY" in (full.env || {}) ? "ANTHROPIC_API_KEY" : "ANTHROPIC_AUTH_TOKEN");
+          }
           setEditorBase(JSON.parse(JSON.stringify(full)));
           setInactive(Array.isArray(view.inactive) ? view.inactive : []);
           setEditorFallback(null);
@@ -530,6 +535,9 @@ export function ProviderEditDialog({
   // editor blank).
   useEffect(() => {
     if (!open) return;
+    setClaudeApiKeyName("ANTHROPIC_AUTH_TOKEN");
+    setAdvancedOpen(false);
+    setLoading(false);
     setError(null);
     setRawError(null);
     setCodexAuthError(null);
@@ -585,6 +593,7 @@ export function ProviderEditDialog({
       setDraft(first ? JSON.parse(JSON.stringify(first.settingsConfig ?? {})) : {});
       loadEditorView(first ? first.settingsConfig ?? {} : {});
     }
+    return () => { viewRequestRef.current += 1; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, editing, app, appState?.current]);
 
@@ -985,6 +994,7 @@ export function ProviderEditDialog({
   };
 
   const save = async (force, policyOverride) => {
+    if (savingRef.current) return;
     // The visible editor text is the save source (cc-switch keeps the config
     // text in its form state the same way) — it mirrors the draft exactly
     // unless the user is mid-edit on invalid text, which blocks saving.
@@ -1031,6 +1041,8 @@ export function ProviderEditDialog({
         return;
       }
     }
+    savingRef.current = true;
+    setSaving(true);
     setPendingIssues(null);
     const cleanMeta = {};
     for (const [key, value] of Object.entries(meta)) {
@@ -1074,6 +1086,9 @@ export function ProviderEditDialog({
         return;
       }
       onError(err instanceof Error ? err.message : String(err));
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
     }
   };
 
@@ -1888,7 +1903,7 @@ export function ProviderEditDialog({
                 <Button variant="secondary" size="sm" onClick={() => setPendingIssues(null)}>
                   {copy("pswitch.validate.go_back")}
                 </Button>
-                <Button size="sm" onClick={() => void save(true)}>
+                <Button size="sm" disabled={saving} onClick={() => void save(true)}>
                   {copy("pswitch.validate.save_anyway")}
                 </Button>
               </div>
@@ -1907,7 +1922,7 @@ export function ProviderEditDialog({
             <Button variant="secondary" size="sm" disabled={busy} onClick={onClose}>
               {copy("pswitch.action.cancel")}
             </Button>
-            <Button size="sm" disabled={busy || loading || !name.trim()} onClick={() => void save(false)}>
+            <Button size="sm" disabled={busy || loading || saving || !name.trim()} onClick={() => void save(false)}>
               {copy("pswitch.action.save")}
             </Button>
           </div>

@@ -1697,7 +1697,7 @@ struct ClawdCompanionView: View {
             pool += Strings.emptyTodayQuips
         } else {
             pool.append(Strings.tokensToday(f))
-            if cost != "$0.00" && cost != "$0" {
+            if (Double(viewModel.todaySummary?.totals.totalCostUsd ?? "0") ?? 0) > 0 {
                 pool += [
                     Strings.tokensSpentToday(tokens: f, cost: cost),
                     Strings.aiInvestedToday(cost),

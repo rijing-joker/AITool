@@ -1351,7 +1351,7 @@ function createLocalApiHandler({ queuePath }) {
     if (!getCloudSyncPref()) return null;
     const refreshToken = getRefreshTokenForCloud();
     if (!refreshToken) return null;
-    const machineId = getOrCreateMachineId(queuePathForMachineId);
+    const machineId = await getOrCreateMachineId(queuePathForMachineId);
     if (!machineId) return null;
 
     const runtime = resolveRuntimeConfig();
@@ -2299,7 +2299,8 @@ function createLocalApiHandler({ queuePath }) {
 
     // --- usage-heatmap ---
     if (p === "/functions/tokentracker-usage-heatmap") {
-      const weeks = parseInt(url.searchParams.get("weeks") || "52", 10);
+      const requestedWeeks = Number(url.searchParams.get("weeks") ?? 52);
+      const weeks = Number.isFinite(requestedWeeks) ? Math.min(104, Math.max(1, Math.trunc(requestedWeeks))) : 52;
       const timeZoneContext = getTimeZoneContext(url);
       const { rows, scope, excludedSources } = scopedQueueRows(qp, url);
       const daily = aggregateByDay(rows, timeZoneContext);
@@ -2893,7 +2894,7 @@ function createLocalApiHandler({ queuePath }) {
     // getOrCreateMachineId above and dashboard/src/lib/cloud-sync.ts.
     if (p === "/functions/tokentracker-machine-id") {
       json(res, {
-        machineId: getOrCreateMachineId(qp),
+        machineId: await getOrCreateMachineId(qp),
         deviceName: getSystemDeviceName(),
       });
       return true;

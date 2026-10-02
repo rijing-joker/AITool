@@ -400,7 +400,7 @@ test("Context local-day boundaries are exact in Asia/Shanghai and America/Los_An
       baselineAt: "2030-06-01T15:30:00.000Z",
       pendingAt: "2030-06-01T15:45:00.000Z",
       targetAt: "2030-06-01T16:30:00.000Z",
-      timeZoneContext: { timeZone: "Asia/Shanghai", offsetMinutes: -480 },
+      timeZoneContext: { timeZone: "Asia/Shanghai", offsetMinutes: 480 },
     },
     {
       name: "America/Los_Angeles",
@@ -409,7 +409,7 @@ test("Context local-day boundaries are exact in Asia/Shanghai and America/Los_An
       baselineAt: "2030-06-01T06:30:00.000Z",
       pendingAt: "2030-06-01T06:45:00.000Z",
       targetAt: "2030-06-01T07:30:00.000Z",
-      timeZoneContext: { timeZone: "America/Los_Angeles", offsetMinutes: 420 },
+      timeZoneContext: { timeZone: "America/Los_Angeles", offsetMinutes: -420 },
     },
   ];
 

@@ -154,6 +154,8 @@ final class UpdateChecker {
                     }
                     // Silent auto-update: download and install without prompting
                     startDownloadAndInstall(dmg, targetVersion: release.tagVersion, interactive: false)
+                } else if silent {
+                    finishUpdate()
                 } else {
                     promptUpdate(release: release, currentVersion: current)
                 }

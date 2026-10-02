@@ -37,7 +37,12 @@ RUN npm run dashboard:build \
     && mkdir -p /opt/aitool \
     && cp /root/.aitool/proxy/bin/cli-proxy-api /opt/aitool/cli-proxy-api
 
-ENV NODE_ENV=production
+# A shared-config server must not register the host AI-CLIs' interactive usage
+# hooks (it would write its own $HOME path into the host-shared settings.json,
+# breaking the host's Stop hook). Placed after the heavy build steps so toggling
+# it never busts the npm/dashboard/core layer cache. See passiveHooksMode().
+ENV NODE_ENV=production \
+    AITOOL_PASSIVE_HOOKS=1
 
 EXPOSE 7680 8318
 VOLUME ["/root/.tokentracker", "/root/.aitool"]

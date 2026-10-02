@@ -1,3 +1,4 @@
+import { copy } from "../lib/copy";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { isAccessTokenReady, resolveAuthAccessToken } from "../lib/auth-token";
 import { isMockEnabled } from "../lib/mock-data";
@@ -28,7 +29,7 @@ export function useUsageModelBreakdown({
   const [error, setError] = useState<string | null>(null);
   const mockEnabled = isMockEnabled();
   const tokenReady = isAccessTokenReady(accessToken);
-  const cacheAllowed = !guestAllowed;
+  const cacheAllowed = !guestAllowed && !mockEnabled;
 
   const storageKey = useMemo(() => {
     if (!cacheKey) return null;
@@ -114,7 +115,7 @@ export function useUsageModelBreakdown({
     if (!isCurrent()) return;
     if (!resolvedToken && !mockEnabled && !isLocalMode && !useCloud) return;
     if (useCloud && !cloudToken) {
-      setError("Your session expired. Please sign in again to view account data.");
+      setError(copy("dashboard.account.session_expired"));
       setLoading(false);
       return;
     }

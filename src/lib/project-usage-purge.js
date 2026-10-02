@@ -2,6 +2,9 @@ const fs = require("node:fs");
 const fsp = require("node:fs/promises");
 const path = require("node:path");
 const readline = require("node:readline");
+const { pipeline } = require("node:stream/promises");
+const crypto = require("node:crypto");
+const { writeFileAtomic } = require("./fs");
 
 async function purgeProjectUsage({
   projectKey,
@@ -26,6 +29,74 @@ async function purgeProjectUsage({
     }
   }
 
+  let removed = 0;
+  let kept = 0;
+  let nextOffset = 0;
+  const st = await fsp.stat(projectQueuePath).catch(() => null);
+  if (st && st.isFile()) {
+    const tmpPath = `${projectQueuePath}.tmp.${crypto.randomUUID()}`;
+    await fsp.mkdir(path.dirname(projectQueuePath), { recursive: true });
+    const input = fs.createReadStream(projectQueuePath, "utf8");
+    const output = fs.createWriteStream(tmpPath, { encoding: "utf8" });
+    const rl = readline.createInterface({ input, crlfDelay: Infinity });
+
+    let inputOffset = 0;
+    let outputOffset = 0;
+    async function* filteredLines() {
+      for await (const line of rl) {
+        const trimmed = line.trim();
+        const inputBytes = Buffer.byteLength(line, "utf8") + 1;
+        inputOffset += inputBytes;
+        if (!trimmed) continue;
+        let parsed = null;
+        try {
+          parsed = JSON.parse(trimmed);
+        } catch (_err) {
+          const entry = trimmed + "\n";
+          yield entry;
+          outputOffset += Buffer.byteLength(entry, "utf8");
+          kept += 1;
+          if (inputOffset <= previousOffset) {
+            nextOffset = outputOffset;
+          }
+          continue;
+        }
+        if (parsed && parsed.project_key === projectKey) {
+          removed += 1;
+          if (inputOffset <= previousOffset) {
+            nextOffset = outputOffset;
+          }
+          continue;
+        }
+        const entry = JSON.stringify(parsed) + "\n";
+        yield entry;
+        outputOffset += Buffer.byteLength(entry, "utf8");
+        kept += 1;
+        if (inputOffset <= previousOffset) {
+          nextOffset = outputOffset;
+        }
+      }
+
+    }
+    try {
+      await pipeline(filteredLines(), output);
+      await fsp.rename(tmpPath, projectQueuePath);
+    } finally {
+      rl.close();
+      input.destroy();
+      output.destroy();
+      await fsp.unlink(tmpPath).catch(() => {});
+    }
+    if (previousOffset >= inputOffset) {
+      nextOffset = outputOffset;
+    }
+  } else {
+    await fsp.writeFile(projectQueuePath, "", "utf8");
+    nextOffset = 0;
+  }
+
+  await writeFileAtomic(projectQueueStatePath, JSON.stringify({ offset: nextOffset }));
+
   const buckets =
     projectState.buckets && typeof projectState.buckets === "object" ? projectState.buckets : {};
   let removedBuckets = 0;
@@ -47,69 +118,6 @@ async function purgeProjectUsage({
       removedProjectCursors += 1;
     }
   }
-
-  let removed = 0;
-  let kept = 0;
-  let nextOffset = 0;
-  const st = await fsp.stat(projectQueuePath).catch(() => null);
-  if (st && st.isFile()) {
-    const tmpPath = `${projectQueuePath}.tmp`;
-    await fsp.mkdir(path.dirname(projectQueuePath), { recursive: true });
-    const input = fs.createReadStream(projectQueuePath, "utf8");
-    const output = fs.createWriteStream(tmpPath, { encoding: "utf8" });
-    const rl = readline.createInterface({ input, crlfDelay: Infinity });
-
-    let inputOffset = 0;
-    let outputOffset = 0;
-    for await (const line of rl) {
-      const trimmed = line.trim();
-      const inputBytes = Buffer.byteLength(line, "utf8") + 1;
-      inputOffset += inputBytes;
-      if (!trimmed) continue;
-      let parsed = null;
-      try {
-        parsed = JSON.parse(trimmed);
-      } catch (_err) {
-        const entry = trimmed + "\n";
-        output.write(entry);
-        outputOffset += Buffer.byteLength(entry, "utf8");
-        kept += 1;
-        if (inputOffset <= previousOffset) {
-          nextOffset = outputOffset;
-        }
-        continue;
-      }
-      if (parsed && parsed.project_key === projectKey) {
-        removed += 1;
-        if (inputOffset <= previousOffset) {
-          nextOffset = outputOffset;
-        }
-        continue;
-      }
-      const entry = JSON.stringify(parsed) + "\n";
-      output.write(entry);
-      outputOffset += Buffer.byteLength(entry, "utf8");
-      kept += 1;
-      if (inputOffset <= previousOffset) {
-        nextOffset = outputOffset;
-      }
-    }
-
-    await new Promise((resolve, reject) => {
-      output.end(resolve);
-      output.on("error", reject);
-    });
-
-    await fsp.rename(tmpPath, projectQueuePath);
-    if (previousOffset >= inputOffset) {
-      nextOffset = outputOffset;
-    }
-  } else {
-    await fsp.writeFile(projectQueuePath, "", "utf8");
-    nextOffset = 0;
-  }
-
-  await fsp.writeFile(projectQueueStatePath, JSON.stringify({ offset: nextOffset }), "utf8");
 
   return { removed, kept, removedBuckets, removedProjectCursors };
 }

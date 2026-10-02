@@ -1,3 +1,4 @@
+import { copy } from "../lib/copy";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { isAccessTokenReady, resolveAuthAccessToken } from "../lib/auth-token";
 import { formatDateLocal, formatDateUTC } from "../lib/date-range";
@@ -193,7 +194,7 @@ export function useTrendData({
     if (!isCurrent()) return;
     if (!resolvedToken && !mockEnabled && !isLocalMode && !useCloud) return;
     if (useCloud && !cloudToken) {
-      setError("Your session expired. Please sign in again to view account data.");
+      setError(copy("dashboard.account.session_expired"));
       setLoading(false);
       return;
     }

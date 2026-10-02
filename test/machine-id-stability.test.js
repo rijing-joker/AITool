@@ -9,6 +9,7 @@ const path = require("node:path");
 const {
   computeStableMachineId,
   getOrCreateMachineId,
+  _resetMachineIdCache,
   isLinuxContainer,
   isValidLinuxMachineId,
   defaultSeedPath,
@@ -142,14 +143,17 @@ test("getOrCreateMachineId survives uninstall --purge via the hardware fingerpri
   }
   const tmp = await mkTempTracker("machine-id-hw-");
   try {
-    const before = getOrCreateMachineId(tmp.queuePath);
+    const before = await getOrCreateMachineId(tmp.queuePath);
     assert.ok(typeof before === "string" && before.length >= 8);
 
     // Simulate `uninstall --purge` + reinstall with the seed ALSO gone — the
     // hardware fingerprint alone must recover the identity.
     await fs.rm(path.join(tmp.dir, ".tokentracker"), { recursive: true, force: true });
     await fs.rm(tmp.seedPath, { force: true });
-    const after = getOrCreateMachineId(tmp.queuePath);
+    // The in-process id cache would otherwise short-circuit recovery; a real
+    // reinstall is a fresh process with an empty cache.
+    _resetMachineIdCache();
+    const after = await getOrCreateMachineId(tmp.queuePath);
 
     assert.equal(after, before, "reinstall after purge must recover the same machine id (issue #176)");
   } finally {
@@ -162,16 +166,17 @@ test("getOrCreateMachineId recovers a legacy random id from the seed file after 
   try {
     // stableMachineId: null simulates a host with no hardware identity — the
     // first install minted a random UUID (exactly the legacy situation).
-    const before = getOrCreateMachineId(tmp.queuePath, { stableMachineId: null });
+    const before = await getOrCreateMachineId(tmp.queuePath, { stableMachineId: null });
     assert.ok(typeof before === "string" && before.length >= 8);
     assert.equal((await fs.readFile(tmp.seedPath, "utf8")).trim(), before, "seed file must mirror the active id");
 
     // `uninstall --purge` removes ~/.tokentracker but NOT the seed.
     await fs.rm(path.join(tmp.dir, ".tokentracker"), { recursive: true, force: true });
+    _resetMachineIdCache();
 
     // Reinstall must prefer the seed over a freshly derived hardware id, so
     // the cloud device row anchored to the legacy id keeps matching.
-    const after = getOrCreateMachineId(tmp.queuePath, { stableMachineId: "hash-of-new-hardware-id" });
+    const after = await getOrCreateMachineId(tmp.queuePath, { stableMachineId: "hash-of-new-hardware-id" });
     assert.equal(after, before, "seed recovery must win over hardware derivation (Codex P1)");
   } finally {
     await tmp.cleanup();
@@ -186,7 +191,7 @@ test("getOrCreateMachineId seeds existing installs that predate the seed file", 
     await fs.writeFile(tmp.configPath, JSON.stringify({ machineId: legacy, deviceToken: "tok" }));
 
     assert.equal(
-      getOrCreateMachineId(tmp.queuePath),
+      await getOrCreateMachineId(tmp.queuePath),
       legacy,
       "existing installs must not be migrated — their cloud device row is anchored to the old id",
     );

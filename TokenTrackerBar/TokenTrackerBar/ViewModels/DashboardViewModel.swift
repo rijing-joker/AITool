@@ -195,7 +195,7 @@ class DashboardViewModel: ObservableObject {
 
         var errorCount = 0
         var firstError: String?
-        let totalFetches = 10
+        let totalFetches = (period == .day || period == .total) ? 9 : 8
 
         await withTaskGroup(of: Void.self) { group in
             // Today summary (always today for summary cards)

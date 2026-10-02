@@ -1,4 +1,6 @@
 const fs = require("node:fs");
+const path = require("node:path");
+const os = require("node:os");
 const crypto = require("node:crypto");
 const YAML = require("yaml");
 const paths = require("./paths");

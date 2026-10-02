@@ -156,23 +156,33 @@ async function inspectLock(lockPath) {
   return { exists: true, pid: owner.pid, alive: isProcessAlive(owner.pid) };
 }
 
-// Drop an abandoned lock file. The rename makes the removal atomic, so two
-// sweepers racing on the same debris cannot delete a lease installed in
-// between: only the winner of the rename removes anything.
+// Use the same transition guard as normal reclamation. Rename alone cannot
+// protect a lease installed after the stale check by another sweeper.
 async function removeAbandonedLockFile(lockPath) {
-  if (!(await existingLockCanBeReclaimed(lockPath))) return false;
-  const quarantinePath = `${lockPath}.stale.${process.pid}.${crypto.randomUUID()}`;
+  const guard = await openLock(`${lockPath}.reclaim`, {
+    quietIfLocked: true,
+    reclaimDepth: MAX_RECLAIM_DEPTH,
+    serializeRelease: false,
+    sweptReclaimGuards: true,
+  });
+  if (!guard) return false;
   try {
-    await fs.rename(lockPath, quarantinePath);
-  } catch (_e) {
-    return false;
+    if (!(await existingLockCanBeReclaimed(lockPath))) return false;
+    const quarantinePath = `${lockPath}.stale.${process.pid}.${crypto.randomUUID()}`;
+    try {
+      await fs.rename(lockPath, quarantinePath);
+    } catch (_e) {
+      return false;
+    }
+    const owner = parseLockOwner(await fs.readFile(quarantinePath, "utf8").catch(() => ""));
+    if (owner) {
+      await fs.unlink(heartbeatPathFor(lockPath, owner.token)).catch(() => {});
+    }
+    await fs.unlink(quarantinePath).catch(() => {});
+    return true;
+  } finally {
+    await guard.release();
   }
-  const owner = parseLockOwner(await fs.readFile(quarantinePath, "utf8").catch(() => ""));
-  if (owner) {
-    await fs.unlink(heartbeatPathFor(lockPath, owner.token)).catch(() => {});
-  }
-  await fs.unlink(quarantinePath).catch(() => {});
-  return true;
 }
 
 // A sync killed while it held a transition guard leaves `${lockPath}.reclaim`
@@ -418,6 +428,7 @@ async function updateJsonLocked(
   update,
   { timeoutMs = 30_000, retryMs = 10 } = {},
 ) {
+  await ensureDir(path.dirname(filePath));
   const lockPath = `${filePath}.lock`;
   const deadline = Date.now() + timeoutMs;
   let lock = null;
@@ -431,11 +442,15 @@ async function updateJsonLocked(
   }
 
   try {
-    const current = (await readJson(filePath)) || {};
+    const result = await readJsonStrict(filePath);
+    if (result.status !== "ok" && result.status !== "missing") throw result.error;
+    const current = result.status === "missing" ? {} : result.value;
+    if (!current || typeof current !== "object" || Array.isArray(current)) {
+      throw new Error(`JSON file is not an object: ${filePath}`);
+    }
     const next = await update(current);
     if (next == null) return current;
-    await writeJson(filePath, next);
-    await chmod600IfPossible(filePath);
+    await writeFileAtomic(filePath, JSON.stringify(next, null, 2) + "\n", { mode: 0o600 });
     return next;
   } finally {
     await lock.release();

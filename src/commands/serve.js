@@ -20,7 +20,7 @@ const DEFAULT_PORT = 7680;
 // next" fallback can't see this, so WSL starts one port up by default.
 const WSL_DEFAULT_PORT = 7681;
 const DEFAULT_MAX_PORT_ATTEMPTS = 20;
-const NPM_PACKAGE_NAME = "tokentracker-cli";
+const NPM_PACKAGE_NAME = require("../../package.json").name;
 const LOCAL_BIND_HOST = "127.0.0.1";
 // Docker / reverse-proxy deployments need the server reachable beyond the
 // container's own loopback (a port mapping cannot reach 127.0.0.1 inside the

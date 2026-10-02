@@ -505,7 +505,7 @@ export function ProfileContent({ data, currency, rate, onClose, variant = "modal
               {copy("leaderboard.profile_modal.streak.days", { count: streak?.current_days ?? 0 })}
             </span>
             <span className="text-xs text-oai-gray-500 dark:text-oai-gray-400 font-mono">
-              (max {streak?.longest_days ?? 0})
+              ({copy("leaderboard.profile_modal.streak.longest")} {streak?.longest_days ?? 0})
             </span>
           </FactRow>
           <FactRow label={copy("leaderboard.profile_modal.best_day.title")}>
@@ -515,7 +515,7 @@ export function ProfileContent({ data, currency, rate, onClose, variant = "modal
                   {formatTokens(bestDay.total_tokens)}
                 </span>
                 <span className="text-xs text-oai-gray-500 dark:text-oai-gray-400 font-mono">
-                  on {bestDay.date}
+                  {copy("leaderboard.profile_modal.best_day.date", { date: bestDay.date })}
                 </span>
               </>
             ) : (

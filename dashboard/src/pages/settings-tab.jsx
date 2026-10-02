@@ -74,6 +74,9 @@ export function SettingsTab({ status, onRefresh }) {
   const [error, setError] = useState(null);
   const [busyField, setBusyField] = useState("");
   const [autoStart, setAutoStart] = useState(status?.core.autoStart ?? true);
+  useEffect(() => {
+    if (typeof status?.core?.autoStart === "boolean") setAutoStart(status.core.autoStart);
+  }, [status?.core?.autoStart]);
   const [yaml, setYaml] = useState(null);
   const [yamlDirty, setYamlDirty] = useState(false);
   const dirtyRef = useRef(new Set());

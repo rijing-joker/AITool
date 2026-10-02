@@ -235,7 +235,7 @@ test("parseOpencodeDbIncremental repairs fork copies counted before fingerprints
     assert.equal(repaired.eventsAggregated, 0);
     assert.equal((await queueTotals(queuePath)).input_tokens, 1000);
     assert.equal((await queueTotals(queuePath)).output_tokens, 100);
-    assert.equal(bucket.totals.conversation_count, 1);
+    assert.equal(Object.values(cursors.hourly.buckets)[0].totals.conversation_count, 1);
     assert.equal(
       cursors.opencode.messages["ses_fork|msg_fork"].dedupedForkCopy,
       true,
@@ -250,7 +250,7 @@ test("parseOpencodeDbIncremental repairs fork copies counted before fingerprints
       cursorKey: "opencode",
     });
     assert.deepEqual(await queueTotals(queuePath), afterRepair, "repair must be idempotent");
-    assert.equal(bucket.totals.conversation_count, 1);
+    assert.equal(Object.values(cursors.hourly.buckets)[0].totals.conversation_count, 1);
   });
 });
 

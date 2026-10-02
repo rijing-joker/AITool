@@ -1,3 +1,4 @@
+import { copy } from "../lib/copy";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   buildActivityHeatmap,
@@ -43,7 +44,7 @@ export function useActivityHeatmap({
   const [error, setError] = useState<string | null>(null);
   const mockEnabled = isMockEnabled();
   const tokenReady = isAccessTokenReady(accessToken);
-  const cacheAllowed = !guestAllowed;
+  const cacheAllowed = !guestAllowed && !mockEnabled;
 
   const isLocalMode = typeof window !== "undefined" &&
     (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
@@ -138,7 +139,7 @@ export function useActivityHeatmap({
     if (!isCurrent()) return;
     if (!resolvedToken && !mockEnabled && !isLocalMode && !useCloud) return;
     if (useCloud && !cloudToken) {
-      setError("Your session expired. Please sign in again to view account data.");
+      setError(copy("dashboard.account.session_expired"));
       setLoading(false);
       return;
     }
@@ -376,6 +377,11 @@ export function useActivityHeatmap({
         setHeatmap(cached.heatmap);
         setDaily(cached.daily || []);
         setSource("cache");
+      } else {
+        setHeatmap(null);
+        setDaily([]);
+        setError(null);
+        setSource("edge");
       }
     }
     refresh();

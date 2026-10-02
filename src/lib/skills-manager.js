@@ -546,6 +546,10 @@ async function fetchJson(url) {
 }
 
 async function fetchText(url) {
+  return (await fetchBytes(url)).toString("utf8");
+}
+
+async function fetchBytes(url) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
   try {
@@ -557,7 +561,7 @@ async function fetchText(url) {
       throw new RateLimitError(`GitHub rate-limited this request (HTTP ${response.status}). Try again later.`);
     }
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return response.text();
+    return Buffer.from(await response.arrayBuffer());
   } finally {
     clearTimeout(timeout);
   }
@@ -968,7 +972,7 @@ async function installSkill(
       if (!safeRelative) continue;
       const out = path.join(temp, safeRelative);
       ensureDir(path.dirname(out));
-      fs.writeFileSync(out, await fetchText(githubRawUrl(skill.repoOwner, skill.repoName, branch, entry.path)));
+      fs.writeFileSync(out, await fetchBytes(githubRawUrl(skill.repoOwner, skill.repoName, branch, entry.path)));
     }
     // An update must not recreate a skill that was uninstalled while we were
     // downloading, nor overwrite whatever took its install directory in the

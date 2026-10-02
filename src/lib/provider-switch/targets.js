@@ -123,19 +123,14 @@ function projectCodex({ prev, target, liveToml, liveAuth, stash }) {
   const targetTable = targetConfig.model_providers && targetConfig.model_providers.custom;
   const prevTable = prevConfig.model_providers && prevConfig.model_providers.custom;
   if (targetTable && typeof targetTable === "object") {
-    const entries = {};
-    for (const [key, value] of Object.entries(targetTable)) {
-      if (typeof value === "string" || typeof value === "boolean" || typeof value === "number") {
-        entries[key] = value;
-      }
-    }
+    const entries = structuredClone(targetTable);
     applyCodexRouteAuth(entries, codexRowKey(target, entries), loginOnDiskAfter);
     text = toml.setTable(text, floor.CODEX_PROVIDER_TABLE, entries);
   } else {
     // Remove when the previous provider wrote one and the target has none.
     const liveTable = toml.getTableEntries(text, floor.CODEX_PROVIDER_TABLE);
     const unchanged = liveTable && prevTable && stableEqual(liveTable, normalizeTable(prevTable));
-    if (liveTable && (prevTable ? unchanged : true)) {
+    if (unchanged) {
       text = toml.setTable(text, floor.CODEX_PROVIDER_TABLE, null);
     }
   }
@@ -152,13 +147,7 @@ function projectCodex({ prev, target, liveToml, liveAuth, stash }) {
 }
 
 function normalizeTable(entries) {
-  const out = {};
-  for (const [key, value] of Object.entries(entries || {})) {
-    if (typeof value === "string" || typeof value === "boolean" || typeof value === "number") {
-      out[key] = value;
-    }
-  }
-  return out;
+  return structuredClone(entries || {});
 }
 
 // The provider row's key (cc-switch codex.rs row_key): auth.OPENAI_API_KEY

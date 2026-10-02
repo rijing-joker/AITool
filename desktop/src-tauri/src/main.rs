@@ -84,7 +84,7 @@ fn spawn_server(root: &PathBuf, port: u16) -> Result<Child, String> {
         .arg(port.to_string())
         .arg("--no-open")
         .current_dir(root)
-        .stdout(Stdio::piped())
+        .stdout(Stdio::null())
         .stderr(Stdio::null())
         .env("AITOOL_DESKTOP", "1");
     cmd.spawn().map_err(|e| format!("failed to spawn {node}: {e}"))
@@ -256,6 +256,10 @@ fn main() {
         RunEvent::ExitRequested { .. } | RunEvent::Exit => {
             if let Ok(mut guard) = app.state::<ServerState>().child.lock() {
                 if let Some(mut child) = guard.take() {
+                    let port = app.state::<ServerState>().port.lock().map(|p| *p).unwrap_or(7680);
+                    if let Err(error) = proxy_command(port, "stop") {
+                        eprintln!("[AiTool] {error}");
+                    }
                     let _ = child.kill();
                     let _ = child.wait();
                 }

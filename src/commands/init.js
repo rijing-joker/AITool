@@ -503,6 +503,18 @@ async function repairAcodeNotifyIntegration({ home = os.homedir(), trackerDir, b
   return { ...result, skippedReason: null, notifyPath };
 }
 
+// True when AiTool runs as a shared-config server rather than beside the user's
+// own AI CLIs — the Docker image sets AITOOL_PASSIVE_HOOKS=1 and bind-mounts the
+// host's ~/.claude, ~/.codex, ~/.gemini, … into its own $HOME. In that mode it
+// must NOT register the interactive usage hooks: it would write this process's
+// $HOME path (e.g. /home/node/.tokentracker/bin/notify.cjs) into the host-shared
+// settings.json, and the host's own Claude Code then fails that Stop hook with
+// MODULE_NOT_FOUND. The host owns the hooks; here we stay a passive reader (the
+// dashboard scans session logs directly). See repairRuntimeIntegrations.
+function passiveHooksMode() {
+  return /^(1|true|yes|on)$/i.test(String(process.env.AITOOL_PASSIVE_HOOKS || "").trim());
+}
+
 async function repairRuntimeIntegrations({
   home = os.homedir(),
   trackerDir,
@@ -523,6 +535,16 @@ async function repairRuntimeIntegrations({
   });
   const integrations = {};
   const warnings = [];
+
+  // Shared-config server: skip hook registration (see passiveHooksMode). The
+  // notify handler is still written above — it is harmless and the dashboard
+  // keeps scanning session logs; only the host-config hook upserts are skipped.
+  if (passiveHooksMode()) {
+    for (const key of ["codex", "acode", "claude", "gemini", "codebuddy", "workbuddy", "opencode"]) {
+      integrations[key] = { changed: false, skippedReason: "passive-hooks" };
+    }
+    return { notifyPath, integrations, warnings };
+  }
 
   const attempt = async (key, work) => {
     try {

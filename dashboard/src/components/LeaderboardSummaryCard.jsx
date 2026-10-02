@@ -47,7 +47,7 @@ export function LeaderboardMeChip({
   const percentile = computePercentile(rank, total);
 
   const rawName = trimName(me?.display_name);
-  const headlineName = !rawName || isAnon(rawName) ? meLabel || "You" : rawName;
+  const headlineName = !rawName || isAnon(rawName) ? meLabel || copy("leaderboard.me_label") : rawName;
   const avatarSeed = me?.user_id || headlineName;
 
   // Click opens the user's own profile modal (where the embeddable badge lives).
@@ -110,7 +110,7 @@ export function LeaderboardMeChip({
       ) : (
         <span
           className="relative flex h-1.5 w-1.5 shrink-0 items-center justify-center ml-1"
-          title="You are here"
+          title={copy("leaderboard.summary.you_are_here")}
         >
           <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75 duration-1000"></span>
           <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-500"></span>

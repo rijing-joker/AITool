@@ -103,20 +103,7 @@ AS $func$
         ELSE ''
       END AS bucket,
       source, model,
-      CASE
-        WHEN lower(model) LIKE '%deepseek-v4-flash%'
-          OR lower(model) LIKE '%deepseek-v4-pro%'
-        THEN CASE
-          WHEN (
-            extract(hour FROM hour_start AT TIME ZONE 'UTC') >= 1
-            AND extract(hour FROM hour_start AT TIME ZONE 'UTC') < 4
-          ) OR (
-            extract(hour FROM hour_start AT TIME ZONE 'UTC') >= 6
-            AND extract(hour FROM hour_start AT TIME ZONE 'UTC') < 10
-          ) THEN 'peak' ELSE 'off_peak'
-        END
-        ELSE 'peak'
-      END AS pricing_tier,
+      public.leaderboard_pricing_tier(model, hour_start) AS pricing_tier,
       total_tokens, input_tokens, output_tokens, cached_input_tokens,
       cache_creation_input_tokens, reasoning_output_tokens, conversations
     FROM hourly CROSS JOIN tzr

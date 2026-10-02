@@ -834,7 +834,7 @@ export function ContextBreakdownPanel({ from, to, source = "claude", referenceTo
           .filter((c) => c.percent > 0)
           .filter((c) => !(source === "claude" && (c.key === "tool_calls" || c.key === "custom_agents")))
           .map((c) => `${categoryLabel(c.key)} ${c.percent}%`)
-          .join("，"),
+          .join(copy("shared.list_separator")),
       })}
     >
       {/* Inline category list — each row's tinted background fill encodes its
@@ -1070,10 +1070,12 @@ export function ContextBreakdownPanel({ from, to, source = "claude", referenceTo
       {/* Configured resources footer */}
       {configuredResources ? (
         <p className="mt-2 text-[10px] text-oai-gray-400 dark:text-oai-gray-500">
-          {formatCompactNumber(configuredResources.skills_count || 0)} skills ·{" "}
-          {formatCompactNumber(configuredResources.mcp_servers_count || 0)} MCP servers ·{" "}
-          {formatCompactNumber(configuredResources.custom_agents_count || 0)} agents ·{" "}
-          {formatCompactNumber(configuredResources.memory_files_count || 0)} memory files
+          {copy("dashboard.context_breakdown.resources", {
+            skills: formatCompactNumber(configuredResources.skills_count || 0),
+            servers: formatCompactNumber(configuredResources.mcp_servers_count || 0),
+            agents: formatCompactNumber(configuredResources.custom_agents_count || 0),
+            memories: formatCompactNumber(configuredResources.memory_files_count || 0),
+          })}
         </p>
       ) : null}
     </div>

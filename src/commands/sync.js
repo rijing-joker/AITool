@@ -337,6 +337,7 @@ const AUTO_SYNC_SOURCES = new Set([
   "opencode",
   "openclaw",
   "pi",
+  "prime-agent",
   "qoder",
   "qoder-cn",
   "reasonix",
@@ -2110,7 +2111,7 @@ async function cmdSync(argv, context = {}) {
         if (traeResult.unpricedRecords > 0 && !opts.auto) {
           process.stderr.write(`TRAE sync: ${traeResult.unpricedRecords} multi-request turns include earlier input without a cache split; it is counted in token totals but left out of cost.\n`);
         }
-      } catch (err) { warnProviderParseFailure("TRAE", err); }
+      } catch (err) { warnProviderParseFailure("TRAE", err, opts); }
     }
 
     // ── Trae Work CN (国内版) — account-level usage API ──
@@ -3370,7 +3371,7 @@ async function cmdSync(argv, context = {}) {
       // instead of double-counting history under a new one (issue #176). This
       // is the migration path for installs that predate the seed file.
       try {
-        require("../lib/machine-id").getOrCreateMachineId(queuePath);
+        await require("../lib/machine-id").getOrCreateMachineId(queuePath);
       } catch {
         // best effort — upload below must not be blocked by identity mirroring
       }

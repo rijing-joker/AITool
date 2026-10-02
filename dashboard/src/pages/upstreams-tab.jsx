@@ -285,18 +285,13 @@ export function UpstreamsTab() {
         })),
       );
       const failures = [];
-      setRecords((current) => {
-        const next = { ...current };
-        responses.forEach((result, index) => {
-          const definition = providerLoadDefinitions[index];
-          if (result.status === "fulfilled") {
-            next[result.value.section] = result.value.records;
-          } else {
-            failures.push(`${copy(CATEGORY_LABEL_KEYS[definition.id])}: ${String(result.reason)}`);
-          }
-        });
-        return next;
+      const loaded = {};
+      responses.forEach((result, index) => {
+        const definition = providerLoadDefinitions[index];
+        if (result.status === "fulfilled") loaded[result.value.section] = result.value.records;
+        else failures.push(`${copy(CATEGORY_LABEL_KEYS[definition.id])}: ${String(result.reason)}`);
       });
+      setRecords((current) => ({ ...current, ...loaded }));
       if (failures.length > 0) {
         setError(copy("proxy.upstream.error.partialLoad", { errors: failures.join("; ") }));
       }

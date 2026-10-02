@@ -96,7 +96,7 @@ export function EndpointSpeedTestDialog({ open, app, currentUrl, presetCandidate
 
   const finish = useCallback(
     (pick) => {
-      const listChanged = list.some((url) => !savedListRef.current?.has(url));
+      const listChanged = list.length !== savedListRef.current?.size || list.some((url) => !savedListRef.current?.has(url));
       onClose(pick ? { url: pick, autoSelect } : null, listChanged, list);
     },
     [autoSelect, list, onClose],

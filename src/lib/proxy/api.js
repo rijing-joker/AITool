@@ -6,6 +6,7 @@ const config = require("./config");
 const manager = require("./manager");
 const bridge = require("./usage-bridge");
 const management = require("./management");
+const { isUsageRecord } = require("./usage-record");
 
 // Dashboard-facing REST surface for the proxy layer. Mounted by local-api.js
 // under /api/proxy/*. Read endpoints are open (consistent with the rest of the
@@ -66,7 +67,8 @@ function readRecords({ maxFiles = 14 } = {}) {
       for (const line of raw.split("\n")) {
         if (!line.trim()) continue;
         try {
-          rows.push(JSON.parse(line));
+          const record = JSON.parse(line);
+          if (isUsageRecord(record)) rows.push(record);
         } catch {}
       }
     } catch {}

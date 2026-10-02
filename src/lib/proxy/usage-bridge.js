@@ -3,6 +3,7 @@ const net = require("node:net");
 const path = require("node:path");
 const paths = require("./paths");
 const config = require("./config");
+const { isUsageRecord } = require("./usage-record");
 
 // Usage bridge — the AiTool fusion point between the CLIProxyAPI core and the
 // TokenTracker data plane.
@@ -10,7 +11,7 @@ const config = require("./config");
 // The core emits one JSON usage record per proxied request on a RESP pub/sub
 // channel (`SUBSCRIBE usage`, served on the same port as the HTTP API; see
 // CLIProxyAPI internal/api/redis_queue_protocol.go). The bridge:
-//   1. appends every raw event to ~/.aitool/proxy/usage/records-YYYY-MM-DD.jsonl
+//   1. appends every request event to ~/.aitool/proxy/usage/records-YYYY-MM-DD.jsonl
 //      (request-level drill-down, like EasyCLIProxyAPI's usage records), and
 //   2. folds successes into cumulative half-hour buckets keyed by
 //      (source="cliproxy", model, hour_start) and appends updated rows to the
@@ -107,14 +108,7 @@ function scheduleBucketFlush() {
   bucketFlushTimer.unref?.();
 }
 
-function appendQueueRow(bucket) {
-  let queuePath;
-  try {
-    queuePath = require("../local-api").resolveQueuePath();
-  } catch (error) {
-    console.error("[ProxyBridge] cannot resolve tracker queue:", error?.message || error);
-    return;
-  }
+function appendQueueRow(bucket, queuePath = require("../local-api").resolveQueuePath()) {
   const row = {
     source: PROXY_SOURCE_ID,
     model: bucket.model,
@@ -236,7 +230,7 @@ function handleUsagePayload(payloadText) {
   } catch {
     return;
   }
-  if (!record || typeof record !== "object") return;
+  if (!isUsageRecord(record)) return;
   const now = new Date().toISOString();
   state.recordsToday += 1;
   state.lastEventAt = now;
@@ -389,9 +383,24 @@ function connect() {
   }
 }
 
+function repairUsageHistory() {
+  if (state.connected || state.connecting) throw new Error("Stop the usage bridge before repairing history");
+  if (bucketFlushTimer) flushBucketsSync();
+  // Do not let the exit hook restore stale totals if a repair fails midway.
+  buckets = null;
+  bucketsLoaded = false;
+  const result = require("./usage-repair").repairUsageHistory({
+    queuePath: require("../local-api").resolveQueuePath(),
+    toUtcHalfHourStart,
+    appendQueueRow,
+  });
+  return result;
+}
+
 function startBridge() {
-  loadBuckets();
   if (state.connected || state.connecting) return bridgeStatus();
+  repairUsageHistory();
+  loadBuckets();
   state.stopping = false;
   connect();
   return bridgeStatus();
@@ -403,10 +412,9 @@ function stopBridge() {
     clearTimeout(state.retryTimer);
     state.retryTimer = null;
   }
-  if (bucketFlushTimer) {
-    clearTimeout(bucketFlushTimer);
-    bucketFlushTimer = null;
-  }
+  flushBucketsSync();
+  buckets = null;
+  bucketsLoaded = false;
   if (state.socket) {
     try {
       state.socket.destroy();
@@ -450,6 +458,7 @@ module.exports = {
   stopBridge,
   bridgeStatus,
   handleUsagePayload,
+  repairUsageHistory,
   toUtcHalfHourStart,
   PROXY_SOURCE_ID,
 };

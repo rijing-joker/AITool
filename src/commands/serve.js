@@ -94,6 +94,14 @@ async function cmdServe(argv) {
     process.stdout.write(`Runtime refresh warning: ${e?.message || e}\n`);
   }
 
+  // Repair proxy history even when proxy autostart is disabled, before the
+  // optional sync uploads the queue or the dashboard reads its cached totals.
+  try {
+    require("../lib/proxy/usage-bridge").repairUsageHistory();
+  } catch (e) {
+    process.stdout.write(`Proxy usage repair warning: ${e?.message || e}\n`);
+  }
+
   // 1. Optional sync
   if (opts.sync) {
     process.stdout.write("Syncing local data...\n");

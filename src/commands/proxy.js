@@ -7,10 +7,16 @@ const bridge = require("../lib/proxy/usage-bridge");
 //   start     start core + usage bridge
 //   stop      stop both
 //   status    machine + human readable status
+//   repair-usage  remove historical control notifications and correct totals
 //   config    print effective proxy paths
 
 async function cmdProxy(argv = []) {
   const sub = String(argv[0] || "status").toLowerCase();
+
+  if (sub === "repair-usage") {
+    process.stdout.write(`${JSON.stringify(bridge.repairUsageHistory())}\n`);
+    return;
+  }
 
   if (sub === "install") {
     // `aitool proxy install [--local <CLIProxyAPI checkout>]` — the local

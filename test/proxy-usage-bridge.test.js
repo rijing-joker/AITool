@@ -162,7 +162,12 @@ test("proxy overview and request list exclude legacy notifications before repair
 
 test("combined pagination and stats use the same filtered records and preserve the stats-only API", async (t) => {
   const f = fixture(t);
-  writeHistory(f, [control, zeroRequest, { ...zeroRequest, failed: true }, { ...zeroRequest, canceled: true }]);
+  writeHistory(f, [
+    control,
+    { ...zeroRequest, provider: "up-a" },
+    { ...zeroRequest, provider: "up-a", failed: true },
+    { ...zeroRequest, provider: "up-b", canceled: true },
+  ]);
   async function read(query) {
     let payload;
     await handleProxyApiRequest({ method: "GET" }, {
@@ -178,11 +183,17 @@ test("combined pagination and stats use the same filtered records and preserve t
   assert.equal(combined.stats.success_count, 1);
   assert.equal(combined.stats.failure_count, 1);
   assert.equal(combined.stats.canceled_count, 1);
+  // Provider aggregation mirrors computeOverview: success requests and
+  // failures count toward the provider; canceled-only providers do not.
+  assert.deepEqual(combined.stats.providers, [
+    { provider: "up-a", requests: 1, total_tokens: 0, failures: 1 },
+  ]);
   const canceled = await read("includeStats=1&result=canceled");
   assert.equal(canceled.total, 1);
   assert.equal(canceled.records[0].canceled, true);
   assert.equal(canceled.stats.total_requests, 1);
   assert.equal(canceled.stats.total_tokens, 0);
+  assert.deepEqual(canceled.stats.providers, []);
 });
 
 test("container liveness succeeds independently of proxy readiness", async (t) => {

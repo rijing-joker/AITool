@@ -5,7 +5,7 @@ import { RequestsTab } from "./requests-tab";
 import { showToast } from "../ui/components/Toast";
 vi.mock("../lib/copy", () => ({ copy: (key) => key }));
 vi.mock("../ui/components/Toast", () => ({ showToast: vi.fn() }));
-const response = { ok: true, total: 1, records: [{ id: "fixture", timestamp: "2026-10-02T00:00:00Z", model: "fixture-model", tokens: { totalTokens: 123 } }], stats: { total_requests: 1, success_count: 1, failure_count: 0, canceled_count: 0, total_tokens: 123, models: [], providers: [] } };
+const response = { ok: true, total: 1, records: [{ id: "fixture", timestamp: "2026-10-02T00:00:00Z", model: "fixture-model", tokens: { totalTokens: 123 } }], stats: { total_requests: 1, success_count: 1, failure_count: 0, canceled_count: 0, total_tokens: 123, models: [], providers: [{ provider: "fixture-provider", requests: 1, total_tokens: 123, failures: 0 }] } };
 beforeEach(() => {
   vi.clearAllMocks();
   vi.stubGlobal("fetch", vi.fn(async () => ({ json: async () => response })));
@@ -18,6 +18,11 @@ it("coalesces typing into one filtered request", async () => {
   for (const value of ["g", "gp", "gpt"]) fireEvent.change(input, { target: { value } });
   await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
   expect(fetch.mock.calls[1][0]).toContain("model=gpt");
+});
+it("feeds filter suggestions from the response stats", async () => {
+  await setup();
+  const providers = document.getElementById(screen.getByRole("combobox", { name: "proxy.requests.filter.provider" }).getAttribute("list"));
+  expect(Array.from(providers.querySelectorAll("option")).map((option) => option.value)).toEqual(["fixture-provider"]);
 });
 it("only reports refresh success after the request completes", async () => {
   await setup();

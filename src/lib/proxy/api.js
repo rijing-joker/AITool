@@ -486,12 +486,25 @@ async function handleProxyApiRequest(req, res, url, ctx) {
         const canceled = filtered.filter((row) => row.canceled && !row.failed);
         const totalTokens = success.reduce((acc, row) => acc + (Number(row?.tokens?.totalTokens) || 0), 0);
         const byModel = new Map();
+        const byProvider = new Map();
         for (const row of success) {
           const name = String(row.response_model || row.model || "unknown");
           const entry = byModel.get(name) || { model: name, requests: 0, total_tokens: 0 };
           entry.requests += 1;
           entry.total_tokens += Number(row?.tokens?.totalTokens) || 0;
           byModel.set(name, entry);
+
+          const provider = String(row.provider || "unknown");
+          const providerEntry = byProvider.get(provider) || { provider, requests: 0, total_tokens: 0, failures: 0 };
+          providerEntry.requests += 1;
+          providerEntry.total_tokens += Number(row?.tokens?.totalTokens) || 0;
+          byProvider.set(provider, providerEntry);
+        }
+        for (const row of failedRows) {
+          const provider = String(row.provider || "unknown");
+          const providerEntry = byProvider.get(provider) || { provider, requests: 0, total_tokens: 0, failures: 0 };
+          providerEntry.failures += 1;
+          byProvider.set(provider, providerEntry);
         }
         stats = {
           total_requests: filtered.length,
@@ -500,6 +513,7 @@ async function handleProxyApiRequest(req, res, url, ctx) {
           canceled_count: canceled.length,
           total_tokens: totalTokens,
           models: Array.from(byModel.values()).sort((a, b) => b.total_tokens - a.total_tokens).slice(0, 8),
+          providers: Array.from(byProvider.values()).sort((a, b) => b.requests - a.requests),
         };
       }
       if (statsOnly) {

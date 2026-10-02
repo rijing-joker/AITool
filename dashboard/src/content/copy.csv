@@ -2407,3 +2407,31 @@ leaderboard.estimated_cost_hint,shared,*,Shared,estimated_cost_hint,"Based on es
 leaderboard.profile_modal.best_day.date,shared,*,Shared,date,on {{date}},,active
 leaderboard.summary.you_are_here,shared,*,Shared,you_are_here,You are here,,active
 shared.list_separator,shared,*,Shared,list_separator,", ",,active
+proxy.upstream.groups.summary,proxy,ProxyPage,Upstreams,groups_summary,{{count}} provider groups,,active
+proxy.upstream.groups.add,proxy,ProxyPage,Upstreams,groups_add,Add group,,active
+proxy.upstream.groups.edit,proxy,ProxyPage,Upstreams,groups_edit,Edit group,,active
+proxy.upstream.groups.name,proxy,ProxyPage,Upstreams,groups_name,Group name,,active
+proxy.upstream.groups.namePlaceholder,proxy,ProxyPage,Upstreams,groups_name_placeholder,"e.g. Primary, Backup",,active
+proxy.upstream.groups.nameRequired,proxy,ProxyPage,Upstreams,groups_name_required,"Enter a group name of 1-80 characters, without control characters.",,active
+proxy.upstream.groups.description,proxy,ProxyPage,Upstreams,groups_description,"A group connects to one upstream endpoint; its keys share models and connection settings.",,active
+proxy.upstream.groups.keys,proxy,ProxyPage,Upstreams,groups_keys,Group keys,,active
+proxy.upstream.groups.keysHint,proxy,ProxyPage,Upstreams,groups_keys_hint,Each key inherits the shared settings and may override them.,,active
+proxy.upstream.groups.addKey,proxy,ProxyPage,Upstreams,groups_add_key,Add key,,active
+proxy.upstream.groups.emptyKeys,proxy,ProxyPage,Upstreams,groups_empty_keys,This group has no keys.,,active
+proxy.upstream.groups.keyNumber,proxy,ProxyPage,Upstreams,groups_key_number,Key {{number}},,active
+proxy.upstream.groups.removeKey,proxy,ProxyPage,Upstreams,groups_remove_key,Remove key {{number}},,active
+proxy.upstream.groups.showKey,proxy,ProxyPage,Upstreams,groups_show_key,Show key,,active
+proxy.upstream.groups.keySettings,proxy,ProxyPage,Upstreams,groups_key_settings,Key settings,,active
+proxy.upstream.groups.overrides,proxy,ProxyPage,Upstreams,groups_overrides,{{count}} overrides,,active
+proxy.upstream.groups.inherits,proxy,ProxyPage,Upstreams,groups_inherits,Inherits shared settings,,active
+proxy.upstream.groups.overrideHint,proxy,ProxyPage,Upstreams,groups_override_hint,"Check to override a field for this key only; uncheck to inherit again. Lists and headers replace the shared value entirely; empty clears it.",,active
+proxy.upstream.groups.overrideField,proxy,ProxyPage,Upstreams,groups_override_field,Override: {{field}},,active
+proxy.upstream.groups.overrideModels,proxy,ProxyPage,Upstreams,groups_override_models,Override: models & aliases,,active
+proxy.upstream.groups.weight,proxy,ProxyPage,Upstreams,groups_weight,Weight (default 1),,active
+proxy.upstream.groups.retry,proxy,ProxyPage,Upstreams,groups_retry,Request retries,,active
+proxy.upstream.groups.invalidKey,proxy,ProxyPage,Upstreams,groups_invalid_key,"Invalid key configuration: {{field}}. Fill in the key and check integer ranges.",,active
+proxy.upstream.groups.discoveryKey,proxy,ProxyPage,Upstreams,groups_discovery_key,Key used to fetch models,,active
+proxy.upstream.groups.sharedHint,proxy,ProxyPage,Upstreams,groups_shared_hint,"The models and advanced settings below are shared by the group's keys; per-key overrides take precedence.",,active
+proxy.upstream.groups.sharedToggleHint,proxy,ProxyPage,Upstreams,groups_shared_toggle_hint,"Toggles the group's shared models. Per-key model exclusions still take precedence.",,active
+proxy.upstream.groups.partial,proxy,ProxyPage,Upstreams,groups_partial,Some keys disabled,,active
+proxy.upstream.groups.healthKey,proxy,ProxyPage,Upstreams,groups_health_key,Health-check key,,active

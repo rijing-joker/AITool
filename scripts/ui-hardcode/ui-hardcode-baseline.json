@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-02T04:16:00.296Z",
+  "generatedAt": "2026-10-02T06:20:02.103Z",
   "root": "dashboard/src",
   "rules": {
     "colors": "hex/rgb(a) literals",
@@ -7,7 +7,7 @@
   },
   "totals": {
     "colors": 412,
-    "rawText": 199
+    "rawText": 202
   },
   "files": {
     "dashboard/src/components/InsforgeUserHeaderControls.jsx": {
@@ -252,6 +252,13 @@
         "Fast"
       ]
     },
+    "dashboard/src/pages/provider-group-keys-editor.jsx": {
+      "colors": 0,
+      "rawText": 1,
+      "rawTextTokens": [
+        "WebSocket"
+      ]
+    },
     "dashboard/src/pages/requests-tab.jsx": {
       "colors": 0,
       "rawText": 4,
@@ -264,13 +271,15 @@
     },
     "dashboard/src/pages/upstreams-tab.jsx": {
       "colors": 2,
-      "rawText": 10,
+      "rawText": 12,
       "rawTextTokens": [
         ") : model.alias || model.displayName ? (",
         ") : modelLoading ? (",
         ") : rows.length === 0 ? (",
         ") : visibleModels.length === 0 ? (",
         "0 ? (",
+        "0; return (",
+        "1; const sharedToggleOn = definitionFor(row.section).openAi ? !row.record.disabled : !(Array.isArray(row.record[\"excluded-models\"]) && row.record[\"excluded-models\"].includes(\"*\")); return (",
         "WebSocket",
         "model.name).join(\"、\") : activeCategory === \"deepseek\" ? copy(\"proxy.upstream.models.selectionRequiredHint\") : hasModelExclusions ? copy(\"proxy.upstream.models.hiddenHint\") : activeSection === \"openai-compatibility\" ? copy(\"proxy.upstream.models.autoHint\") : copy(\"proxy.upstream.models.allHint\"); const inputClass = \"w-full rounded-md border border-oai-gray-300 bg-oai-white px-3 text-sm text-oai-black placeholder-oai-gray-400 transition-colors focus:border-oai-brand focus:outline-none focus:ring-1 focus:ring-oai-brand/30 disabled:cursor-not-allowed disabled:bg-oai-gray-50 disabled:text-oai-gray-400 dark:border-oai-gray-700 dark:bg-oai-gray-900 dark:text-oai-white dark:placeholder-oai-gray-500 dark:disabled:bg-oai-gray-800\"; const fieldLabelClass = \"mb-1.5 block text-sm font-medium text-oai-gray-700 dark:text-oai-gray-300\"; return (",
         "modelSearchText(model).includes(query)), [models, query]); const searchLabel = copy(selected ? \"proxy.upstream.modelDialog.searchSelected\" : \"proxy.upstream.modelDialog.searchUnselected\"); return (",

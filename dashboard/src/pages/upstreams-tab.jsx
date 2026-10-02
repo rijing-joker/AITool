@@ -40,12 +40,14 @@ import {
   apiAccessRemarkLocatorFromRow,
   applyProviderPreset,
   applyProviderRemarkIdentity,
+  buildProviderGroupRecord,
   buildProviderRecord,
   checkProviderModelHealth,
   checkProviderModelsHealth,
   createProviderDraft,
   definitionFor,
   draftFromRow,
+  effectiveProviderKey,
   emptyProviderDraft,
   emptyRecords,
   exclusionsForModelSelection,
@@ -55,6 +57,7 @@ import {
   maskSecret,
   mergeModelOptions,
   mergeProviderHealthModels,
+  modelsFromRecord,
   modelSearchText,
   modelSelectionForDiscovery,
   normalizeBaseUrl,
@@ -65,26 +68,33 @@ import {
   providerCategoryMatchesRecord,
   providerDefinitions,
   providerDragId,
+  providerGroupKeys,
+  providerGroupStatus,
+  providerGroupsApi,
   providerHealthIdentity,
   providerHeadersFromRecord,
+  providerKeyDraft,
   providerLoadDefinitions,
   providerModelType,
   providerRecordWithDisabledState,
   providerRemarkIdentity,
   readBoolean,
+  readString,
   reconcileModelSelection,
   requestErrorMessage,
   resolveApiAccessRemarks,
   resolveProviderRecordIndex,
   reorderProviderRecords,
-  responseList,
   rowFromRecord,
   saveApiAccessRemark,
   sectionRecordsFromConfig,
+  serializeProviderKey,
   stripResponseFields,
+  validateProviderGroupKeys,
 } from "../lib/easy-providers";
 import { Button, Card, ConfirmModal } from "../ui/components";
 import { showToast } from "../ui/components/Toast";
+import { ProviderGroupKeysEditor } from "./provider-group-keys-editor";
 
 // ---------------------------------------------------------------------------
 // Upstreams tab (API 接入) — EasyCLIProxyAPI's provider management, ported
@@ -278,10 +288,7 @@ export function UpstreamsTab() {
       const responses = await Promise.allSettled(
         providerLoadDefinitions.map(async (definition) => ({
           section: definition.section,
-          records: responseList(
-            await managementApi.get(`/${definition.section}`),
-            definition.responseKey,
-          ),
+          records: await providerGroupsApi.get(definition.section),
         })),
       );
       const failures = [];
@@ -348,7 +355,7 @@ export function UpstreamsTab() {
         .filter((row) => {
           const query = filter.trim().toLowerCase();
           if (!query) return true;
-          return [row.remark || row.name, row.apiKey, row.baseUrl, row.models.map((model) => model.name).join(" ")]
+          return [row.remark, row.name, ...row.apiKeys, row.baseUrl, row.models.map((model) => modelSearchText(model)).join(" ")]
             .join(" ")
             .toLowerCase()
             .includes(query);
@@ -359,7 +366,7 @@ export function UpstreamsTab() {
   const openCreate = () => {
     setError("");
     setEditingRow(null);
-    setDialogDraft(createProviderDraft(activeCategory));
+    setDialogDraft({ ...createProviderDraft(activeCategory), groupKeys: [providerKeyDraft({ "api-key": "" })] });
     setDialogOpen(true);
   };
 
@@ -376,15 +383,29 @@ export function UpstreamsTab() {
       activeCategory,
       applyProviderPreset(activeCategory, nextDraft),
     );
+    const grouped = Boolean(preparedDraft.groupKeys);
     const preparedDraftForSave = {
       ...preparedDraft,
       models: preparedDraft.models.filter((model) => model.name.trim()),
     };
     const baseUrlRequired = definition.openAi || definition.section === "codex-api-key";
-    const remarkRequired = definition.openAi && activeCategory !== "deepseek";
-    const parsedApiKeys = parseProviderApiKeys(preparedDraft.apiKey);
+    const remarkRequired = definition.openAi && activeCategory !== "deepseek" && !grouped;
+    const parsedApiKeys = grouped
+      ? (preparedDraft.groupKeys ?? []).map(({ value }) => readString(value, "api-key").trim())
+      : parseProviderApiKeys(preparedDraft.apiKey);
+    if (grouped) {
+      const name = preparedDraft.name.trim();
+      if (!name || name.length > 80 || /[\u0000-\u001f\u007f]/.test(name)) {
+        return { saved: false, target: "form", error: copy("proxy.upstream.groups.nameRequired") };
+      }
+      const invalidKey = validateProviderGroupKeys(preparedDraft.groupKeys ?? []);
+      if (invalidKey) {
+        return { saved: false, target: "form", error: copy("proxy.upstream.groups.invalidKey", { field: invalidKey }) };
+      }
+    }
     if (
-      parsedApiKeys.length === 0
+      (grouped && parsedApiKeys.length === 0 && !editingRow && !definition.openAi)
+      || (!grouped && parsedApiKeys.length === 0)
       || (remarkRequired && !preparedDraft.remark.trim())
       || (baseUrlRequired && !preparedDraft.baseUrl.trim())
     ) {
@@ -437,16 +458,20 @@ export function UpstreamsTab() {
       if (
         definition.openAi
         && activeCategory !== "deepseek"
+        && !editingRow
         && draftToSave.models.length === 0
       ) {
         let fetchedModels;
         try {
+          const firstKey = grouped ? preparedDraft.groupKeys?.[0] : null;
           fetchedModels = await fetchModels(
             "openai",
             baseUrl,
             parsedApiKeys[0],
-            editingRow?.authIndex,
-            providerHeaders,
+            grouped ? undefined : editingRow?.authIndex,
+            firstKey
+              ? providerHeadersFromRecord(effectiveProviderKey({ headers: providerHeaders }, serializeProviderKey(firstKey)))
+              : providerHeaders,
           );
           if (fetchedModels.length === 0) {
             throw new Error(copy("proxy.upstream.error.noModels"));
@@ -463,8 +488,13 @@ export function UpstreamsTab() {
           models: fetchedModels,
         });
       }
-      const latestConfig = await managementApi.get("/config");
-      const current = sectionRecordsFromConfig(latestConfig, activeSection);
+      let current;
+      if (grouped) {
+        current = await providerGroupsApi.get(activeSection);
+      } else {
+        const latestConfig = await managementApi.get("/config");
+        current = sectionRecordsFromConfig(latestConfig, activeSection);
+      }
       let nextList;
       let targetIndex = -1;
       let currentRecord;
@@ -477,13 +507,15 @@ export function UpstreamsTab() {
         currentRecord = current[targetIndex];
       }
 
-      const recordsToSave = definition.openAi
-        ? [buildProviderRecord(activeSection, draftToSave, currentRecord)]
-        : parsedApiKeys.map((apiKey) => buildProviderRecord(
-          activeSection,
-          { ...draftToSave, apiKey },
-          currentRecord,
-        ));
+      const recordsToSave = grouped
+        ? [buildProviderGroupRecord(activeSection, draftToSave, currentRecord)]
+        : definition.openAi
+          ? [buildProviderRecord(activeSection, draftToSave, currentRecord)]
+          : parsedApiKeys.map((apiKey) => buildProviderRecord(
+            activeSection,
+            { ...draftToSave, apiKey },
+            currentRecord,
+          ));
       if (hasDuplicateProviderRecord(activeSection, current, recordsToSave, targetIndex)) {
         throw new Error(copy("proxy.upstream.error.duplicate"));
       }
@@ -495,7 +527,11 @@ export function UpstreamsTab() {
         ]
         : [...current, ...recordsToSave];
 
-      await managementApi.put(`/${activeSection}`, nextList.map(stripResponseFields));
+      if (grouped) {
+        await providerGroupsApi.put(activeSection, nextList.map(stripResponseFields));
+      } else {
+        await managementApi.put(`/${activeSection}`, nextList.map(stripResponseFields));
+      }
       await saveApiAccessRemark({
         providerSection: activeSection,
         previousRecords: editingRow ? [apiAccessRemarkLocatorFromRow(editingRow)] : [],
@@ -517,12 +553,11 @@ export function UpstreamsTab() {
     setBusy(true);
     setError("");
     try {
-      const latestConfig = await managementApi.get("/config");
-      const current = sectionRecordsFromConfig(latestConfig, row.section);
+      const current = await providerGroupsApi.get(row.section);
       const targetIndex = resolveProviderRecordIndex(current, row);
       if (targetIndex < 0) throw new Error(copy("proxy.upstream.error.stale"));
       const remainingRecords = current.filter((_, index) => index !== targetIndex).map(stripResponseFields);
-      await managementApi.put(`/${row.section}`, remainingRecords);
+      await providerGroupsApi.put(row.section, remainingRecords);
       await saveApiAccessRemark({
         providerSection: row.section,
         previousRecords: [apiAccessRemarkLocatorFromRow(row)],
@@ -543,8 +578,7 @@ export function UpstreamsTab() {
     setBusy(true);
     setError("");
     try {
-      const latestConfig = await managementApi.get("/config");
-      const latestRows = sectionRecordsFromConfig(latestConfig, row.section);
+      const latestRows = await providerGroupsApi.get(row.section);
       const targetIndex = resolveProviderRecordIndex(latestRows, row);
       if (targetIndex < 0) {
         throw new Error(copy("proxy.upstream.error.stale"));
@@ -556,10 +590,8 @@ export function UpstreamsTab() {
         : Array.isArray(latestRecord["excluded-models"])
           && latestRecord["excluded-models"].some((model) => String(model).trim() === "*");
       if (definition.openAi) {
-        await managementApi.patch("/openai-compatibility", {
-          index: targetIndex,
-          value: { disabled: !currentlyDisabled },
-        });
+        await providerGroupsApi.put(row.section, latestRows.map((record, index) =>
+          stripResponseFields(index === targetIndex ? { ...record, disabled: !currentlyDisabled } : record)));
       } else {
         const nextRecord = providerRecordWithDisabledState(
           row.section,
@@ -568,7 +600,7 @@ export function UpstreamsTab() {
         );
         const nextRows = latestRows.map((record, index) =>
           index === targetIndex ? nextRecord : stripResponseFields(record));
-        await managementApi.put(`/${row.section}`, nextRows);
+        await providerGroupsApi.put(row.section, nextRows);
       }
       await loadProviders(false);
     } catch (requestError) {
@@ -583,11 +615,10 @@ export function UpstreamsTab() {
     setBusy(true);
     setError("");
     try {
-      const latestConfig = await managementApi.get("/config");
-      const latestRows = sectionRecordsFromConfig(latestConfig, source.section);
+      const latestRows = await providerGroupsApi.get(source.section);
       const nextRows = reorderProviderRecords(latestRows, rows, source, target);
       if (!nextRows) throw new Error(copy("proxy.upstream.error.stale"));
-      await managementApi.put(`/${source.section}`, nextRows);
+      await providerGroupsApi.put(source.section, nextRows);
       await loadProviders(false);
     } catch (requestError) {
       await loadProviders(false);
@@ -615,8 +646,6 @@ export function UpstreamsTab() {
     }
     void reorderProviders(source, target);
   };
-
-  const totalCount = Object.values(records).reduce((sum, items) => sum + items.length, 0);
 
   const countForDefinition = (definition) =>
     records[definition.section].filter((record) =>
@@ -677,7 +706,7 @@ export function UpstreamsTab() {
         </div>
 
         <div className="mt-3 flex items-center justify-between gap-2 text-xs text-oai-gray-400 dark:text-oai-gray-500">
-          <span>{copy("proxy.upstream.count", { count: totalCount })} · {copy("proxy.upstream.matches", { count: rows.length })}</span>
+          <span>{copy("proxy.upstream.groups.summary", { count: rows.length })}</span>
           <span>{copy("proxy.upstream.dragHint")}</span>
         </div>
 
@@ -714,6 +743,11 @@ export function UpstreamsTab() {
               <div className="mt-3 flex flex-col gap-2">
                 {rows.map((row) => {
                   const ProviderIcon = CATEGORY_ICONS[row.section] ?? Boxes;
+                  const isPartial = providerGroupStatus(row.record) === "partial";
+                  const manyKeys = row.apiKeys.length > 1;
+                  const sharedToggleOn = definitionFor(row.section).openAi
+                    ? !row.record.disabled
+                    : !(Array.isArray(row.record["excluded-models"]) && row.record["excluded-models"].includes("*"));
                   return (
                     <SortableUpstreamRow
                       key={providerDragId(row)}
@@ -725,9 +759,14 @@ export function UpstreamsTab() {
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
                           <ProviderIcon className="h-4 w-4 shrink-0 text-oai-gray-400" />
-                          <strong className="min-w-0 truncate text-sm font-medium text-oai-black dark:text-white" title={row.remark || row.name}>
-                            {row.remark || row.name}
+                          <strong className="min-w-0 truncate text-sm font-medium text-oai-black dark:text-white" title={row.name}>
+                            {row.name}
                           </strong>
+                          {row.remark ? (
+                            <span className="shrink-0 max-w-40 truncate text-xs text-oai-gray-500 dark:text-oai-gray-400" title={row.remark}>
+                              {row.remark}
+                            </span>
+                          ) : null}
                           {row.priority !== null ? (
                             <span className="shrink-0 rounded-full bg-oai-gray-100 px-2 py-0.5 text-xs tabular-nums text-oai-gray-500 dark:bg-oai-gray-800 dark:text-oai-gray-400">
                               {copy("proxy.upstream.priorityValue", { priority: row.priority })}
@@ -740,8 +779,8 @@ export function UpstreamsTab() {
                           ) : null}
                         </div>
                         <div className="mt-1 flex min-w-0 items-center gap-3 text-xs text-oai-gray-500 dark:text-oai-gray-400">
-                          <code className="shrink-0 font-mono" title={definitionFor(row.section).openAi ? copy("proxy.upstream.keys.count", { count: row.apiKeys.length }) : undefined}>
-                            {definitionFor(row.section).openAi && row.apiKeys.length > 1
+                          <code className="shrink-0 font-mono" title={copy("proxy.upstream.keys.count", { count: row.apiKeys.length })}>
+                            {manyKeys
                               ? copy("proxy.upstream.keys.summary", { key: maskSecret(row.apiKey), count: row.apiKeys.length })
                               : maskSecret(row.apiKey)}
                           </code>
@@ -764,15 +803,20 @@ export function UpstreamsTab() {
                           {copy("proxy.upstream.health.action")}
                         </Button>
                         <UpstreamSwitch
-                          checked={!row.disabled}
+                          checked={sharedToggleOn}
                           onChange={() => void toggleProvider(row)}
                           disabled={busy}
-                          title={row.disabled ? copy("proxy.upstream.enable") : copy("proxy.upstream.disable")}
+                          title={copy("proxy.upstream.groups.sharedToggleHint")}
                           label={copy("proxy.upstream.toggleAria", {
                             remark: row.remark || row.name,
-                            action: row.disabled ? copy("proxy.upstream.common.enable") : copy("proxy.upstream.common.disable"),
+                            action: sharedToggleOn ? copy("proxy.upstream.common.disable") : copy("proxy.upstream.common.enable"),
                           })}
                         />
+                        {isPartial ? (
+                          <span className="shrink-0 rounded-full bg-oai-brand-50 px-2 py-0.5 text-xs font-medium text-oai-brand-700 dark:bg-oai-brand-950/40 dark:text-oai-brand-300">
+                            {copy("proxy.upstream.groups.partial")}
+                          </span>
+                        ) : null}
                         <button
                           type="button"
                           onClick={() => openEdit(row)}
@@ -814,7 +858,7 @@ export function UpstreamsTab() {
         />
       ) : null}
       {healthDialogRow ? (
-        <UpstreamHealthDialog
+        <UpstreamGroupHealthDialog
           key={providerHealthIdentity(healthDialogRow)}
           row={healthDialogRow}
           onClose={() => setHealthDialogRow(null)}
@@ -937,6 +981,8 @@ function UpstreamFormDialog({
   const definition = definitionFor(activeCategory);
   const activeSection = definition.section;
   const [draft, setDraft] = useState(initialDraft);
+  const grouped = Boolean(draft.groupKeys);
+  const [discoveryKeyId, setDiscoveryKeyId] = useState(initialDraft.groupKeys?.[0]?.id ?? "");
   const [modelLoading, setModelLoading] = useState(false);
   const [modelError, setModelError] = useState("");
   const [formError, setFormError] = useState("");
@@ -1072,13 +1118,23 @@ function UpstreamFormDialog({
             : definition.section === "codex-api-key"
               ? "codex"
               : "openai";
-      const modelApiKey = draft.apiKey.split(/\r?\n/).map((value) => value.trim()).find(Boolean) ?? "";
+      const selectedKey = draft.groupKeys?.find((key) => key.id === discoveryKeyId) ?? draft.groupKeys?.[0];
+      const connection = selectedKey
+        ? effectiveProviderKey({ headers: parseProviderHeaders(draft.headersText ?? "") }, serializeProviderKey(selectedKey))
+        : null;
+      const modelApiKey = connection
+        ? readString(connection, "api-key")
+        : draft.apiKey.split(/\r?\n/).map((value) => value.trim()).find(Boolean) ?? "";
       const fetchedModels = await fetchModels(
         provider,
         draft.baseUrl,
         modelApiKey,
-        editingRow?.authIndex,
-        parseProviderHeaders(draft.headersText ?? ""),
+        connection
+          ? readString(selectedKey.value, "auth-index", "authIndex") || undefined
+          : editingRow?.authIndex,
+        connection
+          ? providerHeadersFromRecord(connection)
+          : parseProviderHeaders(draft.headersText ?? ""),
       );
       if (requestId !== discoveryRequestRef.current) return;
       const models = applyProviderPreset(
@@ -1195,16 +1251,35 @@ function UpstreamFormDialog({
         open
         busy={busy}
         onClose={onClose}
-        title={copy(editingRow ? "proxy.upstream.dialog.edit" : "proxy.upstream.dialog.add")}
+        title={copy(grouped
+          ? editingRow ? "proxy.upstream.groups.edit" : "proxy.upstream.groups.add"
+          : editingRow ? "proxy.upstream.dialog.edit" : "proxy.upstream.dialog.add")}
         subtitle={copy(CATEGORY_LABEL_KEYS[activeCategory])}
       >
         <form onSubmit={(event) => void submit(event)} className="flex min-h-0 flex-1 flex-col">
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 py-4">
+            {grouped ? (
+              <>
+                <p className="text-sm text-oai-gray-500 dark:text-oai-gray-400">{copy("proxy.upstream.groups.description")}</p>
+                <div>
+                  <label htmlFor="upstream-group-name" className={fieldLabelClass}>{copy("proxy.upstream.groups.name")}</label>
+                  <input
+                    id="upstream-group-name"
+                    autoFocus
+                    value={draft.name}
+                    maxLength={80}
+                    onChange={(event) => updateTextField("name", event.currentTarget.value)}
+                    placeholder={copy("proxy.upstream.groups.namePlaceholder")}
+                    className={inputClass}
+                  />
+                </div>
+              </>
+            ) : null}
             <div>
               <label htmlFor="upstream-remark" className={fieldLabelClass}>{copy("proxy.upstream.field.remark")}</label>
               <input
                 id="upstream-remark"
-                autoFocus={definition.openAi}
+                autoFocus={!grouped && definition.openAi}
                 value={draft.remark}
                 maxLength={80}
                 onChange={(event) => updateTextField("remark", event.currentTarget.value)}
@@ -1212,18 +1287,20 @@ function UpstreamFormDialog({
                 className={inputClass}
               />
             </div>
-            <div>
-              <label htmlFor="upstream-keys" className={fieldLabelClass}>{copy("proxy.upstream.field.keysMany")}</label>
-              <textarea
-                id="upstream-keys"
-                autoFocus={!definition.openAi}
-                value={draft.apiKey}
-                onChange={(event) => updateTextField("apiKey", event.currentTarget.value)}
-                placeholder={"sk-...\nsk-..."}
-                rows={3}
-                className={`${inputClass} font-mono`}
-              />
-            </div>
+            {grouped ? null : (
+              <div>
+                <label htmlFor="upstream-keys" className={fieldLabelClass}>{copy("proxy.upstream.field.keysMany")}</label>
+                <textarea
+                  id="upstream-keys"
+                  autoFocus={!definition.openAi}
+                  value={draft.apiKey}
+                  onChange={(event) => updateTextField("apiKey", event.currentTarget.value)}
+                  placeholder={"sk-...\nsk-..."}
+                  rows={3}
+                  className={`${inputClass} font-mono`}
+                />
+              </div>
+            )}
             <div>
               <label htmlFor="upstream-baseurl" className={fieldLabelClass}>{copy("proxy.upstream.field.baseUrl")}</label>
               <input
@@ -1255,6 +1332,60 @@ function UpstreamFormDialog({
                 </button>
               ) : null}
             </div>
+            {draft.groupKeys ? (
+              <ProviderGroupKeysEditor
+                keys={draft.groupKeys}
+                section={activeSection}
+                disabled={busy}
+                shared={{
+                  models: draft.models,
+                  priority: draft.priority ? Number(draft.priority) : undefined,
+                  prefix: draft.prefix,
+                  "proxy-url": draft.proxyUrl,
+                  "disable-cooling": draft.disableCooling,
+                  "excluded-models": draft.excludedModelsText?.split(/[\n,]/).map((item) => item.trim()).filter(Boolean),
+                  headers: (() => {
+                    try {
+                      return parseProviderHeaders(draft.headersText ?? "");
+                    } catch {
+                      return {};
+                    }
+                  })(),
+                }}
+                onChange={(groupKeys) => {
+                  discoveryRequestRef.current += 1;
+                  setModelLoading(false);
+                  setModelError("");
+                  setFormError("");
+                  if (activeCategory === "deepseek") setModelDiscoveryReady(false);
+                  setDraft((current) => ({ ...current, groupKeys }));
+                }}
+              />
+            ) : null}
+            {draft.groupKeys?.length ? (
+              <div>
+                <label htmlFor="upstream-discovery-key" className={fieldLabelClass}>{copy("proxy.upstream.groups.discoveryKey")}</label>
+                <select
+                  id="upstream-discovery-key"
+                  value={draft.groupKeys.some((key) => key.id === discoveryKeyId) ? discoveryKeyId : draft.groupKeys[0].id}
+                  onChange={(event) => {
+                    discoveryRequestRef.current += 1;
+                    setModelLoading(false);
+                    setDiscoveryKeyId(event.currentTarget.value);
+                  }}
+                  className={inputClass}
+                >
+                  {draft.groupKeys.map((key, index) => (
+                    <option key={key.id} value={key.id}>
+                      {`${copy("proxy.upstream.groups.keyNumber", { number: index + 1 })} · ${maskSecret(readString(key.value, "api-key"))}`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : null}
+            {grouped ? (
+              <p className="text-xs text-oai-gray-500 dark:text-oai-gray-400">{copy("proxy.upstream.groups.sharedHint")}</p>
+            ) : null}
             {activeCategory === "openai-compatibility" ? (
               <div className="rounded-lg border border-oai-gray-200 p-3 dark:border-oai-gray-800">
                 <div className="flex items-baseline justify-between gap-2">
@@ -1563,7 +1694,53 @@ function UpstreamFormDialog({
   );
 }
 
-function UpstreamHealthDialog({ row, onClose }) {
+function UpstreamGroupHealthDialog({ row, onClose }) {
+  const keys = providerGroupKeys(row.record);
+  const [selected, setSelected] = useState(0);
+  const key = keys[selected];
+  const effectiveRow = useMemo(() => {
+    if (!key) return row;
+    const record = effectiveProviderKey(row.record, key);
+    const keyApiKey = readString(key, "api-key");
+    return {
+      ...row,
+      record,
+      apiKey: keyApiKey,
+      apiKeys: [keyApiKey],
+      authIndex: readString(key, "auth-index", "authIndex"),
+      models: modelsFromRecord(record.models),
+    };
+  }, [row, key]);
+  const hasKeys = keys.length > 0;
+  return (
+    <UpstreamHealthDialog
+      key={selected}
+      row={effectiveRow}
+      onClose={onClose}
+      keySelector={hasKeys ? (
+        <div>
+          <label htmlFor="upstream-health-key" className="mb-1.5 block text-sm font-medium text-oai-gray-700 dark:text-oai-gray-300">
+            {copy("proxy.upstream.groups.healthKey")}
+          </label>
+          <select
+            id="upstream-health-key"
+            value={selected}
+            onChange={(event) => setSelected(Number(event.currentTarget.value))}
+            className="h-9 w-full rounded-md border border-oai-gray-300 bg-oai-white px-3 text-sm text-oai-black focus:border-oai-brand focus:outline-none focus:ring-1 focus:ring-oai-brand/30 dark:border-oai-gray-700 dark:bg-oai-gray-900 dark:text-oai-white"
+          >
+            {keys.map((entry, index) => (
+              <option key={index} value={index}>
+                {`${copy("proxy.upstream.groups.keyNumber", { number: index + 1 })} · ${maskSecret(readString(entry, "api-key"))}`}
+              </option>
+            ))}
+          </select>
+        </div>
+      ) : undefined}
+    />
+  );
+}
+
+function UpstreamHealthDialog({ row, onClose, keySelector }) {
   const configuredModels = useMemo(
     () => mergeProviderHealthModels([], row.models),
     [row.models],
@@ -1674,6 +1851,7 @@ function UpstreamHealthDialog({ row, onClose }) {
       width="max-w-2xl"
     >
       <div className="flex min-h-0 flex-1 flex-col gap-3 px-5 py-4">
+        {keySelector}
         <div className="relative">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-oai-gray-400" />
           <input

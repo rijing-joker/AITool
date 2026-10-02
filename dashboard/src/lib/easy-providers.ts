@@ -1081,6 +1081,7 @@ export const requestErrorMessage = (error: unknown) =>
   error instanceof Error ? error.message : String(error);
 
 export type ProviderDraft = {
+  groupKeys?: ProviderKeyDraft[];
   name: string;
   apiKey: string;
   remark: string;
@@ -1158,14 +1159,121 @@ export const sectionRecordsFromConfig = (payload: unknown, section: ProviderSect
     ? payload[section].filter(isRecord)
     : [];
 
+// --- native v8 provider groups (EasyCLIProxyAPI be9a2b6) ---------------------
+// A group record carries `keys[]`; each key inherits the group's fields unless
+// it overrides them (null = explicit inherit). Rows and saves must keep this
+// structure intact — the flattened legacy view erases it.
+
+export type ProviderKeyDraft = {
+  id: string;
+  value: Record<string, unknown>;
+  text?: Record<string, string>;
+};
+
+export const providerGroupKeys = (group: Record<string, unknown>): Record<string, unknown>[] =>
+  Array.isArray(group.keys) ? group.keys.filter(isRecord) : [];
+
+export function providerKeyDraft(value: Record<string, unknown> = {}): ProviderKeyDraft {
+  return { id: crypto.randomUUID(), value: structuredClone(value) };
+}
+
+export function cleanProviderGroup(group: Record<string, unknown>): Record<string, unknown> {
+  const clean = normalizeProviderModels(group);
+  for (const field of ["auth-index", "authIndex", "auth_index", "test-model", "testModel"]) delete clean[field];
+  if (Array.isArray(clean.keys)) clean.keys = clean.keys.filter(isRecord).map(cleanProviderGroup);
+  return clean;
+}
+
+export function providerGroupIdentity(group: Record<string, unknown>): string {
+  const sort = (value: unknown): unknown => Array.isArray(value) ? value.map(sort)
+    : isRecord(value) ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, sort(value[key])])) : value;
+  return JSON.stringify(sort(cleanProviderGroup(group)));
+}
+
+// Lists and maps replace the group setting; null and absent fields inherit it.
+export function effectiveProviderKey(group: Record<string, unknown>, key: Record<string, unknown>) {
+  const { keys: _keys, ...shared } = group;
+  return { ...shared, ...Object.fromEntries(Object.entries(key).filter(([, value]) => value !== null)) };
+}
+
+export const providerKeyIsDisabled = (group: Record<string, unknown>, key: Record<string, unknown>) => {
+  const effective = effectiveProviderKey(group, key);
+  return group.disabled === true || effective.disabled === true
+    || (Array.isArray(effective["excluded-models"]) && effective["excluded-models"].some((item) => String(item).trim() === "*"));
+};
+
+export function providerGroupStatus(group: Record<string, unknown>): "enabled" | "partial" | "disabled" {
+  const keys = providerGroupKeys(group);
+  if (!keys.length) return group.disabled === true ? "disabled" : "enabled";
+  const active = keys.filter((key) => !providerKeyIsDisabled(group, key)).length;
+  return active === 0 ? "disabled" : active === keys.length ? "enabled" : "partial";
+}
+
+export function providerKeyOverrides(key: Record<string, unknown>): string[] {
+  return Object.keys(key).filter((field) => !["api-key", "auth-index", "authIndex", "auth_index", "weight"].includes(field)
+    && key[field] != null);
+}
+
+export function validateProviderGroupKeys(keys: ProviderKeyDraft[]): string | null {
+  for (const { value } of keys) {
+    if (!readString(value, "api-key").trim()) return "key";
+    if (Array.isArray(value.models) && value.models.some((model) => !isRecord(model) || !readString(model, "name").trim())) return "models";
+    for (const field of ["priority", "weight", "request-retry"]) {
+      const valueField = value[field];
+      if (valueField == null) continue;
+      if (typeof valueField !== "number" || !Number.isSafeInteger(valueField)) return field;
+      if (field === "weight" && (valueField < 0 || valueField > 1_000_000)) return field;
+    }
+  }
+  return null;
+}
+
+export function serializeProviderKey(draft: ProviderKeyDraft): Record<string, unknown> {
+  const value = cleanProviderGroup(draft.value);
+  for (const [field, text] of Object.entries(draft.text ?? {})) {
+    if (field === "cloak-words") value.cloak = { ...(isRecord(value.cloak) ? value.cloak : {}),
+      "sensitive-words": text.split(/[\n,]/).map((line) => line.trim()).filter(Boolean) };
+    if (field === "excluded-models") value[field] = text.split(/[\n,]/).map((line) => line.trim()).filter(Boolean);
+    if (field === "headers") {
+      const headers: Record<string, string> = {};
+      for (const line of text.split("\n").filter((line) => line.trim())) {
+        const colon = line.indexOf(":");
+        if (colon <= 0 || !/^[!#$%&'*+.^_`|~\w-]+$/.test(line.slice(0, colon).trim())) throw new Error("Invalid key header");
+        headers[line.slice(0, colon).trim()] = line.slice(colon + 1).trim();
+      }
+      value[field] = headers;
+    }
+  }
+  value["api-key"] = readString(value, "api-key").trim();
+  return value;
+}
+
+// Native v8 groups: callers keep keys and overrides intact through every edit.
+export const providerGroupsApi = {
+  get: async (section: ProviderSection): Promise<Record<string, unknown>[]> => {
+    const value = await optionalConfigValue(`/config/api-keys/${section.replace(/-api-key$/, "")}`, [], {});
+    if (!Array.isArray(value) || !value.every(isRecord)) throw new Error("Invalid provider group response");
+    return value;
+  },
+  put: (section: ProviderSection, groups: Record<string, unknown>[]) =>
+    invokeManagement<ManagementJson>({
+      method: "PUT",
+      path: `/config/api-keys/${section.replace(/-api-key$/, "")}`,
+      body: groups as ManagementJson,
+    }),
+};
+
 export const rowFromRecord = (
   section: ProviderSection,
   record: Record<string, unknown>,
   index: number,
 ): ProviderRow => {
-  const entries = definitionFor(section).openAi && Array.isArray(record["api-key-entries"])
-    ? record["api-key-entries"].filter(isRecord)
-    : [];
+  const grouped = Array.isArray(record.keys);
+  const entries = grouped
+    ? providerGroupKeys(record)
+    : definitionFor(section).openAi && Array.isArray(record["api-key-entries"])
+      ? record["api-key-entries"].filter(isRecord)
+      : [];
   const entry = entries[0] ?? null;
   const apiKeys = entries
     .map((item) => readString(item, "api-key", "apiKey"))
@@ -1178,16 +1286,20 @@ export const rowFromRecord = (
     section,
     index,
     record,
-    name: definitionFor(section).openAi
+    name: grouped || definitionFor(section).openAi
       ? readString(record, "name") || copy("proxy.upstream.compatibleName", { number: index + 1 })
       : section,
     apiKey: entry ? readString(entry, "api-key", "apiKey") : singleApiKey,
     apiKeys: entry ? apiKeys : singleApiKey ? [singleApiKey] : [],
     baseUrl: readString(record, "base-url", "baseUrl"),
-    models: modelsFromRecord(record.models),
-    disabled: definitionFor(section).openAi
-      ? readBoolean(record, "disabled")
-      : excludedModels.some((model) => model.trim() === "*"),
+    models: grouped && Array.isArray(record.models)
+      ? record.models.flatMap((model) => modelsFromRecord([model]))
+      : modelsFromRecord(record.models),
+    disabled: grouped
+      ? providerGroupStatus(record) === "disabled"
+      : definitionFor(section).openAi
+        ? readBoolean(record, "disabled")
+        : excludedModels.some((model) => model.trim() === "*"),
     priority: readNumber(record, "priority"),
     authIndex: entry
       ? readString(entry, "auth-index", "authIndex")
@@ -1213,6 +1325,7 @@ export const providerHeadersFromRecord = (record: Record<string, unknown>) =>
     : {};
 
 export const stripResponseFields = (record: Record<string, unknown>) => {
+  if (Array.isArray(record.keys)) return cleanProviderGroup(record);
   const next = normalizeProviderModels(record);
   delete next["test-model"];
   delete next.testModel;
@@ -1247,6 +1360,7 @@ const normalizeProviderIdentity = (value: unknown): unknown => {
 };
 
 const providerConfigIdentity = (record: Record<string, unknown>) => {
+  if (Array.isArray(record.keys)) return providerGroupIdentity(record);
   const config = stripResponseFields(record);
   if (config.priority === 0) delete config.priority;
   if (config.websockets === false) delete config.websockets;
@@ -1256,7 +1370,7 @@ const providerConfigIdentity = (record: Record<string, unknown>) => {
 
 export const providerRemarkConfigIdentity = (record: Record<string, unknown>) => {
   const config = stripResponseFields(record);
-  for (const key of ["name", "api-key", "apiKey", "api-key-entries", "base-url", "baseUrl", "disabled"]) {
+  for (const key of ["name", "api-key", "apiKey", "api-key-entries", "keys", "base-url", "baseUrl", "disabled"]) {
     delete config[key];
   }
   if (Array.isArray(config["excluded-models"])) {
@@ -1271,6 +1385,7 @@ export const hasDuplicateProviderRecord = (
   candidates: Record<string, unknown>[],
   targetIndex = -1,
 ) => records.some((record, index) => index !== targetIndex && candidates.some((candidate) => {
+  if (Array.isArray(candidate.keys)) return readString(record, "name") === readString(candidate, "name");
   if (definitionFor(section).openAi) return readString(record, "name") === readString(candidate, "name");
   if (section === "gemini-api-key") {
     return readString(record, "api-key", "apiKey") === readString(candidate, "api-key", "apiKey")
@@ -1452,6 +1567,7 @@ export const providerProxyDraftFromRecord = (
   section: ProviderSection,
   record: Record<string, unknown>,
 ): Pick<ProviderDraft, "proxyUrl" | "proxyUrlEdited" | "proxyUrlMixed"> => {
+  if (Array.isArray(record.keys)) return { proxyUrl: readString(record, "proxy-url"), proxyUrlEdited: false, proxyUrlMixed: false };
   const entries = definitionFor(section).openAi && Array.isArray(record["api-key-entries"])
     ? record["api-key-entries"].filter(isRecord)
     : [];
@@ -1469,10 +1585,23 @@ export const providerProxyDraftFromRecord = (
 export const draftFromRow = (row: ProviderRow): ProviderDraft => {
   const definition = definitionFor(row.section);
   const isDeepSeek = row.section === "codex-api-key" && isDeepSeekRecord(row.record);
+  const grouped = Array.isArray(row.record.keys);
+  // Legacy flat records carry key material outside keys[]; seed drafts from it
+  // so an edit round-trip upgrades to a group instead of dropping the key.
+  const groupKeyValues = grouped
+    ? providerGroupKeys(row.record)
+    : definition.openAi && Array.isArray(row.record["api-key-entries"])
+      ? row.record["api-key-entries"].filter(isRecord)
+      : readString(row.record, "api-key", "apiKey")
+        ? [{ "api-key": readString(row.record, "api-key", "apiKey") }]
+        : [];
   return {
-    name: isDeepSeek ? "DeepSeek" : row.name,
+    ...(grouped || groupKeyValues.length
+      ? { groupKeys: groupKeyValues.map(providerKeyDraft) }
+      : {}),
+    name: grouped ? row.name : isDeepSeek ? "DeepSeek" : row.name,
     apiKey: definition.openAi ? row.apiKeys.join("\n") : row.apiKey,
-    remark: row.remark || (definition.openAi && !isDeepSeek ? row.name : ""),
+    remark: row.remark || (!grouped && definition.openAi && !isDeepSeek ? row.name : ""),
     baseUrl: row.baseUrl,
     ...providerProxyDraftFromRecord(row.section, row.record),
     priority: row.priority === null ? "" : String(row.priority),
@@ -1540,11 +1669,13 @@ export const createProviderDraft = (category: ProviderCategory): ProviderDraft =
 export const applyProviderRemarkIdentity = (
   category: ProviderCategory,
   draft: ProviderDraft,
-): ProviderDraft => category === "deepseek"
-  ? { ...draft, name: draft.name.trim() || "DeepSeek" }
-  : definitionFor(category).openAi
-    ? { ...draft, name: draft.remark.trim() }
-    : draft;
+): ProviderDraft => draft.groupKeys
+  ? draft
+  : category === "deepseek"
+    ? { ...draft, name: draft.name.trim() || "DeepSeek" }
+    : definitionFor(category).openAi
+      ? { ...draft, name: draft.remark.trim() }
+      : draft;
 
 export const applyProviderPreset = (
   category: ProviderCategory,
@@ -1732,6 +1863,64 @@ export const buildProviderRecord = (
   return applyAdvancedFields(next, section, draft);
 };
 
+export const buildProviderGroupRecord = (
+  section: ProviderSection,
+  draft: ProviderDraft,
+  current?: Record<string, unknown>,
+): Record<string, unknown> => {
+  const sharedDraft: ProviderDraft = { ...draft, apiKey: "", proxyUrlEdited: true,
+    websockets: undefined, cloakMode: undefined, cloakStrictMode: undefined,
+    cloakSensitiveWordsText: undefined, cloakCacheUserId: undefined,
+    disabled: Array.isArray(current?.["excluded-models"]) && current["excluded-models"].includes("*"),
+  };
+  const next = buildProviderRecord(section, sharedDraft, current);
+  // Native groups expose every mapping, including multiple aliases of the same
+  // upstream ID. Match each row independently so edits/removals are explicit.
+  const existing = Array.isArray(current?.models) ? current.models : [];
+  const used = new Set<number>();
+  next.models = draft.models.filter((model) => model.name.trim()).flatMap((model) => {
+    let index = existing.findIndex((item, position) => !used.has(position) && isRecord(item)
+      && readString(item, "name") === model.name && readString(item, "alias") === (model.alias ?? ""));
+    if (index < 0) index = existing.findIndex((item, position) => !used.has(position) && isRecord(item) && readString(item, "name") === model.name);
+    if (index >= 0) used.add(index);
+    return mergeModelRecords(index >= 0 ? [existing[index]] : [], [model]);
+  });
+  if (section === "openai-compatibility" && draft.thinkingLevelsEdited) {
+    for (const model of next.models as Record<string, unknown>[]) {
+      const thinking = isRecord(model.thinking) ? { ...model.thinking } : {};
+      if (draft.thinkingLevels?.length) thinking.levels = [...draft.thinkingLevels];
+      else delete thinking.levels;
+      if (Object.keys(thinking).length) model.thinking = thinking;
+      else delete model.thinking;
+    }
+  }
+  applyAdvancedFields(next, section, sharedDraft);
+  delete next["api-key"];
+  delete next["api-key-entries"];
+  next.name = draft.name.trim();
+  if (draft.proxyUrl?.trim()) next["proxy-url"] = draft.proxyUrl.trim();
+  else delete next["proxy-url"];
+  next.keys = (draft.groupKeys ?? []).map(serializeProviderKey);
+  // Preserve absent/null/empty fields when the corresponding shared setting was
+  // not edited. In v8 these values can have different inheritance semantics.
+  if (current) {
+    const baseline = draftFromRow(rowFromRecord(section, current, 0));
+    const fields: [keyof ProviderDraft, string][] = [
+      ["baseUrl", "base-url"], ["proxyUrl", "proxy-url"], ["priority", "priority"],
+      ["prefix", "prefix"], ["headersText", "headers"], ["excludedModelsText", "excluded-models"],
+      ["disableCooling", "disable-cooling"], ["models", "models"],
+    ];
+    for (const [field, configField] of fields) {
+      if (field === "models" && draft.thinkingLevelsEdited) continue;
+      if (field === "excludedModelsText" && draft.modelSelectionCatalog) continue;
+      if (JSON.stringify(draft[field]) !== JSON.stringify(baseline[field])) continue;
+      if (Object.prototype.hasOwnProperty.call(current, configField)) next[configField] = structuredClone(current[configField]);
+      else delete next[configField];
+    }
+  }
+  return next;
+};
+
 export type ProviderRecordIdentity = Pick<
   ProviderRow,
   "section" | "index" | "name" | "apiKey" | "baseUrl"
@@ -1741,6 +1930,7 @@ const providerIdentityMatches = (
   row: ProviderRecordIdentity,
   record: Record<string, unknown>,
 ) => {
+  if (Array.isArray(record.keys)) return readString(record, "name") === row.name;
   if (definitionFor(row.section).openAi) {
     return readString(record, "name") === row.name;
   }
@@ -1753,7 +1943,7 @@ const providerIdentityMatches = (
 const providerPrimaryIdentityMatches = (
   row: ProviderRecordIdentity,
   record: Record<string, unknown>,
-) => definitionFor(row.section).openAi
+) => Array.isArray(record.keys) || definitionFor(row.section).openAi
   ? readString(record, "name") === row.name
   : readString(record, "api-key", "apiKey") === row.apiKey;
 

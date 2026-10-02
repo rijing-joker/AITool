@@ -116,11 +116,39 @@ export interface ProxyAuthFile {
   [key: string]: unknown;
 }
 
+// Progress snapshot of the core-binary install task (EasyCLIProxyAPI's
+// CoreInstallTask, polled while the progress dialog is open).
+export interface CoreInstallTask {
+  running: boolean;
+  cancellable: boolean;
+  phase:
+    | "checking"
+    | "stopping"
+    | "downloading"
+    | "switching"
+    | "extracting"
+    | "restarting"
+    | "complete"
+    | "failed"
+    | "canceled";
+  source: string | null;
+  downloaded: number;
+  total: number | null;
+  percent: number | null;
+  message: string | null;
+  error: string | null;
+  result: { skipped: boolean; version: string; path: string; source: string } | null;
+  startedAt: string;
+  finishedAt: string | null;
+}
+
 export const proxyApi = {
   status: () => get<ProxyStatus>("/api/proxy/status"),
   start: () => mutate<{ ok: true }>("/api/proxy/start", "POST"),
   stop: () => mutate<{ ok: true }>("/api/proxy/stop", "POST"),
-  install: () => mutate<{ ok: true }>("/api/proxy/install", "POST"),
+  install: () => mutate<{ ok: true; task: CoreInstallTask }>("/api/proxy/install", "POST"),
+  installStatus: () => get<{ ok: true; task: CoreInstallTask | null }>("/api/proxy/install"),
+  installCancel: () => mutate<{ ok: true; task: CoreInstallTask | null }>("/api/proxy/install/cancel", "POST"),
   setSettings: (settings: { autoStart?: boolean }) =>
     mutate<{ ok: true }>("/api/proxy/settings", "PUT", settings),
 

@@ -11,6 +11,10 @@ const path = require("node:path");
 const { Readable } = require("node:stream");
 const { test, beforeEach, afterEach } = require("node:test");
 
+// Keep the suite hermetic: never probe the local `codex` CLI for the official
+// model list. Tests that need mirroring pass fixture rows explicitly.
+require("../src/lib/provider-switch/catalog").setCodexOfficialModelsForTests([]);
+
 let tmpHome;
 let prevHome;
 let prevUserProfile;
@@ -1439,4 +1443,136 @@ test("provider-switch gemini editor: view projects the full .env, save splits gl
   const row = state.body.providers.find((p) => p.id === relay.body.provider.id);
   assert.deepEqual(row.settingsConfig.env, { GEMINI_API_KEY: "newer-key", GEMINI_MODEL: "gemini-3-pro" });
   assert.ok(!("MY_OWN_VAR" in row.settingsConfig.env));
+});
+
+// ---------------------------------------------------------------------------
+// Codex catalog: official GPT entry mirroring (cc-switch c6255cc port)
+// ---------------------------------------------------------------------------
+
+test("provider-switch codex catalog: official models match like Codex", () => {
+  const catalog = require("../src/lib/provider-switch/catalog");
+  const officialRows = ["gpt-6", "gpt-6-sol", "gpt-5.5"].map((slug) => ({
+    slug,
+    base_instructions: `${slug} prompt`,
+  }));
+  const found = (model) => {
+    const hit = catalog.findCodexOfficialModel(model, officialRows);
+    return hit ? hit.slug : null;
+  };
+  // longest case-sensitive prefix
+  assert.equal(found("gpt-6-sol"), "gpt-6-sol");
+  assert.equal(found("gpt-6-sol-high"), "gpt-6-sol");
+  assert.equal(found("gpt-6-luna"), "gpt-6");
+  // one simple namespace segment may be stripped
+  assert.equal(found("openai/gpt-5.5"), "gpt-5.5");
+  assert.equal(found("my_relay-1/gpt-6-sol"), "gpt-6-sol");
+  assert.equal(found("a/b/gpt-5.5"), null);
+  assert.equal(found("bad ns/gpt-5.5"), null);
+  assert.equal(found("/gpt-5.5"), null);
+  // case-sensitive, no partial-slug hits
+  assert.equal(found("GPT-5.5"), null);
+  assert.equal(found("gpt-5"), null);
+  assert.equal(found("glm-5"), null);
+});
+
+test("provider-switch codex catalog: GPT rows mirror the official entry", () => {
+  const catalog = require("../src/lib/provider-switch/catalog");
+  const officialRows = [
+    {
+      slug: "gpt-6-sol",
+      display_name: "GPT-6 SOL",
+      base_instructions: "gpt-6-sol harness prompt",
+      model_messages: { instructions_template: "gpt-6-sol harness prompt" },
+      apply_patch_tool_type: "freeform",
+      use_responses_lite: true,
+      visibility: "hide",
+      service_tiers: [{ id: "priority", name: "Fast" }],
+      additional_speed_tiers: ["fast"],
+      upgrade: { model: "gpt-next" },
+      context_window: 272000,
+      max_context_window: 872000,
+      supports_image_detail_original: true,
+      input_modalities: ["text", "image"],
+      supports_parallel_tool_calls: false,
+      supported_reasoning_levels: [
+        { effort: "low", description: "l" },
+        { effort: "xhigh", description: "x" },
+      ],
+      default_reasoning_level: "low",
+    },
+  ];
+  const content = catalog.buildCodexCatalog(
+    [
+      // the row's own overrides must NOT apply to an official hit
+      { model: "gpt-6-sol", displayName: "My Relay Name", contextWindow: "128000", reasoningLevels: ["none"] },
+      { model: "gpt-6-sol-high", displayName: "Prefixed" },
+      { model: "glm-5", displayName: "Template Row" },
+    ],
+    officialRows,
+  );
+  const models = JSON.parse(content).models;
+  assert.equal(models.length, 3);
+
+  const direct = models[0];
+  assert.equal(direct.slug, "gpt-6-sol");
+  // official values win: no user display name, no overridden window/levels
+  assert.equal(direct.display_name, "GPT-6 SOL");
+  assert.equal(direct.base_instructions, "gpt-6-sol harness prompt");
+  assert.equal(direct.context_window, 272000);
+  assert.deepEqual(
+    direct.supported_reasoning_levels.map((level) => level.effort),
+    ["low", "xhigh"],
+  );
+  assert.equal(direct.default_reasoning_level, "low");
+  // account/backend-owned fields reset
+  assert.equal(direct.use_responses_lite, false);
+  assert.deepEqual(direct.service_tiers, []);
+  assert.deepEqual(direct.additional_speed_tiers, []);
+  assert.equal(direct.availability_nux, null);
+  assert.equal(direct.upgrade, null);
+  assert.equal(direct.visibility, "list");
+
+  // a prefixed hit keeps its own name (no stealing the official display name)
+  assert.equal(models[1].slug, "gpt-6-sol-high");
+  assert.equal(models[1].display_name, "gpt-6-sol-high");
+
+  // a non-official row still comes from the neutral template
+  assert.equal(models[2].slug, "glm-5");
+  assert.equal(models[2].display_name, "Template Row");
+  assert.match(models[2].base_instructions, /You are Codex/);
+});
+
+test("provider-switch codex catalog: pure mirrors collapse on import, edited clones stay", () => {
+  const catalog = require("../src/lib/provider-switch/catalog");
+  const officialRows = [
+    {
+      slug: "gpt-6-sol",
+      display_name: "GPT-6 SOL",
+      base_instructions: "gpt-6-sol harness prompt",
+      model_messages: { instructions_template: "gpt-6-sol harness prompt" },
+      context_window: 272000,
+      input_modalities: ["text", "image"],
+      supports_parallel_tool_calls: false,
+    },
+  ];
+  const mirror = catalog.buildCodexCatalog([{ model: "gpt-6-sol" }], officialRows);
+  const edited = JSON.stringify({
+    models: [
+      // same official row but the user renamed it: not a pure mirror anymore
+      {
+        slug: "gpt-6-sol",
+        display_name: "My Relay Name",
+        base_instructions: "gpt-6-sol harness prompt",
+        context_window: 272000,
+        input_modalities: ["text", "image"],
+        supports_parallel_tool_calls: false,
+      },
+    ],
+  });
+  const rows = catalog.parseCodexCatalog(mirror, officialRows);
+  assert.deepEqual(rows, [{ model: "gpt-6-sol" }]);
+  const editedRows = catalog.parseCodexCatalog(edited, officialRows);
+  assert.equal(editedRows.length, 1);
+  assert.equal(editedRows[0].model, "gpt-6-sol");
+  assert.equal(editedRows[0].displayName, "My Relay Name");
 });

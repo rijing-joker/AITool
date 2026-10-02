@@ -67,7 +67,7 @@ const integerOrNull = (value) => {
   return Number.isSafeInteger(parsed) ? parsed : undefined;
 };
 
-export function SettingsTab({ status, onRefresh }) {
+export function SettingsTab({ status, onRefresh, onInstallCore }) {
   const [fields, setFields] = useState(null);
   const [loadError, setLoadError] = useState(null);
   const [notice, setNotice] = useState(null);
@@ -244,20 +244,7 @@ export function SettingsTab({ status, onRefresh }) {
           <Button
             variant="secondary"
             disabled={busyField !== ""}
-            onClick={async () => {
-              setBusyField("core");
-              setError(null);
-              setNotice(null);
-              try {
-                await proxyApi.install();
-                setNotice(copy("proxy.settings.core_updated"));
-                onRefresh();
-              } catch (e) {
-                setError(e instanceof Error ? e.message : String(e));
-              } finally {
-                setBusyField("");
-              }
-            }}
+            onClick={onInstallCore}
           >
             {copy("proxy.settings.fetch_core")}
           </Button>

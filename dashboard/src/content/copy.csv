@@ -1627,6 +1627,32 @@ proxy.state.stopped,proxy,ProxyPage,ProxyPage,stopped,Stopped,,active
 proxy.core.installed_hint,proxy,ProxyPage,ProxyPage,installed_hint,CLIProxyAPI core — multi-provider AI gateway (OpenAI / Anthropic / Gemini compatible).,,active
 proxy.core.missing_hint,proxy,ProxyPage,ProxyPage,missing_hint,Core binary not installed yet — fetch it to enable the proxy.,,active
 proxy.core.endpoint,proxy,ProxyPage,ProxyPage,endpoint,Endpoint,,active
+proxy.core.confirm_title,proxy,ProxyPage,ProxyPage,confirm_title,"Fetch core binary",,active
+proxy.core.confirm_desc,proxy,ProxyPage,ProxyPage,confirm_desc,"Checks the latest core release and downloads it (GitCode China mirror first, automatic fallback). If the core is running it is stopped first and restarted after the install. Continue?",,active
+proxy.core.confirm_action,proxy,ProxyPage,ProxyPage,confirm_action,"Start fetch",,active
+proxy.core.confirm_dismiss,proxy,ProxyPage,ProxyPage,confirm_dismiss,"Not now",,active
+proxy.core.dialog_eyebrow,proxy,ProxyPage,ProxyPage,dialog_eyebrow,"Core install",,active
+proxy.core.title_running,proxy,ProxyPage,ProxyPage,title_running,"Fetching core",,active
+proxy.core.title_complete,proxy,ProxyPage,ProxyPage,title_complete,"Core fetch complete",,active
+proxy.core.title_failed,proxy,ProxyPage,ProxyPage,title_failed,"Core fetch failed",,active
+proxy.core.title_canceled,proxy,ProxyPage,ProxyPage,title_canceled,"Download canceled",,active
+proxy.core.phase_label,proxy,ProxyPage,ProxyPage,phase_label,"Current phase",,active
+proxy.core.phase_checking,proxy,ProxyPage,ProxyPage,phase_checking,"Checking latest version",,active
+proxy.core.phase_stopping,proxy,ProxyPage,ProxyPage,phase_stopping,"Stopping the running core",,active
+proxy.core.phase_downloading,proxy,ProxyPage,ProxyPage,phase_downloading,"Downloading",,active
+proxy.core.phase_extracting,proxy,ProxyPage,ProxyPage,phase_extracting,"Extracting",,active
+proxy.core.phase_restarting,proxy,ProxyPage,ProxyPage,phase_restarting,"Restarting core",,active
+proxy.core.phase_complete,proxy,ProxyPage,ProxyPage,phase_complete,"Complete",,active
+proxy.core.phase_failed,proxy,ProxyPage,ProxyPage,phase_failed,"Failed",,active
+proxy.core.phase_canceled,proxy,ProxyPage,ProxyPage,phase_canceled,"Canceled",,active
+proxy.core.progress_unknown,proxy,ProxyPage,ProxyPage,progress_unknown,"Progress unknown",,active
+proxy.core.switching_message,proxy,ProxyPage,ProxyPage,switching_message,"{{source}} download failed — switching source…",,active
+proxy.core.canceled_message,proxy,ProxyPage,ProxyPage,canceled_message,"Download canceled.",,active
+proxy.core.action_cancel,proxy,ProxyPage,ProxyPage,action_cancel,"Cancel download",,active
+proxy.core.action_close,proxy,ProxyPage,ProxyPage,action_close,"Close",,active
+proxy.core.toast_updated,proxy,ProxyPage,ProxyPage,toast_updated,"Core updated to v{{version}}.",,active
+proxy.core.toast_latest,proxy,ProxyPage,ProxyPage,toast_latest,"Core already at the latest version (v{{version}}).",,active
+proxy.core.toast_start_failed,proxy,ProxyPage,ProxyPage,toast_start_failed,"Could not start the core fetch: {{error}}",,active
 proxy.action.install_core,proxy,ProxyPage,ProxyPage,install_core,Fetch core,,active
 proxy.action.stop,proxy,ProxyPage,ProxyPage,stop,Stop,,active
 proxy.action.start,proxy,ProxyPage,ProxyPage,start,Start,,active
@@ -2381,3 +2407,31 @@ leaderboard.estimated_cost_hint,shared,*,Shared,estimated_cost_hint,"Based on es
 leaderboard.profile_modal.best_day.date,shared,*,Shared,date,on {{date}},,active
 leaderboard.summary.you_are_here,shared,*,Shared,you_are_here,You are here,,active
 shared.list_separator,shared,*,Shared,list_separator,", ",,active
+proxy.upstream.groups.summary,proxy,ProxyPage,Upstreams,groups_summary,{{count}} provider groups,,active
+proxy.upstream.groups.add,proxy,ProxyPage,Upstreams,groups_add,Add group,,active
+proxy.upstream.groups.edit,proxy,ProxyPage,Upstreams,groups_edit,Edit group,,active
+proxy.upstream.groups.name,proxy,ProxyPage,Upstreams,groups_name,Group name,,active
+proxy.upstream.groups.namePlaceholder,proxy,ProxyPage,Upstreams,groups_name_placeholder,"e.g. Primary, Backup",,active
+proxy.upstream.groups.nameRequired,proxy,ProxyPage,Upstreams,groups_name_required,"Enter a group name of 1-80 characters, without control characters.",,active
+proxy.upstream.groups.description,proxy,ProxyPage,Upstreams,groups_description,"A group connects to one upstream endpoint; its keys share models and connection settings.",,active
+proxy.upstream.groups.keys,proxy,ProxyPage,Upstreams,groups_keys,Group keys,,active
+proxy.upstream.groups.keysHint,proxy,ProxyPage,Upstreams,groups_keys_hint,Each key inherits the shared settings and may override them.,,active
+proxy.upstream.groups.addKey,proxy,ProxyPage,Upstreams,groups_add_key,Add key,,active
+proxy.upstream.groups.emptyKeys,proxy,ProxyPage,Upstreams,groups_empty_keys,This group has no keys.,,active
+proxy.upstream.groups.keyNumber,proxy,ProxyPage,Upstreams,groups_key_number,Key {{number}},,active
+proxy.upstream.groups.removeKey,proxy,ProxyPage,Upstreams,groups_remove_key,Remove key {{number}},,active
+proxy.upstream.groups.showKey,proxy,ProxyPage,Upstreams,groups_show_key,Show key,,active
+proxy.upstream.groups.keySettings,proxy,ProxyPage,Upstreams,groups_key_settings,Key settings,,active
+proxy.upstream.groups.overrides,proxy,ProxyPage,Upstreams,groups_overrides,{{count}} overrides,,active
+proxy.upstream.groups.inherits,proxy,ProxyPage,Upstreams,groups_inherits,Inherits shared settings,,active
+proxy.upstream.groups.overrideHint,proxy,ProxyPage,Upstreams,groups_override_hint,"Check to override a field for this key only; uncheck to inherit again. Lists and headers replace the shared value entirely; empty clears it.",,active
+proxy.upstream.groups.overrideField,proxy,ProxyPage,Upstreams,groups_override_field,Override: {{field}},,active
+proxy.upstream.groups.overrideModels,proxy,ProxyPage,Upstreams,groups_override_models,Override: models & aliases,,active
+proxy.upstream.groups.weight,proxy,ProxyPage,Upstreams,groups_weight,Weight (default 1),,active
+proxy.upstream.groups.retry,proxy,ProxyPage,Upstreams,groups_retry,Request retries,,active
+proxy.upstream.groups.invalidKey,proxy,ProxyPage,Upstreams,groups_invalid_key,"Invalid key configuration: {{field}}. Fill in the key and check integer ranges.",,active
+proxy.upstream.groups.discoveryKey,proxy,ProxyPage,Upstreams,groups_discovery_key,Key used to fetch models,,active
+proxy.upstream.groups.sharedHint,proxy,ProxyPage,Upstreams,groups_shared_hint,"The models and advanced settings below are shared by the group's keys; per-key overrides take precedence.",,active
+proxy.upstream.groups.sharedToggleHint,proxy,ProxyPage,Upstreams,groups_shared_toggle_hint,"Toggles the group's shared models. Per-key model exclusions still take precedence.",,active
+proxy.upstream.groups.partial,proxy,ProxyPage,Upstreams,groups_partial,Some keys disabled,,active
+proxy.upstream.groups.healthKey,proxy,ProxyPage,Upstreams,groups_health_key,Health-check key,,active

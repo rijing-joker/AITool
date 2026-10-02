@@ -8,11 +8,12 @@ const management = require("./management");
 // (src-tauri/src/core_config/aliases.rs + alias_edit.rs). The Rust original
 // edits the kernel YAML and writes it back through the management API; here the
 // same legacy config view is read from GET /v8/management/config (JSON) and the
-// changed sections are written back section-by-section exactly like
-// put_management_legacy_alias_view_changes:
+// changed sections are written back like put_management_legacy_alias_view_changes:
 //   oauth-model-alias → PUT /config/oauth/model-alias
 //   payload           → PUT/DELETE /config/requests/payload
-//   api-key sections  → regrouped PUT /config/api-keys/{provider}
+//   api-key sections  → models-only changes applied onto the NATIVE v8 groups
+//                       (applyModelsToNativeProviderGroups), preserving
+//                       multi-key layouts and per-key overrides
 // Error strings mirror the Rust ones because the ported page surfaces them raw.
 
 const OAUTH_ALIAS_CHANNELS = [
@@ -118,27 +119,73 @@ function flattenV8ProviderGroups(provider, groups) {
   return records;
 }
 
-function groupLegacyProviderRecords(provider, records) {
-  if (!Array.isArray(records)) throw new Error(`${provider} provider configuration must be an array`);
-  return records.map((record, index) => {
-    if (!isRecord(record)) throw new Error(`${provider} provider entry ${index} must be an object`);
+const sameJson = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+// Alias edits only touch models[]. Instead of rebuilding each provider section
+// from the flattened legacy view (which would split multi-key groups and drop
+// per-key overrides — the EasyCLIProxyAPI alias-save bug fixed in be9a2b6),
+// apply exactly those model changes back onto the NATIVE v8 groups: keys that
+// inherit the group's model list get the shared update at group level, keys
+// with their own models are updated in place, and everything else (names,
+// connection settings, unknown fields, key layout) is preserved verbatim.
+function applyModelsToNativeProviderGroups(provider, groups, beforeRecords, afterRecords) {
+  if (!Array.isArray(groups) || !Array.isArray(beforeRecords) || !Array.isArray(afterRecords)) {
+    throw new Error("Provider groups changed. Refresh and try again");
+  }
+  if (!sameJson(flattenV8ProviderGroups(provider, groups), beforeRecords)) {
+    throw new Error("Provider groups changed. Refresh and try again");
+  }
+  if (beforeRecords.length !== afterRecords.length) {
+    throw new Error("An alias update cannot add or remove provider keys");
+  }
+  for (let index = 0; index < beforeRecords.length; index += 1) {
+    const stripModels = (record) => {
+      if (!isRecord(record)) return record;
+      const copy = { ...record };
+      delete copy.models;
+      return copy;
+    };
+    if (!sameJson(stripModels(beforeRecords[index]), stripModels(afterRecords[index]))) {
+      throw new Error("An alias update cannot change provider connection settings");
+    }
+  }
+  const modelsOf = (record) => (isRecord(record) ? record.models : undefined);
+  const assignModels = (target, value) => {
+    if (value !== undefined) target.models = structuredClone(value);
+    else delete target.models;
+  };
+  const updated = structuredClone(groups);
+  let offset = 0;
+  for (const group of updated) {
     if (provider === "openai-compatibility") {
-      const group = { ...record };
-      const keys = Array.isArray(group["api-key-entries"]) ? group["api-key-entries"] : [];
-      delete group["api-key-entries"];
-      group.keys = keys.map((key) => ({ ...key }));
-      return group;
+      if (!sameJson(modelsOf(beforeRecords[offset]), modelsOf(afterRecords[offset]))) {
+        assignModels(group, modelsOf(afterRecords[offset]));
+      }
+      offset += 1;
+      continue;
     }
-    const group = { name: readString(record, "name") || `${provider}-${index + 1}` };
-    const key = {};
-    for (const [field, value] of Object.entries(record)) {
-      if (field === "name") continue;
-      if (field === "base-url" || SHARED_PROVIDER_FIELDS.has(field)) group[field] = value;
-      else if (value !== null && value !== undefined) key[field] = value;
+    const keys = Array.isArray(group.keys) ? group.keys : [];
+    const inherited = [];
+    keys.forEach((key, index) => {
+      if (!isRecord(key) || key.models === undefined || key.models === null) inherited.push(index);
+    });
+    const first = inherited[0];
+    let sharedUpdate = false;
+    if (first !== undefined
+      && !sameJson(modelsOf(beforeRecords[offset + first]), modelsOf(afterRecords[offset + first]))
+      && inherited.every((index) => sameJson(modelsOf(afterRecords[offset + index]), modelsOf(afterRecords[offset + first])))) {
+      assignModels(group, modelsOf(afterRecords[offset + first]));
+      sharedUpdate = true;
     }
-    if (Object.keys(key).length > 0) group.keys = [key];
-    return group;
-  });
+    keys.forEach((key, index) => {
+      if (sameJson(modelsOf(beforeRecords[offset + index]), modelsOf(afterRecords[offset + index]))) return;
+      if (sharedUpdate && inherited.includes(index)) return;
+      if (!isRecord(key)) throw new Error(`api-keys.${provider} group keys[${index}] must be an object`);
+      assignModels(key, modelsOf(afterRecords[offset + index]));
+    });
+    offset += keys.length;
+  }
+  return updated;
 }
 
 async function fetchLegacyConfig() {
@@ -166,10 +213,13 @@ async function fetchLegacyConfig() {
     : {};
   const requests = isRecord(payload.requests) ? payload.requests : null;
   legacy.payload = requests && requests.payload !== undefined ? requests.payload : {};
-  return legacy;
+  // Native v8 group arrays per provider section — the write-back needs the
+  // original layout (multi-key groups, per-key overrides) that the flattened
+  // legacy view above deliberately erases.
+  return { legacy, nativeApiKeys: upstream };
 }
 
-function diffAndWriteBack(before, after) {
+function diffAndWriteBack(before, after, nativeApiKeys) {
   const jobs = [];
   const beforeOauth = isRecord(before["oauth-model-alias"]) ? before["oauth-model-alias"] : {};
   const afterOauth = isRecord(after["oauth-model-alias"]) ? after["oauth-model-alias"] : {};
@@ -194,7 +244,12 @@ function diffAndWriteBack(before, after) {
     const beforeRecords = Array.isArray(before[section]) ? before[section] : [];
     const afterRecords = Array.isArray(after[section]) ? after[section] : [];
     if (JSON.stringify(beforeRecords) !== JSON.stringify(afterRecords)) {
-      const groups = groupLegacyProviderRecords(provider, afterRecords);
+      const groups = applyModelsToNativeProviderGroups(
+        provider,
+        isRecord(nativeApiKeys) ? nativeApiKeys[provider] : undefined,
+        beforeRecords,
+        afterRecords,
+      );
       jobs.push(management.request("PUT", `/v8/management/config/api-keys/${provider}`, { body: groups, timeoutMs: 30_000 }));
     }
   }
@@ -1000,7 +1055,7 @@ function removeConfigSpeedAlias(root, section, protocol, alias) {
 // --- public operations -------------------------------------------------------
 
 async function loadState() {
-  const root = await fetchLegacyConfig();
+  const { legacy: root } = await fetchLegacyConfig();
   const availableModels = await fetchAvailableModels();
   const definitions = await fetchOauthDefinitions();
   const baseSources = resolveSources(root, definitions, availableModels, "base");
@@ -1080,7 +1135,7 @@ async function resolveSourceForEdit(root, definitions, originalAlias, target) {
 async function getEditContext({ alias, section, providerIndex, modelIndex }) {
   const normalizedAlias = existingAliasModelId(alias, "Alias model");
   const target = configModelKeyFromParts(section, providerIndex, modelIndex);
-  const root = await fetchLegacyConfig();
+  const { legacy: root } = await fetchLegacyConfig();
   const definitions = await fetchOauthDefinitions();
   const resolved = await resolveSourceForEdit(root, definitions, normalizedAlias, target);
   const protocol = resolved.source.protocol;
@@ -1112,7 +1167,7 @@ async function createAlias(payload) {
   const fast = Boolean(payload.fast);
   const target = configModelKeyFromParts(payload.section, payload.providerIndex, payload.modelIndex);
 
-  const root = await fetchLegacyConfig();
+  const { legacy: root, nativeApiKeys } = await fetchLegacyConfig();
   if (originalAlias) {
     const revision = payload.expectedRevision;
     const providers = target ? yamlValue(root, target.section) : null;
@@ -1187,7 +1242,7 @@ async function createAlias(payload) {
       appendAliasPayloadOverride(mutated, alias, source.protocol, { service_tier: "priority" });
     }
   }
-  await Promise.all(diffAndWriteBack(root, mutated));
+  await Promise.all(diffAndWriteBack(root, mutated, nativeApiKeys));
   return { thinkingEntries: thinkingEntriesFromConfig(mutated), speedEntries: speedEntriesFromConfig(mutated) };
 }
 
@@ -1336,7 +1391,7 @@ async function createSpeedAlias(payload) {
   const sourceId = String(payload.sourceId ?? "").trim();
   if (!sourceId) throw new Error("Select the source model first");
   const alias = validateAliasModelId(payload.alias, "Alias model");
-  const root = await fetchLegacyConfig();
+  const { legacy: root, nativeApiKeys } = await fetchLegacyConfig();
   const availableModels = await fetchAvailableModels();
   const definitions = await fetchOauthDefinitions();
   const resolved = resolveSources(root, definitions, availableModels, "fast")
@@ -1373,7 +1428,7 @@ async function createSpeedAlias(payload) {
   } else if (findSpeedAliasServiceTier(mutated, alias, source.protocol) === null) {
     appendAliasPayloadOverride(mutated, alias, source.protocol, { service_tier: "priority" });
   }
-  await Promise.all(diffAndWriteBack(root, mutated));
+  await Promise.all(diffAndWriteBack(root, mutated, nativeApiKeys));
   return { thinkingEntries: thinkingEntriesFromConfig(mutated), speedEntries: speedEntriesFromConfig(mutated) };
 }
 
@@ -1398,7 +1453,7 @@ async function deleteAlias(payload) {
   const target = configModelKeyFromParts(payload.section, payload.providerIndex, payload.modelIndex);
   const isSpeed = payload.kind === "speed"
     || (payload.serviceTier && !payload.effort);
-  const root = await fetchLegacyConfig();
+  const { legacy: root, nativeApiKeys } = await fetchLegacyConfig();
   const mutated = structuredClone(root);
   let removed = false;
   if (!target) {
@@ -1422,7 +1477,7 @@ async function deleteAlias(payload) {
     throw new Error(`Alias model ${alias} does not exist. Refresh and try again`);
   }
   removeAliasPayloadOptions(mutated, alias, payloadScopeAfterRemoval(mutated, alias, oauthChannel));
-  await Promise.all(diffAndWriteBack(root, mutated));
+  await Promise.all(diffAndWriteBack(root, mutated, nativeApiKeys));
   return { thinkingEntries: thinkingEntriesFromConfig(mutated), speedEntries: speedEntriesFromConfig(mutated) };
 }
 
@@ -1432,4 +1487,6 @@ module.exports = {
   createAlias,
   createSpeedAlias,
   deleteAlias,
+  flattenV8ProviderGroups,
+  applyModelsToNativeProviderGroups,
 };

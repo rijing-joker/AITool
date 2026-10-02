@@ -7,6 +7,7 @@ const manager = require("./manager");
 const bridge = require("./usage-bridge");
 const management = require("./management");
 const { isUsageRecord } = require("./usage-record");
+const coreInstall = require("./core-install").getInstance;
 
 // Dashboard-facing REST surface for the proxy layer. Mounted by local-api.js
 // under /api/proxy/*. Read endpoints are open (consistent with the rest of the
@@ -325,8 +326,23 @@ async function handleProxyApiRequest(req, res, url, ctx) {
     }
     if (p === "/api/proxy/install" && method === "POST") {
       if (!requireMutation()) return true;
-      const result = await manager.installCore();
-      json(res, { ok: true, result });
+      // Starts the background install task (EasyCLIProxyAPI's stop-and-update
+      // flow); progress is polled at GET /api/proxy/install.
+      try {
+        const task = coreInstall().startInstall();
+        json(res, { ok: true, task });
+      } catch (error) {
+        json(res, { ok: false, error: error?.message || "install failed" }, error?.statusCode || 500);
+      }
+      return true;
+    }
+    if (p === "/api/proxy/install" && method === "GET") {
+      json(res, { ok: true, task: coreInstall().snapshot() });
+      return true;
+    }
+    if (p === "/api/proxy/install/cancel" && method === "POST") {
+      if (!requireMutation()) return true;
+      json(res, { ok: true, task: coreInstall().cancelInstall() });
       return true;
     }
     if (p === "/api/proxy/settings" && (method === "PUT" || method === "POST")) {

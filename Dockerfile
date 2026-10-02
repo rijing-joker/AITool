@@ -48,6 +48,6 @@ EXPOSE 7680 8318
 VOLUME ["/root/.tokentracker", "/root/.aitool"]
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:7680/api/proxy/status').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+  CMD node -e "require('node:http').get('http://127.0.0.1:7680/api/health',r=>{r.resume();process.exit(r.statusCode===200?0:1)}).on('error',()=>process.exit(1)).setTimeout(3000,()=>process.exit(1))"
 
 CMD ["node", "bin/tracker.js", "serve"]

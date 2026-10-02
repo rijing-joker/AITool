@@ -1573,6 +1573,13 @@ function createLocalApiHandler({ queuePath, serverVersion = null }) {
   return async function handleLocalApi(req, res, url) {
     const p = url.pathname;
 
+    // Container liveness should not spawn the proxy binary or authenticate
+    // against the management API. Proxy readiness remains in /api/proxy/status.
+    if (p === "/api/health" && req.method === "GET") {
+      json(res, { ok: true });
+      return true;
+    }
+
     // --- AiTool proxy layer (core management + usage bridge) ---
     if (p === "/api/proxy" || p.startsWith("/api/proxy/")) {
       const handled = await require("./proxy/api").handleProxyApiRequest(req, res, url, {

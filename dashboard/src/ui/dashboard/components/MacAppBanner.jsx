@@ -4,7 +4,6 @@ import { motion } from "motion/react";
 import { useLoginModal } from "../../../contexts/LoginModalContext.jsx";
 import { useInsforgeAuth } from "../../../contexts/InsforgeAuthContext.jsx";
 import { ClawdAnimated } from "../../foundation/ClawdAnimated.jsx";
-import { useClawdState } from "../../../hooks/useClawdState.js";
 import { isNativeLinuxApp } from "../../../lib/native-bridge.js";
 
 const DISMISS_KEY = "macAppBannerDismissed";
@@ -30,10 +29,9 @@ const isNativeApp = (() => {
  * - Native app + not signed in → Login CTA
  * - Browser → Download App CTA
  */
-export function MacAppBanner({ todayTokens = 0, isSyncing = false, enterDelay = 0 }) {
+export function MacAppBanner({ enterDelay = 0 }) {
   const { openLoginModal } = useLoginModal();
   const { signedIn: cloudSignedIn } = useInsforgeAuth();
-  const clawdState = useClawdState({ todayTokens, isSyncing });
   const dismissKey = isNativeApp ? LOGIN_DISMISS_KEY : DISMISS_KEY;
 
   const [dismissed, setDismissed] = useState(() => {
@@ -111,7 +109,7 @@ export function MacAppBanner({ todayTokens = 0, isSyncing = false, enterDelay = 
     >
         <div className="flex items-center gap-3">
           <div className="flex-shrink-0">
-            <ClawdAnimated state={clawdState} size={56} />
+            <ClawdAnimated state="static-base" size={56} />
           </div>
 
           <div className="flex-1 min-w-0">

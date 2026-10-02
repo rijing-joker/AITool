@@ -1,8 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, RefreshCw, Zap } from "lucide-react";
 import { copy } from "../lib/copy";
 import { Card } from "../ui/components";
 import { showToast } from "../ui/components/Toast";
+import { useVisiblePolling } from "../hooks/use-visible-polling";
 
 // ---------------------------------------------------------------------------
 // Requests tab (请求记录) — interaction ported from EasyCLIProxyAPI's
@@ -116,41 +117,38 @@ export function RequestsTab() {
   const [error, setError] = useState(null);
   const pageSize = 50;
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (signal) => {
     try {
       const params = new URLSearchParams({
         page: String(page),
         pageSize: String(pageSize),
+        includeStats: "1",
         result,
         ...(model.trim() ? { model: model.trim() } : {}),
         ...(provider.trim() ? { provider: provider.trim() } : {}),
         ...rangeParams(range, customStart, customEnd),
       });
-      const [data, statsData] = await Promise.all([
-        fetch(`/api/proxy/usage/records?${params}`, { cache: "no-store" }).then((response) => response.json()),
-        fetch(`/api/proxy/usage/records?stats=1&${params}`, { cache: "no-store" }).then((response) => response.json()),
-      ]);
+      const data = await fetch(`/api/proxy/usage/records?${params}`, { cache: "no-store", signal })
+        .then((response) => response.json());
+      if (signal.aborted) return;
       if (!data?.ok) throw new Error(data?.error || `HTTP records`);
       setRecords(data.records);
       setTotal(data.total);
-      setStats(statsData?.ok ? statsData.stats : null);
+      setStats(data.stats ?? null);
       setError(null);
     } catch (e) {
+      if (signal.aborted) return;
       setError(e instanceof Error ? e.message : String(e));
       setRecords([]);
     }
   }, [page, result, model, provider, range, customStart, customEnd]);
 
-  useEffect(() => {
-    void load();
-    const timer = setInterval(() => void load(), 10_000);
-    return () => clearInterval(timer);
-  }, [load]);
+  const refreshRecords = useVisiblePolling(load, 10_000);
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   const refresh = () => {
-    void load();
+    void refreshRecords();
     showToast(copy("proxy.requests.refreshed"), "success");
   };
 

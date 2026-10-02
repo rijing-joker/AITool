@@ -48,7 +48,7 @@ export function startLocalUsageAutoRefresh({
       visible: documentRef.visibilityState === "visible",
       lastInteractionAt,
       now,
-    });
+    }) * intervalMs / LOCAL_USAGE_REFRESH_INTERVAL_MS;
     void run();
   }, intervalMs);
   const handleVisible = () => {

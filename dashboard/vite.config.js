@@ -8,6 +8,7 @@ import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv } from "vite";
 import os from "node:os";
 import { copyRegistryPlugin } from "./scripts/copy-registry-plugin.mjs";
+import { precompressAssetsPlugin } from "./scripts/precompress-assets.mjs";
 
 const COPY_REQUIRED_KEYS = [
   "landing.meta.title",
@@ -1292,6 +1293,7 @@ export default defineConfig(({ mode }) => {
       richLinkMetaPlugin(),
       routeSeoPagesPlugin(),
       localDataApiPlugin(),
+      precompressAssetsPlugin(),
     ],
     ...(Object.keys(define).length ? { define } : {}),
     build: {

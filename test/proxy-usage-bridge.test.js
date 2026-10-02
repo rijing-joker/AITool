@@ -160,6 +160,44 @@ test("proxy overview and request list exclude legacy notifications before repair
   }
 });
 
+test("combined pagination and stats use the same filtered records and preserve the stats-only API", async (t) => {
+  const f = fixture(t);
+  writeHistory(f, [control, zeroRequest, { ...zeroRequest, failed: true }, { ...zeroRequest, canceled: true }]);
+  async function read(query) {
+    let payload;
+    await handleProxyApiRequest({ method: "GET" }, {
+      writeHead(status) { assert.equal(status, 200); },
+      end(body) { payload = JSON.parse(body); },
+    }, new URL(`http://localhost/api/proxy/usage/records?${query}`), {});
+    return payload;
+  }
+  const combined = await read("includeStats=1&pageSize=1&model=unknown");
+  assert.equal(combined.records.length, 1);
+  assert.equal(combined.total, 3);
+  assert.deepEqual(combined.stats, (await read("stats=1&model=unknown")).stats);
+  assert.equal(combined.stats.success_count, 1);
+  assert.equal(combined.stats.failure_count, 1);
+  assert.equal(combined.stats.canceled_count, 1);
+  const canceled = await read("includeStats=1&result=canceled");
+  assert.equal(canceled.total, 1);
+  assert.equal(canceled.records[0].canceled, true);
+  assert.equal(canceled.stats.total_requests, 1);
+  assert.equal(canceled.stats.total_tokens, 0);
+});
+
+test("container liveness succeeds independently of proxy readiness", async (t) => {
+  const f = fixture(t);
+  t.mock.method(require("../src/lib/proxy/manager"), "status", () => { throw new Error("must not probe the core"); });
+  const handler = localApi.createLocalApiHandler({ queuePath: f.queuePath });
+  let result;
+  const handled = await handler({ method: "GET", headers: {} }, {
+    writeHead(status) { assert.equal(status, 200); },
+    end(body) { result = JSON.parse(body); },
+  }, new URL("http://localhost/api/health"));
+  assert.equal(handled, true);
+  assert.deepEqual(result, { ok: true });
+});
+
 test("RESP backfill, subscribe and reconnect ignore controls but accept the next request", async (t) => {
   const f = fixture(t);
   const sockets = [];

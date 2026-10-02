@@ -6,7 +6,7 @@ const config = require("./config");
 const manager = require("./manager");
 const bridge = require("./usage-bridge");
 const management = require("./management");
-const { isUsageRecord } = require("./usage-record");
+const recordStore = require("./usage-records").createUsageRecordStore();
 const coreInstall = require("./core-install").getInstance;
 
 // Dashboard-facing REST surface for the proxy layer. Mounted by local-api.js
@@ -48,34 +48,10 @@ function readJsonBody(req, maxBytes = 8 * 1024 * 1024) {
 // Usage records store (raw per-request events from the bridge)
 // ---------------------------------------------------------------------------
 
-function listRecordFiles() {
-  try {
-    return fs
-      .readdirSync(paths.usageDir)
-      .filter((name) => /^records-\d{4}-\d{2}-\d{2}\.jsonl$/.test(name))
-      .sort()
-      .reverse();
-  } catch {
-    return [];
-  }
-}
-
-function readRecords({ maxFiles = 14 } = {}) {
-  const rows = [];
-  for (const name of listRecordFiles().slice(0, maxFiles)) {
-    try {
-      const raw = fs.readFileSync(path.join(paths.usageDir, name), "utf8");
-      for (const line of raw.split("\n")) {
-        if (!line.trim()) continue;
-        try {
-          const record = JSON.parse(line);
-          if (isUsageRecord(record)) rows.push(record);
-        } catch {}
-      }
-    } catch {}
-  }
-  rows.sort((a, b) => String(b.timestamp || "").localeCompare(String(a.timestamp || "")));
-  return rows;
+const recordTimestamps = new WeakMap();
+function recordTimestamp(record) {
+  if (!recordTimestamps.has(record)) recordTimestamps.set(record, Date.parse(record.timestamp || ""));
+  return recordTimestamps.get(record);
 }
 
 function computeOverview(rows) {
@@ -116,9 +92,9 @@ function computeOverview(rows) {
     const hourStart = bridge.toUtcHalfHourStart(new Date(now - i * 30 * 60 * 1000));
     timeline.push({ hour_start: hourStart, requests: 0, failures: 0, total_tokens: 0 });
   }
-  const timelineIndex = new Map(timeline.map((point) => [point.hour_start, point]));
+  const timelineIndex = new Map(timeline.map((point) => [Date.parse(point.hour_start), point]));
   for (const row of rows) {
-    const point = timelineIndex.get(bridge.toUtcHalfHourStart(row.timestamp));
+    const point = timelineIndex.get(Math.floor(recordTimestamp(row) / 1_800_000) * 1_800_000);
     if (!point) continue;
     if (row.failed) point.failures += 1;
     else if (!row.canceled) point.requests += 1;
@@ -126,7 +102,7 @@ function computeOverview(rows) {
   }
 
   const recentWindow = rows.filter((r) => {
-    const ts = Date.parse(r.timestamp || "");
+    const ts = recordTimestamp(r);
     return Number.isFinite(ts) && now - ts <= 5 * 60 * 1000;
   });
   const latencies = success.map((r) => Number(r.latencyMs) || 0).filter((v) => v > 0);
@@ -478,11 +454,11 @@ async function handleProxyApiRequest(req, res, url, ctx) {
 
     // --- usage records / overview ---
     if (p === "/api/proxy/usage/overview") {
-      json(res, { ok: true, overview: computeOverview(readRecords()), bridge: bridge.bridgeStatus() });
+      json(res, { ok: true, overview: computeOverview(await recordStore.readRecords(paths.usageDir)), bridge: bridge.bridgeStatus() });
       return true;
     }
     if (p === "/api/proxy/usage/records") {
-      const rows = readRecords();
+      const rows = await recordStore.readRecords(paths.usageDir);
       const model = (url.searchParams.get("model") || "").trim().toLowerCase();
       const provider = (url.searchParams.get("provider") || "").trim().toLowerCase();
       const failed = url.searchParams.get("failed");
@@ -497,12 +473,14 @@ async function handleProxyApiRequest(req, res, url, ctx) {
         if (result === "success" && (row.failed || row.canceled)) return false;
         if (result === "failed" && !row.failed) return false;
         if (result === "canceled" && (!row.canceled || row.failed)) return false;
-        const ts = Date.parse(row.timestamp || "");
+        const ts = recordTimestamp(row);
         if (Number.isFinite(since) && (!Number.isFinite(ts) || ts < since)) return false;
         if (Number.isFinite(until) && (!Number.isFinite(ts) || ts > until)) return false;
         return true;
       });
-      if (url.searchParams.get("stats")) {
+      const statsOnly = Boolean(url.searchParams.get("stats"));
+      let stats;
+      if (statsOnly || url.searchParams.get("includeStats") === "1") {
         const success = filtered.filter((row) => !row.failed && !row.canceled);
         const failedRows = filtered.filter((row) => row.failed);
         const canceled = filtered.filter((row) => row.canceled && !row.failed);
@@ -515,17 +493,17 @@ async function handleProxyApiRequest(req, res, url, ctx) {
           entry.total_tokens += Number(row?.tokens?.totalTokens) || 0;
           byModel.set(name, entry);
         }
-        json(res, {
-          ok: true,
-          stats: {
-            total_requests: filtered.length,
-            success_count: success.length,
-            failure_count: failedRows.length,
-            canceled_count: canceled.length,
-            total_tokens: totalTokens,
-            models: Array.from(byModel.values()).sort((a, b) => b.total_tokens - a.total_tokens).slice(0, 8),
-          },
-        });
+        stats = {
+          total_requests: filtered.length,
+          success_count: success.length,
+          failure_count: failedRows.length,
+          canceled_count: canceled.length,
+          total_tokens: totalTokens,
+          models: Array.from(byModel.values()).sort((a, b) => b.total_tokens - a.total_tokens).slice(0, 8),
+        };
+      }
+      if (statsOnly) {
+        json(res, { ok: true, stats });
         return true;
       }
       const pageSize = Math.min(Math.max(Number(url.searchParams.get("pageSize")) || 50, 1), 500);
@@ -537,6 +515,7 @@ async function handleProxyApiRequest(req, res, url, ctx) {
         page,
         pageSize,
         records: filtered.slice(start, start + pageSize),
+        ...(stats ? { stats } : {}),
       });
       return true;
     }

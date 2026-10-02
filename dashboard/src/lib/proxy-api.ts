@@ -15,8 +15,8 @@ async function parseResponse<T>(res: Response): Promise<T> {
   return body as T;
 }
 
-async function get<T>(path: string): Promise<T> {
-  return parseResponse<T>(await fetch(path, { cache: "no-store" }));
+async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
+  return parseResponse<T>(await fetch(path, { cache: "no-store", signal }));
 }
 
 async function mutate<T>(path: string, method: string, body?: unknown): Promise<T> {
@@ -143,7 +143,7 @@ export interface CoreInstallTask {
 }
 
 export const proxyApi = {
-  status: () => get<ProxyStatus>("/api/proxy/status"),
+  status: (signal?: AbortSignal) => get<ProxyStatus>("/api/proxy/status", signal),
   start: () => mutate<{ ok: true }>("/api/proxy/start", "POST"),
   stop: () => mutate<{ ok: true }>("/api/proxy/stop", "POST"),
   install: () => mutate<{ ok: true; task: CoreInstallTask }>("/api/proxy/install", "POST"),
@@ -152,8 +152,8 @@ export const proxyApi = {
   setSettings: (settings: { autoStart?: boolean }) =>
     mutate<{ ok: true }>("/api/proxy/settings", "PUT", settings),
 
-  overview: () => get<{ ok: true; overview: ProxyUsageOverview; bridge: ProxyBridgeStatus }>(
-    "/api/proxy/usage/overview",
+  overview: (signal?: AbortSignal) => get<{ ok: true; overview: ProxyUsageOverview; bridge: ProxyBridgeStatus }>(
+    "/api/proxy/usage/overview", signal,
   ),
   records: (params: { page?: number; pageSize?: number; failed?: "true" | "false"; model?: string; provider?: string }) => {
     const query = new URLSearchParams();

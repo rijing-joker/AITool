@@ -158,7 +158,8 @@ cp "$REPO_ROOT/package-lock.json" "$TT_DIR/"
 # Dashboard build artifacts
 if [[ -d "$REPO_ROOT/dashboard/dist" ]]; then
   mkdir -p "$TT_DIR/dashboard"
-  cp -R "$REPO_ROOT/dashboard/dist" "$TT_DIR/dashboard/dist"
+  # Keep precompressed variants at least as fresh as their source assets.
+  cp -pR "$REPO_ROOT/dashboard/dist" "$TT_DIR/dashboard/dist"
 else
   echo "⚠️  dashboard/dist/ not found — run 'npm run dashboard:build' first"
   echo "   Continuing without dashboard assets..."

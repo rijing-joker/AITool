@@ -39,6 +39,10 @@ test("Linux bundle rebuilds an isolated runtime and synchronizes an isolated Tau
     fs.writeFileSync(staleFile, "stale runtime artifact");
     fs.mkdirSync(dashboardDist, { recursive: true });
     fs.writeFileSync(path.join(dashboardDist, "index.html"), "<main>dashboard fixture</main>");
+    fs.writeFileSync(path.join(dashboardDist, "index.html.gz"), require("node:zlib").gzipSync("<main>dashboard fixture</main>"));
+    for (const name of ["index.html", "index.html.gz"]) {
+      fs.utimesSync(path.join(dashboardDist, name), new Date("2026-01-01"), new Date("2026-01-01"));
+    }
 
     // The bundle script verifies the downloaded Node tarball with `sha256sum`,
     // and so does the stubbed curl below. That binary is GNU coreutils and does
@@ -107,8 +111,16 @@ chmod +x "$destination/node-v22.22.2-linux-x64/bin/node"
       "tokentracker/bin/tracker.js",
       "tokentracker/package.json",
       "tokentracker/dashboard/dist/index.html",
+      "tokentracker/dashboard/dist/index.html.gz",
     ]) {
       assert.equal(fs.existsSync(path.join(embeddedServer, requiredFile)), true, `missing ${requiredFile}`);
+    }
+    for (const name of ["index.html", "index.html.gz"]) {
+      assert.equal(
+        fs.statSync(path.join(embeddedServer, "tokentracker/dashboard/dist", name)).mtimeMs,
+        fs.statSync(path.join(dashboardDist, name)).mtimeMs,
+        "bundling must preserve timestamps used to validate compressed variants",
+      );
     }
     const canonicalPixels = PNG.sync.read(fs.readFileSync(canonicalIcon));
     const tauriPixels = PNG.sync.read(fs.readFileSync(tauriIcon));

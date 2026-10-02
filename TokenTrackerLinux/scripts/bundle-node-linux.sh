@@ -105,7 +105,8 @@ if [[ ! -d "$DASHBOARD_DIST" ]]; then
   exit 1
 fi
 mkdir -p "$TT_DIR/dashboard"
-cp -R "$DASHBOARD_DIST" "$TT_DIR/dashboard/dist"
+# Keep precompressed variants at least as fresh as their source assets.
+cp -pR "$DASHBOARD_DIST" "$TT_DIR/dashboard/dist"
 
 (
   cd "$TT_DIR"

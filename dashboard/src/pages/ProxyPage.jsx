@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { copy } from "../lib/copy";
 import { proxyApi } from "../lib/proxy-api";
+import { useVisiblePolling } from "../hooks/use-visible-polling";
 import { ConfirmModal } from "../ui/components";
 import { showToast } from "../ui/components/Toast";
 import { UpstreamsTab } from "./upstreams-tab";
@@ -134,21 +135,19 @@ function OverviewTab({ status, onRefresh, onInstallCore }) {
   const [actionBusy, setActionBusy] = useState(false);
   const [error, setError] = useState(null);
 
-  const loadOverview = useCallback(async () => {
+  const loadOverview = useCallback(async (signal) => {
     try {
-      const data = await proxyApi.overview();
+      const data = await proxyApi.overview(signal);
+      if (signal.aborted) return;
       setOverview(data.overview);
       setError(null);
     } catch (e) {
+      if (signal.aborted) return;
       setError(e instanceof Error ? e.message : String(e));
     }
   }, []);
 
-  useEffect(() => {
-    void loadOverview();
-    const timer = setInterval(() => void loadOverview(), 10_000);
-    return () => clearInterval(timer);
-  }, [loadOverview]);
+  const refreshOverview = useVisiblePolling(loadOverview, 10_000);
 
   const toggleCore = useCallback(async () => {
     if (!status) return;
@@ -158,13 +157,13 @@ function OverviewTab({ status, onRefresh, onInstallCore }) {
       if (status.core.running) await proxyApi.stop();
       else await proxyApi.start();
       onRefresh();
-      void loadOverview();
+      void refreshOverview();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setActionBusy(false);
     }
-  }, [status, onRefresh, loadOverview]);
+  }, [status, onRefresh, refreshOverview]);
 
   const running = status?.core.running ?? false;
   const endpoint = status ? `http://${status.core.host}:${status.core.port}` : "";
@@ -351,19 +350,16 @@ export function ProxyPage() {
   const [installTask, setInstallTask] = useState(null);
   const [installActive, setInstallActive] = useState(false);
 
-  const refreshStatus = useCallback(async () => {
+  const loadStatus = useCallback(async (signal) => {
     try {
-      setStatus(await proxyApi.status());
+      const data = await proxyApi.status(signal);
+      if (!signal.aborted) setStatus(data);
     } catch {
-      setStatus(null);
+      if (!signal.aborted) setStatus(null);
     }
   }, []);
 
-  useEffect(() => {
-    void refreshStatus();
-    const timer = setInterval(() => void refreshStatus(), 15_000);
-    return () => clearInterval(timer);
-  }, [refreshStatus]);
+  const refreshStatus = useVisiblePolling(loadStatus, 15_000);
 
   const openCoreInstall = useCallback(() => setConfirmOpen(true), []);
 

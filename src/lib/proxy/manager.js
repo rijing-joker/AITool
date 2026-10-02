@@ -46,16 +46,33 @@ function pidAlive(pid) {
   }
 }
 
+let versionCache = null;
+
 async function readBinaryVersion() {
-  if (!binaryExists()) return null;
-  return new Promise((resolve) => {
+  let stat;
+  try {
+    stat = fs.statSync(paths.binPath, { bigint: true });
+  } catch {
+    versionCache = null;
+    return null;
+  }
+  const key = `${paths.binPath}:${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
+  if (versionCache?.key === key && Date.now() < versionCache.expiresAt) return versionCache.promise;
+  // Reprobe occasionally even when metadata is unchanged (coarse timestamp
+  // filesystems can hide a same-size in-place replacement).
+  const entry = { key, expiresAt: Date.now() + 5 * 60_000, promise: null };
+  entry.promise = new Promise((resolve) => {
     // The core prints a "CLIProxyAPI Version: x.y.z" banner before flag
     // parsing, so even a rejected flag yields the version line.
     execFile(paths.binPath, ["-h"], { timeout: 5_000 }, (error, stdout) => {
       const match = String(stdout || "").match(/CLIProxyAPI Version:\s*([^\s,]+)/);
+      // A failed/timed-out probe is transient. Coalesce it briefly, then retry.
+      if (!match) entry.expiresAt = Date.now() + 1_000;
       resolve(match ? match[1] : null);
     });
   });
+  versionCache = entry;
+  return entry.promise;
 }
 
 async function installCore({ sourcePath } = {}) {

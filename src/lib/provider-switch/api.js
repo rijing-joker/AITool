@@ -10,6 +10,7 @@ const paths = require("./paths");
 const catalog = require("./catalog");
 const editor = require("./editor");
 const additive = require("./additive");
+const mcp = require("./mcp");
 
 // Dashboard-facing REST surface for the provider-switch layer, mounted by
 // local-api.js under /api/provider-switch/*. Mirrors the proxy/api.js
@@ -364,6 +365,49 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
       const body = await readJsonBody(req);
       const visibleApps = await store.updateVisibleApps(body.visibleApps);
       json(res, { ok: true, visibleApps });
+      return true;
+    }
+
+    // MCP server management (cc-switch's unified mcp_servers module). Reads
+    // are open; every mutation projects into the enabled apps' live configs
+    // and reports per-server projection failures instead of aborting.
+    if (p === `${prefix}/mcp` && method === "GET") {
+      json(res, { ok: true, servers: await mcp.listServers(), apps: mcp.MCP_APPS });
+      return true;
+    }
+    if (p === `${prefix}/mcp` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      const result = await mcp.upsertServer(body.server || body);
+      json(res, { ok: true, ...result });
+      return true;
+    }
+    if (p === `${prefix}/mcp/delete` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      const result = await mcp.deleteServer(String(body.id || ""));
+      json(res, { ok: true, ...result });
+      return true;
+    }
+    if (p === `${prefix}/mcp/toggle` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      const result = await mcp.toggleServerApp(String(body.id || ""), String(body.app || ""), body.enabled === true);
+      json(res, { ok: true, ...result });
+      return true;
+    }
+    if (p === `${prefix}/mcp/import` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      const result = await mcp.importFromApps(Array.isArray(body.apps) ? body.apps : null);
+      json(res, { ok: true, ...result });
+      return true;
+    }
+    if (p === `${prefix}/mcp/sync` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      const result = await mcp.syncServers(Array.isArray(body.apps) ? body.apps : null);
+      json(res, { ok: true, ...result });
       return true;
     }
 

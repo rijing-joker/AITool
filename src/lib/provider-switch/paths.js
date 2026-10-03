@@ -4,6 +4,7 @@ const path = require("node:path");
 // Provider-switch layer (ported from cc-switch's config-management module) —
 // on-disk layout under ~/.aitool/provider-switch:
 //   providers.json          SSOT store of per-app provider presets + current pointer
+//   mcp-servers.json        SSOT store of MCP servers shared across apps (see mcp.js)
 //   codex-auth-stash.json   official Codex (ChatGPT) login stashed while a
 //                           third-party provider is active (0600)
 //   backups/<app>/…         pre-first-write + pre-switch copies of live files
@@ -21,6 +22,12 @@ function providerSwitchRoot() {
 
 function storePath() {
   return path.join(providerSwitchRoot(), "providers.json");
+}
+
+// MCP servers SSOT (cc-switch's unified mcp_servers table): one JSON list
+// shared by every app, projected into each tool's native MCP config.
+function mcpStorePath() {
+  return path.join(providerSwitchRoot(), "mcp-servers.json");
 }
 
 function codexAuthStashPath() {
@@ -153,6 +160,7 @@ function targetFile(app, fileId) {
 module.exports = {
   providerSwitchRoot,
   storePath,
+  mcpStorePath,
   codexAuthStashPath,
   codexModelCatalogPath,
   backupsDir,

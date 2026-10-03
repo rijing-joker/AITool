@@ -90,8 +90,9 @@ docker compose up -d --build
 | **切换模型** | 最小补丁投影（cc-switch 的"关键字段"表）：只写入供应商的关键字段 —— 地址、凭据、模型名；用户自有内容（hooks、permissions、注释）一律不动，上一家供应商的残留仅在未被改动时清除 |
 | **编辑器** | 添加/编辑弹窗显示切换到该供应商之后的完整配置文件（cc-switch 的编辑器视图）；保存时关键字段写回供应商行，其余改动经三方比对写入本机配置文件（保留我的 / 保留对方的） |
 | **Codex 凭据** | 中转密钥写入 `config.toml` 中 `[model_providers.custom]` 的 `experimental_bearer_token` —— Codex CLI 0.149+ 不再从 `auth.json` 读取中转密钥，`auth.json` 只保存官方 ChatGPT 登录（添加/编辑弹窗的 Codex 编辑器相应拆分：`auth.json` JSON + `config.toml` TOML） |
+| **MCP 服务器** | 页面的 MCP 标签维护一份所有 agent 共用的 MCP 服务器列表（cc-switch 的统一 `mcp_servers` 模块），按应用开关即投影进对应应用的原生 MCP 配置 —— Claude（`~/.claude.json`）、Codex（`config.toml` 的 `[mcp_servers.*]`）、Gemini（`settings.json`）、Grok Build、OpenCode、Hermes、MiniMax Code（`~/.minimax/mcp.json`），并可从各工具已配置的服务器导入 |
 | **安全性** | 原子写入（凭据文件 0600）、每文件首次写入前自动备份（可在仪表盘恢复）、配置文件编辑器内置于添加/编辑弹窗；Codex 官方 ChatGPT 登录在切向第三方中转时自动暂存、切回时还原 |
-| **存储位置** | `~/.aitool/provider-switch/` —— `providers.json`（预设 + 当前指针）、`codex-auth-stash.json`、`backups/` |
+| **存储位置** | `~/.aitool/provider-switch/` —— `providers.json`（预设 + 当前指针）、`mcp-servers.json`（共享 MCP 服务器列表）、`codex-auth-stash.json`、`backups/` |
 
 ## AI 代理能力（来自 EasyCLIProxyAPI）
 

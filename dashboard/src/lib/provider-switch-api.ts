@@ -271,3 +271,76 @@ export const providerSwitchApi = {
     return mutate("/api/provider-switch/switch", "POST", { app, id });
   },
 };
+
+// ---------------------------------------------------------------------------
+// MCP servers (cc-switch's unified mcp_servers module)
+// ---------------------------------------------------------------------------
+
+export type McpAppId = "claude" | "codex" | "gemini" | "grokbuild" | "opencode" | "hermes" | "mcode";
+
+export interface McpServerSpec {
+  type?: "stdio" | "http" | "sse" | string;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  cwd?: string;
+  url?: string;
+  headers?: Record<string, string>;
+  [key: string]: unknown;
+}
+
+export interface McpServer {
+  id: string;
+  name: string;
+  server: McpServerSpec;
+  apps: Record<McpAppId, boolean>;
+  description?: string;
+  homepage?: string;
+  docs?: string;
+  tags?: string[];
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface McpUpsertPayload {
+  id: string;
+  name?: string;
+  server: McpServerSpec;
+  apps?: Partial<Record<McpAppId, boolean>>;
+  description?: string;
+  homepage?: string;
+  docs?: string;
+  tags?: string[];
+}
+
+export interface McpMutationResult {
+  ok: true;
+  servers: McpServer[];
+  failures: string[];
+}
+
+export const mcpApi = {
+  list(): Promise<{ ok: true; servers: McpServer[]; apps: McpAppId[] }> {
+    return get("/api/provider-switch/mcp");
+  },
+
+  upsert(server: McpUpsertPayload): Promise<McpMutationResult> {
+    return mutate("/api/provider-switch/mcp", "POST", { server });
+  },
+
+  remove(id: string): Promise<McpMutationResult> {
+    return mutate("/api/provider-switch/mcp/delete", "POST", { id });
+  },
+
+  toggle(id: string, app: McpAppId, enabled: boolean): Promise<McpMutationResult> {
+    return mutate("/api/provider-switch/mcp/toggle", "POST", { id, app, enabled });
+  },
+
+  import(apps?: McpAppId[]): Promise<{ ok: true; changed: number; skipped: string[]; servers: McpServer[] }> {
+    return mutate("/api/provider-switch/mcp/import", "POST", apps?.length ? { apps } : {});
+  },
+
+  sync(apps?: McpAppId[]): Promise<{ ok: true; failures: string[] }> {
+    return mutate("/api/provider-switch/mcp/sync", "POST", apps?.length ? { apps } : {});
+  },
+};

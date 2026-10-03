@@ -49,6 +49,8 @@ const SOURCE_IDENTICAL_KEY_ALLOWLIST = [
   /^proxy[.]creds[.]models[.]rulesPlaceholder$/,
   // Provider-switch page: CLI product names stay verbatim in zh/zh-TW.
   /^pswitch[.]tab[.]/,
+  // The MCP tab label is the protocol name itself.
+  /^pswitch[.]mcp[.]tab$/,
   // Provider-switch form fields: env/protocol identifiers stay verbatim.
   /^pswitch[.]field[.]/,
   // Codex editor headings are literal config-file names.

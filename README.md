@@ -95,8 +95,9 @@ A Node port of [cc-switch](https://github.com/farion1231/cc-switch)'s config-fil
 | **Switch model** | Minimal-patch projection (cc-switch's "floor" key fields): only the provider's key fields — endpoint, credentials, model names — are written; user-owned content (hooks, permissions, comments) is never touched, and the previous provider's residue is removed only when you haven't changed it |
 | **Editor** | The add/edit dialog shows the full config file as it would look after switching to this provider (cc-switch's editor view); on save, key fields go back to the provider row while other edits are written into the live files with three-way conflict detection (keep mine / keep theirs) |
 | **Codex credentials** | The relay key is written to `experimental_bearer_token` under `[model_providers.custom]` in `config.toml` — Codex CLI 0.149+ no longer reads relay keys from `auth.json`, which holds only the official ChatGPT login (the add/edit dialog's Codex editors are split accordingly: `auth.json` JSON + `config.toml` TOML) |
+| **MCP servers** | The page's MCP tab keeps one list of MCP servers (cc-switch's unified `mcp_servers` module) with per-app toggles that project each spec into the app's native MCP config — Claude (`~/.claude.json`), Codex (`[mcp_servers.*]` in `config.toml`), Gemini (`settings.json`), Grok Build, OpenCode, Hermes, MiniMax Code (`~/.minimax/mcp.json`) — and can import what the tools already configured |
 | **Safety** | Atomic writes (`0600` for credential files), first-write backup per file restorable from the dashboard, and config-file editors built into the add/edit dialog; Codex's official ChatGPT login is stashed when switching to a third-party relay and restored on switch-back |
-| **Storage** | `~/.aitool/provider-switch/` — `providers.json` (presets + current pointer), `codex-auth-stash.json`, `backups/` |
+| **Storage** | `~/.aitool/provider-switch/` — `providers.json` (presets + current pointer), `mcp-servers.json` (shared MCP server list), `codex-auth-stash.json`, `backups/` |
 
 ## AI Proxy capabilities (from EasyCLIProxyAPI)
 

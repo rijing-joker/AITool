@@ -34,6 +34,7 @@ import { PageHeader } from "../ui/components/PageHeader";
 import { PageTabs } from "../ui/components/PageTabs";
 import { UnsavedChangesGuard } from "../ui/components/UnsavedChangesGuard";
 import { PresetIcon, presetAvatarClass, ProviderEditDialog } from "./provider-edit-dialog";
+import { ProviderMcpPanel } from "./provider-mcp-panel";
 
 // Provider config management — an interaction port of cc-switch's provider
 // module. Presets live in ~/.aitool/provider-switch (served by the local
@@ -192,6 +193,7 @@ export function ProviderSwitchPage() {
   const appState = useMemo(() => {
     return status?.apps.find((app) => app.app === activeApp) || null;
   }, [status, activeApp]);
+  const isMcpTab = activeApp === "mcp";
 
   // Visible tabs follow the settings-page toggle (cc-switch's
   // AppVisibilitySettings); the backend guarantees at least one stays on.
@@ -200,6 +202,9 @@ export function ProviderSwitchPage() {
   }, [status]);
 
   useEffect(() => {
+    // "mcp" is the MCP-servers tab — not an app, so the visible-apps filter
+    // doesn't apply to it.
+    if (activeApp === "mcp") return;
     if (!visibleApps.some(({ id }) => id === activeApp) && visibleApps.length > 0) {
       setActiveApp(visibleApps[0].id);
     }
@@ -376,20 +381,35 @@ export function ProviderSwitchPage() {
       ) : null}
 
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-        <PageTabs options={visibleApps.map((item) => ({ ...item, label: copy(item.labelKey) }))} value={activeApp} onChange={setActiveApp} label={copy("pswitch.title")} panelId="provider-panel" />
-        <div className="flex items-center gap-2">
-          <Button variant="secondary" size="sm" disabled={busy} onClick={() => void importFromLive()}>
-            <Import className="h-4 w-4" />
-            {copy("pswitch.action.import_live")}
-          </Button>
-          <Button size="sm" disabled={busy} onClick={() => void openDialog(null)}>
-            <Plus className="h-4 w-4" />
-            {copy("pswitch.action.add")}
-          </Button>
-        </div>
+        <PageTabs
+          options={[
+            ...visibleApps.map((item) => ({ ...item, label: copy(item.labelKey) })),
+            { id: "mcp", label: copy("pswitch.mcp.tab") },
+          ]}
+          value={activeApp}
+          onChange={setActiveApp}
+          label={copy("pswitch.title")}
+          panelId="provider-panel"
+        />
+        {!isMcpTab ? (
+          <div className="flex items-center gap-2">
+            <Button variant="secondary" size="sm" disabled={busy} onClick={() => void importFromLive()}>
+              <Import className="h-4 w-4" />
+              {copy("pswitch.action.import_live")}
+            </Button>
+            <Button size="sm" disabled={busy} onClick={() => void openDialog(null)}>
+              <Plus className="h-4 w-4" />
+              {copy("pswitch.action.add")}
+            </Button>
+          </div>
+        ) : null}
       </div>
 
       <div role="tabpanel" id="provider-panel" aria-labelledby={`provider-panel-${activeApp}`}>
+      {isMcpTab ? (
+        <ProviderMcpPanel />
+      ) : (
+      <>
       <section className="mb-8">
         <SectionTitle>{copy("pswitch.section.providers")}</SectionTitle>
         {!appState || appState.providers.length === 0 ? (
@@ -454,6 +474,8 @@ export function ProviderSwitchPage() {
           )}
         </Card>
       </section>
+      </>
+      )}
 
       </div>
       {status ? <p className="mb-3 break-all font-mono text-xs text-oai-gray-500">{copy("pswitch.storage_path", { path: status.storagePath })}</p> : null}
@@ -463,18 +485,20 @@ export function ProviderSwitchPage() {
         </p>
       ) : null}
 
-      <ProviderEditDialog
-        onDirtyChange={onDialogDirty}
-        open={dialogOpen}
-        busy={busy}
-        app={activeApp}
-        appState={appState}
-        presets={presets}
-        editing={editingProvider}
-        onClose={() => setDialogOpen(false)}
-        onSaved={onDialogSaved}
-        onError={onDialogError}
-      />
+      {!isMcpTab ? (
+        <ProviderEditDialog
+          onDirtyChange={onDialogDirty}
+          open={dialogOpen}
+          busy={busy}
+          app={activeApp}
+          appState={appState}
+          presets={presets}
+          editing={editingProvider}
+          onClose={() => setDialogOpen(false)}
+          onSaved={onDialogSaved}
+          onError={onDialogError}
+        />
+      ) : null}
 
       <ConfirmModal
         open={!!switchTarget}

@@ -2258,6 +2258,44 @@ pswitch.provider.config_editor_hint,pswitch,ProviderSwitchPage,ProviderEditDialo
 pswitch.provider.invalid_json,pswitch,ProviderSwitchPage,ProviderSwitchPage,provider_invalid_json,Config is not valid JSON: {{error}},,active
 pswitch.provider.invalid_toml,pswitch,ProviderSwitchPage,ProviderEditDialog,invalid_toml,Invalid TOML: {{error}},,active
 pswitch.provider.auth_object_required,pswitch,ProviderSwitchPage,ProviderEditDialog,auth_object_required,auth.json must be a JSON object,,active
+pswitch.mcp.tab,pswitch,ProviderSwitchPage,ProviderSwitchPage,mcp_tab,MCP,,active
+pswitch.mcp.title,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_title,MCP servers ({{count}}),,active
+pswitch.mcp.subtitle,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_subtitle,One list of MCP servers shared by every agent; toggles project each server into the app's native config. Edits and toggles take effect immediately.,,active
+pswitch.mcp.import,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_import,Import from live,,active
+pswitch.mcp.add,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_add,Add server,,active
+pswitch.mcp.bulk_hint,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_bulk_hint,Click to enable or disable every server for this app,,active
+pswitch.mcp.search,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_search,Search servers…,,active
+pswitch.mcp.empty_title,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_empty_title,No MCP servers yet,,active
+pswitch.mcp.empty_hint,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_empty_hint,"Add a server manually, start from a preset, or import the servers already configured in your agents.",,active
+pswitch.mcp.no_match,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_no_match,No servers match the search.,,active
+pswitch.mcp.edit,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_edit,Edit server,,active
+pswitch.mcp.delete_title,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_delete_title,Delete server,,active
+pswitch.mcp.delete_hint,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_delete_hint,Remove {{id}} from the list and from every enabled app's config?,,active
+pswitch.mcp.toast_deleted,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_toast_deleted,Server deleted,,active
+pswitch.mcp.toast_saved,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_toast_saved,Server saved,,active
+pswitch.mcp.toast_error,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_toast_error,Save failed,,active
+pswitch.mcp.import_none,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_import_none,Nothing to import,,active
+pswitch.mcp.import_done,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_import_done,Imported {{count}} servers,,active
+pswitch.mcp.dialog_title,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_dialog_title,MCP server,,active
+pswitch.mcp.field_id,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_field_id,Server ID,,active
+pswitch.mcp.id_taken,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_id_taken,This ID is already in use,,active
+pswitch.mcp.id_invalid,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_id_invalid,"Use letters, digits, _ or - (max 64)",,active
+pswitch.mcp.id_hint,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_id_hint,The key written into each app's config,,active
+pswitch.mcp.field_name,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_field_name,Display name,,active
+pswitch.mcp.preset,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_preset,Preset,,active
+pswitch.mcp.preset_none,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_preset_none,Start from scratch,,active
+pswitch.mcp.field_spec,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_field_spec,Server config (JSON),,active
+pswitch.mcp.format,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_format,Format,,active
+pswitch.mcp.json_invalid,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_json_invalid,Invalid JSON,,active
+pswitch.mcp.json_object,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_json_object,The config must be a JSON object,,active
+pswitch.mcp.apps,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_apps,Enable for apps,,active
+pswitch.mcp.apps_hint,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_apps_hint,Each enabled app gets this server written into its native MCP config; disabling removes it again.,,active
+pswitch.mcp.metadata,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_metadata,Notes and links,,active
+pswitch.mcp.field_description,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_field_description,Description,,active
+pswitch.mcp.field_homepage,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_field_homepage,Homepage,,active
+pswitch.mcp.field_docs,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_field_docs,Docs,,active
+pswitch.mcp.field_tags,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_field_tags,Tags (comma separated),,active
+pswitch.mcp.spec_empty,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_spec_empty,No command or URL configured,,active
 pswitch.provider.dialog.add_title,pswitch,ProviderSwitchPage,ProviderSwitchPage,provider_dialog_add_title,Add provider,,active
 pswitch.provider.dialog.edit_title,pswitch,ProviderSwitchPage,ProviderSwitchPage,provider_dialog_edit_title,Edit provider,,active
 pswitch.backups.empty,pswitch,ProviderSwitchPage,ProviderSwitchPage,backups_empty,No backups yet. A backup is taken before the first managed write to each file.,,active

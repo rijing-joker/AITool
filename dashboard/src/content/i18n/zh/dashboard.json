@@ -1456,5 +1456,18 @@
   "pswitch.provider.appearance": "备注与外观",
   "pswitch.preset.change": "更换预设",
   "pswitch.provider.save_effect": "保存此预设；对通用设置的修改也会写入当前配置。",
-  "pswitch.provider.save_effect_active": "保存后会同时更新正在使用的配置。"
+  "pswitch.provider.save_effect_active": "保存后会同时更新正在使用的配置。",
+  "pswitch.tab.hermes": "Hermes",
+  "pswitch.tab.pi": "Pi",
+  "pswitch.tab.grokbuild": "Grok Build",
+  "pswitch.preset.hermes_custom": "自定义中转",
+  "pswitch.preset.pi_custom": "自定义中转",
+  "pswitch.preset.grokbuild_custom": "自定义中转",
+  "pswitch.validate.endpoint.hermes": "Hermes API 端点为空。",
+  "pswitch.validate.endpoint.pi": "Pi API 端点为空。",
+  "pswitch.validate.endpoint.grokbuild": "Grok Build API 端点为空。",
+  "pswitch.validate.key.hermes": "Hermes API Key 为空。",
+  "pswitch.validate.key.pi": "Pi API Key 为空。",
+  "pswitch.validate.key.grokbuild": "Grok Build API Key 为空。",
+  "pswitch.validate.model.pi": "Pi 供应商至少需要填写一个模型 ID。"
 }

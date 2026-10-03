@@ -16,14 +16,21 @@ import { ModelDropdown, ModelInputAction } from "./provider-model-dropdown";
 // src/lib/provider-switch/additive.js): the provider owns one keyed entry in
 // the tool's native config plus (where the tool has one) a default-model
 // pointer. The config editor shows the whole native file — JSON for
-// opencode/openclaw, YAML for MiniMax Code. Preset form-field paths address
-// that document with `$slot` standing for the entry key (see resolveAdditivePath).
-const ADDITIVE_APPS = ["opencode", "openclaw", "mcode"];
-const ADDITIVE_CONFIG_FORMAT = { opencode: "json", openclaw: "json", mcode: "yaml" };
+// opencode/openclaw/pi, YAML for MiniMax Code/Hermes, TOML for Grok Build.
+// Preset form-field paths address that document with `$slot` standing for
+// the entry key (see resolveAdditivePath). The pointer kinds differ: most
+// apps store "<key>/<modelId>" refs, Hermes writes model.default (model id)
+// alongside model.provider (the slot key), and Grok Build's models.default
+// points at the table name itself.
+const ADDITIVE_APPS = ["opencode", "openclaw", "mcode", "hermes", "pi", "grokbuild"];
+const ADDITIVE_CONFIG_FORMAT = { opencode: "json", openclaw: "json", mcode: "yaml", hermes: "yaml", pi: "json", grokbuild: "toml" };
 const ADDITIVE_SPEC = {
   opencode: { container: "provider", pointer: "model" },
   openclaw: { container: "models.providers", pointer: "agents.defaults.model.primary" },
   mcode: { container: "custom_provider", pointer: null },
+  hermes: { container: "custom_providers", pointer: "model.default", pointerProvider: "model.provider" },
+  pi: { container: "providers", pointer: null },
+  grokbuild: { container: "model", pointer: "models.default", pointerKind: "slotKey" },
 };
 const isAdditiveApp = (app) => ADDITIVE_APPS.includes(app);
 
@@ -39,7 +46,19 @@ function additiveWrapperToDoc(app, wrapper) {
     : {};
   let doc = setPath({}, `${spec.container}.${slotKey}`, provider);
   if (spec.pointer && typeof config.modelId === "string" && config.modelId.trim()) {
-    doc = setPath(doc, spec.pointer, config.modelId.trim());
+    doc = setPath(doc, spec.pointer, spec.pointerKind === "slotKey" ? slotKey : config.modelId.trim());
+  }
+  if (spec.pointerProvider) {
+    doc = setPath(doc, spec.pointerProvider, slotKey);
+  }
+  // Pi entries carry their model in the models list; the dialog edits
+  // models[0].id, so seed one slot when the fragment has none.
+  if (app === "pi") {
+    const entryPath = `${spec.container}.${slotKey}.models`;
+    const models = getPath(doc, entryPath);
+    if (!Array.isArray(models) || models.length === 0 || !models.some((model) => model && typeof model === "object")) {
+      doc = setPath(doc, entryPath, [{ id: "" }]);
+    }
   }
   return doc;
 }
@@ -60,11 +79,16 @@ function parseAdditiveText(app, text) {
     if (parsed === null || parsed === undefined) return {};
     return parsed;
   }
+  if (ADDITIVE_CONFIG_FORMAT[app] === "toml") {
+    if (!raw) return {};
+    return tomlParse(raw);
+  }
   return JSON.parse(raw || "{}");
 }
 
 function stringifyAdditive(app, value) {
   if (ADDITIVE_CONFIG_FORMAT[app] === "yaml") return yamlStringify(value ?? {});
+  if (ADDITIVE_CONFIG_FORMAT[app] === "toml") return tomlStringify(value ?? {});
   return `${JSON.stringify(value ?? {}, null, 2)}\n`;
 }
 
@@ -185,10 +209,15 @@ const DEFAULT_MODEL_PATH = {
   claude: "env.ANTHROPIC_MODEL",
   codex: "config.model",
   gemini: "env.GEMINI_MODEL",
-  // Additive apps: the sentinel resolves to the app's default-model pointer
-  // (see ADDITIVE_SPEC); mcode has none — MiniMax Code owns model selection.
+  // Additive apps: the model field edits where the tool reads "this
+  // provider's model" from. opencode/openclaw use the sentinel (the
+  // default-model pointer — see ADDITIVE_SPEC); hermes/grokbuild/pi edit the
+  // entry itself (singular model / models[0].id) and the engine syncs the
+  // pointers on switch; mcode has none — MiniMax Code owns model selection.
   opencode: "ADDITIVE_MODEL_POINTER",
   openclaw: "ADDITIVE_MODEL_POINTER",
+  hermes: "custom_providers.$slot.model",
+  pi: "providers.$slot.models.0.id",
 };
 const ENDPOINT_PATH = {
   claude: "env.ANTHROPIC_BASE_URL",
@@ -197,6 +226,9 @@ const ENDPOINT_PATH = {
   opencode: "provider.$slot.options.baseURL",
   openclaw: "models.providers.$slot.baseUrl",
   mcode: "custom_provider.$slot.options.baseURL",
+  hermes: "custom_providers.$slot.base_url",
+  pi: "providers.$slot.baseUrl",
+  grokbuild: "model.$slot.base_url",
 };
 const API_KEY_PATH = {
   claude: null,
@@ -205,6 +237,9 @@ const API_KEY_PATH = {
   opencode: "provider.$slot.options.apiKey",
   openclaw: "models.providers.$slot.apiKey",
   mcode: "custom_provider.$slot.options.apiKey",
+  hermes: "custom_providers.$slot.api_key",
+  pi: "providers.$slot.apiKey",
+  grokbuild: "model.$slot.api_key",
 };
 // Endpoint path inside the stored row wrapper (settingsConfig), used when
 // seeding endpoint candidates from the provider being edited — the wrapper's
@@ -213,6 +248,9 @@ const ADDITIVE_WRAPPER_ENDPOINT_PATH = {
   opencode: "provider.options.baseURL",
   openclaw: "provider.baseUrl",
   mcode: "provider.options.baseURL",
+  hermes: "provider.base_url",
+  pi: "provider.baseUrl",
+  grokbuild: "provider.base_url",
 };
 
 function withoutOneM(value) {
@@ -953,15 +991,18 @@ export function ProviderEditDialog({
   // invalid text stays in the textarea and is flagged via rawError.
   // rawTextRef mirrors rawText exactly (every writer updates both) so save()
   // can rely on it; the repopulate decision reads the rawText state itself.
-  // Additive apps reuse this editor over their native file format (JSON, or
-  // YAML for MiniMax Code).
+  // Additive apps reuse this editor over their native file format (JSON, YAML
+  // for MiniMax Code/Hermes, TOML for Grok Build).
   const rawTextRef = useRef("");
   const configInvalid = (err) =>
     copy("pswitch.provider.invalid_json", { error: err instanceof Error ? err.message : String(err) });
-  const additiveInvalid = (err) =>
-    isAdditiveApp(app) && ADDITIVE_CONFIG_FORMAT[app] === "yaml"
-      ? copy("pswitch.provider.invalid_yaml", { error: err instanceof Error ? err.message : String(err) })
-      : configInvalid(err);
+  const additiveInvalid = (err) => {
+    if (!isAdditiveApp(app)) return configInvalid(err);
+    const message = err instanceof Error ? err.message : String(err);
+    if (ADDITIVE_CONFIG_FORMAT[app] === "yaml") return copy("pswitch.provider.invalid_yaml", { error: message });
+    if (ADDITIVE_CONFIG_FORMAT[app] === "toml") return copy("pswitch.provider.invalid_toml", { error: message });
+    return configInvalid(err);
+  };
   useEffect(() => {
     // Codex uses the two cc-switch editors below (auth.json + config.toml)
     // and gemini edits the real .env text — claude and the additive apps
@@ -1151,6 +1192,11 @@ export function ProviderEditDialog({
     }
     if (!officialSelected && showApiKeyField && !currentApiKey.trim()) {
       issues.push(copy(`pswitch.validate.key.${app}`));
+    }
+    // Pi entries are enabled by membership, but a provider without a model
+    // id is inert — cc-switch's form requires at least one model, too.
+    if (app === "pi" && !officialSelected && !String(getPath(draft, resolveAdditivePath(DEFAULT_MODEL_PATH.pi)) ?? "").trim()) {
+      issues.push(copy("pswitch.validate.model.pi"));
     }
     return issues;
   };

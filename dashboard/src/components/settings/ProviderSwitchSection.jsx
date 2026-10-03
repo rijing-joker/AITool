@@ -18,6 +18,9 @@ const APP_ITEMS = [
   { id: "opencode", labelKey: "pswitch.tab.opencode" },
   { id: "openclaw", labelKey: "pswitch.tab.openclaw" },
   { id: "mcode", labelKey: "pswitch.tab.mcode" },
+  { id: "hermes", labelKey: "pswitch.tab.hermes" },
+  { id: "pi", labelKey: "pswitch.tab.pi" },
+  { id: "grokbuild", labelKey: "pswitch.tab.grokbuild" },
 ];
 
 export function ProviderSwitchSection() {

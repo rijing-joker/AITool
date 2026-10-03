@@ -34,7 +34,16 @@ async function mutate<T>(path: string, method: string, body?: unknown): Promise<
   );
 }
 
-export type ProviderSwitchApp = "claude" | "codex" | "gemini" | "opencode" | "openclaw" | "mcode";
+export type ProviderSwitchApp =
+  | "claude"
+  | "codex"
+  | "gemini"
+  | "opencode"
+  | "openclaw"
+  | "mcode"
+  | "hermes"
+  | "pi"
+  | "grokbuild";
 
 export interface ProviderSwitchProvider {
   id: string;

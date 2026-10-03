@@ -292,12 +292,13 @@ const GEMINI_CUSTOM = {
 };
 
 // ---------------------------------------------------------------------------
-// Additive apps (opencode / openclaw / mcode) — see additive.js for the row
-// wrapper shape. Community presets are carried from cc-switch's MIT-licensed
-// opencode/openclaw/mcode provider presets (affiliate parameters stripped,
-// model lists trimmed to the rows these CLIs actively resolve today). mcode
-// has no default-model pointer — MiniMax Code owns model selection — so its
-// presets carry no modelId.
+// Additive apps (opencode / openclaw / mcode / hermes / pi / grokbuild) — see
+// additive.js for the row wrapper shape. Community presets are carried from
+// cc-switch's MIT-licensed per-app provider presets (affiliate parameters
+// stripped, model lists trimmed to the rows these CLIs actively resolve
+// today). mcode and pi have no default-model pointer — MiniMax Code and Pi
+// own model selection — so their presets carry modelId only as entry
+// metadata; grokbuild's pointer selects the provider table, not a model.
 // ---------------------------------------------------------------------------
 
 const OPENCODE_KIMI = {
@@ -562,6 +563,300 @@ const MCODE_CUSTOM = {
   ],
 };
 
+// ---------------------------------------------------------------------------
+// Hermes (cc-switch's hermesProviderPresets, affiliate links stripped, model
+// lists trimmed): providers live in ~/.hermes/config.yaml's custom_providers
+// list keyed by the entry `name`, and the switch updates the top-level
+// `model.default`/`model.provider` pointers (see additive.js). api_mode is
+// carried per preset and editable through the YAML editor.
+// ---------------------------------------------------------------------------
+
+const HERMES_FORM_FIELDS = [
+  { id: "api_key", path: "custom_providers.$slot.api_key", labelKey: "pswitch.field.api_key", placeholder: "sk-…", secret: true },
+  { id: "base_url", path: "custom_providers.$slot.base_url", labelKey: "pswitch.field.base_url", placeholder: "https://your-relay.example.com/v1" },
+  { id: "model", path: "custom_providers.$slot.model", labelKey: "pswitch.field.model", placeholder: "" },
+];
+
+const HERMES_NOUS = {
+  id: "hermes_nous",
+  name: "Nous Research",
+  // Community (not official): the inference API authenticates by API key, so
+  // the key/endpoint fields must stay visible in the add dialog.
+  group: "community",
+  icon: "sparkles",
+  color: "violet",
+  websiteUrl: "https://nousresearch.com",
+  endpointCandidates: ["https://inference-api.nousresearch.com/v1"],
+  settingsConfig: {
+    slotKey: "nous",
+    modelId: "Hermes-4-405B",
+    provider: {
+      name: "nous",
+      base_url: "https://inference-api.nousresearch.com/v1",
+      api_key: "",
+      api_mode: "chat_completions",
+      model: "Hermes-4-405B",
+    },
+  },
+  formFields: HERMES_FORM_FIELDS,
+};
+
+const HERMES_KIMI = {
+  id: "hermes_kimi",
+  name: "Kimi",
+  group: "community",
+  icon: "moon",
+  color: "indigo",
+  websiteUrl: "https://platform.kimi.com",
+  endpointCandidates: ["https://api.moonshot.cn/v1"],
+  settingsConfig: {
+    slotKey: "kimi",
+    modelId: "kimi-k2.7-code",
+    provider: {
+      name: "kimi",
+      base_url: "https://api.moonshot.cn/v1",
+      api_key: "",
+      api_mode: "chat_completions",
+      model: "kimi-k2.7-code",
+    },
+  },
+  formFields: HERMES_FORM_FIELDS,
+};
+
+const HERMES_DEEPSEEK = {
+  id: "hermes_deepseek",
+  name: "DeepSeek",
+  group: "community",
+  icon: "waves",
+  color: "blue",
+  websiteUrl: "https://platform.deepseek.com",
+  endpointCandidates: ["https://api.deepseek.com"],
+  settingsConfig: {
+    slotKey: "deepseek",
+    modelId: "deepseek-v4-pro",
+    provider: {
+      name: "deepseek",
+      base_url: "https://api.deepseek.com",
+      api_key: "",
+      api_mode: "chat_completions",
+      model: "deepseek-v4-pro",
+    },
+  },
+  formFields: HERMES_FORM_FIELDS,
+};
+
+const HERMES_MODELSCOPE = {
+  id: "hermes_modelscope",
+  name: "ModelScope",
+  group: "community",
+  icon: "boxes",
+  color: "violet",
+  websiteUrl: "https://modelscope.cn",
+  endpointCandidates: ["https://api-inference.modelscope.cn/v1"],
+  settingsConfig: {
+    slotKey: "modelscope",
+    modelId: "ZhipuAI/GLM-5.2",
+    provider: {
+      name: "modelscope",
+      base_url: "https://api-inference.modelscope.cn/v1",
+      api_key: "",
+      api_mode: "chat_completions",
+      model: "ZhipuAI/GLM-5.2",
+    },
+  },
+  formFields: HERMES_FORM_FIELDS,
+};
+
+const HERMES_CUSTOM = {
+  id: "hermes_custom",
+  name: "Custom Relay",
+  nameKey: "pswitch.preset.hermes_custom",
+  group: "custom",
+  icon: "shuffle",
+  color: "blue",
+  settingsConfig: {
+    slotKey: "custom",
+    modelId: "",
+    provider: {
+      name: "custom",
+      base_url: "",
+      api_key: "",
+      api_mode: "chat_completions",
+      model: "",
+    },
+  },
+  formFields: HERMES_FORM_FIELDS,
+};
+
+// ---------------------------------------------------------------------------
+// Pi (cc-switch's piProviderPresets, trimmed): providers are entries of
+// ~/.pi/agent/models.json's `providers` dict; enabling = the entry exists.
+// Pi owns defaultProvider/defaultModel itself, so there is no pointer to
+// write and the model rides in the entry's models[0].id.
+// ---------------------------------------------------------------------------
+
+const PI_FORM_FIELDS = [
+  { id: "api_key", path: "providers.$slot.apiKey", labelKey: "pswitch.field.api_key", placeholder: "sk-…", secret: true },
+  { id: "base_url", path: "providers.$slot.baseUrl", labelKey: "pswitch.field.base_url", placeholder: "https://your-relay.example.com/v1" },
+  { id: "model", path: "providers.$slot.models.0.id", labelKey: "pswitch.field.model", placeholder: "" },
+];
+
+const PI_KIMI = {
+  id: "pi_kimi",
+  name: "Kimi",
+  group: "community",
+  icon: "moon",
+  color: "indigo",
+  websiteUrl: "https://platform.kimi.com",
+  endpointCandidates: ["https://api.moonshot.cn/v1"],
+  settingsConfig: {
+    slotKey: "kimi",
+    modelId: "kimi-k2.7-code",
+    provider: {
+      name: "Kimi",
+      baseUrl: "https://api.moonshot.cn/v1",
+      api: "openai-completions",
+      apiKey: "",
+      models: [
+        { id: "kimi-k2.7-code", name: "Kimi K2.7 Code" },
+        { id: "kimi-k3", name: "Kimi K3", reasoning: true },
+      ],
+    },
+  },
+  formFields: PI_FORM_FIELDS,
+};
+
+const PI_DEEPSEEK = {
+  id: "pi_deepseek",
+  name: "DeepSeek",
+  group: "community",
+  icon: "waves",
+  color: "blue",
+  websiteUrl: "https://platform.deepseek.com",
+  endpointCandidates: ["https://api.deepseek.com/v1"],
+  settingsConfig: {
+    slotKey: "deepseek",
+    modelId: "deepseek-v4-pro",
+    provider: {
+      name: "DeepSeek",
+      baseUrl: "https://api.deepseek.com/v1",
+      api: "openai-completions",
+      apiKey: "",
+      models: [
+        { id: "deepseek-v4-pro", name: "DeepSeek V4 Pro", reasoning: true },
+        { id: "deepseek-flash", name: "DeepSeek Flash", reasoning: true },
+      ],
+    },
+  },
+  formFields: PI_FORM_FIELDS,
+};
+
+const PI_MODELSCOPE = {
+  id: "pi_modelscope",
+  name: "ModelScope",
+  group: "community",
+  icon: "boxes",
+  color: "violet",
+  websiteUrl: "https://modelscope.cn",
+  endpointCandidates: ["https://api-inference.modelscope.cn/v1"],
+  settingsConfig: {
+    slotKey: "modelscope",
+    modelId: "ZhipuAI/GLM-5.2",
+    provider: {
+      name: "ModelScope",
+      baseUrl: "https://api-inference.modelscope.cn/v1",
+      api: "openai-completions",
+      apiKey: "",
+      models: [{ id: "ZhipuAI/GLM-5.2", name: "GLM 5.2" }],
+    },
+  },
+  formFields: PI_FORM_FIELDS,
+};
+
+const PI_CUSTOM = {
+  id: "pi_custom",
+  name: "Custom Relay",
+  nameKey: "pswitch.preset.pi_custom",
+  group: "custom",
+  icon: "shuffle",
+  color: "blue",
+  settingsConfig: {
+    slotKey: "custom",
+    modelId: "",
+    provider: {
+      name: "custom",
+      baseUrl: "",
+      api: "openai-completions",
+      apiKey: "",
+      models: [{ id: "" }],
+    },
+  },
+  formFields: PI_FORM_FIELDS,
+};
+
+// ---------------------------------------------------------------------------
+// Grok Build (cc-switch's grokBuildProviderPresets, trimmed): providers are
+// [model."<key>"] tables in ~/.grok/config.toml and [models] default points
+// at the table name. Only aggregators/relays carry grok models; api_backend
+// stays "responses" (cc-switch's form pins it the same way).
+// ---------------------------------------------------------------------------
+
+const GROKBUILD_FORM_FIELDS = [
+  { id: "api_key", path: "model.$slot.api_key", labelKey: "pswitch.field.api_key", placeholder: "xai-…", secret: true },
+  { id: "base_url", path: "model.$slot.base_url", labelKey: "pswitch.field.base_url", placeholder: "https://your-relay.example.com/v1" },
+  { id: "model", path: "model.$slot.model", labelKey: "pswitch.field.model", placeholder: "" },
+];
+
+function grokbuildWrapper(slotKey, displayName, baseUrl, model) {
+  return {
+    slotKey,
+    modelId: model,
+    provider: {
+      name: displayName,
+      model,
+      base_url: baseUrl,
+      api_key: "",
+      api_backend: "responses",
+      context_window: 500000,
+    },
+  };
+}
+
+const GROKBUILD_XAI = {
+  id: "grokbuild_xai",
+  name: "xAI (Grok)",
+  group: "community",
+  icon: "terminal",
+  color: "gray",
+  websiteUrl: "https://x.ai/api",
+  endpointCandidates: ["https://api.x.ai/v1"],
+  settingsConfig: grokbuildWrapper("xai", "xAI (Grok)", "https://api.x.ai/v1", "grok-4.5"),
+  formFields: GROKBUILD_FORM_FIELDS,
+};
+
+const GROKBUILD_OPENROUTER = {
+  id: "grokbuild_openrouter",
+  name: "OpenRouter",
+  group: "community",
+  icon: "globe",
+  color: "indigo",
+  websiteUrl: "https://openrouter.ai",
+  endpointCandidates: ["https://openrouter.ai/api/v1"],
+  settingsConfig: grokbuildWrapper("openrouter", "OpenRouter", "https://openrouter.ai/api/v1", "x-ai/grok-4.5"),
+  formFields: GROKBUILD_FORM_FIELDS,
+};
+
+const GROKBUILD_CUSTOM = {
+  id: "grokbuild_custom",
+  name: "Custom Relay",
+  nameKey: "pswitch.preset.grokbuild_custom",
+  group: "custom",
+  icon: "shuffle",
+  color: "blue",
+  settingsConfig: grokbuildWrapper("custom", "custom", "", ""),
+  formFields: GROKBUILD_FORM_FIELDS,
+};
+
 const PRESETS = {
   claude: [CLAUDE_OFFICIAL, CLAUDE_KIMI, CLAUDE_DEEPSEEK, CLAUDE_MODELSCOPE, CLAUDE_CUSTOM],
   codex: [CODEX_OFFICIAL, CODEX_CUSTOM],
@@ -569,6 +864,9 @@ const PRESETS = {
   opencode: [OPENCODE_KIMI, OPENCODE_DEEPSEEK, OPENCODE_MODELSCOPE, OPENCODE_CUSTOM],
   openclaw: [OPENCLAW_KIMI, OPENCLAW_DEEPSEEK, OPENCLAW_CUSTOM],
   mcode: [MCODE_MINIMAX, MCODE_CUSTOM],
+  hermes: [HERMES_NOUS, HERMES_KIMI, HERMES_DEEPSEEK, HERMES_MODELSCOPE, HERMES_CUSTOM],
+  pi: [PI_KIMI, PI_DEEPSEEK, PI_MODELSCOPE, PI_CUSTOM],
+  grokbuild: [GROKBUILD_XAI, GROKBUILD_OPENROUTER, GROKBUILD_CUSTOM],
 };
 
 function listPresets(app) {

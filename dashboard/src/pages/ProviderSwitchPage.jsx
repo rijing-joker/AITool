@@ -54,6 +54,9 @@ const APPS = [
   { id: "opencode", labelKey: "pswitch.tab.opencode" },
   { id: "openclaw", labelKey: "pswitch.tab.openclaw" },
   { id: "mcode", labelKey: "pswitch.tab.mcode" },
+  { id: "hermes", labelKey: "pswitch.tab.hermes" },
+  { id: "pi", labelKey: "pswitch.tab.pi" },
+  { id: "grokbuild", labelKey: "pswitch.tab.grokbuild" },
 ];
 
 function SectionTitle({ children, action = null }) {
@@ -523,11 +526,11 @@ export function ProviderSwitchPage() {
 }
 
 function officialIconFor(app) {
-  return { claude: "sparkles", codex: "terminal", gemini: "gem", opencode: "boxes", openclaw: "globe", mcode: "sparkles" }[app] || "sparkles";
+  return { claude: "sparkles", codex: "terminal", gemini: "gem", opencode: "boxes", openclaw: "globe", mcode: "sparkles", hermes: "sparkles", pi: "boxes", grokbuild: "terminal" }[app] || "sparkles";
 }
 
 function officialColorFor(app) {
-  return { claude: "orange", codex: "green", gemini: "sky", opencode: "violet", openclaw: "teal", mcode: "amber" }[app] || "gray";
+  return { claude: "orange", codex: "green", gemini: "sky", opencode: "violet", openclaw: "teal", mcode: "amber", hermes: "violet", pi: "sky", grokbuild: "gray" }[app] || "gray";
 }
 
 function appLabel(app) {

@@ -25,7 +25,7 @@ const paths = require("./paths");
 
 const additive = require("./additive");
 
-const SUPPORTED_APPS = ["claude", "codex", "gemini", "opencode", "openclaw", "mcode"];
+const SUPPORTED_APPS = ["claude", "codex", "gemini", "opencode", "openclaw", "mcode", "hermes", "pi", "grokbuild"];
 const PROVIDER_CATEGORIES = ["official", "custom"];
 
 function emptyApp() {

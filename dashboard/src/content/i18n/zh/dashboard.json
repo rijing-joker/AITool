@@ -1433,5 +1433,18 @@
   "leaderboard.estimated_cost_hint": "依据 API 定价估算，并非实际账单",
   "leaderboard.profile_modal.best_day.date": "于 {{date}}",
   "leaderboard.summary.you_are_here": "你的位置",
-  "shared.list_separator": "，"
+  "shared.list_separator": "，",
+  "pswitch.tab.hermes": "Hermes",
+  "pswitch.tab.pi": "Pi",
+  "pswitch.tab.grokbuild": "Grok Build",
+  "pswitch.preset.hermes_custom": "自定义中转",
+  "pswitch.preset.pi_custom": "自定义中转",
+  "pswitch.preset.grokbuild_custom": "自定义中转",
+  "pswitch.validate.endpoint.hermes": "Hermes API 端点为空。",
+  "pswitch.validate.endpoint.pi": "Pi API 端点为空。",
+  "pswitch.validate.endpoint.grokbuild": "Grok Build API 端点为空。",
+  "pswitch.validate.key.hermes": "Hermes API Key 为空。",
+  "pswitch.validate.key.pi": "Pi API Key 为空。",
+  "pswitch.validate.key.grokbuild": "Grok Build API Key 为空。",
+  "pswitch.validate.model.pi": "Pi 供应商至少需要填写一个模型 ID。"
 }

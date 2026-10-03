@@ -2408,6 +2408,19 @@ pswitch.validate.endpoint.mcode,pswitch,ProviderSwitchPage,ProviderEditDialog,mc
 pswitch.validate.key.opencode,pswitch,ProviderSwitchPage,ProviderEditDialog,opencode,OpenCode API key is empty.,,active
 pswitch.validate.key.openclaw,pswitch,ProviderSwitchPage,ProviderEditDialog,openclaw,OpenClaw API key is empty.,,active
 pswitch.validate.key.mcode,pswitch,ProviderSwitchPage,ProviderEditDialog,mcode,MiniMax Code API key is empty.,,active
+pswitch.tab.hermes,pswitch,ProviderSwitchPage,ProviderSwitchPage,tab_hermes,Hermes,,active
+pswitch.tab.pi,pswitch,ProviderSwitchPage,ProviderSwitchPage,tab_pi,Pi,,active
+pswitch.tab.grokbuild,pswitch,ProviderSwitchPage,ProviderSwitchPage,tab_grokbuild,Grok Build,,active
+pswitch.preset.hermes_custom,pswitch,ProviderSwitchPage,ProviderEditDialog,preset_hermes_custom,Custom Relay,,active
+pswitch.preset.pi_custom,pswitch,ProviderSwitchPage,ProviderEditDialog,preset_pi_custom,Custom Relay,,active
+pswitch.preset.grokbuild_custom,pswitch,ProviderSwitchPage,ProviderEditDialog,preset_grokbuild_custom,Custom Relay,,active
+pswitch.validate.endpoint.hermes,pswitch,ProviderSwitchPage,ProviderEditDialog,hermes,Hermes API endpoint is empty.,,active
+pswitch.validate.endpoint.pi,pswitch,ProviderSwitchPage,ProviderEditDialog,pi,Pi API endpoint is empty.,,active
+pswitch.validate.endpoint.grokbuild,pswitch,ProviderSwitchPage,ProviderEditDialog,grokbuild,Grok Build API endpoint is empty.,,active
+pswitch.validate.key.hermes,pswitch,ProviderSwitchPage,ProviderEditDialog,hermes,Hermes API key is empty.,,active
+pswitch.validate.key.pi,pswitch,ProviderSwitchPage,ProviderEditDialog,pi,Pi API key is empty.,,active
+pswitch.validate.key.grokbuild,pswitch,ProviderSwitchPage,ProviderEditDialog,grokbuild,Grok Build API key is empty.,,active
+pswitch.validate.model.pi,pswitch,ProviderSwitchPage,ProviderEditDialog,model_pi,Pi provider needs at least one model ID.,,active
 settings.section.provider_switch,ui,SettingsPage,ProviderSwitchSection,sec_provider_switch,Provider switch,,active
 settings.section.provider_switch.description,ui,SettingsPage,ProviderSwitchSection,sec_provider_switch_description,"Choose which agent tabs appear on the provider-switch page and manage its provider presets.",,active
 settings.pswitch.visibility.title,ui,SettingsPage,ProviderSwitchSection,visibility_title,Visible agent tabs,,active

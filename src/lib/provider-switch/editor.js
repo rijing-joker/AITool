@@ -514,7 +514,7 @@ async function buildEditorView(app, { settingsConfig, id, category } = {}) {
       isCurrent,
       inactive: [],
       configText: additive.serializeLive(app, next),
-      slotKey: draftSlotKey || additive.normalizeSlotKey(row && row.name),
+      slotKey: draftSlotKey || additive.normalizeSlotKey(row && row.name, app),
     };
   }
 

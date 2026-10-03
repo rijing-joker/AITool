@@ -111,6 +111,36 @@ function targetFiles(app) {
           private: true,
         },
       ];
+    case "hermes":
+      return [
+        {
+          id: "config",
+          labelKey: "pswitch.live.file.hermes_config",
+          path: path.join(home(), ".hermes", "config.yaml"),
+          format: "yaml",
+          private: true,
+        },
+      ];
+    case "pi":
+      return [
+        {
+          id: "config",
+          labelKey: "pswitch.live.file.pi_models",
+          path: path.join(home(), ".pi", "agent", "models.json"),
+          format: "json",
+          private: true,
+        },
+      ];
+    case "grokbuild":
+      return [
+        {
+          id: "config",
+          labelKey: "pswitch.live.file.grokbuild_config",
+          path: path.join(home(), ".grok", "config.toml"),
+          format: "toml",
+          private: true,
+        },
+      ];
     default:
       return [];
   }

@@ -31,6 +31,9 @@ const LABELS = {
   "pswitch.tab.opencode": "OpenCode",
   "pswitch.tab.openclaw": "OpenClaw",
   "pswitch.tab.mcode": "MiniMax Code",
+  "pswitch.tab.hermes": "Hermes",
+  "pswitch.tab.pi": "Pi",
+  "pswitch.tab.grokbuild": "Grok Build",
 };
 
 const ALL_VISIBLE = {
@@ -40,6 +43,9 @@ const ALL_VISIBLE = {
   opencode: true,
   openclaw: true,
   mcode: true,
+  hermes: true,
+  pi: true,
+  grokbuild: true,
 };
 
 function renderSection() {
@@ -76,7 +82,9 @@ describe("ProviderSwitchSection", () => {
   });
 
   it("keeps the last visible tab disabled", async () => {
-    statusMock.mockResolvedValue({ visibleApps: { ...ALL_VISIBLE, claude: false, codex: false, gemini: false, openclaw: false, mcode: false } });
+    statusMock.mockResolvedValue({
+      visibleApps: { ...ALL_VISIBLE, claude: false, codex: false, gemini: false, openclaw: false, mcode: false, hermes: false, pi: false, grokbuild: false },
+    });
     renderSection();
     const lastTab = await screen.findByRole("button", { name: "OpenCode" });
     expect(lastTab).toBeDisabled();

@@ -283,6 +283,9 @@ test("visible apps: normalized, persisted, last-visible guard", async () => {
     opencode: true,
     openclaw: true,
     mcode: true,
+    hermes: true,
+    pi: true,
+    grokbuild: true,
   });
 
   const next = await store.updateVisibleApps({ claude: false, opencode: false, bogus: false });
@@ -293,12 +296,274 @@ test("visible apps: normalized, persisted, last-visible guard", async () => {
     opencode: false,
     openclaw: true,
     mcode: true,
+    hermes: true,
+    pi: true,
+    grokbuild: true,
   });
   // Persisted across a fresh read.
   assert.equal((await store.readVisibleApps()).claude, false);
 
-  await assert.rejects(
-    () => store.updateVisibleApps({ claude: false, codex: false, gemini: false, opencode: false, openclaw: false, mcode: false }),
-    /At least one/,
+  const allNine = Object.fromEntries(store.SUPPORTED_APPS.map((app) => [app, false]));
+  await assert.rejects(() => store.updateVisibleApps(allNine), /At least one/);
+});
+
+// ---------------------------------------------------------------------------
+// Hermes: list container keyed by `name`, model.default/model.provider
+// pointers, read-only providers dict
+// ---------------------------------------------------------------------------
+
+const HERMES_KIMI_ENTRY = {
+  name: "kimi",
+  base_url: "https://api.moonshot.cn/v1",
+  api_key: "a",
+  api_mode: "chat_completions",
+  model: "kimi-k2.7-code",
+  models: { "kimi-k2.7-code": {} },
+};
+
+test("additive hermes projection: list container, pointer sync, residue, dict-only guard", () => {
+  const prev = { settingsConfig: { slotKey: "kimi", modelId: "kimi-k2.7-code", provider: JSON.parse(JSON.stringify(HERMES_KIMI_ENTRY)) } };
+  const target = {
+    settingsConfig: {
+      slotKey: "deepseek",
+      modelId: "deepseek-v4-pro",
+      provider: { name: "deepseek", base_url: "https://api.deepseek.com", api_key: "b", api_mode: "chat_completions", model: "deepseek-v4-pro", models: { "deepseek-v4-pro": {} } },
+    },
+  };
+  const live = {
+    _config_version: 19,
+    providers: { builtin: { name: "builtin" } },
+    custom_providers: [JSON.parse(JSON.stringify(HERMES_KIMI_ENTRY)), { name: "mine", base_url: "https://x" }],
+    model: { default: "kimi-k2.7-code", provider: "kimi" },
+  };
+
+  const next = additive.projectAdditive("hermes", { prev, target, live });
+  // The previous provider's entry is residue and disappears; the user's own
+  // entry survives and the target lands after it.
+  assert.deepEqual(next.custom_providers.map((entry) => entry.name), ["mine", "deepseek"]);
+  assert.equal(next.model.default, "deepseek-v4-pro");
+  assert.equal(next.model.provider, "deepseek");
+  // Hermes' self-managed providers dict is untouched; _config_version passes through.
+  assert.deepEqual(next.providers, { builtin: { name: "builtin" } });
+  assert.equal(next._config_version, 19);
+
+  // A switch whose slot would shadow a dict-only entry is refused...
+  const dictTarget = { settingsConfig: { slotKey: "builtin", provider: { name: "builtin", base_url: "https://b" } } };
+  assert.throws(() => additive.projectAdditive("hermes", { prev: target, target: dictTarget, live: next }), /managed by Hermes/);
+  // ...unless the same name also exists in custom_providers (list wins there).
+  const listed = JSON.parse(JSON.stringify(next));
+  listed.custom_providers.push({ name: "builtin", base_url: "https://b" });
+  const ok = additive.projectAdditive("hermes", { prev: target, target: dictTarget, live: listed });
+  assert.ok(ok.custom_providers.find((entry) => entry.name === "builtin"));
+
+  // YAML round-trip keeps the sequence shape.
+  const reparsed = additive.parseLive("hermes", additive.serializeLive("hermes", next));
+  assert.deepEqual(reparsed.custom_providers, next.custom_providers);
+});
+
+test("additive hermes wrapper sanitize: camelCase aliases, UI markers, models sync", () => {
+  const wrapper = additive.sanitizeWrapper(
+    "hermes",
+    {
+      slotKey: "kimi",
+      provider: { baseUrl: "https://m", apiKey: "k", apiMode: "chat_completions", model: "kimi-k2.7-code", _cc_source: "custom_providers", provider_key: "kimi", api: "legacy" },
+    },
+    "Kimi",
   );
+  const entry = wrapper.provider;
+  assert.equal(entry.base_url, "https://m");
+  assert.equal(entry.api_key, "k");
+  assert.equal(entry.api_mode, "chat_completions");
+  assert.equal(entry.baseUrl, undefined);
+  assert.equal(entry.api, undefined);
+  assert.equal(entry._cc_source, undefined);
+  assert.equal(entry.provider_key, undefined);
+  // The singular model id is guaranteed to be a key of the models catalog.
+  assert.deepEqual(entry.models, { "kimi-k2.7-code": {} });
+
+  // No singular model: cc-switch derives one from the first catalog key.
+  const derived = additive.sanitizeWrapper("hermes", { slotKey: "x", provider: { models: { "m-1": {}, "m-2": {} } } }, "X");
+  assert.equal(derived.provider.model, "m-1");
+});
+
+test("additive hermes editor view and planSave: named list entries split, dict edits refused", async () => {
+  fs.mkdirSync(path.dirname(paths.targetFile("hermes", "config").path), { recursive: true });
+  fs.writeFileSync(
+    paths.targetFile("hermes", "config").path,
+    ["_config_version: 19", "custom_providers:", "  - name: mine", "    base_url: https://x", "model:", "  default: old"].join("\n") + "\n",
+  );
+
+  const row = await store.createProvider("hermes", {
+    name: "Kimi",
+    settingsConfig: { slotKey: "kimi", modelId: "kimi-k2.7-code", provider: JSON.parse(JSON.stringify(HERMES_KIMI_ENTRY)) },
+  });
+
+  const view = await editor.buildEditorView("hermes", { settingsConfig: row.settingsConfig, id: row.id });
+  assert.equal(view.slotKey, "kimi");
+  const base = additive.parseLive("hermes", view.configText);
+  assert.equal(base.model.default, "kimi-k2.7-code");
+  assert.equal(base.model.provider, "kimi");
+  assert.ok(base.custom_providers.find((entry) => entry.name === "mine"));
+
+  // The user edits their entry's model + key, adds a foreign entry, and moves
+  // the pointer — pointer and slot are row-owned, only the foreign entry is a
+  // global change.
+  const edited = JSON.parse(JSON.stringify(base));
+  const kimi = edited.custom_providers.find((entry) => entry.name === "kimi");
+  kimi.model = "kimi-k3";
+  kimi.api_key = "a2";
+  edited.custom_providers.push({ name: "another", base_url: "https://y" });
+  edited.model.default = "kimi-k3";
+  const plan = editor.planSave("hermes", row.settingsConfig, edited, base, view.slotKey);
+  assert.equal(plan.rowSettings.provider.model, "kimi-k3");
+  assert.equal(plan.rowSettings.provider.api_key, "a2");
+  assert.equal(plan.rowSettings.modelId, "kimi-k3"); // derived from the entry
+  assert.deepEqual(plan.changes.map((change) => change.path.join(".")), ["custom_providers.another"]);
+
+  // Removing the row's own entry is refused.
+  const withoutSlot = JSON.parse(JSON.stringify(base));
+  withoutSlot.custom_providers = withoutSlot.custom_providers.filter((entry) => entry.name !== "kimi");
+  assert.throws(() => editor.planSave("hermes", row.settingsConfig, withoutSlot, base, view.slotKey), /cannot be removed/);
+
+  // Editing Hermes' self-managed providers dict is refused.
+  const withDictEdit = JSON.parse(JSON.stringify(base));
+  withDictEdit.providers = { builtin: { name: "builtin", base_url: "https://z" } };
+  assert.throws(() => editor.planSave("hermes", row.settingsConfig, withDictEdit, base, view.slotKey), /Hermes Web UI/);
+});
+
+// ---------------------------------------------------------------------------
+// Pi: providers dict in models.json, no pointer, lowercase-dash slot keys
+// ---------------------------------------------------------------------------
+
+test("additive pi projection: membership semantics, no pointer, slug charset", () => {
+  const target = {
+    settingsConfig: {
+      slotKey: "kimi",
+      modelId: "kimi-k2.7-code",
+      provider: { name: "Kimi", baseUrl: "https://api.moonshot.cn/v1", api: "openai-completions", apiKey: "a", models: [{ id: "kimi-k2.7-code", name: "Kimi K2.7 Code" }] },
+    },
+  };
+  const live = { providers: { openai: { name: "OpenAI" } } };
+  const next = additive.projectAdditive("pi", { prev: null, target, live });
+  assert.deepEqual(next.providers.kimi, target.settingsConfig.provider);
+  assert.ok(next.providers.openai);
+  // Membership is enabling: no pointer is written anywhere.
+  assert.equal(next.defaultProvider, undefined);
+  assert.equal(next.defaultModel, undefined);
+
+  // Pi slot keys only allow lowercase letters, digits and '-'.
+  assert.throws(
+    () => additive.sanitizeWrapper("pi", { slotKey: "my_key", provider: { name: "X" } }, "Bad"),
+    /slotKey/,
+  );
+  assert.equal(additive.normalizeSlotKey("My Provider_2!", "pi"), "my-provider-2");
+
+  // Import: single entry falls back; multiple entries without a pointer fail.
+  const single = additive.extractAdditive("pi", { providers: { only: { name: "Only", models: [{ id: "m-1" }] } } });
+  assert.equal(single.slotKey, "only");
+  assert.equal(single.modelId, "m-1");
+  assert.throws(() => additive.extractAdditive("pi", { providers: { a: { name: "A" }, b: { name: "B" } } }), /multiple providers/i);
+});
+
+test("additive pi editor save: models array rides the row entry", () => {
+  const entry = { name: "Kimi", baseUrl: "https://m", api: "openai-completions", apiKey: "a", models: [{ id: "kimi-k2.7-code" }] };
+  const row = { settingsConfig: { slotKey: "kimi", modelId: "kimi-k2.7-code", provider: JSON.parse(JSON.stringify(entry)) } };
+  const base = { providers: { kimi: JSON.parse(JSON.stringify(entry)), mine: { name: "Mine" } } };
+  const edited = JSON.parse(JSON.stringify(base));
+  edited.providers.kimi.models[0].id = "kimi-k3";
+  edited.providers.kimi.apiKey = "a2";
+  const plan = editor.planSave("pi", row.settingsConfig, edited, base, "kimi");
+  assert.equal(plan.rowSettings.modelId, "kimi-k3");
+  assert.equal(plan.rowSettings.provider.models[0].id, "kimi-k3");
+  assert.deepEqual(plan.changes, []); // only the row's own entry changed
+});
+
+// ---------------------------------------------------------------------------
+// Grok Build: TOML [model.*] tables + [models] default pointer
+// ---------------------------------------------------------------------------
+
+const GROK_XAI_ENTRY = {
+  name: "xAI (Grok)",
+  model: "grok-4.5",
+  base_url: "https://api.x.ai/v1",
+  api_key: "k1",
+  api_backend: "responses",
+  context_window: 500000,
+};
+
+test("additive grokbuild projection: TOML tables, slot-key pointer, previous table retired", () => {
+  const prev = { settingsConfig: { slotKey: "xai", modelId: "grok-4.5", provider: JSON.parse(JSON.stringify(GROK_XAI_ENTRY)) } };
+  const target = {
+    settingsConfig: {
+      slotKey: "openrouter",
+      modelId: "x-ai/grok-4.5",
+      provider: { name: "OpenRouter", model: "x-ai/grok-4.5", base_url: "https://openrouter.ai/api/v1", api_key: "k2", api_backend: "responses", context_window: 500000 },
+    },
+  };
+  const liveText = [
+    "[models]",
+    'default = "xai"',
+    "",
+    '[model."xai"]',
+    'model = "grok-4.5"',
+    'base_url = "https://api.x.ai/v1"',
+    'name = "xAI (Grok)"',
+    'api_key = "k1"',
+    'api_backend = "responses"',
+    "context_window = 500000",
+    "",
+    "[mcp_servers.fs]",
+    'command = "fs"',
+  ].join("\n");
+  const live = additive.parseLive("grokbuild", liveText);
+
+  const next = additive.projectAdditive("grokbuild", { prev, target, live });
+  // The pointer names the table; the previous (unchanged) table is retired;
+  // unrelated sections (mcp_servers) survive untouched.
+  assert.equal(next.models.default, "openrouter");
+  assert.equal(next.model.xai, undefined);
+  assert.equal(next.model.openrouter.api_key, "k2");
+  assert.deepEqual(next.mcp_servers, { fs: { command: "fs" } });
+
+  // TOML round-trip.
+  const reparsed = additive.parseLive("grokbuild", additive.serializeLive("grokbuild", next));
+  assert.equal(reparsed.models.default, "openrouter");
+  assert.equal(reparsed.model.openrouter.model, "x-ai/grok-4.5");
+
+  // Import: the pointer selects the table and the model id comes from it.
+  const wrapper = additive.extractAdditive("grokbuild", JSON.parse(JSON.stringify(next)));
+  assert.equal(wrapper.slotKey, "openrouter");
+  assert.equal(wrapper.modelId, "x-ai/grok-4.5");
+});
+
+test("additive grokbuild editor save: pointer + table row-owned, other keys global", () => {
+  const row = { settingsConfig: { slotKey: "xai", modelId: "grok-4.5", provider: JSON.parse(JSON.stringify(GROK_XAI_ENTRY)) } };
+  const base = {
+    models: { default: "xai" },
+    model: { xai: JSON.parse(JSON.stringify(GROK_XAI_ENTRY)) },
+    ui: { theme: "dark" },
+  };
+  const edited = JSON.parse(JSON.stringify(base));
+  edited.model.xai.api_key = "k2";
+  edited.model.xai.model = "grok-4.6";
+  edited.ui.theme = "light";
+  const plan = editor.planSave("grokbuild", row.settingsConfig, edited, base, "xai");
+  assert.equal(plan.rowSettings.provider.api_key, "k2");
+  assert.equal(plan.rowSettings.modelId, "grok-4.6"); // derived from the table's model
+  assert.deepEqual(plan.changes.map((change) => change.path.join(".")), ["ui.theme"]);
+});
+
+test("additive presets for hermes/pi/grokbuild carry their native shapes", () => {
+  for (const preset of presets.listPresets("hermes")) {
+    assert.ok(preset.settingsConfig.provider.api_mode, `${preset.id} carries an api_mode`);
+    assert.ok("model" in preset.settingsConfig.provider, `${preset.id} carries a singular model`);
+  }
+  for (const preset of presets.listPresets("pi")) {
+    assert.ok(Array.isArray(preset.settingsConfig.provider.models) && preset.settingsConfig.provider.models.length > 0, `${preset.id} carries models`);
+    assert.match(preset.settingsConfig.slotKey, /^[a-z0-9-]*$/);
+  }
+  for (const preset of presets.listPresets("grokbuild")) {
+    assert.equal(preset.settingsConfig.provider.api_backend, "responses", `${preset.id} pins api_backend`);
+    assert.equal(preset.settingsConfig.provider.context_window, 500000);
+  }
 });

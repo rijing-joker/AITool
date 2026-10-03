@@ -51,6 +51,20 @@ it("failed saves retain the draft for retry", async () => {
   expect(port).toHaveValue("8320");
   expect(fields["server.port"]).toBe(8318);
 });
+it("codex client section loads and saves both client.codex fields", async () => {
+  fields["client.codex.optimize-multi-agent-v2"] = true;
+  await setup();
+  const optimize = screen.getByRole("switch", { name: "proxy.settings.codex.optimizeMultiAgent" });
+  await waitFor(() => expect(optimize).toBeChecked());
+  const applyPatch = screen.getByRole("switch", { name: "proxy.settings.codex.applyPatch" });
+  expect(applyPatch).not.toBeChecked();
+  fireEvent.click(applyPatch);
+  // save buttons order: network, routing, diagnostics, codex, yaml
+  fireEvent.click(screen.getAllByRole("button", { name: "proxy.action.save_config" })[3]);
+  await screen.findByText("proxy.settings.sectionSaved");
+  expect(fields["client.codex.enable-apply-patch"]).toBe(true);
+  expect(fields["client.codex.optimize-multi-agent-v2"]).toBe(true);
+});
 it("blocks navigation until the user explicitly discards the draft", async () => {
   const { router, port } = await setup();
   fireEvent.change(port, { target: { value: "8320" } });

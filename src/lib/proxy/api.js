@@ -633,6 +633,8 @@ async function handleProxyApiRequest(req, res, url, ctx) {
           "routing.retry.streaming-bootstrap-retries": get("routing.retry.streaming-bootstrap-retries"),
           "debug": get("debug"),
           "logging-to-file": get("logging-to-file"),
+          "client.codex.enable-apply-patch": get("client.codex.enable-apply-patch"),
+          "client.codex.optimize-multi-agent-v2": get("client.codex.optimize-multi-agent-v2"),
           "observability.usage.usage-statistics-enabled": get("observability.usage.usage-statistics-enabled"),
           "observability.usage.redis-usage-queue-retention-seconds": get("observability.usage.redis-usage-queue-retention-seconds"),
         };

@@ -1772,6 +1772,7 @@ proxy.upstream.dragHint,proxy,ProxyPage,Upstreams,drag_hint,Drag rows to adjust 
 proxy.upstream.dragHandle,proxy,ProxyPage,Upstreams,drag_handle,Drag {{remark}} to reorder; keyboard: press space then use arrow keys,,active
 proxy.upstream.loading,proxy,ProxyPage,Upstreams,loading,Reading configuration,,active
 proxy.upstream.priorityValue,proxy,ProxyPage,Upstreams,priority_value,Priority {{priority}},,active
+proxy.upstream.authIndex,proxy,ProxyPage,Upstreams,auth_index,Credential: {{id}},,active
 proxy.upstream.keys.count,proxy,ProxyPage,Upstreams,keys_count,{{count}} key(s),,active
 proxy.upstream.keys.summary,proxy,ProxyPage,Upstreams,keys_summary,"{{key}} · {{count}} key(s)",,active
 proxy.upstream.defaultUrl,proxy,ProxyPage,Upstreams,default_url,Using default endpoint,,active
@@ -2165,6 +2166,12 @@ proxy.settings.diagnostics.usageStatistics,proxy,ProxyPage,Proxy,diagnostics_usa
 proxy.settings.diagnostics.usageStatisticsHint,proxy,ProxyPage,Proxy,diagnostics_usageStatisticsHint,"Aggregate request and token usage in memory for the usage records page.",,active
 proxy.settings.diagnostics.redisRetention,proxy,ProxyPage,Proxy,diagnostics_redisRetention,"Usage queue retention (seconds)",,active
 proxy.settings.diagnostics.redisRetentionHint,proxy,ProxyPage,Proxy,diagnostics_redisRetentionHint,"In-memory retention for Management API usage entries, from 1 to 3600 seconds.",,active
+proxy.settings.codex.title,proxy,ProxyPage,Proxy,codex_title,"Codex client",,active
+proxy.settings.codex.hint,proxy,ProxyPage,Proxy,codex_hint,"Compatibility options for Codex clients (Codex Desktop, codex-tui, codex_cli_rs); applies to both OAuth and API-key credentials. Requires core 8.0.11+.",,active
+proxy.settings.codex.applyPatch,proxy,ProxyPage,Proxy,codex_applyPatch,"Advertise apply-patch catalog",,active
+proxy.settings.codex.applyPatchHint,proxy,ProxyPage,Proxy,codex_applyPatchHint,"When on, only models supported by every routing executor advertise the freeform apply-patch tool in /v1/models catalogs.",,active
+proxy.settings.codex.optimizeMultiAgent,proxy,ProxyPage,Proxy,codex_optimizeMultiAgent,"Optimize multi-agent v2 requests",,active
+proxy.settings.codex.optimizeMultiAgentHint,proxy,ProxyPage,Proxy,codex_optimizeMultiAgentHint,"Optimize Codex multi-agent v2 requests: refresh spawn_agent model details, remove message parameter encryption, and normalize agent_message content. Default off.",,active
 proxy.settings.errors.nonNegativeInteger,proxy,ProxyPage,Proxy,errors_nonNegativeInteger,"Log size and error log retention must be non-negative integers",,active
 proxy.settings.errors.redisRetention,proxy,ProxyPage,Proxy,errors_redisRetention,"Usage queue retention must be an integer between 1 and 3600",,active
 proxy.settings.saving,proxy,ProxyPage,Proxy,settings_saving,"Saving",,active

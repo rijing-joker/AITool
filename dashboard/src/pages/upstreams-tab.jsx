@@ -787,6 +787,11 @@ export function UpstreamsTab() {
                           <span className="min-w-0 truncate" title={row.baseUrl || undefined}>
                             {row.baseUrl || copy("proxy.upstream.defaultUrl")}
                           </span>
+                          {row.authIndex ? (
+                            <span className="shrink-0 max-w-48 truncate font-mono" title={row.authIndex}>
+                              {copy("proxy.upstream.authIndex", { id: row.authIndex })}
+                            </span>
+                          ) : null}
                           {row.models.length > 0 ? (
                             <span className="shrink-0">{copy("proxy.upstream.models.summary", { count: row.models.length })}</span>
                           ) : null}

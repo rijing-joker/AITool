@@ -73,6 +73,9 @@ export function ProviderGroupKeysEditor({ keys, shared, section, disabled, onCha
         const overrideCount = providerKeyOverrides(key).length;
         const effective = effectiveProviderKey(shared, key);
         const keyNumberLabel = copy("proxy.upstream.groups.keyNumber", { number: index + 1 });
+        // v8 synthesizes the live credential binding into config responses;
+        // it is transient (stripped before save) and shown read-only.
+        const authIndex = readString(key, "auth-index") || readString(key, "authIndex") || readString(key, "auth_index");
         return (
           <fieldset key={draft.id} disabled={disabled} className="mt-3 rounded-md border border-oai-gray-200 p-3 dark:border-oai-gray-800">
             <legend className="px-1 text-xs font-medium text-oai-gray-500 dark:text-oai-gray-400">{keyNumberLabel}</legend>
@@ -295,6 +298,11 @@ export function ProviderGroupKeysEditor({ keys, shared, section, disabled, onCha
               </div>
             </details>
             <p className="mt-2 font-mono text-xs text-oai-gray-400">{maskSecret(readString(key, "api-key"))}</p>
+            {authIndex ? (
+              <p className="mt-1 truncate text-xs text-oai-gray-500 dark:text-oai-gray-400" title={authIndex}>
+                {copy("proxy.upstream.authIndex", { id: authIndex })}
+              </p>
+            ) : null}
           </fieldset>
         );
       })}

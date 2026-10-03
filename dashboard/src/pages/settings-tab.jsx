@@ -93,6 +93,10 @@ function normalizedDrafts(next) {
       usageStatistics: Boolean(read("observability.usage.usage-statistics-enabled", true)),
       redisRetention: String(read("observability.usage.redis-usage-queue-retention-seconds", 3600)),
     },
+    codex: {
+      codexApplyPatch: Boolean(read("client.codex.enable-apply-patch", false)),
+      codexOptimizeMultiAgent: Boolean(read("client.codex.optimize-multi-agent-v2", false)),
+    },
   };
 }
 
@@ -129,17 +133,20 @@ export function SettingsTab({ status, onRefresh, onInstallCore }) {
   const [loggingToFile, setLoggingToFile] = useState(false);
   const [usageStatistics, setUsageStatistics] = useState(true);
   const [redisRetention, setRedisRetention] = useState("");
+  const [codexApplyPatch, setCodexApplyPatch] = useState(false);
+  const [codexOptimizeMultiAgent, setCodexOptimizeMultiAgent] = useState(false);
 
   const drafts = {
     network: { host, port, proxyUrl },
     routing: { strategy, sessionAffinity, sessionTtl, disableCooling, requestRetry, maxRetryCredentials, maxRetryInterval, streamingBootstrapRetries },
     diagnostics: { debug, loggingToFile, usageStatistics, redisRetention },
+    codex: { codexApplyPatch, codexOptimizeMultiAgent },
   };
   const dirtySections = Object.keys(drafts).filter((section) => savedDrafts &&
     JSON.stringify(drafts[section]) !== JSON.stringify(savedDrafts[section]));
   const structuredDirty = dirtySections.length > 0;
   const revertSection = (section) => {
-    const setters = { host: setHost, port: setPort, proxyUrl: setProxyUrl, strategy: setStrategy, sessionAffinity: setSessionAffinity, sessionTtl: setSessionTtl, disableCooling: setDisableCooling, requestRetry: setRequestRetry, maxRetryCredentials: setMaxRetryCredentials, maxRetryInterval: setMaxRetryInterval, streamingBootstrapRetries: setStreamingBootstrapRetries, debug: setDebug, loggingToFile: setLoggingToFile, usageStatistics: setUsageStatistics, redisRetention: setRedisRetention };
+    const setters = { host: setHost, port: setPort, proxyUrl: setProxyUrl, strategy: setStrategy, sessionAffinity: setSessionAffinity, sessionTtl: setSessionTtl, disableCooling: setDisableCooling, requestRetry: setRequestRetry, maxRetryCredentials: setMaxRetryCredentials, maxRetryInterval: setMaxRetryInterval, streamingBootstrapRetries: setStreamingBootstrapRetries, debug: setDebug, loggingToFile: setLoggingToFile, usageStatistics: setUsageStatistics, redisRetention: setRedisRetention, codexApplyPatch: setCodexApplyPatch, codexOptimizeMultiAgent: setCodexOptimizeMultiAgent };
     for (const [key, value] of Object.entries(savedDrafts[section])) setters[key](value);
   };
   const applyFields = useCallback((next) => {
@@ -159,6 +166,8 @@ export function SettingsTab({ status, onRefresh, onInstallCore }) {
     setLoggingToFile(normalized.diagnostics.loggingToFile);
     setUsageStatistics(normalized.diagnostics.usageStatistics);
     setRedisRetention(normalized.diagnostics.redisRetention);
+    setCodexApplyPatch(normalized.codex.codexApplyPatch);
+    setCodexOptimizeMultiAgent(normalized.codex.codexOptimizeMultiAgent);
     setSavedDrafts(normalized);
   }, []);
 
@@ -497,6 +506,32 @@ export function SettingsTab({ status, onRefresh, onInstallCore }) {
             onChange={setRedisRetention}
             error={redisError}
           />
+        </div>
+      </Card>
+
+      {/* Codex client (client.codex — core 8.0.11+) */}
+      <Card>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold">{copy("proxy.settings.codex.title")}</p>
+            <p className="mt-1 text-xs text-oai-gray-500 dark:text-oai-gray-400">{copy("proxy.settings.codex.hint")}</p>
+          </div>
+          <div className="flex items-center gap-2">
+            {dirtySections.includes("codex") ? <Button variant="ghost" size="sm" onClick={() => revertSection("codex")}>{copy("proxy.action.revert")}</Button> : null}
+            <Button
+              disabled={busyField !== "" || fields === null || !dirtySections.includes("codex")}
+              onClick={() => void patchFields("codex", {
+                "client.codex.enable-apply-patch": codexApplyPatch,
+                "client.codex.optimize-multi-agent-v2": codexOptimizeMultiAgent,
+              })}
+            >
+              {busyField === "codex" ? copy("proxy.settings.saving") : copy("proxy.action.save_config")}
+            </Button>
+          </div>
+        </div>
+        <div className="mt-3 space-y-3">
+          <Toggle checked={codexApplyPatch} onChange={setCodexApplyPatch} label={copy("proxy.settings.codex.applyPatch")} hint={copy("proxy.settings.codex.applyPatchHint")} />
+          <Toggle checked={codexOptimizeMultiAgent} onChange={setCodexOptimizeMultiAgent} label={copy("proxy.settings.codex.optimizeMultiAgent")} hint={copy("proxy.settings.codex.optimizeMultiAgentHint")} />
         </div>
       </Card>
 

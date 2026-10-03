@@ -38,15 +38,22 @@ import { PresetIcon, presetAvatarClass, ProviderEditDialog } from "./provider-ed
 // Provider config management — an interaction port of cc-switch's provider
 // module. Presets live in ~/.aitool/provider-switch (served by the local
 // CLI); switching projects a provider's key fields into the live tool configs
-// (~/.claude/settings.json, ~/.codex/config.toml + auth.json, ~/.gemini/.env)
-// with pre-write backups, leaving user-owned fields alone. The card list is
+// (~/.claude/settings.json, ~/.codex/config.toml + auth.json, ~/.gemini/.env,
+// plus the additive apps' native configs — opencode.json, openclaw.json,
+// MiniMax Code's config.yaml — via src/lib/provider-switch/additive.js) with
+// pre-write backups, leaving user-owned fields alone. The card list is
 // drag-sortable, providers can be imported from the current live config, and
-// editing the active provider re-applies it immediately.
+// editing the active provider re-applies it immediately. Which agent tabs
+// show follows the visible-apps setting (cc-switch's AppVisibilitySettings),
+// edited on the dashboard's Settings page.
 
 const APPS = [
   { id: "claude", labelKey: "pswitch.tab.claude" },
   { id: "codex", labelKey: "pswitch.tab.codex" },
   { id: "gemini", labelKey: "pswitch.tab.gemini" },
+  { id: "opencode", labelKey: "pswitch.tab.opencode" },
+  { id: "openclaw", labelKey: "pswitch.tab.openclaw" },
+  { id: "mcode", labelKey: "pswitch.tab.mcode" },
 ];
 
 function SectionTitle({ children, action = null }) {
@@ -182,6 +189,18 @@ export function ProviderSwitchPage() {
   const appState = useMemo(() => {
     return status?.apps.find((app) => app.app === activeApp) || null;
   }, [status, activeApp]);
+
+  // Visible tabs follow the settings-page toggle (cc-switch's
+  // AppVisibilitySettings); the backend guarantees at least one stays on.
+  const visibleApps = useMemo(() => {
+    return APPS.filter(({ id }) => !status?.visibleApps || status.visibleApps[id] !== false);
+  }, [status]);
+
+  useEffect(() => {
+    if (!visibleApps.some(({ id }) => id === activeApp) && visibleApps.length > 0) {
+      setActiveApp(visibleApps[0].id);
+    }
+  }, [visibleApps, activeApp]);
 
   // Card presentation: provider record + preset-derived avatar styling.
   const providerRows = useMemo(() => {
@@ -354,7 +373,7 @@ export function ProviderSwitchPage() {
       ) : null}
 
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-        <PageTabs options={APPS.map((item) => ({ ...item, label: copy(item.labelKey) }))} value={activeApp} onChange={setActiveApp} label={copy("pswitch.title")} panelId="provider-panel" />
+        <PageTabs options={visibleApps.map((item) => ({ ...item, label: copy(item.labelKey) }))} value={activeApp} onChange={setActiveApp} label={copy("pswitch.title")} panelId="provider-panel" />
         <div className="flex items-center gap-2">
           <Button variant="secondary" size="sm" disabled={busy} onClick={() => void importFromLive()}>
             <Import className="h-4 w-4" />
@@ -504,11 +523,11 @@ export function ProviderSwitchPage() {
 }
 
 function officialIconFor(app) {
-  return { claude: "sparkles", codex: "terminal", gemini: "gem" }[app] || "sparkles";
+  return { claude: "sparkles", codex: "terminal", gemini: "gem", opencode: "boxes", openclaw: "globe", mcode: "sparkles" }[app] || "sparkles";
 }
 
 function officialColorFor(app) {
-  return { claude: "orange", codex: "green", gemini: "sky" }[app] || "gray";
+  return { claude: "orange", codex: "green", gemini: "sky", opencode: "violet", openclaw: "teal", mcode: "amber" }[app] || "gray";
 }
 
 function appLabel(app) {

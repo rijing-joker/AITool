@@ -15,6 +15,13 @@
 // (official | community | custom). `endpointCandidates` seeds the endpoint
 // speed-test dialog; `modelsUrl` overrides the model-list URL when the
 // models endpoint lives on a different host than the API endpoint.
+//
+// Additive-app presets (opencode/openclaw/mcode) carry the wrapper shape
+// documented in additive.js. Their `formFields` paths, though, address the
+// FULL native document the dialog edits after the editor view loads:
+// `provider.$slot.…` has `$slot` substituted by the dialog with the slot key
+// the row/preset is pinned under, and the sentinel `ADDITIVE_MODEL_POINTER`
+// resolves to the app's default-model pointer path.
 
 const CLAUDE_OFFICIAL = {
   id: "claude_official",
@@ -283,10 +290,284 @@ const GEMINI_CUSTOM = {
   ],
 };
 
+// ---------------------------------------------------------------------------
+// Additive apps (opencode / openclaw / mcode) — see additive.js for the row
+// wrapper shape. Community presets are carried from cc-switch's MIT-licensed
+// opencode/openclaw/mcode provider presets (affiliate parameters stripped,
+// model lists trimmed to the rows these CLIs actively resolve today). mcode
+// has no default-model pointer — MiniMax Code owns model selection — so its
+// presets carry no modelId.
+// ---------------------------------------------------------------------------
+
+const OPENCODE_KIMI = {
+  id: "opencode_kimi",
+  name: "Kimi",
+  group: "community",
+  icon: "moon",
+  color: "indigo",
+  websiteUrl: "https://platform.kimi.com",
+  endpointCandidates: ["https://api.moonshot.cn/v1"],
+  settingsConfig: {
+    slotKey: "kimi",
+    modelId: "kimi/kimi-k2.7-code",
+    provider: {
+      npm: "@ai-sdk/openai-compatible",
+      name: "Kimi",
+      options: {
+        baseURL: "https://api.moonshot.cn/v1",
+        apiKey: "",
+      },
+      models: {
+        "kimi-k2.7-code": { name: "Kimi K2.7 Code" },
+        "kimi-k3": { name: "Kimi K3" },
+      },
+    },
+  },
+  formFields: [
+    { id: "api_key", path: "provider.$slot.options.apiKey", labelKey: "pswitch.field.api_key", placeholder: "sk-…", secret: true },
+    { id: "base_url", path: "provider.$slot.options.baseURL", labelKey: "pswitch.field.base_url", placeholder: "https://api.moonshot.cn/v1" },
+  ],
+};
+
+const OPENCODE_DEEPSEEK = {
+  id: "opencode_deepseek",
+  name: "DeepSeek",
+  group: "community",
+  icon: "waves",
+  color: "blue",
+  websiteUrl: "https://platform.deepseek.com",
+  endpointCandidates: ["https://api.deepseek.com/v1"],
+  settingsConfig: {
+    slotKey: "deepseek",
+    modelId: "deepseek/deepseek-chat",
+    provider: {
+      npm: "@ai-sdk/openai-compatible",
+      name: "DeepSeek",
+      options: {
+        baseURL: "https://api.deepseek.com/v1",
+        apiKey: "",
+      },
+      models: {
+        "deepseek-chat": { name: "DeepSeek Chat" },
+        "deepseek-reasoner": { name: "DeepSeek Reasoner" },
+      },
+    },
+  },
+  formFields: [
+    { id: "api_key", path: "provider.$slot.options.apiKey", labelKey: "pswitch.field.api_key", placeholder: "sk-…", secret: true },
+    { id: "base_url", path: "provider.$slot.options.baseURL", labelKey: "pswitch.field.base_url", placeholder: "https://api.deepseek.com/v1" },
+  ],
+};
+
+const OPENCODE_MODELSCOPE = {
+  id: "opencode_modelscope",
+  name: "ModelScope",
+  group: "community",
+  icon: "boxes",
+  color: "violet",
+  websiteUrl: "https://modelscope.cn",
+  endpointCandidates: ["https://api-inference.modelscope.cn/v1"],
+  settingsConfig: {
+    slotKey: "modelscope",
+    modelId: "modelscope/ZhipuAI/GLM-5.2",
+    provider: {
+      npm: "@ai-sdk/openai-compatible",
+      name: "ModelScope",
+      options: {
+        baseURL: "https://api-inference.modelscope.cn/v1",
+        apiKey: "",
+      },
+      models: {
+        "ZhipuAI/GLM-5.2": { name: "GLM 5.2" },
+        "ZhipuAI/GLM-5.1": { name: "GLM 5.1" },
+      },
+    },
+  },
+  formFields: [
+    { id: "api_key", path: "provider.$slot.options.apiKey", labelKey: "pswitch.field.api_key", placeholder: "ms-…", secret: true },
+    { id: "base_url", path: "provider.$slot.options.baseURL", labelKey: "pswitch.field.base_url", placeholder: "https://api-inference.modelscope.cn/v1" },
+  ],
+};
+
+const OPENCODE_CUSTOM = {
+  id: "opencode_custom",
+  name: "Custom Relay",
+  nameKey: "pswitch.preset.opencode_custom",
+  group: "custom",
+  icon: "shuffle",
+  color: "blue",
+  settingsConfig: {
+    slotKey: "custom",
+    modelId: "",
+    provider: {
+      npm: "@ai-sdk/openai-compatible",
+      name: "custom",
+      options: { baseURL: "", apiKey: "" },
+      models: {},
+    },
+  },
+  formFields: [
+    { id: "api_key", path: "provider.$slot.options.apiKey", labelKey: "pswitch.field.api_key", placeholder: "sk-…", secret: true },
+    { id: "base_url", path: "provider.$slot.options.baseURL", labelKey: "pswitch.field.base_url", placeholder: "https://your-relay.example.com/v1" },
+    {
+      id: "model",
+      path: "ADDITIVE_MODEL_POINTER",
+      labelKey: "pswitch.field.default_model",
+      placeholder: "",
+      hintKey: "pswitch.field.additive_model_hint",
+    },
+  ],
+};
+
+const OPENCLAW_KIMI = {
+  id: "openclaw_kimi",
+  name: "Kimi",
+  group: "community",
+  icon: "moon",
+  color: "indigo",
+  websiteUrl: "https://platform.kimi.com",
+  endpointCandidates: ["https://api.moonshot.cn/v1"],
+  settingsConfig: {
+    slotKey: "kimi",
+    modelId: "kimi/kimi-k2.7-code",
+    provider: {
+      baseUrl: "https://api.moonshot.cn/v1",
+      apiKey: "",
+      api: "openai-completions",
+      models: [
+        { id: "kimi-k2.7-code", name: "Kimi K2.7 Code", contextWindow: 262144 },
+        { id: "kimi-k3", name: "Kimi K3", contextWindow: 1048576 },
+      ],
+    },
+  },
+  formFields: [
+    { id: "api_key", path: "provider.$slot.apiKey", labelKey: "pswitch.field.api_key", placeholder: "sk-…", secret: true },
+    { id: "base_url", path: "provider.$slot.baseUrl", labelKey: "pswitch.field.base_url", placeholder: "https://api.moonshot.cn/v1" },
+  ],
+};
+
+const OPENCLAW_DEEPSEEK = {
+  id: "openclaw_deepseek",
+  name: "DeepSeek",
+  group: "community",
+  icon: "waves",
+  color: "blue",
+  websiteUrl: "https://platform.deepseek.com",
+  endpointCandidates: ["https://api.deepseek.com/v1"],
+  settingsConfig: {
+    slotKey: "deepseek",
+    modelId: "deepseek/deepseek-chat",
+    provider: {
+      baseUrl: "https://api.deepseek.com/v1",
+      apiKey: "",
+      api: "openai-completions",
+      models: [
+        { id: "deepseek-chat", name: "DeepSeek Chat" },
+        { id: "deepseek-reasoner", name: "DeepSeek Reasoner", reasoning: true },
+      ],
+    },
+  },
+  formFields: [
+    { id: "api_key", path: "provider.$slot.apiKey", labelKey: "pswitch.field.api_key", placeholder: "sk-…", secret: true },
+    { id: "base_url", path: "provider.$slot.baseUrl", labelKey: "pswitch.field.base_url", placeholder: "https://api.deepseek.com/v1" },
+  ],
+};
+
+const OPENCLAW_CUSTOM = {
+  id: "openclaw_custom",
+  name: "Custom Relay",
+  nameKey: "pswitch.preset.openclaw_custom",
+  group: "custom",
+  icon: "shuffle",
+  color: "blue",
+  settingsConfig: {
+    slotKey: "custom",
+    modelId: "",
+    provider: {
+      baseUrl: "",
+      apiKey: "",
+      api: "openai-completions",
+      models: [],
+    },
+  },
+  formFields: [
+    { id: "api_key", path: "provider.$slot.apiKey", labelKey: "pswitch.field.api_key", placeholder: "sk-…", secret: true },
+    { id: "base_url", path: "provider.$slot.baseUrl", labelKey: "pswitch.field.base_url", placeholder: "https://your-relay.example.com/v1" },
+    {
+      id: "model",
+      path: "ADDITIVE_MODEL_POINTER",
+      labelKey: "pswitch.field.default_model",
+      placeholder: "",
+      hintKey: "pswitch.field.additive_model_hint",
+    },
+  ],
+};
+
+const MCODE_MINIMAX = {
+  id: "mcode_minimax",
+  name: "MiniMax Official",
+  nameKey: "pswitch.preset.mcode_minimax",
+  // Community (not official): MiniMax Code has no login flow — the official
+  // service still authenticates by Console API key, and the key/endpoint
+  // fields must stay visible in the add dialog.
+  group: "community",
+  icon: "sparkles",
+  color: "amber",
+  websiteUrl: "https://www.minimax.io",
+  endpointCandidates: ["https://api.minimax.cn/anthropic"],
+  settingsConfig: {
+    slotKey: "minimax",
+    provider: {
+      name: "MiniMax",
+      kind: "custom",
+      enabled: true,
+      api: "anthropic-messages",
+      options: {
+        baseURL: "https://api.minimax.cn/anthropic",
+        apiKey: "",
+      },
+      models: {
+        "MiniMax-M3": { name: "MiniMax M3" },
+      },
+    },
+  },
+  formFields: [
+    { id: "api_key", path: "provider.$slot.options.apiKey", labelKey: "pswitch.field.api_key", placeholder: "ey-…", secret: true },
+    { id: "base_url", path: "provider.$slot.options.baseURL", labelKey: "pswitch.field.base_url", placeholder: "https://api.minimax.cn/anthropic" },
+  ],
+};
+
+const MCODE_CUSTOM = {
+  id: "mcode_custom",
+  name: "Custom Relay",
+  nameKey: "pswitch.preset.mcode_custom",
+  group: "custom",
+  icon: "shuffle",
+  color: "blue",
+  settingsConfig: {
+    slotKey: "custom",
+    provider: {
+      name: "custom",
+      kind: "custom",
+      enabled: true,
+      api: "anthropic-messages",
+      options: { baseURL: "", apiKey: "" },
+      models: {},
+    },
+  },
+  formFields: [
+    { id: "api_key", path: "provider.$slot.options.apiKey", labelKey: "pswitch.field.api_key", placeholder: "sk-…", secret: true },
+    { id: "base_url", path: "provider.$slot.options.baseURL", labelKey: "pswitch.field.base_url", placeholder: "https://your-relay.example.com" },
+  ],
+};
+
 const PRESETS = {
   claude: [CLAUDE_OFFICIAL, CLAUDE_KIMI, CLAUDE_DEEPSEEK, CLAUDE_MODELSCOPE, CLAUDE_CUSTOM],
   codex: [CODEX_OFFICIAL, CODEX_CUSTOM],
   gemini: [GEMINI_OFFICIAL, GEMINI_CUSTOM],
+  opencode: [OPENCODE_KIMI, OPENCODE_DEEPSEEK, OPENCODE_MODELSCOPE, OPENCODE_CUSTOM],
+  openclaw: [OPENCLAW_KIMI, OPENCLAW_DEEPSEEK, OPENCLAW_CUSTOM],
+  mcode: [MCODE_MINIMAX, MCODE_CUSTOM],
 };
 
 function listPresets(app) {

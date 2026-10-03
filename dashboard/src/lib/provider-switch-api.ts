@@ -34,7 +34,7 @@ async function mutate<T>(path: string, method: string, body?: unknown): Promise<
   );
 }
 
-export type ProviderSwitchApp = "claude" | "codex" | "gemini";
+export type ProviderSwitchApp = "claude" | "codex" | "gemini" | "opencode" | "openclaw" | "mcode";
 
 export interface ProviderSwitchProvider {
   id: string;
@@ -85,7 +85,7 @@ export interface ProviderSwitchFormField {
 export interface ProviderSwitchTargetFile {
   id: string;
   path: string;
-  format: "json" | "toml" | "env";
+  format: "json" | "toml" | "env" | "yaml";
   private: boolean;
   exists: boolean;
   size: number;
@@ -117,6 +117,8 @@ export interface ProviderSwitchAppState {
 export interface ProviderSwitchStatus {
   ok: true;
   storagePath: string;
+  // cc-switch's app-visibility setting: which agent tabs the dashboard shows.
+  visibleApps: Record<ProviderSwitchApp, boolean>;
   codexAuthStash: { stashedAt: string | null } | null;
   apps: ProviderSwitchAppState[];
 }
@@ -140,15 +142,18 @@ export interface ProviderSwitchProviderPayload {
   meta?: ProviderSwitchProviderMeta;
   // cc-switch's EditorSave: the full projected config the dialog opened with;
   // on save the backend splits floor keys (row) from the user's other edits
-  // (three-way write into the live files).
-  editor?: { base: unknown; onConflict?: ProviderSwitchConflictPolicy };
+  // (three-way write into the live files). slotKey: additive apps' echo of
+  // the container entry the row owns (from the editor view).
+  editor?: { base: unknown; onConflict?: ProviderSwitchConflictPolicy; slotKey?: string };
 }
 
 export type ProviderSwitchConflictPolicy = "keepMine" | "keepTheirs";
 
 // The full post-switch projection (cc-switch's ProviderEditorView): the
 // config file as it would look after switching to the provider. Exactly one
-// of settings / configToml+authJson / envText is present, per app.
+// of settings / configToml+authJson / envText / configText is present, per
+// app (configText: additive apps' whole native file; slotKey echoes which
+// container entry the row owns).
 export interface ProviderSwitchEditorView {
   ok: true;
   app: ProviderSwitchApp;
@@ -158,11 +163,19 @@ export interface ProviderSwitchEditorView {
   configToml?: string;
   authJson?: unknown;
   envText?: string;
+  configText?: string;
+  slotKey?: string;
 }
 
 export const providerSwitchApi = {
   getStatus(): Promise<ProviderSwitchStatus> {
     return get<ProviderSwitchStatus>("/api/provider-switch/status");
+  },
+
+  updateVisibleApps(
+    visibleApps: Record<ProviderSwitchApp, boolean>,
+  ): Promise<{ ok: true; visibleApps: Record<ProviderSwitchApp, boolean> }> {
+    return mutate("/api/provider-switch/settings", "POST", { visibleApps });
   },
 
   getPresets(app: ProviderSwitchApp): Promise<{ ok: true; app: string; presets: ProviderSwitchPreset[] }> {

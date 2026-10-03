@@ -79,6 +79,38 @@ function targetFiles(app) {
           private: true,
         },
       ];
+    // Additive apps (cc-switch's additive mode): one native config file per
+    // tool; the provider owns a keyed entry inside it (see additive.js).
+    case "opencode":
+      return [
+        {
+          id: "config",
+          labelKey: "pswitch.live.file.opencode_config",
+          path: path.join(home(), ".config", "opencode", "opencode.json"),
+          format: "json",
+          private: true,
+        },
+      ];
+    case "openclaw":
+      return [
+        {
+          id: "config",
+          labelKey: "pswitch.live.file.openclaw_config",
+          path: path.join(home(), ".openclaw", "openclaw.json"),
+          format: "json",
+          private: true,
+        },
+      ];
+    case "mcode":
+      return [
+        {
+          id: "config",
+          labelKey: "pswitch.live.file.mcode_config",
+          path: path.join(home(), ".minimax", "config.yaml"),
+          format: "yaml",
+          private: true,
+        },
+      ];
     default:
       return [];
   }

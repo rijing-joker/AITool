@@ -460,11 +460,11 @@ test("provider-switch api: status / create / switch / live save conflict flow", 
   const handler = handleProviderSwitchApiRequest;
   const prefix = "/api/provider-switch";
 
-  // Status on a fresh machine.
+  // Status on a fresh machine (claude/codex/gemini + additive apps).
   const status0 = await call(handler, { url: `${prefix}/status` });
   assert.equal(status0.status, 200);
   assert.equal(status0.body.ok, true);
-  assert.equal(status0.body.apps.length, 3);
+  assert.equal(status0.body.apps.length, 6);
   const claude0 = status0.body.apps.find((app) => app.app === "claude");
   assert.equal(claude0.current, null);
   assert.equal(claude0.files[0].path, path.join(tmpHome, ".claude", "settings.json"));

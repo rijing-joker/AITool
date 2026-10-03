@@ -37,6 +37,8 @@ const LABELS = {
   "settings.section.labs.description": "Experimental insights",
   "settings.section.network": "Network",
   "settings.section.network.description": "Proxy configuration",
+  "settings.section.provider_switch": "Provider switch",
+  "settings.section.provider_switch.description": "Provider presets and visible agent tabs",
   "settings.limits.providers": "Providers",
   "limits.settings.display_mode_label": "Usage Display",
   "settings.menubar.toastOnReset": "Toast on limits reset",
@@ -47,6 +49,12 @@ const LABELS = {
 
 vi.mock("../lib/copy", () => ({
   copy: (key) => LABELS[key] || key,
+}));
+
+// The provider-switch section talks to the local CLI API; its behavior is
+// covered by ProviderSwitchSection.test.jsx.
+vi.mock("../components/settings/ProviderSwitchSection.jsx", () => ({
+  ProviderSwitchSection: () => null,
 }));
 
 vi.mock("../lib/native-bridge", () => ({

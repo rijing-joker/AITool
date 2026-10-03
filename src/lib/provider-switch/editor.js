@@ -5,6 +5,7 @@ const paths = require("./paths");
 const floor = require("./floor");
 const toml = require("./toml");
 const envfile = require("./envfile");
+const additive = require("./additive");
 
 // cc-switch's provider editor (services/provider/{claude,codex,gemini}_editor.rs):
 //
@@ -497,6 +498,26 @@ async function buildEditorView(app, { settingsConfig, id, category } = {}) {
     return { ok: true, app, isCurrent, inactive: codexInactiveFields(draft), configToml, authJson };
   }
 
+  // Additive apps (opencode / openclaw / mcode): the editor shows the whole
+  // native file as it would look after the switch. A missing file starts from
+  // an empty document — the projection creates it on save (cc-switch does the
+  // same for OpenCode).
+  if (additive.isAdditiveApp(app)) {
+    const live = lives.config.exists ? additive.parseLive(app, lives.config.content) : {};
+    const next = additive.projectAdditive(app, { prev, target, live });
+    // Echo the slot key the projection pinned the draft under, so the save
+    // can split the row's entry back out of the edited document.
+    const draftSlotKey = additive.wrapperOf({ settingsConfig: draft }).slotKey;
+    return {
+      ok: true,
+      app,
+      isCurrent,
+      inactive: [],
+      configText: additive.serializeLive(app, next),
+      slotKey: draftSlotKey || additive.normalizeSlotKey(row && row.name),
+    };
+  }
+
   // gemini
   const envText = targets.projectGemini({ prev, target, liveEnv: geminiReadLiveText(lives) });
   return { ok: true, app, isCurrent, inactive: geminiInactiveFields(draft), envText };
@@ -508,11 +529,13 @@ async function buildEditorView(app, { settingsConfig, id, category } = {}) {
 
 // Split an edited full config (what the dialog's editor showed, after user
 // edits) against the base it was opened with. Returns the provider row
-// content and the global-settings changes for the live files.
-function planSave(app, storedRow, edited, base) {
+// content and the global-settings changes for the live files. `slotKey` is
+// the additive editor-view echo (which container entry the row owns).
+function planSave(app, storedRow, edited, base, slotKey) {
   if (app === "claude") return claudePlanSave(storedRow, edited, base);
   if (app === "codex") return codexPlanSave(storedRow, edited, base);
   if (app === "gemini") return geminiPlanSave(storedRow, edited, base);
+  if (additive.isAdditiveApp(app)) return additive.planSaveAdditive(app, storedRow, edited, base, slotKey);
   throw new Error(`Unsupported app: ${app}`);
 }
 
@@ -523,6 +546,7 @@ function resolveConflicts(app, changes, lives) {
   if (app === "claude") return claudeConflicts(changes, lives);
   if (app === "codex") return codexConflicts(changes, lives);
   if (app === "gemini") return geminiConflicts(changes, lives);
+  if (additive.isAdditiveApp(app)) return additive.additiveConflicts(app, changes, lives);
   throw new Error(`Unsupported app: ${app}`);
 }
 
@@ -534,6 +558,7 @@ function applyChanges(app, lives, changes) {
   if (app === "claude") return claudeApply(lives, changes);
   if (app === "codex") return codexApply(lives, changes);
   if (app === "gemini") return geminiApply(lives, changes);
+  if (additive.isAdditiveApp(app)) return additive.applyAdditiveChanges(app, lives, changes);
   throw new Error(`Unsupported app: ${app}`);
 }
 

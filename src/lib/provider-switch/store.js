@@ -15,22 +15,43 @@ const paths = require("./paths");
 //     codex:  { ... },
 //     gemini: { ... },
 //   },
+//   settings: {
+//     visibleApps: { claude: true, ..., mcode: true },  // which agent tabs the dashboard shows
+//   },
 // }
 //
 // Provider: { id, name, category: "official"|"custom", settingsConfig, notes,
 //             createdAt, updatedAt }
 
-const SUPPORTED_APPS = ["claude", "codex", "gemini"];
+const additive = require("./additive");
+
+const SUPPORTED_APPS = ["claude", "codex", "gemini", "opencode", "openclaw", "mcode"];
 const PROVIDER_CATEGORIES = ["official", "custom"];
 
 function emptyApp() {
   return { current: null, providers: [] };
 }
 
+function defaultVisibleApps() {
+  const visibleApps = {};
+  for (const app of SUPPORTED_APPS) visibleApps[app] = true;
+  return visibleApps;
+}
+
 function defaultStore() {
   const apps = {};
   for (const app of SUPPORTED_APPS) apps[app] = emptyApp();
-  return { version: 1, apps };
+  return { version: 1, apps, settings: { visibleApps: defaultVisibleApps() } };
+}
+
+function normalizeVisibleApps(value) {
+  const visibleApps = defaultVisibleApps();
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    for (const app of SUPPORTED_APPS) {
+      if (typeof value[app] === "boolean") visibleApps[app] = value[app];
+    }
+  }
+  return visibleApps;
 }
 
 function isSupportedApp(app) {
@@ -53,6 +74,7 @@ async function readStore() {
       providers: Array.isArray(saved.providers) ? saved.providers.filter((p) => p && typeof p === "object") : [],
     };
   }
+  next.settings = { visibleApps: normalizeVisibleApps(store.settings && store.settings.visibleApps) };
   return next;
 }
 
@@ -72,12 +94,13 @@ async function mutateStore(update) {
         };
       }
     }
+    normalized.settings = { visibleApps: normalizeVisibleApps(store.settings && store.settings.visibleApps) };
     const next = update(normalized);
     return next === undefined ? normalized : next;
   });
 }
 
-function sanitizeSettingsConfig(app, settingsConfig) {
+function sanitizeSettingsConfig(app, settingsConfig, name) {
   if (!settingsConfig || typeof settingsConfig !== "object" || Array.isArray(settingsConfig)) {
     throw new Error("settingsConfig must be an object");
   }
@@ -98,6 +121,11 @@ function sanitizeSettingsConfig(app, settingsConfig) {
       throw new Error("settingsConfig.config must be an object");
     }
     return { auth: auth || null, config: config || {} };
+  }
+  if (additive.isAdditiveApp(app)) {
+    // Wrapper shape { slotKey, provider, modelId? } — see additive.js. The
+    // slotKey is filled from the provider name when missing.
+    return additive.sanitizeWrapper(app, settingsConfig, name);
   }
   throw new Error(`Unsupported app: ${app}`);
 }
@@ -142,7 +170,7 @@ function sanitizeProviderFields(app, { name, category, settingsConfig, notes, we
   return {
     name: trimmedName,
     category: normalizedCategory,
-    settingsConfig: sanitizeSettingsConfig(app, settingsConfig || {}),
+    settingsConfig: sanitizeSettingsConfig(app, settingsConfig || {}, trimmedName),
     notes: String(notes || "").slice(0, 2000),
     websiteUrl: sanitizeWebsiteUrl(websiteUrl),
     icon: sanitizeIcon(icon),
@@ -256,6 +284,25 @@ async function setCurrentProvider(app, id) {
   });
 }
 
+// Dashboard-facing feature settings (which agent tabs are visible). At least
+// one app stays visible — enforced here so a bad client cannot blank the page.
+async function readVisibleApps() {
+  const store = await readStore();
+  return store.settings.visibleApps;
+}
+
+async function updateVisibleApps(visibleApps) {
+  const next = normalizeVisibleApps(visibleApps);
+  if (!Object.values(next).some(Boolean)) {
+    throw new Error("At least one app must stay visible");
+  }
+  await mutateStore((store) => {
+    store.settings.visibleApps = next;
+    return store;
+  });
+  return next;
+}
+
 module.exports = {
   SUPPORTED_APPS,
   isSupportedApp,
@@ -269,4 +316,6 @@ module.exports = {
   setCurrentProvider,
   sanitizeProviderFields,
   sanitizeSettingsConfig,
+  readVisibleApps,
+  updateVisibleApps,
 };

@@ -9,6 +9,7 @@ const backup = require("./backup");
 const paths = require("./paths");
 const catalog = require("./catalog");
 const editor = require("./editor");
+const additive = require("./additive");
 
 // Dashboard-facing REST surface for the provider-switch layer, mounted by
 // local-api.js under /api/provider-switch/*. Mirrors the proxy/api.js
@@ -137,6 +138,13 @@ function computeSwitchPlan(app, prev, target, lives, stash) {
       liveEnv: lives.env.exists ? lives.env.content : "",
     });
     writes.push({ file: envFile, content: next });
+  } else if (additive.isAdditiveApp(app)) {
+    // Additive apps: one native config document; a missing file is created on
+    // the first switch (cc-switch's edit_config does the same for OpenCode).
+    const configFile = files.find((f) => f.id === "config");
+    const live = lives.config.exists ? additive.parseLive(app, lives.config.content) : {};
+    const next = additive.projectAdditive(app, { prev, target, live });
+    writes.push({ file: configFile, content: additive.serializeLive(app, next), skipBackupIfMissing: true });
   }
 
   return { writes, stashWrite, stashRestore, catalogAction };
@@ -252,7 +260,7 @@ async function saveProvider({ app, id, body }) {
 
   const policy = CONFLICT_POLICIES.includes(body.editor.onConflict) ? body.editor.onConflict : "refuse";
   const existing = id ? await store.getProvider(app, id) : null;
-  const plan = editor.planSave(app, existing ? existing.settingsConfig : null, body.settingsConfig, editorInput.base);
+  const plan = editor.planSave(app, existing ? existing.settingsConfig : null, body.settingsConfig, editorInput.base, editorInput.slotKey);
 
   const state = await store.listProviders(app);
   const isCurrent = !!id && state.current === id;
@@ -306,6 +314,7 @@ async function persistEditorChanges(app, patchedLives, originalLives, accepted) 
   for (const change of accepted) {
     if (app === "claude") touchedFiles.add("settings");
     else if (app === "codex") touchedFiles.add("config");
+    else if (additive.isAdditiveApp(app)) touchedFiles.add("config");
     else touchedFiles.add("env");
   }
   const wrote = [];
@@ -345,6 +354,16 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
   try {
     if (p === `${prefix}/status`) {
       json(res, await buildStatus());
+      return true;
+    }
+
+    // Feature settings (cc-switch's app-visibility toggle): which agent tabs
+    // the dashboard shows on the provider-switch page.
+    if (p === `${prefix}/settings` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      const visibleApps = await store.updateVisibleApps(body.visibleApps);
+      json(res, { ok: true, visibleApps });
       return true;
     }
 
@@ -552,6 +571,9 @@ async function importFromLive(app, name) {
   } else if (app === "codex") {
     settingsConfig = targets.extractCodexConfig(lives.config.exists ? lives.config.content : "");
     meta = await importCodexCatalogMeta(settingsConfig.config);
+  } else if (additive.isAdditiveApp(app)) {
+    const live = lives.config.exists ? additive.parseLive(app, lives.config.content) : null;
+    settingsConfig = additive.extractAdditive(app, live);
   } else {
     settingsConfig = targets.extractGeminiConfig(lives.env.exists ? lives.env.content : "");
   }
@@ -696,6 +718,7 @@ async function buildStatus() {
   return {
     ok: true,
     storagePath: paths.providerSwitchRoot(),
+    visibleApps: state.settings.visibleApps,
     codexAuthStash: stash && typeof stash === "object" && stash.auth ? { stashedAt: stash.stashedAt || null } : null,
     apps,
   };

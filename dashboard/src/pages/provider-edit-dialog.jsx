@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, Download, ExternalLink, Eye, EyeOff, Wand2, X } from "lucide-react";
 import { parse as tomlParse, stringify as tomlStringify } from "smol-toml";
+import { parse as yamlParse, stringify as yamlStringify } from "yaml";
 import { copy } from "../lib/copy";
 import { providerSwitchApi } from "../lib/provider-switch-api";
 import { Button } from "../ui/components";
@@ -9,6 +10,59 @@ import { EndpointSpeedTestDialog } from "./provider-speed-test";
 import { ProviderIconPicker, iconComponentFor } from "./provider-icon-picker";
 import { CodexCatalogEditor } from "./provider-codex-catalog";
 import { ModelDropdown, ModelInputAction } from "./provider-model-dropdown";
+
+// Additive apps (cc-switch's additive mode, backed by
+// src/lib/provider-switch/additive.js): the provider owns one keyed entry in
+// the tool's native config plus (where the tool has one) a default-model
+// pointer. The config editor shows the whole native file — JSON for
+// opencode/openclaw, YAML for MiniMax Code. Preset form-field paths address
+// that document with `$slot` standing for the entry key (see resolveAdditivePath).
+const ADDITIVE_APPS = ["opencode", "openclaw", "mcode"];
+const ADDITIVE_CONFIG_FORMAT = { opencode: "json", openclaw: "json", mcode: "yaml" };
+const ADDITIVE_SPEC = {
+  opencode: { container: "provider", pointer: "model" },
+  openclaw: { container: "models.providers", pointer: "agents.defaults.model.primary" },
+  mcode: { container: "custom_provider", pointer: null },
+};
+const isAdditiveApp = (app) => ADDITIVE_APPS.includes(app);
+
+// Convert a provider row wrapper ({ slotKey, provider, modelId }) into the
+// minimal native document shape, used when the editor view is unavailable
+// and the dialog falls back to editing the row fragment alone.
+function additiveWrapperToDoc(app, wrapper) {
+  const spec = ADDITIVE_SPEC[app];
+  const config = wrapper && typeof wrapper === "object" ? wrapper : {};
+  const slotKey = typeof config.slotKey === "string" && config.slotKey ? config.slotKey : "custom";
+  let doc = setPath({}, `${spec.container}.${slotKey}`, (config.provider && typeof config.provider === "object") || {});
+  if (spec.pointer && typeof config.modelId === "string" && config.modelId.trim()) {
+    doc = setPath(doc, spec.pointer, config.modelId.trim());
+  }
+  return doc;
+}
+
+// The dialog edits the full native document once the editor view loads; the
+// stored row / preset template is the wrapper shape, so the initial draft (and
+// the editor-view-failure fallback) converts it to the document shape.
+function additiveInitialDraft(app, settingsConfig) {
+  if (!isAdditiveApp(app)) return JSON.parse(JSON.stringify(settingsConfig ?? {}));
+  return additiveWrapperToDoc(app, settingsConfig);
+}
+
+function parseAdditiveText(app, text) {
+  const raw = String(text || "").trim();
+  if (ADDITIVE_CONFIG_FORMAT[app] === "yaml") {
+    if (!raw) return {};
+    const parsed = yamlParse(raw);
+    if (parsed === null || parsed === undefined) return {};
+    return parsed;
+  }
+  return JSON.parse(raw || "{}");
+}
+
+function stringifyAdditive(app, value) {
+  if (ADDITIVE_CONFIG_FORMAT[app] === "yaml") return yamlStringify(value ?? {});
+  return `${JSON.stringify(value ?? {}, null, 2)}\n`;
+}
 
 // Add/edit provider dialog — an interaction port of cc-switch's
 // AddProviderDialog / EditProviderDialog / ProviderForm: preset cards with
@@ -123,13 +177,39 @@ const CLAUDE_MODEL_ROLES = [
   },
 ];
 
-const DEFAULT_MODEL_PATH = { claude: "env.ANTHROPIC_MODEL", codex: "config.model", gemini: "env.GEMINI_MODEL" };
+const DEFAULT_MODEL_PATH = {
+  claude: "env.ANTHROPIC_MODEL",
+  codex: "config.model",
+  gemini: "env.GEMINI_MODEL",
+  // Additive apps: the sentinel resolves to the app's default-model pointer
+  // (see ADDITIVE_SPEC); mcode has none — MiniMax Code owns model selection.
+  opencode: "ADDITIVE_MODEL_POINTER",
+  openclaw: "ADDITIVE_MODEL_POINTER",
+};
 const ENDPOINT_PATH = {
   claude: "env.ANTHROPIC_BASE_URL",
   codex: "config.model_providers.custom.base_url",
   gemini: "env.GOOGLE_GEMINI_BASE_URL",
+  opencode: "provider.$slot.options.baseURL",
+  openclaw: "provider.$slot.baseUrl",
+  mcode: "provider.$slot.options.baseURL",
 };
-const API_KEY_PATH = { claude: null, codex: "auth.OPENAI_API_KEY", gemini: "env.GEMINI_API_KEY" };
+const API_KEY_PATH = {
+  claude: null,
+  codex: "auth.OPENAI_API_KEY",
+  gemini: "env.GEMINI_API_KEY",
+  opencode: "provider.$slot.options.apiKey",
+  openclaw: "provider.$slot.apiKey",
+  mcode: "provider.$slot.options.apiKey",
+};
+// Endpoint path inside the stored row wrapper (settingsConfig), used when
+// seeding endpoint candidates from the provider being edited — the wrapper's
+// provider fragment sits above the per-slot document paths.
+const ADDITIVE_WRAPPER_ENDPOINT_PATH = {
+  opencode: "provider.options.baseURL",
+  openclaw: "provider.baseUrl",
+  mcode: "provider.options.baseURL",
+};
 
 function withoutOneM(value) {
   return String(value || "").replace(/\[1m\]$/, "");
@@ -221,6 +301,9 @@ function viewToConfig(app, view) {
       auth: JSON.parse(JSON.stringify(view.authJson ?? {})),
       config: tomlParse(view.configToml || ""),
     };
+  }
+  if (isAdditiveApp(app)) {
+    return parseAdditiveText(app, view.configText || "");
   }
   return { env: parseEnvText(view.envText || "") ?? {} };
 }
@@ -433,6 +516,10 @@ export function ProviderEditDialog({
   // take effect on switch, and the fallback notice when the live files
   // cannot be projected (the dialog then edits the row fragment only).
   const [editorBase, setEditorBase] = useState(null);
+  // Additive apps: the editor view echoes the container key the draft's
+  // provider entry was pinned under; it is sent back on save so the backend
+  // can split the row's entry out of the edited document.
+  const [editorSlotKey, setEditorSlotKey] = useState("");
   const [inactive, setInactive] = useState([]);
   const [editorFallback, setEditorFallback] = useState(null);
   const [conflictKeys, setConflictKeys] = useState(null);
@@ -455,18 +542,39 @@ export function ProviderEditDialog({
     return selectedPreset ? selectedPreset.formFields : [];
   }, [isEdit, presets, selectedPresetId]);
 
-  const currentEndpoint = String(getPath(draft, ENDPOINT_PATH[app]) ?? "");
+  // Additive apps: the document path the row's entry lives under depends on
+  // the slot key pinned when the provider was created — preset templates use
+  // `$slot` as a placeholder, resolved here (editor view echo first, then the
+  // selected preset's own slot key).
+  const additiveSlot =
+    editorSlotKey ||
+    (selectedPreset && selectedPreset.settingsConfig && typeof selectedPreset.settingsConfig.slotKey === "string"
+      ? selectedPreset.settingsConfig.slotKey
+      : "") ||
+    "custom";
+  const resolveAdditivePath = useCallback(
+    (path) => {
+      if (!isAdditiveApp(app) || typeof path !== "string") return path;
+      const spec = ADDITIVE_SPEC[app];
+      return path.replace(/\$slot/g, additiveSlot).replace("ADDITIVE_MODEL_POINTER", spec ? spec.pointer || "" : "");
+    },
+    [app, additiveSlot],
+  );
+
+  const currentEndpoint = String(getPath(draft, resolveAdditivePath(ENDPOINT_PATH[app])) ?? "");
   const currentApiKey =
     app === "claude"
       ? String(getPath(draft, `env.${claudeApiKeyName}`) ?? "")
       : app === "codex"
         ? codexApiKeyOf(draft)
-        : String(getPath(draft, API_KEY_PATH[app]) ?? "");
+        : String(getPath(draft, resolveAdditivePath(API_KEY_PATH[app])) ?? "");
 
   const endpointCandidates = useMemo(() => {
     const list = [...(selectedPreset?.endpointCandidates || []), ...(meta.customEndpoints || [])];
     if (editing) {
-      const fromConfig = String(getPath(editing.settingsConfig, ENDPOINT_PATH[app]) ?? "").replace(/\/+$/, "");
+      const fromConfig = String(
+        getPath(editing.settingsConfig, isAdditiveApp(app) ? ADDITIVE_WRAPPER_ENDPOINT_PATH[app] : ENDPOINT_PATH[app]) ?? "",
+      ).replace(/\/+$/, "");
       if (fromConfig && !list.includes(fromConfig)) list.unshift(fromConfig);
     }
     return [...new Set(list.filter(Boolean))];
@@ -491,14 +599,28 @@ export function ProviderEditDialog({
             setClaudeApiKeyName("ANTHROPIC_API_KEY" in (full.env || {}) ? "ANTHROPIC_API_KEY" : "ANTHROPIC_AUTH_TOKEN");
           }
           setEditorBase(JSON.parse(JSON.stringify(full)));
+          setEditorSlotKey(typeof view.slotKey === "string" ? view.slotKey : "");
           setInactive(Array.isArray(view.inactive) ? view.inactive : []);
           setEditorFallback(null);
         })
         .catch((err) => {
           if (viewRequestRef.current !== token) return;
           // No live file (or it does not parse): fall back to editing the
-          // row fragment only, like cc-switch's toast + fallback.
-          setEditorBase(null);
+          // row fragment only, like cc-switch's toast + fallback. Additive
+          // apps keep the document shape (fields and the save split address
+          // document paths): the wrapper is converted, the base pins it so
+          // the save still goes through the editor split, and the slot key
+          // comes from the wrapper being edited.
+          if (isAdditiveApp(app)) {
+            const wrapper = editing ? editing.settingsConfig : selectedPreset ? selectedPreset.settingsConfig : null;
+            const slotKey = wrapper && typeof wrapper.slotKey === "string" && wrapper.slotKey ? wrapper.slotKey : "custom";
+            const doc = additiveWrapperToDoc(app, wrapper);
+            setDraft(doc);
+            setEditorBase(JSON.parse(JSON.stringify(doc)));
+            setEditorSlotKey(slotKey);
+          } else {
+            setEditorSlotKey("");
+          }
           setInactive([]);
           setEditorFallback(
             copy("pswitch.provider.editor_view_failed", { error: err instanceof Error ? err.message : String(err) }),
@@ -516,7 +638,7 @@ export function ProviderEditDialog({
     // fields to the preset's values, not only the config template. The
     // editor view is re-projected for the preset's draft.
     setSelectedPresetId(preset.id);
-    setDraft(JSON.parse(JSON.stringify(preset.settingsConfig ?? {})));
+    setDraft(additiveInitialDraft(app, preset.settingsConfig ?? {}));
     setCategory(preset.group === "official" ? "official" : "custom");
     setName(preset.nameKey ? copy(preset.nameKey) : preset.name);
     setWebsiteUrl(preset.websiteUrl || "");
@@ -549,6 +671,7 @@ export function ProviderEditDialog({
     setIconPickerOpen(false);
     setSpeedTestOpen(false);
     setEditorBase(null);
+    setEditorSlotKey("");
     setInactive([]);
     setEditorFallback(null);
     setConflictKeys(null);
@@ -562,7 +685,7 @@ export function ProviderEditDialog({
       setIcon(editing.icon || "");
       setIconColor(editing.iconColor || "");
       setMeta({ ...(editing.meta || {}) });
-      setDraft(JSON.parse(JSON.stringify(editing.settingsConfig ?? {})));
+      setDraft(additiveInitialDraft(app, editing.settingsConfig ?? {}));
       if (app === "claude" && editing.settingsConfig?.env) {
         if ("ANTHROPIC_API_KEY" in editing.settingsConfig.env) setClaudeApiKeyName("ANTHROPIC_API_KEY");
       }
@@ -590,7 +713,7 @@ export function ProviderEditDialog({
       // preset card.
       const first = presets.find((preset) => preset.group === "custom") || presets[0] || null;
       setSelectedPresetId(first ? first.id : null);
-      setDraft(first ? JSON.parse(JSON.stringify(first.settingsConfig ?? {})) : {});
+      setDraft(first ? additiveInitialDraft(app, first.settingsConfig ?? {}) : {});
       loadEditorView(first ? first.settingsConfig ?? {} : {});
     }
     return () => { viewRequestRef.current += 1; };
@@ -647,7 +770,7 @@ export function ProviderEditDialog({
       setDraft((current) => setCodexApiKeyInDraft(current, value));
       return;
     }
-    setDraft((current) => setPath(current, field.path, value));
+    setDraft((current) => setPath(current, resolveAdditivePath(field.path), value));
   };
 
   const switchClaudeApiKeyName = (keyName) => {
@@ -724,7 +847,7 @@ export function ProviderEditDialog({
   const closeSpeedTest = (picked, listChanged, list) => {
     setSpeedTestOpen(false);
     if (picked) {
-      setDraft((current) => setPath(current, ENDPOINT_PATH[app], picked.url));
+      setDraft((current) => setPath(current, resolveAdditivePath(ENDPOINT_PATH[app]), picked.url));
       if (picked.autoSelect) setMetaValue("endpointAutoSelect", true);
     }
     if (listChanged) {
@@ -800,21 +923,28 @@ export function ProviderEditDialog({
   // invalid text stays in the textarea and is flagged via rawError.
   // rawTextRef mirrors rawText exactly (every writer updates both) so save()
   // can rely on it; the repopulate decision reads the rawText state itself.
+  // Additive apps reuse this editor over their native file format (JSON, or
+  // YAML for MiniMax Code).
   const rawTextRef = useRef("");
   const configInvalid = (err) =>
     copy("pswitch.provider.invalid_json", { error: err instanceof Error ? err.message : String(err) });
+  const additiveInvalid = (err) =>
+    isAdditiveApp(app) && ADDITIVE_CONFIG_FORMAT[app] === "yaml"
+      ? copy("pswitch.provider.invalid_yaml", { error: err instanceof Error ? err.message : String(err) })
+      : configInvalid(err);
   useEffect(() => {
     // Codex uses the two cc-switch editors below (auth.json + config.toml)
-    // and gemini edits the real .env text — claude keeps the JSON editor.
-    if (app !== "claude") return;
+    // and gemini edits the real .env text — claude and the additive apps
+    // keep the merged editor.
+    if (app !== "claude" && !isAdditiveApp(app)) return;
     let parsed = null;
     try {
-      parsed = JSON.parse(rawText);
+      parsed = isAdditiveApp(app) ? parseAdditiveText(app, rawText) : JSON.parse(rawText);
     } catch {
       parsed = null;
     }
     if (JSON.stringify(parsed) !== JSON.stringify(draft ?? {})) {
-      const next = JSON.stringify(draft ?? {}, null, 2);
+      const next = isAdditiveApp(app) ? stringifyAdditive(app, draft ?? {}) : JSON.stringify(draft ?? {}, null, 2);
       rawTextRef.current = next;
       setRawText(next);
       setRawError(null);
@@ -822,27 +952,29 @@ export function ProviderEditDialog({
     // rawText is read, not tracked: typed edits commit through
     // handleConfigTextChange and must not re-trigger repopulation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft]);
+  }, [draft, app]);
   const handleConfigTextChange = (text) => {
     rawTextRef.current = text;
     setRawText(text);
     try {
-      const parsed = JSON.parse(text);
+      const parsed = isAdditiveApp(app) ? parseAdditiveText(app, text) : JSON.parse(text);
       if (!parsed || typeof parsed !== "object") throw new Error("config must be a JSON object");
       setDraft(parsed);
       setRawError(null);
     } catch (err) {
-      setRawError(configInvalid(err));
+      setRawError(isAdditiveApp(app) ? additiveInvalid(err) : configInvalid(err));
     }
   };
   const formatConfigText = () => {
     try {
-      const next = JSON.stringify(JSON.parse(rawTextRef.current), null, 2);
+      const next = isAdditiveApp(app)
+        ? stringifyAdditive(app, parseAdditiveText(app, rawTextRef.current))
+        : JSON.stringify(JSON.parse(rawTextRef.current), null, 2);
       rawTextRef.current = next;
       setRawText(next);
       setRawError(null);
     } catch (err) {
-      setRawError(configInvalid(err));
+      setRawError(isAdditiveApp(app) ? additiveInvalid(err) : configInvalid(err));
     }
   };
 
@@ -1026,6 +1158,20 @@ export function ProviderEditDialog({
         return;
       }
       payloadConfig = { env: parsed };
+    } else if (isAdditiveApp(app)) {
+      // The whole native config file (JSON, or YAML for mcode) is the save
+      // source; the backend splits the row's slot entry + model pointer out
+      // of it (see additive.js planSaveAdditive).
+      try {
+        payloadConfig = parseAdditiveText(app, rawTextRef.current);
+      } catch (err) {
+        setRawError(additiveInvalid(err));
+        return;
+      }
+      if (!payloadConfig || typeof payloadConfig !== "object" || Array.isArray(payloadConfig)) {
+        setRawError(copy("pswitch.provider.invalid_json", { error: "config must be an object" }));
+        return;
+      }
     } else {
       try {
         payloadConfig = JSON.parse(rawTextRef.current);
@@ -1061,9 +1207,14 @@ export function ProviderEditDialog({
       };
       // cc-switch's EditorSave: the base is the full projected config the
       // dialog opened with; the backend splits floor keys (row) from the
-      // user's other edits (three-way write into the live files).
+      // user's other edits (three-way write into the live files). Additive
+      // apps also echo the slot key from the editor view.
       if (editorBase) {
-        payload.editor = { base: editorBase, ...(policyOverride || conflictPolicy ? { onConflict: policyOverride || conflictPolicy } : {}) };
+        payload.editor = {
+          base: editorBase,
+          ...(isAdditiveApp(app) && editorSlotKey ? { slotKey: editorSlotKey } : {}),
+          ...(policyOverride || conflictPolicy ? { onConflict: policyOverride || conflictPolicy } : {}),
+        };
       }
       if (isEdit) {
         const res = await providerSwitchApi.updateProvider(app, editing.id, payload);
@@ -1127,7 +1278,7 @@ export function ProviderEditDialog({
   for (const field of fields) {
     if (field.id === "api_key") showApiKeyField = true;
   }
-  const showEndpointField = !officialSelected && (app === "claude" || app === "codex" || app === "gemini");
+  const showEndpointField = !officialSelected && (app === "claude" || app === "codex" || app === "gemini" || isAdditiveApp(app));
   const showAdvancedToggle = app === "claude" || app === "codex";
   const showQuickToggles = app === "claude";
   // Precomputed so the config-editor block below has no ternary chains after
@@ -1151,9 +1302,11 @@ export function ProviderEditDialog({
     if (field.id === "model") hasModelField = true;
   }
   const showEndpointForEdit = isEdit && showEndpointField && !hasBaseUrlField;
-  const showModelForEdit = isEdit && !hasModelField;
   const showEndpointForAdd = !isEdit && showEndpointField && !hasBaseUrlField;
-  const showModelForAdd = !isEdit && !hasModelField;
+  // mcode has no DEFAULT_MODEL_PATH (MiniMax Code owns model selection), so
+  // the fallback model field is only offered where a pointer exists.
+  const showModelForEdit = isEdit && !hasModelField && !!DEFAULT_MODEL_PATH[app];
+  const showModelForAdd = !isEdit && !hasModelField && !!DEFAULT_MODEL_PATH[app];
   const claudeAdvancedOpen = advancedOpen && app === "claude";
   const codexAdvancedOpen = advancedOpen && app === "codex";
 
@@ -1349,7 +1502,7 @@ export function ProviderEditDialog({
                         ) : null}
                       </FieldLabel>
                       <SecretInput
-                        value={app === "codex" ? codexApiKeyOf(draft) : String(getPath(draft, field.path) ?? "")}
+                        value={app === "codex" ? codexApiKeyOf(draft) : String(getPath(draft, resolveAdditivePath(field.path)) ?? "")}
                         onChange={(value) => setFieldValue(field, value)}
                         placeholder={field.placeholderKey ? copy(field.placeholderKey) : field.placeholder}
                         ariaLabel={copy(field.labelKey)}
@@ -1365,8 +1518,8 @@ export function ProviderEditDialog({
                     <EndpointField
                       key={field.id}
                       label={copy("pswitch.field.endpoint")}
-                      value={String(getPath(draft, field.path) ?? "")}
-                      onChange={(value) => setDraft((current) => setPath(current, field.path, value))}
+                      value={String(getPath(draft, resolveAdditivePath(field.path)) ?? "")}
+                      onChange={(value) => setDraft((current) => setPath(current, resolveAdditivePath(field.path), value))}
                       isFullUrl={!!meta.isFullUrl}
                       onFullUrlChange={(on) => setMetaValue("isFullUrl", on || undefined)}
                       onManage={openSpeedTest}
@@ -1379,8 +1532,8 @@ export function ProviderEditDialog({
                     <ModelInput
                       key={field.id}
                       label={copy(field.labelKey)}
-                      value={String(getPath(draft, field.path) ?? "")}
-                      onChange={(value) => setDraft((current) => setPath(current, field.path, value))}
+                      value={String(getPath(draft, resolveAdditivePath(field.path)) ?? "")}
+                      onChange={(value) => setDraft((current) => setPath(current, resolveAdditivePath(field.path), value))}
                       models={fetchedModels}
                       fetchState={fetchState}
                       onFetch={fetchModels}
@@ -1393,8 +1546,8 @@ export function ProviderEditDialog({
                     <div key={field.id}>
                       <FieldLabel label={copy(field.labelKey)} />
                       <select
-                        value={String(getPath(draft, field.path) ?? "")}
-                        onChange={(event) => setDraft((current) => setPath(current, field.path, event.target.value))}
+                        value={String(getPath(draft, resolveAdditivePath(field.path)) ?? "")}
+                        onChange={(event) => setDraft((current) => setPath(current, resolveAdditivePath(field.path), event.target.value))}
                         aria-label={copy(field.labelKey)}
                         className="w-full rounded-lg border border-oai-gray-200 bg-white px-3 py-2 text-sm text-oai-black focus:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 dark:border-oai-gray-800 dark:bg-oai-gray-900 dark:text-white"
                       >
@@ -1415,8 +1568,8 @@ export function ProviderEditDialog({
                     <FieldLabel label={copy(field.labelKey)} />
                     <input
                       type={field.secret ? "password" : "text"}
-                      value={String(getPath(draft, field.path) ?? "")}
-                      onChange={(event) => setDraft((current) => setPath(current, field.path, event.target.value))}
+                      value={String(getPath(draft, resolveAdditivePath(field.path)) ?? "")}
+                      onChange={(event) => setDraft((current) => setPath(current, resolveAdditivePath(field.path), event.target.value))}
                       placeholder={field.placeholder || ""}
                       autoComplete="off"
                       spellCheck={false}
@@ -1442,7 +1595,7 @@ export function ProviderEditDialog({
             <EndpointField
               label={copy("pswitch.field.endpoint")}
               value={currentEndpoint}
-              onChange={(value) => setDraft((current) => setPath(current, ENDPOINT_PATH[app], value))}
+              onChange={(value) => setDraft((current) => setPath(current, resolveAdditivePath(ENDPOINT_PATH[app]), value))}
               isFullUrl={!!meta.isFullUrl}
               onFullUrlChange={(on) => setMetaValue("isFullUrl", on || undefined)}
               onManage={openSpeedTest}
@@ -1452,8 +1605,8 @@ export function ProviderEditDialog({
           {showModelForAdd ? (
             <ModelInput
               label={copy("pswitch.field.model")}
-              value={String(getPath(draft, DEFAULT_MODEL_PATH[app]) ?? "")}
-              onChange={(value) => setDraft((current) => setPath(current, DEFAULT_MODEL_PATH[app], value))}
+              value={String(getPath(draft, resolveAdditivePath(DEFAULT_MODEL_PATH[app])) ?? "")}
+              onChange={(value) => setDraft((current) => setPath(current, resolveAdditivePath(DEFAULT_MODEL_PATH[app]), value))}
               models={fetchedModels}
               fetchState={fetchState}
               onFetch={fetchModels}
@@ -1465,7 +1618,7 @@ export function ProviderEditDialog({
             <EndpointField
               label={copy("pswitch.field.endpoint")}
               value={currentEndpoint}
-              onChange={(value) => setDraft((current) => setPath(current, ENDPOINT_PATH[app], value))}
+              onChange={(value) => setDraft((current) => setPath(current, resolveAdditivePath(ENDPOINT_PATH[app]), value))}
               isFullUrl={!!meta.isFullUrl}
               onFullUrlChange={(on) => setMetaValue("isFullUrl", on || undefined)}
               onManage={openSpeedTest}
@@ -1475,8 +1628,8 @@ export function ProviderEditDialog({
           {showModelForEdit ? (
             <ModelInput
               label={copy("pswitch.field.model")}
-              value={String(getPath(draft, DEFAULT_MODEL_PATH[app]) ?? "")}
-              onChange={(value) => setDraft((current) => setPath(current, DEFAULT_MODEL_PATH[app], value))}
+              value={String(getPath(draft, resolveAdditivePath(DEFAULT_MODEL_PATH[app])) ?? "")}
+              onChange={(value) => setDraft((current) => setPath(current, resolveAdditivePath(DEFAULT_MODEL_PATH[app]), value))}
               models={fetchedModels}
               fetchState={fetchState}
               onFetch={fetchModels}

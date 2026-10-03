@@ -153,10 +153,6 @@ function normalizeSlotKey(name, app) {
 // modelId: these tools write "<slotKey>/<modelId>" (and model ids may
 // themselves contain "/", e.g. ModelScope's "ZhipuAI/GLM-5.2"), so keeping
 // the whole ref avoids ambiguous re-composition.
-function composedModelRef(slotKey, modelId) {
-  return String(modelId || "").trim();
-}
-
 function modelIdFromRef(ref, slotKey) {
   return String(ref || "").trim();
 }
@@ -712,7 +708,6 @@ module.exports = {
   specOf,
   wrapperOf,
   normalizeSlotKey,
-  composedModelRef,
   modelIdFromRef,
   sanitizeWrapper,
   parseLive,

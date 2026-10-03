@@ -240,3 +240,24 @@ it("edits the named Hermes entry after its YAML list is reordered", async () => 
   expect(plan.changes).toEqual([]);
   expect(payload.settingsConfig.custom_providers[1]).toEqual({ name: "other", api_key: "other-key" });
 });
+
+it("writes pi's model field back as a models list when the entry had none", async () => {
+  const callbacks = additiveProps("pi");
+  delete callbacks.editing.settingsConfig.provider.models;
+  const baseConfig = projectAdditive("pi", { target: callbacks.editing, live: {} });
+  providerSwitchApi.getEditorView.mockResolvedValue({
+    configText: serializeLive("pi", baseConfig), slotKey: "saved-relay", inactive: [],
+  });
+  providerSwitchApi.updateProvider.mockResolvedValue({ provider: { name: "Saved relay" } });
+  render(<ProviderEditDialog {...callbacks} />);
+  const save = screen.getByRole("button", { name: "pswitch.action.save" });
+  await waitFor(() => expect(save).toBeEnabled());
+  fireEvent.change(screen.getByLabelText("pswitch.field.model"), { target: { value: "new-model" } });
+  fireEvent.click(save);
+  await waitFor(() => expect(callbacks.onSaved).toHaveBeenCalledTimes(1));
+  const payload = providerSwitchApi.updateProvider.mock.calls[0][2];
+  const plan = planSaveAdditive("pi", callbacks.editing, payload.settingsConfig, payload.editor.base, payload.editor.slotKey);
+  expect(plan.rowSettings.provider.models).toEqual([{ id: "new-model" }]);
+  expect(plan.rowSettings.modelId).toBe("new-model");
+  expect(plan.changes).toEqual([]);
+});

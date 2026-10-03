@@ -167,7 +167,9 @@ function setPath(obj, dottedPath, value) {
   let current = clone;
   for (let i = 0; i < keys.length - 1; i++) {
     if (current[keys[i]] == null || typeof current[keys[i]] !== "object") {
-      current[keys[i]] = {};
+      // A numeric next segment addresses a list item (pi's models.0.id) —
+      // the missing ancestor must become a list, not a "0"-keyed map.
+      current[keys[i]] = /^\d+$/.test(keys[i + 1]) ? [] : {};
     }
     current = current[keys[i]];
   }

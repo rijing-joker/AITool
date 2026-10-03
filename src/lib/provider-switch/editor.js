@@ -535,7 +535,7 @@ function planSave(app, storedRow, edited, base, slotKey) {
   if (app === "claude") return claudePlanSave(storedRow, edited, base);
   if (app === "codex") return codexPlanSave(storedRow, edited, base);
   if (app === "gemini") return geminiPlanSave(storedRow, edited, base);
-  if (additive.isAdditiveApp(app)) return additive.planSaveAdditive(app, storedRow, edited, base, slotKey);
+  if (additive.isAdditiveApp(app)) return additive.planSaveAdditive(app, { settingsConfig: storedRow }, edited, base, slotKey);
   throw new Error(`Unsupported app: ${app}`);
 }
 

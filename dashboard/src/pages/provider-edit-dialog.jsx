@@ -34,7 +34,10 @@ function additiveWrapperToDoc(app, wrapper) {
   const spec = ADDITIVE_SPEC[app];
   const config = wrapper && typeof wrapper === "object" ? wrapper : {};
   const slotKey = typeof config.slotKey === "string" && config.slotKey ? config.slotKey : "custom";
-  let doc = setPath({}, `${spec.container}.${slotKey}`, (config.provider && typeof config.provider === "object") || {});
+  const provider = config.provider && typeof config.provider === "object" && !Array.isArray(config.provider)
+    ? config.provider
+    : {};
+  let doc = setPath({}, `${spec.container}.${slotKey}`, provider);
   if (spec.pointer && typeof config.modelId === "string" && config.modelId.trim()) {
     doc = setPath(doc, spec.pointer, config.modelId.trim());
   }
@@ -192,16 +195,16 @@ const ENDPOINT_PATH = {
   codex: "config.model_providers.custom.base_url",
   gemini: "env.GOOGLE_GEMINI_BASE_URL",
   opencode: "provider.$slot.options.baseURL",
-  openclaw: "provider.$slot.baseUrl",
-  mcode: "provider.$slot.options.baseURL",
+  openclaw: "models.providers.$slot.baseUrl",
+  mcode: "custom_provider.$slot.options.baseURL",
 };
 const API_KEY_PATH = {
   claude: null,
   codex: "auth.OPENAI_API_KEY",
   gemini: "env.GEMINI_API_KEY",
   opencode: "provider.$slot.options.apiKey",
-  openclaw: "provider.$slot.apiKey",
-  mcode: "provider.$slot.options.apiKey",
+  openclaw: "models.providers.$slot.apiKey",
+  mcode: "custom_provider.$slot.options.apiKey",
 };
 // Endpoint path inside the stored row wrapper (settingsConfig), used when
 // seeding endpoint candidates from the provider being edited — the wrapper's

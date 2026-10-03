@@ -19,8 +19,9 @@
 // Additive-app presets (opencode/openclaw/mcode) carry the wrapper shape
 // documented in additive.js. Their `formFields` paths, though, address the
 // FULL native document the dialog edits after the editor view loads:
-// `provider.$slot.…` has `$slot` substituted by the dialog with the slot key
-// the row/preset is pinned under, and the sentinel `ADDITIVE_MODEL_POINTER`
+// The container is `provider`, `models.providers`, or `custom_provider`.
+// `$slot` is substituted by the dialog with the row/preset's slot key, and
+// the sentinel `ADDITIVE_MODEL_POINTER`
 // resolves to the app's default-model pointer path.
 
 const CLAUDE_OFFICIAL = {
@@ -441,8 +442,8 @@ const OPENCLAW_KIMI = {
     },
   },
   formFields: [
-    { id: "api_key", path: "provider.$slot.apiKey", labelKey: "pswitch.field.api_key", placeholder: "sk-…", secret: true },
-    { id: "base_url", path: "provider.$slot.baseUrl", labelKey: "pswitch.field.base_url", placeholder: "https://api.moonshot.cn/v1" },
+    { id: "api_key", path: "models.providers.$slot.apiKey", labelKey: "pswitch.field.api_key", placeholder: "sk-…", secret: true },
+    { id: "base_url", path: "models.providers.$slot.baseUrl", labelKey: "pswitch.field.base_url", placeholder: "https://api.moonshot.cn/v1" },
   ],
 };
 
@@ -468,8 +469,8 @@ const OPENCLAW_DEEPSEEK = {
     },
   },
   formFields: [
-    { id: "api_key", path: "provider.$slot.apiKey", labelKey: "pswitch.field.api_key", placeholder: "sk-…", secret: true },
-    { id: "base_url", path: "provider.$slot.baseUrl", labelKey: "pswitch.field.base_url", placeholder: "https://api.deepseek.com/v1" },
+    { id: "api_key", path: "models.providers.$slot.apiKey", labelKey: "pswitch.field.api_key", placeholder: "sk-…", secret: true },
+    { id: "base_url", path: "models.providers.$slot.baseUrl", labelKey: "pswitch.field.base_url", placeholder: "https://api.deepseek.com/v1" },
   ],
 };
 
@@ -491,8 +492,8 @@ const OPENCLAW_CUSTOM = {
     },
   },
   formFields: [
-    { id: "api_key", path: "provider.$slot.apiKey", labelKey: "pswitch.field.api_key", placeholder: "sk-…", secret: true },
-    { id: "base_url", path: "provider.$slot.baseUrl", labelKey: "pswitch.field.base_url", placeholder: "https://your-relay.example.com/v1" },
+    { id: "api_key", path: "models.providers.$slot.apiKey", labelKey: "pswitch.field.api_key", placeholder: "sk-…", secret: true },
+    { id: "base_url", path: "models.providers.$slot.baseUrl", labelKey: "pswitch.field.base_url", placeholder: "https://your-relay.example.com/v1" },
     {
       id: "model",
       path: "ADDITIVE_MODEL_POINTER",
@@ -532,8 +533,8 @@ const MCODE_MINIMAX = {
     },
   },
   formFields: [
-    { id: "api_key", path: "provider.$slot.options.apiKey", labelKey: "pswitch.field.api_key", placeholder: "ey-…", secret: true },
-    { id: "base_url", path: "provider.$slot.options.baseURL", labelKey: "pswitch.field.base_url", placeholder: "https://api.minimax.cn/anthropic" },
+    { id: "api_key", path: "custom_provider.$slot.options.apiKey", labelKey: "pswitch.field.api_key", placeholder: "ey-…", secret: true },
+    { id: "base_url", path: "custom_provider.$slot.options.baseURL", labelKey: "pswitch.field.base_url", placeholder: "https://api.minimax.cn/anthropic" },
   ],
 };
 
@@ -556,8 +557,8 @@ const MCODE_CUSTOM = {
     },
   },
   formFields: [
-    { id: "api_key", path: "provider.$slot.options.apiKey", labelKey: "pswitch.field.api_key", placeholder: "sk-…", secret: true },
-    { id: "base_url", path: "provider.$slot.options.baseURL", labelKey: "pswitch.field.base_url", placeholder: "https://your-relay.example.com" },
+    { id: "api_key", path: "custom_provider.$slot.options.apiKey", labelKey: "pswitch.field.api_key", placeholder: "sk-…", secret: true },
+    { id: "base_url", path: "custom_provider.$slot.options.baseURL", labelKey: "pswitch.field.base_url", placeholder: "https://your-relay.example.com" },
   ],
 };
 

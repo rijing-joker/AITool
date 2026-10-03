@@ -291,9 +291,18 @@ function planSaveAdditive(app, storedRow, edited, base, slotKey) {
       }
       return;
     }
-    if (isPlainObject(before) && isPlainObject(after)) {
-      for (const childKey of new Set([...Object.keys(before), ...Object.keys(after)])) {
-        diffValue(before[childKey], after[childKey], [...path, childKey]);
+    // A newly added/deleted ancestor (e.g. OpenClaw's agents.defaults) must
+    // still be split at the pointer: saving an inactive row must not write
+    // its model into the live config. Sibling settings remain global changes.
+    const pointerAncestor = spec.modelPointer && path.length < spec.modelPointer.length &&
+      path.every((k, i) => k === spec.modelPointer[i]);
+    const addedOrRemovedObject = (before === undefined && isPlainObject(after)) ||
+      (isPlainObject(before) && after === undefined);
+    if ((isPlainObject(before) && isPlainObject(after)) || (pointerAncestor && addedOrRemovedObject)) {
+      const beforeMap = before || {};
+      const afterMap = after || {};
+      for (const childKey of new Set([...Object.keys(beforeMap), ...Object.keys(afterMap)])) {
+        diffValue(beforeMap[childKey], afterMap[childKey], [...path, childKey]);
       }
       return;
     }
@@ -312,16 +321,14 @@ function planSaveAdditive(app, storedRow, edited, base, slotKey) {
   }
 
   // The row owns the slot entry + pointer: the fragment comes from the edited
-  // doc, the model id from the edited pointer (when the base carried one).
+  // doc, the model id from the edited pointer, including the first value
+  // entered into an empty config or an explicit removal.
   let modelId = stored.modelId;
   if (spec.modelPointer) {
-    const baseRef = String(valueAt(base, spec.modelPointer) ?? "").trim();
-    if (baseRef) {
-      const editedRef = String(valueAt(edited, spec.modelPointer) ?? "").trim();
-      modelId = modelIdFromRef(editedRef, key);
-    }
+    const editedRef = String(valueAt(edited, spec.modelPointer) ?? "").trim();
+    modelId = modelIdFromRef(editedRef, key);
   }
-  const rowSettings = sanitizeWrapper(app, { slotKey: key, provider: isPlainObject(fragment) ? fragment : {}, modelId }, key);
+  const rowSettings = sanitizeWrapper(app, { slotKey: key, provider: fragment, modelId }, key);
 
   return { rowSettings, changes };
 }
@@ -352,6 +359,15 @@ function additiveConflicts(app, changes, lives) {
   const file = lives.config;
   const live = file && file.exists ? parseLive(app, file.content) : {};
   return changes.map((change) => {
+    // A leaf patch may create missing parents, but replacing an existing
+    // scalar/array parent would discard an external edit. valueAt alone
+    // reports undefined in that case, hiding the structural conflict.
+    let parent = live;
+    for (const key of change.path.slice(0, -1)) {
+      parent = parent[key];
+      if (parent === undefined) break;
+      if (!isPlainObject(parent)) return { change, conflict: true };
+    }
     const now = valueAt(live, change.path);
     const before = change.before;
     const after = change.after;

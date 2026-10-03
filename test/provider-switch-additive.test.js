@@ -9,6 +9,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { Readable } = require("node:stream");
 const { test, beforeEach, afterEach } = require("node:test");
 
 let tmpHome;
@@ -40,6 +41,25 @@ const store = require("../src/lib/provider-switch/store");
 const editor = require("../src/lib/provider-switch/editor");
 const paths = require("../src/lib/provider-switch/paths");
 const presets = require("../src/lib/provider-switch/presets");
+const { handleProviderSwitchApiRequest, switchProvider } = require("../src/lib/provider-switch/api");
+
+async function saveViaApi(app, edited, base, slotKey, id, { onConflict, expectedStatus = 200 } = {}) {
+  const url = `/api/provider-switch/providers${id ? `/${id}` : ""}`;
+  const req = Readable.from([Buffer.from(JSON.stringify({
+    app, name: "Custom relay", settingsConfig: edited, editor: { base, slotKey, onConflict },
+  }))]);
+  req.method = id ? "PUT" : "POST";
+  req.headers = { host: "localhost" };
+  const res = {
+    writeHead(status) { this.status = status; },
+    end(body) { this.body = JSON.parse(body); },
+  };
+  await handleProviderSwitchApiRequest(req, res, new URL(url, "http://localhost"), {
+    isAuthorizedLocalMutation: () => true,
+  });
+  assert.equal(res.status, expectedStatus, JSON.stringify(res.body));
+  return res.body;
+}
 
 // ---------------------------------------------------------------------------
 // Store: wrapper sanitization
@@ -251,6 +271,136 @@ test("additive editor conflicts: three-way check against the live file", async (
   const doc = additive.parseLive("mcode", patched.config.content);
   assert.equal(doc.top, "v2");
   assert.equal(doc.other, "y");
+});
+
+for (const app of ["opencode", "openclaw"]) {
+  test(`additive ${app}: first model is saved without changing live config until switch`, async () => {
+    const preset = presets.listPresets(app).find((item) => item.group === "custom");
+    const view = await editor.buildEditorView(app, { settingsConfig: preset.settingsConfig });
+    const base = additive.parseLive(app, view.configText);
+    const edited = structuredClone(base);
+    const ref = "custom/vendor/model";
+    if (app === "opencode") edited.model = ref;
+    else edited.agents = { defaults: { model: { primary: ref } } };
+    const plan = editor.planSave(app, null, edited, base, view.slotKey);
+    assert.equal(plan.rowSettings.modelId, ref);
+    assert.deepEqual(plan.changes, [], "the model belongs to the row, including newly added ancestors");
+
+    const saved = await saveViaApi(app, edited, base, view.slotKey);
+    assert.equal(saved.provider.settingsConfig.modelId, ref);
+    const livePath = paths.targetFile(app, "config").path;
+    assert.equal(fs.existsSync(livePath), false, "creating a provider must not activate its model");
+    await switchProvider({ app, id: saved.provider.id });
+    const live = additive.parseLive(app, fs.readFileSync(livePath, "utf8"));
+    assert.equal(app === "opencode" ? live.model : live.agents.defaults.model.primary, ref);
+
+    // Clearing the current row's model removes the reference it wrote.
+    const cleared = structuredClone(live);
+    if (app === "opencode") delete cleared.model;
+    else delete cleared.agents;
+    const updated = await saveViaApi(app, cleared, live, view.slotKey, saved.provider.id);
+    assert.equal(updated.provider.settingsConfig.modelId, "");
+    const after = additive.parseLive(app, fs.readFileSync(livePath, "utf8"));
+    assert.equal(app === "opencode" ? after.model : after.agents?.defaults?.model?.primary, undefined);
+  });
+}
+
+test("additive openclaw: new model ancestors keep sibling globals in three-way conflict handling", () => {
+  const stored = { slotKey: "custom", provider: { apiKey: "fixture-key" } };
+  const base = { models: { providers: { custom: stored.provider } } };
+  const edited = {
+    ...base,
+    agents: { defaults: { model: { primary: "custom/model", fallbacks: ["other/backup"] }, workspace: "/mine" } },
+  };
+  const plan = editor.planSave("openclaw", stored, edited, base, "custom");
+  assert.equal(plan.rowSettings.modelId, "custom/model");
+  assert.deepEqual(plan.changes.map((change) => change.path.join(".")).sort(), [
+    "agents.defaults.model.fallbacks", "agents.defaults.workspace",
+  ]);
+  const emptyLives = { config: { exists: false, content: "" } };
+  assert.ok(editor.resolveConflicts("openclaw", plan.changes, emptyLives).every((entry) => !entry.conflict));
+  const added = additive.parseLive("openclaw", editor.applyChanges("openclaw", emptyLives, plan.changes).config.content);
+  assert.deepEqual(added.agents, {
+    defaults: { model: { fallbacks: ["other/backup"] }, workspace: "/mine" },
+  });
+  const lives = { config: { exists: true, content: JSON.stringify({
+    agents: { defaults: { model: { primary: "other/current" }, workspace: "/external" } },
+  }) } };
+  const marked = editor.resolveConflicts("openclaw", plan.changes, lives);
+  assert.deepEqual(marked.filter((entry) => entry.conflict).map((entry) => entry.change.path.join(".")), ["agents.defaults.workspace"]);
+  const accepted = marked.filter((entry) => !entry.conflict).map((entry) => entry.change);
+  const patched = additive.parseLive("openclaw", editor.applyChanges("openclaw", lives, accepted).config.content);
+  assert.equal(patched.agents.defaults.workspace, "/external");
+  assert.equal(patched.agents.defaults.model.primary, "other/current");
+  assert.deepEqual(patched.agents.defaults.model.fallbacks, ["other/backup"]);
+});
+
+test("additive openclaw: external model shorthand respects every editor conflict policy", async () => {
+  const stored = { slotKey: "custom", provider: { apiKey: "fixture-key" }, modelId: "" };
+  const base = { models: { providers: { custom: stored.provider } } };
+  const edited = {
+    ...base,
+    agents: { defaults: { model: { fallbacks: ["other/backup"] }, workspace: "/mine" } },
+  };
+  const livePath = paths.targetFile("openclaw", "config").path;
+  const external = { agents: { defaults: { model: "other/current" } } };
+  fs.mkdirSync(path.dirname(livePath), { recursive: true });
+  fs.writeFileSync(livePath, JSON.stringify(external));
+
+  const refused = await saveViaApi("openclaw", edited, base, "custom", undefined, { expectedStatus: 409 });
+  assert.deepEqual(refused.conflicts, ["agents.defaults.model.fallbacks"]);
+  assert.deepEqual(JSON.parse(fs.readFileSync(livePath, "utf8")), external);
+  assert.deepEqual((await store.listProviders("openclaw")).providers, []);
+
+  const saved = await saveViaApi("openclaw", edited, base, "custom", undefined, { onConflict: "keepTheirs" });
+  assert.deepEqual(JSON.parse(fs.readFileSync(livePath, "utf8")), {
+    agents: { defaults: { model: "other/current", workspace: "/mine" } },
+  });
+  assert.equal(saved.provider.settingsConfig.modelId, "");
+
+  await saveViaApi("openclaw", edited, base, "custom", saved.provider.id, { onConflict: "keepMine" });
+  assert.deepEqual(JSON.parse(fs.readFileSync(livePath, "utf8")), {
+    agents: { defaults: { model: { fallbacks: ["other/backup"] }, workspace: "/mine" } },
+  });
+});
+
+test("additive openclaw: adding or removing nested globals conflicts with non-object ancestors", () => {
+  const stored = { slotKey: "custom", provider: { apiKey: "fixture-key" } };
+  const withoutAgents = { models: { providers: { custom: stored.provider } } };
+  const withAgents = {
+    ...withoutAgents,
+    agents: { defaults: { model: { primary: "custom/model", fallbacks: ["other/backup"] } } },
+  };
+  for (const [base, edited] of [[withoutAgents, withAgents], [withAgents, withoutAgents]]) {
+    const plan = editor.planSave("openclaw", stored, edited, base, "custom");
+    for (const value of ["other/current", null, ["other/current"]]) {
+      for (const live of [
+        { agents: value },
+        { agents: { defaults: value } },
+        { agents: { defaults: { model: value } } },
+      ]) {
+        const lives = { config: { exists: true, content: JSON.stringify(live) } };
+        const marked = editor.resolveConflicts("openclaw", plan.changes, lives);
+        assert.deepEqual(marked.map((entry) => entry.conflict), [true], JSON.stringify({ base, edited, live }));
+        const accepted = marked.filter((entry) => !entry.conflict).map((entry) => entry.change);
+        const patched = editor.applyChanges("openclaw", lives, accepted);
+        assert.deepEqual(JSON.parse(patched.config.content), live);
+      }
+    }
+  }
+});
+
+test("additive editor rejects invalid slot values instead of erasing the provider", () => {
+  const base = { provider: { custom: { options: { apiKey: "fixture-key" } } } };
+  for (const invalid of [true, null, [], "invalid"]) {
+    assert.throws(() => editor.planSave("opencode", null, { provider: { custom: invalid } }, base, "custom"), /provider must be an object/);
+  }
+});
+
+test("additive editor resolves a stored slot when the client omits its echo", () => {
+  const stored = { slotKey: "custom", provider: { options: { apiKey: "fixture-key" } } };
+  const base = { provider: { custom: stored.provider, other: {} } };
+  assert.equal(editor.planSave("opencode", stored, base, base).rowSettings.slotKey, "custom");
 });
 
 // ---------------------------------------------------------------------------

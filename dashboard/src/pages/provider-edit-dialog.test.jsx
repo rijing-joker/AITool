@@ -1,8 +1,16 @@
 import React from "react";
+import { createRequire } from "node:module";
+import { parse as parseYaml } from "yaml";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { providerSwitchApi } from "../lib/provider-switch-api";
 import { ProviderEditDialog } from "./provider-edit-dialog";
+
+// Exercise the form against the real API presets and save split, so native
+// config paths cannot drift between the dashboard and the backend.
+const require = createRequire(import.meta.url);
+const { listPresets } = require("../../../src/lib/provider-switch/presets");
+const { projectAdditive, serializeLive, planSaveAdditive } = require("../../../src/lib/provider-switch/additive");
 
 vi.mock("../lib/copy", () => ({ copy: (key) => key }));
 vi.mock("../lib/provider-switch-api", () => ({
@@ -113,4 +121,74 @@ it("keeps a dirty draft when closing is canceled and discards only after confirm
   fireEvent.click(screen.getByRole("button", { name: "pswitch.action.close" }));
   fireEvent.click(await screen.findByRole("button", { name: "shared.unsaved.discard" }));
   expect(callbacks.onClose).toHaveBeenCalledTimes(1);
+});
+
+function additiveProps(app) {
+  const presets = listPresets(app);
+  const template = presets.find((preset) => preset.group === "custom");
+  const settingsConfig = structuredClone(template.settingsConfig);
+  settingsConfig.slotKey = "saved-relay";
+  const credentials = app === "openclaw" ? settingsConfig.provider : settingsConfig.provider.options;
+  credentials[app === "openclaw" ? "baseUrl" : "baseURL"] = "https://before.example.test/v1";
+  credentials.apiKey = "before-fixture-key";
+  return {
+    ...props(), app, presets,
+    editing: { id: "saved-provider", name: "Saved relay", category: "custom", settingsConfig },
+  };
+}
+
+function configFromEditor(app) {
+  const text = screen.getByRole("textbox", { name: "pswitch.provider.config" }).value;
+  return app === "mcode" ? parseYaml(text) : JSON.parse(text);
+}
+
+it.each(["opencode", "openclaw", "mcode"])("saves %s credentials in its native provider entry", async (app) => {
+  const callbacks = additiveProps(app);
+  const baseConfig = projectAdditive(app, { target: callbacks.editing, live: {} });
+  providerSwitchApi.getEditorView.mockResolvedValue({
+    configText: serializeLive(app, baseConfig), slotKey: "saved-relay", inactive: [],
+  });
+  providerSwitchApi.updateProvider.mockResolvedValue({ provider: { name: "Saved relay" } });
+  render(<ProviderEditDialog {...callbacks} />);
+  const save = screen.getByRole("button", { name: "pswitch.action.save" });
+  await waitFor(() => expect(save).toBeEnabled());
+  const key = screen.getByLabelText("pswitch.field.api_key");
+  const endpoint = screen.getByLabelText("pswitch.field.endpoint");
+  expect(key).toHaveValue("before-fixture-key");
+  expect(endpoint).toHaveValue("https://before.example.test/v1");
+  fireEvent.change(key, { target: { value: "after-fixture-key" } });
+  fireEvent.change(endpoint, { target: { value: "https://after.example.test/v1" } });
+
+  const expectedWrapper = structuredClone(callbacks.editing.settingsConfig);
+  const credentials = app === "openclaw" ? expectedWrapper.provider : expectedWrapper.provider.options;
+  credentials.apiKey = "after-fixture-key";
+  credentials[app === "openclaw" ? "baseUrl" : "baseURL"] = "https://after.example.test/v1";
+  const expectedConfig = projectAdditive(app, { target: { settingsConfig: expectedWrapper }, live: {} });
+  expect(configFromEditor(app)).toEqual(expectedConfig);
+  fireEvent.click(save);
+  await waitFor(() => expect(callbacks.onSaved).toHaveBeenCalledTimes(1));
+  const payload = providerSwitchApi.updateProvider.mock.calls[0][2];
+  expect(payload.settingsConfig).toEqual(expectedConfig);
+  expect(payload.editor).toEqual({ base: baseConfig, slotKey: "saved-relay" });
+  const plan = planSaveAdditive(app, callbacks.editing, payload.settingsConfig, payload.editor.base, payload.editor.slotKey);
+  expect(plan.rowSettings.provider).toEqual(expectedWrapper.provider);
+  expect(plan.changes).toEqual([]);
+});
+
+it.each(["opencode", "openclaw", "mcode"])("preserves the %s provider when the editor view fails", async (app) => {
+  const callbacks = additiveProps(app);
+  providerSwitchApi.getEditorView.mockRejectedValue(new Error("Temporary connection failure"));
+  providerSwitchApi.updateProvider.mockResolvedValue({ provider: { name: "Saved relay" } });
+  render(<ProviderEditDialog {...callbacks} />);
+  const save = screen.getByRole("button", { name: "pswitch.action.save" });
+  await waitFor(() => expect(save).toBeEnabled());
+  const expectedConfig = projectAdditive(app, { target: callbacks.editing, live: {} });
+  expect(configFromEditor(app)).toEqual(expectedConfig);
+  fireEvent.click(save);
+  await waitFor(() => expect(callbacks.onSaved).toHaveBeenCalledTimes(1));
+  const payload = providerSwitchApi.updateProvider.mock.calls[0][2];
+  expect(payload.editor).toEqual({ base: expectedConfig, slotKey: "saved-relay" });
+  const plan = planSaveAdditive(app, callbacks.editing, payload.settingsConfig, payload.editor.base, payload.editor.slotKey);
+  expect(plan.rowSettings.provider).toEqual(callbacks.editing.settingsConfig.provider);
+  expect(plan.changes).toEqual([]);
 });

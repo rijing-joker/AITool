@@ -44,9 +44,12 @@ function additiveWrapperToDoc(app, wrapper) {
   const provider = config.provider && typeof config.provider === "object" && !Array.isArray(config.provider)
     ? config.provider
     : {};
-  let doc = setPath({}, `${spec.container}.${slotKey}`, provider);
-  if (spec.pointer && typeof config.modelId === "string" && config.modelId.trim()) {
-    doc = setPath(doc, spec.pointer, spec.pointerKind === "slotKey" ? slotKey : config.modelId.trim());
+  let doc = app === "hermes"
+    ? { custom_providers: [{ ...provider, name: slotKey }] }
+    : setPath({}, `${spec.container}.${slotKey}`, provider);
+  const pointerValue = spec.pointerKind === "slotKey" ? slotKey : String(config.modelId || "").trim();
+  if (spec.pointer && pointerValue) {
+    doc = setPath(doc, spec.pointer, pointerValue);
   }
   if (spec.pointerProvider) {
     doc = setPath(doc, spec.pointerProvider, slotKey);
@@ -127,9 +130,31 @@ export function PresetIcon({ icon, color, className = "h-4 w-4" }) {
   return <Icon className={className} />;
 }
 
+// Hermes paths use the provider's name, not its position in custom_providers.
+// Resolve against each current document so YAML reordering and numeric names
+// cannot redirect form edits to another provider.
+function configPathKeys(obj, dottedPath, createEntry = false) {
+  const keys = dottedPath.split(".");
+  if (keys[0] === "custom_providers" && keys.length > 1) {
+    if (createEntry && obj.custom_providers === undefined) obj.custom_providers = [];
+    const entries = obj?.custom_providers;
+    if (Array.isArray(entries)) {
+      let index = entries.findIndex((entry) => {
+        return typeof entry?.name === "string" && entry.name.trim() === keys[1];
+      });
+      if (index < 0 && createEntry) {
+        index = entries.length;
+        entries.push({ name: keys[1] });
+      }
+      keys[1] = String(index);
+    }
+  }
+  return keys;
+}
+
 function getPath(obj, dottedPath) {
   let current = obj;
-  for (const key of dottedPath.split(".")) {
+  for (const key of configPathKeys(obj, dottedPath)) {
     if (current == null || typeof current !== "object") return undefined;
     current = current[key];
   }
@@ -137,8 +162,8 @@ function getPath(obj, dottedPath) {
 }
 
 function setPath(obj, dottedPath, value) {
-  const keys = dottedPath.split(".");
   const clone = JSON.parse(JSON.stringify(obj ?? {}));
+  const keys = configPathKeys(clone, dottedPath, true);
   let current = clone;
   for (let i = 0; i < keys.length - 1; i++) {
     if (current[keys[i]] == null || typeof current[keys[i]] !== "object") {

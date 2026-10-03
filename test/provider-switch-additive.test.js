@@ -703,6 +703,92 @@ test("additive grokbuild editor save: pointer + table row-owned, other keys glob
   assert.deepEqual(plan.changes.map((change) => change.path.join(".")), ["ui.theme"]);
 });
 
+test("additive hermes: clearing the active model does not restore stale wrapper state", async () => {
+  const row = await store.createProvider("hermes", {
+    name: "Kimi", settingsConfig: { slotKey: "kimi", modelId: "kimi-k2.7-code", provider: HERMES_KIMI_ENTRY },
+  });
+  await switchProvider({ app: "hermes", id: row.id });
+  const livePath = paths.targetFile("hermes", "config").path;
+  const base = additive.parseLive("hermes", fs.readFileSync(livePath, "utf8"));
+  const edited = structuredClone(base);
+  edited.custom_providers[0].model = "";
+  delete edited.custom_providers[0].models;
+  delete edited.model.default;
+  const result = await saveViaApi("hermes", edited, base, "kimi", row.id);
+  assert.equal(result.provider.settingsConfig.modelId, "");
+  assert.equal(additive.parseLive("hermes", fs.readFileSync(livePath, "utf8")).model.default, undefined);
+  await switchProvider({ app: "hermes", id: row.id });
+  assert.equal(additive.parseLive("hermes", fs.readFileSync(livePath, "utf8")).model.default, undefined);
+});
+
+test("additive entry-derived models clear stale wrapper ids but retain catalog-derived Hermes models", () => {
+  for (const app of ["hermes", "pi", "grokbuild"]) {
+    const wrapper = additive.sanitizeWrapper(app, { slotKey: "custom", modelId: "old", provider: {} }, "Custom");
+    assert.equal(wrapper.modelId, "", app);
+  }
+  const wrapper = additive.sanitizeWrapper("hermes", {
+    slotKey: "custom", modelId: "old", provider: { model: "", models: { newer: {} } },
+  }, "Custom");
+  assert.equal(wrapper.modelId, "newer");
+});
+
+test("additive hermes: editor saves refuse new shadows of read-only providers for every policy", async () => {
+  const row = await store.createProvider("hermes", {
+    name: "Kimi", settingsConfig: { slotKey: "kimi", provider: HERMES_KIMI_ENTRY },
+  });
+  const view = await editor.buildEditorView("hermes", { id: row.id });
+  const base = additive.parseLive("hermes", view.configText);
+  const edited = structuredClone(base);
+  edited.custom_providers.push({ name: "builtin", api_key: "replacement-key" });
+  // The readonly provider may also arrive after the editor loaded.
+  const livePath = paths.targetFile("hermes", "config").path;
+  const liveText = additive.serializeLive("hermes", { providers: { builtin: { api_key: "original-key" } } });
+  fs.mkdirSync(path.dirname(livePath), { recursive: true });
+  fs.writeFileSync(livePath, liveText);
+  for (const onConflict of [undefined, "keepMine", "keepTheirs"]) {
+    const refused = await saveViaApi("hermes", edited, base, "kimi", row.id, { onConflict, expectedStatus: 400 });
+    assert.match(refused.error, /managed by Hermes/);
+    assert.equal(fs.readFileSync(livePath, "utf8"), liveText);
+    assert.deepEqual((await store.getProvider("hermes", row.id)).settingsConfig, row.settingsConfig);
+  }
+});
+
+test("additive hermes: existing custom entries that overlap the readonly dict remain editable", () => {
+  const base = {
+    providers: { shared: { api_key: "dict-key" } },
+    custom_providers: [{ name: "kimi", ...HERMES_KIMI_ENTRY }, { name: "shared", api_key: "old-key" }],
+  };
+  const edited = structuredClone(base);
+  edited.custom_providers[1].api_key = "new-key";
+  const plan = editor.planSave("hermes", { slotKey: "kimi", provider: HERMES_KIMI_ENTRY }, edited, base, "kimi");
+  const lives = { config: { exists: true, content: additive.serializeLive("hermes", base) } };
+  const next = additive.parseLive("hermes", editor.applyChanges("hermes", lives, plan.changes).config.content);
+  assert.equal(next.custom_providers[1].api_key, "new-key");
+  assert.deepEqual(next.providers, base.providers);
+});
+
+for (const app of additive.ADDITIVE_APPS) {
+  test(`additive ${app}: invalid container types leave the file and active provider unchanged`, async () => {
+    const preset = presets.listPresets(app).find((item) => item.group === "custom");
+    const row = await store.createProvider(app, { name: "Custom", settingsConfig: preset.settingsConfig });
+    const spec = additive.specOf(app);
+    const invalid = {};
+    let cursor = invalid;
+    for (const key of spec.slotContainer.slice(0, -1)) cursor = cursor[key] = {};
+    cursor[spec.slotContainer.at(-1)] = spec.slotContainerKind === "list" ? {} : [];
+    const livePath = paths.targetFile(app, "config").path;
+    const liveText = additive.serializeLive(app, invalid);
+    fs.mkdirSync(path.dirname(livePath), { recursive: true });
+    fs.writeFileSync(livePath, liveText);
+    await assert.rejects(() => switchProvider({ app, id: row.id }), /must be an (array|object)/);
+    assert.equal(fs.readFileSync(livePath, "utf8"), liveText);
+    assert.equal((await store.listProviders(app)).current, null);
+    if (app === "openclaw") {
+      assert.throws(() => additive.projectAdditive(app, { target: row, live: { models: [] } }), /models must be an object/);
+    }
+  });
+}
+
 test("additive presets for hermes/pi/grokbuild carry their native shapes", () => {
   for (const preset of presets.listPresets("hermes")) {
     assert.ok(preset.settingsConfig.provider.api_mode, `${preset.id} carries an api_mode`);

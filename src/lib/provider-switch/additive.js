@@ -245,10 +245,8 @@ function sanitizeWrapper(app, settingsConfig, name) {
   if (app === "hermes") provider = normalizeHermesEntry(provider);
   let modelId = typeof config.modelId === "string" ? config.modelId.trim().slice(0, 300) : "";
   if (spec.modelIdFrom) {
-    // Entry-derived apps keep the wrapper and the entry in sync (the entry
-    // wins when it carries a model id).
-    const derived = modelIdFromEntry(app, provider);
-    if (derived) modelId = derived.slice(0, 300);
+    // The normalized entry is authoritative, including an explicit removal.
+    modelId = modelIdFromEntry(app, provider).slice(0, 300);
   }
   return { slotKey, provider, modelId };
 }
@@ -291,9 +289,13 @@ function isListContainer(spec) {
 
 function ensureContainer(doc, spec) {
   let current = doc;
-  for (const key of spec.slotContainer) {
-    const want = isListContainer(spec) ? [] : {};
-    if (!Array.isArray(current[key]) && !isPlainObject(current[key])) current[key] = want;
+  for (const [index, key] of spec.slotContainer.entries()) {
+    const wantsList = isListContainer(spec) && index === spec.slotContainer.length - 1;
+    if (current[key] === undefined) current[key] = wantsList ? [] : {};
+    if (wantsList ? !Array.isArray(current[key]) : !isPlainObject(current[key])) {
+      const location = spec.slotContainer.slice(0, index + 1).join(".");
+      throw new Error(`${location} must be an ${wantsList ? "array" : "object"}`);
+    }
     current = current[key];
   }
   return current;
@@ -607,8 +609,7 @@ function planSaveAdditive(app, storedRow, edited, base, slotKey) {
   // save the edited value, including the first selection or its removal.
   let modelId = stored.modelId;
   if (spec.modelIdFrom) {
-    const derived = modelIdFromEntry(app, fragment);
-    if (derived) modelId = derived;
+    modelId = modelIdFromEntry(app, fragment);
   } else if (spec.modelPointer) {
     const editedRef = String(valueAt(edited, spec.modelPointer) ?? "").trim();
     modelId = modelIdFromRef(editedRef, key);
@@ -694,6 +695,7 @@ function applyAdditiveChanges(app, lives, changes) {
         if (!isPlainObject(change.after)) {
           throw new Error(`Cannot write a non-object entry to ${spec.slotContainer.join(".")}`);
         }
+        assertSlotWritable(app, live, spec, name);
         writeSlot(live, spec, name, JSON.parse(JSON.stringify(change.after)));
       }
       continue;

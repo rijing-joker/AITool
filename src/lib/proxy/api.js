@@ -56,9 +56,10 @@ function recordTimestamp(record) {
 
 function computeOverview(rows) {
   const now = Date.now();
+  // Disjoint result buckets — canceled rows carry failed=true.
   const success = rows.filter((r) => !r.failed && !r.canceled);
-  const failed = rows.filter((r) => r.failed);
-  const canceled = rows.filter((r) => r.canceled && !r.failed);
+  const failed = rows.filter((r) => r.failed && !r.canceled);
+  const canceled = rows.filter((r) => r.canceled);
   const sumTokens = (list, key) => list.reduce((acc, r) => acc + (Number(r?.tokens?.[key]) || 0), 0);
 
   const byModel = new Map();
@@ -96,8 +97,9 @@ function computeOverview(rows) {
   for (const row of rows) {
     const point = timelineIndex.get(Math.floor(recordTimestamp(row) / 1_800_000) * 1_800_000);
     if (!point) continue;
+    if (row.canceled) continue;
     if (row.failed) point.failures += 1;
-    else if (!row.canceled) point.requests += 1;
+    else point.requests += 1;
     point.total_tokens += Number(row?.tokens?.totalTokens) || 0;
   }
 
@@ -470,9 +472,12 @@ async function handleProxyApiRequest(req, res, url, ctx) {
         if (provider && !String(row.provider || "").toLowerCase().includes(provider)) return false;
         if (failed === "true" && !row.failed) return false;
         if (failed === "false" && row.failed) return false;
-        if (result === "success" && (row.failed || row.canceled)) return false;
-        if (result === "failed" && !row.failed) return false;
-        if (result === "canceled" && (!row.canceled || row.failed)) return false;
+        // Canceled rows carry failed=true (the core reports 499/context
+        // canceled as a failure), so success excludes them via failed and the
+        // canceled bucket must not double-require a clean failure flag.
+        if (result === "success" && row.failed) return false;
+        if (result === "failed" && (!row.failed || row.canceled)) return false;
+        if (result === "canceled" && !row.canceled) return false;
         const ts = recordTimestamp(row);
         if (Number.isFinite(since) && (!Number.isFinite(ts) || ts < since)) return false;
         if (Number.isFinite(until) && (!Number.isFinite(ts) || ts > until)) return false;
@@ -481,9 +486,11 @@ async function handleProxyApiRequest(req, res, url, ctx) {
       const statsOnly = Boolean(url.searchParams.get("stats"));
       let stats;
       if (statsOnly || url.searchParams.get("includeStats") === "1") {
+        // Disjoint result buckets: canceled rows carry failed=true (499 /
+        // context canceled), so counting failed rows alone would swallow them.
         const success = filtered.filter((row) => !row.failed && !row.canceled);
-        const failedRows = filtered.filter((row) => row.failed);
-        const canceled = filtered.filter((row) => row.canceled && !row.failed);
+        const failedRows = filtered.filter((row) => row.failed && !row.canceled);
+        const canceled = filtered.filter((row) => row.canceled);
         const totalTokens = success.reduce((acc, row) => acc + (Number(row?.tokens?.totalTokens) || 0), 0);
         const byModel = new Map();
         const byProvider = new Map();

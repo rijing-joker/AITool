@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-02T06:20:02.103Z",
+  "generatedAt": "2026-10-04T03:16:31.404Z",
   "root": "dashboard/src",
   "rules": {
     "colors": "hex/rgb(a) literals",
@@ -7,7 +7,7 @@
   },
   "totals": {
     "colors": 412,
-    "rawText": 202
+    "rawText": 216
   },
   "files": {
     "dashboard/src/components/InsforgeUserHeaderControls.jsx": {
@@ -261,12 +261,25 @@
     },
     "dashboard/src/pages/requests-tab.jsx": {
       "colors": 0,
-      "rawText": 4,
+      "rawText": 18,
       "rawTextTokens": [
-        ") : record.canceled ? (",
+        ") : record.alias && record.alias !== record.model ? (",
         ") : records.length === 0 ? (",
+        "); case \"cache\": return (",
+        "); case \"cacheRate\": return (",
+        "); case \"input\": return",
+        "); case \"key\": return (",
+        "); case \"provider\": return (",
+        "); case \"request\": return (",
+        "); case \"source\": return (",
+        "); case \"speed\": return (",
+        "); case \"total\": return (",
+        "); case \"ttft\": return (",
         "); return (",
-        "pageSize ? ("
+        "0 ? (",
+        "; case \"output\": return",
+        "; case \"reasoning\": return",
+        "; default: return"
       ]
     },
     "dashboard/src/pages/upstreams-tab.jsx": {

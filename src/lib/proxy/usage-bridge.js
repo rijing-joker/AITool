@@ -3,7 +3,7 @@ const net = require("node:net");
 const path = require("node:path");
 const paths = require("./paths");
 const config = require("./config");
-const { isUsageRecord } = require("./usage-record");
+const { isUsageRecord, normalizeRecord } = require("./usage-record");
 
 // Usage bridge — the AiTool fusion point between the CLIProxyAPI core and the
 // TokenTracker data plane.
@@ -224,13 +224,18 @@ function createRespParser(onArray, onFrame) {
 }
 
 function handleUsagePayload(payloadText) {
-  let record;
+  let payload;
   try {
-    record = JSON.parse(payloadText);
+    payload = JSON.parse(payloadText);
   } catch {
     return;
   }
-  if (!isUsageRecord(record)) return;
+  if (!isUsageRecord(payload)) return;
+  // Canonicalize the core's raw snake_case payload once: the fusion below and
+  // the persisted record store both work on camelCase rows, and the raw
+  // api_key / response_headers never reach the disk.
+  const record = normalizeRecord(payload);
+  if (!record) return;
   const now = new Date().toISOString();
   state.recordsToday += 1;
   state.lastEventAt = now;

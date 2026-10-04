@@ -50,3 +50,24 @@ it("does not fetch an incomplete or reversed custom range", async () => {
   expect(screen.getByRole("alert")).toHaveTextContent("proxy.requests.range.invalid");
   expect(fetch).toHaveBeenCalledTimes(1);
 });
+it("exports the loaded page as a CSV download", async () => {
+  await setup();
+  const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+  const createObjectURL = vi.fn(() => "blob:csv");
+  vi.stubGlobal("URL", Object.assign(URL, { createObjectURL }));
+  fireEvent.click(screen.getByRole("button", { name: "proxy.requests.export" }));
+  expect(click).toHaveBeenCalledTimes(1);
+  expect(createObjectURL).toHaveBeenCalledTimes(1);
+  const blob = createObjectURL.mock.calls[0][0];
+  expect(blob).toBeInstanceOf(Blob);
+  click.mockRestore();
+  vi.unstubAllGlobals();
+});
+it("applies column visibility from the settings dialog", async () => {
+  await setup();
+  fireEvent.click(screen.getByRole("button", { name: "proxy.requests.col_settings" }));
+  const dialog = await screen.findByRole("dialog", { name: "proxy.requests.col_settings" });
+  expect(dialog).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "shared.action.apply" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+});

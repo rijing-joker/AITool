@@ -104,6 +104,65 @@ function parseJsonLine(line) {
   }
 }
 
+// Session usage totals (cc-switch services/session_usage*.rs, minimal): token
+// sums read back from the same transcript files, used for the reader header.
+// `inputInclusive` mirrors the upstream semantics split: Claude reports fresh
+// input tokens with independent cache fields, while Codex/OpenAI and Gemini
+// report input already including cache reads.
+function emptyUsage(inputInclusive) {
+  return {
+    inputTokens: 0,
+    outputTokens: 0,
+    reasoningTokens: 0,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
+    totalTokens: 0,
+    durationMs: null,
+    inputInclusive,
+    model: null,
+  };
+}
+
+function trackSpan(usage, ts) {
+  if (ts == null) return;
+  if (usage.firstTs == null || ts < usage.firstTs) usage.firstTs = ts;
+  if (usage.lastTs == null || ts > usage.lastTs) usage.lastTs = ts;
+}
+
+function finalizeUsage(usage) {
+  if (usage.firstTs != null && usage.lastTs != null && usage.lastTs > usage.firstTs) {
+    usage.durationMs = usage.lastTs - usage.firstTs;
+  }
+  delete usage.firstTs;
+  delete usage.lastTs;
+  // Per-model token sums so the reader header can price a mixed-model
+  // session at each model's own rate (cc-switch prices per imported row).
+  const perModel = usage.perModel instanceof Map ? usage.perModel : new Map();
+  usage.perModel = Array.from(perModel.values()).sort((a, b) =>
+    (b.inputTokens + b.outputTokens + b.reasoningTokens + b.cacheReadTokens + b.cacheCreationTokens)
+    - (a.inputTokens + a.outputTokens + a.reasoningTokens + a.cacheReadTokens + a.cacheCreationTokens));
+  const dominant = usage.perModel[0];
+  usage.model = dominant && dominant.model !== "unknown" ? dominant.model : (usage.model ?? null);
+  return usage;
+}
+
+/** Accumulate one token row into the per-model breakdown. */
+function trackModelUsage(usage, model, row) {
+  const perModel = usage.perModel instanceof Map ? usage.perModel : new Map();
+  usage.perModel = perModel;
+  const key = model || "unknown";
+  let entry = perModel.get(key);
+  if (!entry) {
+    entry = { model: key, inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 };
+    perModel.set(key, entry);
+  }
+  entry.inputTokens += row.inputTokens;
+  entry.outputTokens += row.outputTokens;
+  entry.reasoningTokens += row.reasoningTokens;
+  entry.cacheReadTokens += row.cacheReadTokens;
+  entry.cacheCreationTokens += row.cacheCreationTokens;
+}
+
 async function collectJsonlFiles(root, files = []) {
   let entries;
   try {
@@ -208,10 +267,15 @@ async function claudeParseSession(filePath) {
 async function claudeReadMessages(filePath) {
   const raw = await fsp.readFile(filePath, "utf8");
   const messages = [];
+  // Claude can rewrite the same assistant message (streaming retries); keep
+  // the row with the larger output_tokens per message id, like cc-switch does.
+  const usageById = new Map();
+  const usage = emptyUsage(false);
   for (const line of raw.split("\n")) {
     if (line === "") continue;
     const value = parseJsonLine(line);
     if (!value || value.isMeta === true) continue;
+    trackSpan(usage, parseTimestampToMs(value.timestamp));
     const message = value.message;
     if (!message) continue;
     let role = typeof message.role === "string" ? message.role : "unknown";
@@ -221,10 +285,42 @@ async function claudeReadMessages(filePath) {
       if (allToolResults) role = "tool";
     }
     const content = extractText(message.content);
-    if (content.trim() === "") continue;
-    messages.push({ role, content, ts: parseTimestampToMs(value.timestamp) });
+    if (content.trim() !== "") messages.push({ role, content, ts: parseTimestampToMs(value.timestamp) });
+
+    if (role === "assistant" && message.usage && typeof message.usage === "object") {
+      // cc-switch imports only id-carrying assistant usage rows; synthetic or
+      // error rows without a message id are skipped rather than summed.
+      const id = typeof message.id === "string" && message.id ? message.id : null;
+      if (id) {
+        const row = {
+          inputTokens: Number(message.usage.input_tokens) || 0,
+          outputTokens: Number(message.usage.output_tokens) || 0,
+          cacheReadTokens: Number(message.usage.cache_read_input_tokens) || 0,
+          cacheCreationTokens: Number(message.usage.cache_creation_input_tokens) || 0,
+          reasoningTokens: 0,
+          model: typeof message.model === "string" && message.model ? message.model : null,
+          stopReason: typeof message.stop_reason === "string" && message.stop_reason ? message.stop_reason : null,
+        };
+        const existing = usageById.get(id);
+        // Same retry-write rule as upstream: a row with a stop_reason always
+        // beats one without; among equal presence the larger output wins.
+        if (!existing
+          || (row.stopReason && !existing.stopReason)
+          || (!row.stopReason === !existing.stopReason && row.outputTokens > existing.outputTokens)) {
+          usageById.set(id, row);
+        }
+      }
+    }
   }
-  return messages;
+  for (const row of usageById.values()) {
+    usage.inputTokens += row.inputTokens;
+    usage.outputTokens += row.outputTokens;
+    usage.cacheReadTokens += row.cacheReadTokens;
+    usage.cacheCreationTokens += row.cacheCreationTokens;
+    trackModelUsage(usage, row.model, row);
+  }
+  usage.totalTokens = usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheCreationTokens;
+  return { messages, usage: finalizeUsage(usage) };
 }
 
 // ---------------------------------------------------------------------------
@@ -308,10 +404,35 @@ async function codexParseSession(filePath) {
 async function codexReadMessages(filePath) {
   const raw = await fsp.readFile(filePath, "utf8");
   const messages = [];
+  // token_count events carry cumulative totals; the last one is the session
+  // total. Input is inclusive of cached tokens (OpenAI semantics).
+  const usage = emptyUsage(true);
+  let usageSeen = false;
   for (const line of raw.split("\n")) {
     if (line === "") continue;
     const value = parseJsonLine(line);
-    if (!value || value.type !== "response_item") continue;
+    if (!value) continue;
+    trackSpan(usage, parseTimestampToMs(value.timestamp));
+    if (value.type === "turn_context" && typeof value.payload?.model === "string" && value.payload.model) {
+      usage.model = value.payload.model;
+    }
+    if (value.type === "event_msg" && value.payload?.type === "token_count") {
+      const info = value.payload.info;
+      // Sessions can switch models mid-flight; the model rides turn_context
+      // and the token_count info block — the last one seen wins.
+      if (typeof info?.model === "string" && info.model) usage.model = info.model;
+      else if (typeof info?.model_name === "string" && info.model_name) usage.model = info.model_name;
+      const total = info?.total_token_usage;
+      if (total && typeof total === "object") {
+        usage.inputTokens = Number(total.input_tokens) || 0;
+        usage.outputTokens = Number(total.output_tokens) || 0;
+        usage.reasoningTokens = Number(total.reasoning_output_tokens) || 0;
+        usage.cacheReadTokens = Number(total.cached_input_tokens ?? total.cache_read_input_tokens) || 0;
+        usage.totalTokens = Number(total.total_tokens) || (usage.inputTokens + usage.outputTokens);
+        usageSeen = true;
+      }
+    }
+    if (value.type !== "response_item") continue;
     const payload = value.payload;
     if (!payload) continue;
     let role;
@@ -331,7 +452,15 @@ async function codexReadMessages(filePath) {
     if (content.trim() === "") continue;
     messages.push({ role, content, ts: parseTimestampToMs(value.timestamp) });
   }
-  return messages;
+  if (!usageSeen) return { messages, usage: null };
+  trackModelUsage(usage, usage.model, {
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    reasoningTokens: usage.reasoningTokens,
+    cacheReadTokens: usage.cacheReadTokens,
+    cacheCreationTokens: 0,
+  });
+  return { messages, usage: finalizeUsage(usage) };
 }
 
 // ---------------------------------------------------------------------------
@@ -412,9 +541,32 @@ async function geminiReadMessages(filePath) {
   }
   const msgs = Array.isArray(value?.messages) ? value.messages : [];
   const messages = [];
+  // Per-message `tokens` fields ({input, output, thoughts, cached}); input is
+  // inclusive of cached tokens (Gemini semantics).
+  const usage = emptyUsage(true);
+  const startTs = parseTimestampToMs(value?.startTime);
+  const endTs = parseTimestampToMs(value?.lastUpdated) ?? startTs;
+  trackSpan(usage, startTs);
+  trackSpan(usage, endTs);
   for (const msg of msgs) {
     const type = msg?.type;
     if (type !== "user" && type !== "gemini") continue;
+    if (typeof msg.model === "string" && msg.model) usage.model = msg.model;
+    const tokens = msg.tokens && typeof msg.tokens === "object" ? msg.tokens : null;
+    if (tokens) {
+      const row = {
+        inputTokens: Number(tokens.input) || 0,
+        outputTokens: Number(tokens.output) || 0,
+        reasoningTokens: Number(tokens.thoughts) || 0,
+        cacheReadTokens: Number(tokens.cached) || 0,
+        cacheCreationTokens: 0,
+      };
+      usage.inputTokens += row.inputTokens;
+      usage.outputTokens += row.outputTokens;
+      usage.reasoningTokens += row.reasoningTokens;
+      usage.cacheReadTokens += row.cacheReadTokens;
+      trackModelUsage(usage, msg.model, row);
+    }
     let content = typeof msg.content === "string"
       ? msg.content
       : Array.isArray(msg.content)
@@ -430,7 +582,8 @@ async function geminiReadMessages(filePath) {
     if (content.trim() === "") continue;
     messages.push({ role: type === "gemini" ? "assistant" : "user", content, ts: parseTimestampToMs(msg.timestamp) });
   }
-  return messages;
+  usage.totalTokens = usage.inputTokens + usage.outputTokens + usage.reasoningTokens;
+  return { messages, usage: finalizeUsage(usage) };
 }
 
 // ---------------------------------------------------------------------------
@@ -501,12 +654,12 @@ async function readSession({ app, sourcePath, home, env = process.env } = {}) {
   if (app === "claude" && isClaudeAgentSession(path.basename(resolved))) {
     throw new Error("Not a claude session file");
   }
-  const messages = app === "claude"
+  const transcript = app === "claude"
     ? await claudeReadMessages(resolved)
     : app === "codex"
       ? await codexReadMessages(resolved)
       : await geminiReadMessages(resolved);
-  return { sourcePath: resolved, messages };
+  return { sourcePath: resolved, messages: transcript.messages, usage: transcript.usage };
 }
 
 function listSessionApps({ home, env = process.env } = {}) {

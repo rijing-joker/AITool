@@ -56,6 +56,24 @@ it("does not fetch an incomplete or reversed custom range", async () => {
   expect(screen.getByRole("alert")).toHaveTextContent("proxy.requests.range.invalid");
   expect(fetch).toHaveBeenCalledTimes(1);
 });
+it("renders the estimated cost column and stats tile from pricing", async () => {
+  await setup({
+    records: [{ ...response.records[0], costUsd: 0.0013575 }],
+    stats: { ...response.stats, total_cost_usd: 0.0025 },
+  });
+  expect(screen.getByTitle("proxy.requests.col.cost")).toBeInTheDocument();
+  expect(screen.getByText("$0.0014")).toBeInTheDocument();
+  const tile = screen.getByText("proxy.requests.cost").closest("div");
+  expect(tile).toHaveTextContent("$0.0025");
+});
+it("keeps tiny and zero costs readable in the cost column and tile", async () => {
+  await setup({
+    records: [{ ...response.records[0], costUsd: 0.0000042 }],
+    stats: { ...response.stats, total_cost_usd: 0 },
+  });
+  expect(screen.getByText("<$0.0001")).toBeInTheDocument();
+  expect(screen.getByText("$0")).toBeInTheDocument();
+});
 it("exports the loaded page as a CSV download with the injection guard", async () => {
   // A model id that would be interpreted as a formula by spreadsheet apps
   // must be neutralized by the upstream's `'`-prefix guard.
@@ -80,6 +98,7 @@ it("exports the loaded page as a CSV download with the injection guard", async (
   expect([bytes[0], bytes[1], bytes[2]]).toEqual([0xef, 0xbb, 0xbf]); // UTF-8 BOM for Excel
   const csv = bytes.toString("utf8");
   expect(csv).toContain('"total_tokens"');
+  expect(csv).toContain('"estimated_cost_usd"');
   expect(csv).toContain('"fixture-model"');
   expect(csv).toContain('"\'=cmd|\'!A1"'); // guarded, quoted, not bare `=…`
   click.mockRestore();

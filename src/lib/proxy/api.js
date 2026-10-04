@@ -7,6 +7,7 @@ const manager = require("./manager");
 const bridge = require("./usage-bridge");
 const management = require("./management");
 const recordStore = require("./usage-records").createUsageRecordStore();
+const pricing = require("./pricing");
 const coreInstall = require("./core-install").getInstance;
 
 // Dashboard-facing REST surface for the proxy layer. Mounted by local-api.js
@@ -459,6 +460,12 @@ async function handleProxyApiRequest(req, res, url, ctx) {
       json(res, { ok: true, overview: computeOverview(await recordStore.readRecords(paths.usageDir)), bridge: bridge.bridgeStatus() });
       return true;
     }
+    if (p === "/api/proxy/pricing" && method === "GET") {
+      // Read-only pricing sync state for the dashboard's cost column tooltip.
+      const snapshot = await pricing.getPricingSnapshot(paths.pricingPath);
+      json(res, { ok: true, modelCount: snapshot.modelCount, fetchedAt: snapshot.fetchedAt, stale: snapshot.stale, syncing: snapshot.syncing });
+      return true;
+    }
     if (p === "/api/proxy/usage/records") {
       const rows = await recordStore.readRecords(paths.usageDir);
       const model = (url.searchParams.get("model") || "").trim().toLowerCase();
@@ -523,6 +530,24 @@ async function handleProxyApiRequest(req, res, url, ctx) {
           providers: Array.from(byProvider.values()).sort((a, b) => b.requests - a.requests),
         };
       }
+      // Cost estimation (models.dev pricing): add a total over all filtered
+      // successful requests and annotate the returned page. Without a pricing
+      // index (never synced, offline) stats and records pass through
+      // untouched. This runs before the stats-only early return so both
+      // response shapes carry the same stats object.
+      const pricingSnapshot = await pricing.getPricingSnapshot(paths.pricingPath);
+      const pricingModels = pricingSnapshot.models;
+      if (stats && pricingModels) {
+        let totalCostUsd = 0;
+        // Same disjoint success bucket as the stats aggregation above (the
+        // `success` list itself is scoped to that block).
+        for (const row of filtered) {
+          if (row.failed || row.canceled) continue;
+          const cost = pricing.estimateCostUsd(pricingModels, String(row.response_model || row.model || ""), row.tokens, { executorType: row.executor_type });
+          if (cost != null) totalCostUsd += cost;
+        }
+        stats.total_cost_usd = totalCostUsd;
+      }
       if (statsOnly) {
         json(res, { ok: true, stats });
         return true;
@@ -530,12 +555,16 @@ async function handleProxyApiRequest(req, res, url, ctx) {
       const pageSize = Math.min(Math.max(Number(url.searchParams.get("pageSize")) || 50, 1), 500);
       const page = Math.max(Number(url.searchParams.get("page")) || 0, 0);
       const start = page * pageSize;
+      const pageRecords = filtered.slice(start, start + pageSize).map((record) => {
+        const costUsd = pricing.estimateCostUsd(pricingModels, String(record.response_model || record.model || ""), record.tokens, { executorType: record.executor_type });
+        return costUsd == null ? record : { ...record, costUsd };
+      });
       json(res, {
         ok: true,
         total: filtered.length,
         page,
         pageSize,
-        records: filtered.slice(start, start + pageSize),
+        records: pageRecords,
         ...(stats ? { stats } : {}),
       });
       return true;

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useId, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, Brain, ChevronLeft, ChevronRight, Columns3, Database, Download, RefreshCw, RotateCcw, TriangleAlert, Zap } from "lucide-react";
 import { copy } from "../lib/copy";
+import { formatCostUsd } from "../lib/cost-format";
 import { Card } from "../ui/components";
 import { ModalFrame } from "../ui/components/ModalFrame";
 import { showToast } from "../ui/components/Toast";
@@ -76,6 +77,7 @@ const EVENT_COLUMNS = [
   { key: "speed", labelKey: "proxy.requests.col.speed", defaultWidth: 88, minWidth: 72 },
   { key: "total", labelKey: "proxy.requests.tokens", defaultWidth: 148, minWidth: 116 },
   { key: "cache", labelKey: "proxy.requests.col.cache", defaultWidth: 132, minWidth: 100 },
+  { key: "cost", labelKey: "proxy.requests.col.cost", defaultWidth: 96, minWidth: 72 },
   { key: "provider", labelKey: "proxy.requests.provider", defaultWidth: 110, minWidth: 88 },
   { key: "input", labelKey: "proxy.requests.detail.input", defaultWidth: 84, minWidth: 60 },
   { key: "output", labelKey: "proxy.requests.detail.output", defaultWidth: 84, minWidth: 60 },
@@ -85,24 +87,55 @@ const EVENT_COLUMNS = [
 ];
 
 const DEFAULT_VISIBLE_COLUMNS = [
+  "time", "key", "source", "model", "result", "request", "latency", "speed", "total", "cache", "cost", "provider",
+];
+
+// Defaults before the cost column joined. Seeds the migration marker so only
+// newly-added defaults one-time-merge into a saved layout — columns the user
+// deliberately hid (from the old defaults) stay hidden.
+const PREVIOUS_DEFAULT_VISIBLE_COLUMNS = [
   "time", "key", "source", "model", "result", "request", "latency", "speed", "total", "cache", "provider",
 ];
 
 const WIDTHS_STORAGE_KEY = "aitool.usage-events-col-widths.v1";
 const VISIBLE_STORAGE_KEY = "aitool.usage-events-visible-cols.v1";
+// Defaults already offered to the saved layout; lets later-added columns (e.g.
+// cost) start visible once without re-appearing after the user hides them.
+const MIGRATED_DEFAULTS_STORAGE_KEY = "aitool.usage-events-migrated-defaults.v1";
 const MAX_COLUMN_WIDTH = 800;
 
 const allColumnKeys = () => EVENT_COLUMNS.map((column) => column.key);
 
+function persistMigratedDefaults(keys) {
+  try { localStorage.setItem(MIGRATED_DEFAULTS_STORAGE_KEY, JSON.stringify([...new Set(keys)])); } catch {}
+}
+
 function loadVisibleColumns() {
   try {
     const raw = localStorage.getItem(VISIBLE_STORAGE_KEY);
-    if (!raw) return [...DEFAULT_VISIBLE_COLUMNS];
+    if (!raw) {
+      persistMigratedDefaults(DEFAULT_VISIBLE_COLUMNS);
+      return [...DEFAULT_VISIBLE_COLUMNS];
+    }
     const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [...DEFAULT_VISIBLE_COLUMNS];
+    if (!Array.isArray(parsed)) {
+      persistMigratedDefaults(DEFAULT_VISIBLE_COLUMNS);
+      return [...DEFAULT_VISIBLE_COLUMNS];
+    }
     const known = new Set(allColumnKeys());
     const saved = [...new Set(parsed)].filter((key) => typeof key === "string" && known.has(key));
-    return saved.length > 0 ? saved : [...DEFAULT_VISIBLE_COLUMNS];
+    if (saved.length === 0) {
+      persistMigratedDefaults(DEFAULT_VISIBLE_COLUMNS);
+      return [...DEFAULT_VISIBLE_COLUMNS];
+    }
+    let migrated = null;
+    try { migrated = JSON.parse(localStorage.getItem(MIGRATED_DEFAULTS_STORAGE_KEY) || "null"); } catch {}
+    const migratedSet = new Set(Array.isArray(migrated) && migrated.length > 0 ? migrated : PREVIOUS_DEFAULT_VISIBLE_COLUMNS);
+    for (const key of DEFAULT_VISIBLE_COLUMNS) {
+      if (!migratedSet.has(key) && !saved.includes(key)) saved.push(key);
+    }
+    persistMigratedDefaults([...DEFAULT_VISIBLE_COLUMNS, ...migratedSet]);
+    return saved;
   } catch {
     return [...DEFAULT_VISIBLE_COLUMNS];
   }
@@ -340,6 +373,14 @@ function EventCell({ record, column }) {
           </span>
         </td>
       );
+    case "cost": {
+      const costText = formatCostUsd(record.costUsd) ?? "—";
+      return (
+        <td className="px-2 py-2 align-top text-xs tabular-nums" title={record.costUsd != null ? `$${record.costUsd.toFixed(6)}` : undefined}>
+          {costText}
+        </td>
+      );
+    }
     case "input":
       return <td className="px-2 py-2 align-top text-xs tabular-nums" title={`${formatCount(tokens.inputTokens)} tokens`}>{formatTokens(tokens.inputTokens)}</td>;
     case "output":
@@ -430,7 +471,7 @@ function StatTile({ label, value, tone }) {
 }
 
 function exportCsv(records, page) {
-  const headers = ["id", "request_id", "timestamp", "api_key_display", "api_key_hash", "source", "provider", "model", "alias", "response_model", "reasoning_effort", "endpoint", "failed", "canceled", "failure_status", "failure_body", "latency_ms", "ttft_ms", "input_tokens", "output_tokens", "reasoning_tokens", "cache_read_tokens", "cache_creation_tokens", "total_tokens"];
+  const headers = ["id", "request_id", "timestamp", "api_key_display", "api_key_hash", "source", "provider", "model", "alias", "response_model", "reasoning_effort", "endpoint", "failed", "canceled", "failure_status", "failure_body", "latency_ms", "ttft_ms", "input_tokens", "output_tokens", "reasoning_tokens", "cache_read_tokens", "cache_creation_tokens", "total_tokens", "estimated_cost_usd"];
   const cell = (value) => {
     const text = value == null ? "" : String(value);
     // Guard against CSV injection the same way the upstream port does.
@@ -444,6 +485,7 @@ function exportCsv(records, page) {
     record.failure_status, record.failure_body, record.latencyMs, record.ttftMs,
     record.tokens?.inputTokens, record.tokens?.outputTokens, record.tokens?.reasoningTokens,
     record.tokens?.cacheReadTokens, record.tokens?.cacheCreationTokens, record.tokens?.totalTokens,
+    record.costUsd,
   ]);
   const csv = `\uFEFF${[headers, ...rows].map((row) => row.map(cell).join(",")).join("\r\n")}`;
   const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8;" }));
@@ -770,6 +812,9 @@ export function RequestsTab() {
           <StatTile label={copy("proxy.requests.filter.failed")} value={fullTokens.format(stats.failure_count)} tone="text-red-600 dark:text-red-400" />
           <StatTile label={copy("proxy.requests.canceled")} value={fullTokens.format(stats.canceled_count)} />
           <StatTile label={copy("proxy.requests.tokens")} value={formatTokens(stats.total_tokens)} />
+          {stats.total_cost_usd != null ? (
+            <StatTile label={copy("proxy.requests.cost")} value={formatCostUsd(stats.total_cost_usd) ?? "—"} />
+          ) : null}
           <StatTile
             label={copy("proxy.metric.top_model")}
             value={stats.models?.[0]?.model || "—"}

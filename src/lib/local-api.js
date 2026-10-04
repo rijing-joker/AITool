@@ -1748,7 +1748,26 @@ function createLocalApiHandler({ queuePath, serverVersion = null }) {
         const app = url.searchParams.get("app") || "claude";
         const sourcePath = url.searchParams.get("path") || "";
         try {
-          json(res, { ok: true, app, ...(await sessions.readSession({ app, sourcePath })) });
+          const session = await sessions.readSession({ app, sourcePath });
+          // Reader-header cost (cc-switch 31e5ae3): price each model's share of
+          // the session at its own rate (mixed-model sessions), using the
+          // session's own input semantics.
+          const perModel = session.usage?.perModel;
+          if (Array.isArray(perModel) && perModel.length > 0) {
+            const pricing = require("./proxy/pricing");
+            const snapshot = await pricing.getPricingSnapshot(require("./proxy/paths").pricingPath);
+            let totalCostUsd = 0;
+            let pricedAny = false;
+            for (const entry of perModel) {
+              const costUsd = pricing.estimateCostUsd(snapshot.models, entry.model, entry, { inputInclusive: session.usage.inputInclusive });
+              if (costUsd != null) {
+                totalCostUsd += costUsd;
+                pricedAny = true;
+              }
+            }
+            if (pricedAny) session.usage.estimatedCostUsd = totalCostUsd;
+          }
+          json(res, { ok: true, app, ...session });
         } catch (error) {
           json(res, { ok: false, error: error?.message || String(error) }, 400);
         }

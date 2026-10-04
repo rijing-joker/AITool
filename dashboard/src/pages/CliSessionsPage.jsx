@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, History, RefreshCw, Search, User } from "lucide-react";
+import { ArrowLeft, Coins, History, RefreshCw, Search, Timer, User } from "lucide-react";
 import { copy } from "../lib/copy";
+import { formatCostUsd } from "../lib/cost-format";
 import { Input } from "../ui/components";
 import { LocalOnlyNotice } from "../components/LocalOnlyNotice.jsx";
 import { isLocalDashboardHost } from "../lib/host-mode";
@@ -24,6 +25,22 @@ function formatTime(ms) {
   return new Date(ms).toLocaleString([], {
     year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false,
   });
+}
+
+const compactNumber = new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 });
+
+function formatUsageTokens(value) {
+  if (!Number.isFinite(value) || value <= 0) return null;
+  return compactNumber.format(value);
+}
+
+function formatUsageDuration(ms) {
+  if (!Number.isFinite(ms) || ms <= 0) return null;
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m${seconds % 60}s`;
+  return `${Math.floor(minutes / 60)}h${minutes % 60}m`;
 }
 
 function relativeFrom(ms) {
@@ -63,6 +80,37 @@ function roleKey(role) {
   return ROLE_STYLES[role] ? role : "unknown";
 }
 
+// Reader-header usage chips (cc-switch 31e5ae3): total tokens, active span and
+// the models.dev-estimated cost, when the server could price the session.
+function UsageChips({ usage }) {
+  if (!usage || typeof usage !== "object") return null;
+  const chips = [];
+  const tokens = formatUsageTokens(usage.totalTokens);
+  if (tokens != null) {
+    chips.push({ key: "tokens", icon: Coins, label: copy("clisessions.usage.tokens"), value: tokens, title: String(usage.totalTokens) });
+  }
+  const duration = formatUsageDuration(usage.durationMs);
+  if (duration != null) {
+    chips.push({ key: "duration", icon: Timer, label: copy("clisessions.usage.duration"), value: duration, title: `${Math.round(usage.durationMs / 1000)}s` });
+  }
+  const cost = formatCostUsd(usage.estimatedCostUsd);
+  if (cost != null) {
+    chips.push({ key: "cost", label: copy("clisessions.usage.cost"), value: cost, title: usage.model ? `$${usage.estimatedCostUsd.toFixed(6)} · ${usage.model}` : undefined });
+  }
+  if (chips.length === 0) return null;
+  return (
+    <div className="flex shrink-0 flex-wrap items-center justify-end gap-x-2 gap-y-0.5 text-[11px] tabular-nums text-oai-gray-500 dark:text-oai-gray-400">
+      {chips.map((chip) => (
+        <span key={chip.key} className="inline-flex items-center gap-1" title={chip.title}>
+          {chip.icon ? <chip.icon size={11} aria-hidden="true" /> : null}
+          <span className="hidden sm:inline">{chip.label}</span>
+          <span className="font-medium text-oai-gray-700 dark:text-oai-gray-300">{chip.value}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function TranscriptRow({ message }) {
   const style = ROLE_STYLES[roleKey(message.role)];
   return (
@@ -90,6 +138,7 @@ export function CliSessionsPage() {
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState(null);
   const [messages, setMessages] = useState(null);
+  const [usage, setUsage] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [deferredSearch, setDeferredSearch] = useState("");
@@ -135,6 +184,7 @@ export function CliSessionsPage() {
     const controller = new AbortController();
     setSelected(null);
     setMessages(null);
+    setUsage(null);
     void loadSessions(activeApp, controller.signal);
     return () => controller.abort();
   }, [activeApp, loadSessions]);
@@ -147,15 +197,18 @@ export function CliSessionsPage() {
     const requestId = ++openRequestIdRef.current;
     setSelected(session);
     setMessages(null);
+    setUsage(null);
     try {
       const params = new URLSearchParams({ app: activeApp, path: session.sourcePath });
       const data = await fetch(`/api/cli-sessions/read?${params}`, { cache: "no-store" }).then((response) => response.json());
       if (openRequestIdRef.current !== requestId) return;
       if (!data?.ok) throw new Error(data?.error || "HTTP transcript");
       setMessages(data.messages ?? []);
+      setUsage(data.usage ?? null);
     } catch (e) {
       if (openRequestIdRef.current !== requestId) return;
       setMessages([]);
+      setUsage(null);
       setError(e instanceof Error ? e.message : String(e));
     }
   };
@@ -308,6 +361,7 @@ export function CliSessionsPage() {
                   onClick={() => {
                     setSelected(null);
                     setMessages(null);
+                    setUsage(null);
                   }}
                   aria-label={copy("clisessions.back")}
                   className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-oai-gray-500 hover:bg-oai-gray-100 lg:hidden dark:hover:bg-oai-gray-800"
@@ -320,6 +374,7 @@ export function CliSessionsPage() {
                     <p className="truncate font-mono text-[10px] text-oai-gray-400" title={selected.resumeCommand}>{selected.resumeCommand}</p>
                   ) : null}
                 </div>
+                <UsageChips usage={usage} />
               </div>
               <div className="flex flex-col gap-2.5 overflow-y-auto p-4">
                 {transcriptContent}

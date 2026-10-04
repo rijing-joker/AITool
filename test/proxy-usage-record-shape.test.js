@@ -113,8 +113,13 @@ test("bridge fusion accumulates snake_case tokens into half-hour buckets", (t) =
 
   const row = JSON.parse(fs.readFileSync(queuePath, "utf8").split("\n").filter(Boolean).at(-1));
   assert.equal(row.conversation_count, 1);
-  assert.equal(row.input_tokens, 100, "the fusion reads the normalized tokens, not zeros");
+  // OpenAI-family input includes the cache amounts; the fold applies the
+  // queue contract (input_tokens = non-cached only) so computeRowCost does
+  // not double-bill the cached share. Reasoning rides inside output.
+  assert.equal(row.input_tokens, 32, "the fusion folds fresh input for cache-inclusive upstreams");
   assert.equal(row.cached_input_tokens, 60);
+  assert.equal(row.cache_creation_input_tokens, 8);
+  assert.equal(row.reasoning_output_tokens, 0);
   assert.equal(row.output_tokens, 40);
   assert.equal(row.total_tokens, 150);
 });

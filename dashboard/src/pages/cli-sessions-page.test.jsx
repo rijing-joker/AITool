@@ -42,7 +42,7 @@ it("lists sessions for the active app and opens the transcript", async () => {
       return { json: async () => ({ ok: true, app: "claude", messages: [
         { role: "user", content: "Fix the login bug", ts: 1_700_000_000_000 },
         { role: "assistant", content: "[Tool: Read]\nOn it.", ts: 1_700_000_000_001 },
-      ] }) };
+      ], usage: { totalTokens: 1120, durationMs: 10000, model: "claude-sonnet-5", estimatedCostUsd: 0.0013575 } }) };
     }
     throw new Error(`unexpected fetch: ${path}`);
   });
@@ -55,6 +55,15 @@ it("lists sessions for the active app and opens the transcript", async () => {
   expect(screen.getByText("clisessions.role.user")).toBeInTheDocument();
   expect(screen.getByText("clisessions.role.assistant")).toBeInTheDocument();
   expect(screen.getByText(/On it\./)).toBeInTheDocument();
+  // Reader-header usage chips: tokens, active span and the estimated cost.
+  // The token format is Intl-locale-dependent — derive the expectation.
+  const expectedTokens = new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(1120);
+  expect(screen.getByText("clisessions.usage.tokens")).toBeInTheDocument();
+  expect(screen.getByText(expectedTokens)).toBeInTheDocument();
+  expect(screen.getByText("clisessions.usage.duration")).toBeInTheDocument();
+  expect(screen.getByText("10s")).toBeInTheDocument();
+  expect(screen.getByText("clisessions.usage.cost")).toBeInTheDocument();
+  expect(screen.getByText("$0.0014")).toBeInTheDocument();
   vi.unstubAllGlobals();
 });
 

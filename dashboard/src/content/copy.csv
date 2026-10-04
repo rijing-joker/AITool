@@ -1764,6 +1764,8 @@ proxy.requests.col.request,proxy,ProxyPage,ProxyPage,requests_col_request,Reques
 proxy.requests.col.speed,proxy,ProxyPage,ProxyPage,requests_col_speed,Speed,,active
 proxy.requests.col.cache,proxy,ProxyPage,ProxyPage,requests_col_cache,Cache,,active
 proxy.requests.col.cacheRate,proxy,ProxyPage,ProxyPage,requests_col_cacheRate,Cache hit,,active
+proxy.requests.col.cost,proxy,ProxyPage,ProxyPage,requests_col_cost,Cost,,active
+proxy.requests.cost,proxy,ProxyPage,ProxyPage,requests_cost,Est. cost,,active
 proxy.requests.col.ttft,proxy,ProxyPage,ProxyPage,requests_col_ttft,TTFT,,active
 proxy.requests.col_settings,proxy,ProxyPage,ProxyPage,requests_col_settings,Columns,,active
 proxy.requests.col_reset,proxy,ProxyPage,ProxyPage,requests_col_reset,Reset column widths,,active
@@ -2264,6 +2266,9 @@ clisessions.role.user,clisessions,CliSessionsPage,CliSessionsPage,role_user,User
 clisessions.role.assistant,clisessions,CliSessionsPage,CliSessionsPage,role_assistant,Assistant,,active
 clisessions.role.tool,clisessions,CliSessionsPage,CliSessionsPage,role_tool,Tool,,active
 clisessions.role.unknown,clisessions,CliSessionsPage,CliSessionsPage,role_unknown,System,,active
+clisessions.usage.tokens,clisessions,CliSessionsPage,CliSessionsPage,usage_tokens,Tokens,,active
+clisessions.usage.duration,clisessions,CliSessionsPage,CliSessionsPage,usage_duration,Span,,active
+clisessions.usage.cost,clisessions,CliSessionsPage,CliSessionsPage,usage_cost,Est. cost,,active
 pswitch.title,pswitch,ProviderSwitchPage,ProviderSwitchPage,title,Provider Configs,,active
 pswitch.subtitle,pswitch,ProviderSwitchPage,ProviderSwitchPage,subtitle,Manage provider presets for your AI CLI tools and switch their live config files in one click. Ported from cc-switch.,,active
 pswitch.storage_path,pswitch,ProviderSwitchPage,ProviderSwitchPage,storage_path,Presets stored at {{path}},,active

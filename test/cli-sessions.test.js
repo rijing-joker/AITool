@@ -203,3 +203,101 @@ test("readSession refuses paths outside the app roots and unsupported apps", asy
     /outside this app's session roots/,
   );
 });
+
+test("session usage: claude dedupes retries, codex takes the last cumulative count, gemini sums", async () => {
+  // Claude: two writes of the same assistant message id keep the larger
+  // output; usage fields are independent of input (fresh-input semantics).
+  const claudePath = writeClaudeSession(tmpHome, "session-usage", [
+    JSON.stringify({ sessionId: "session-usage", cwd: "/tmp/p", timestamp: "2026-10-01T10:00:00Z" }),
+    JSON.stringify({ type: "user", message: { role: "user", content: "go" }, timestamp: "2026-10-01T10:00:01Z" }),
+    JSON.stringify({ type: "assistant", timestamp: "2026-10-01T10:00:02Z", message: { id: "msg_1", role: "assistant", model: "claude-sonnet-5", usage: { input_tokens: 100, output_tokens: 40, cache_read_input_tokens: 900, cache_creation_input_tokens: 10 }, content: [{ type: "text", text: "partial" }] } }),
+    JSON.stringify({ type: "assistant", timestamp: "2026-10-01T10:00:03Z", message: { id: "msg_1", role: "assistant", model: "claude-sonnet-5", usage: { input_tokens: 100, output_tokens: 60, cache_read_input_tokens: 900, cache_creation_input_tokens: 10 }, content: [{ type: "text", text: "final" }] } }),
+    JSON.stringify({ type: "assistant", timestamp: "2026-10-01T10:00:10Z", message: { id: "msg_2", role: "assistant", model: "claude-sonnet-5", usage: { input_tokens: 20, output_tokens: 30, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }, content: [{ type: "text", text: "more" }] } }),
+  ]);
+  const claude = await sessions.readSession({ app: "claude", sourcePath: claudePath, home: tmpHome });
+  assert.deepEqual(
+    { inputTokens: claude.usage.inputTokens, outputTokens: claude.usage.outputTokens, cacheReadTokens: claude.usage.cacheReadTokens, cacheCreationTokens: claude.usage.cacheCreationTokens, totalTokens: claude.usage.totalTokens, durationMs: claude.usage.durationMs, model: claude.usage.model, inputInclusive: claude.usage.inputInclusive },
+    { inputTokens: 120, outputTokens: 90, cacheReadTokens: 900, cacheCreationTokens: 10, totalTokens: 1120, durationMs: 10000, model: "claude-sonnet-5", inputInclusive: false },
+  );
+
+  // Codex: token_count events carry cumulative totals; the last one wins and
+  // the model comes from turn_context. Input includes cached tokens.
+  const codexRoot = path.join(tmpHome, ".codex", "sessions", "2026", "10", "01");
+  fs.mkdirSync(codexRoot, { recursive: true });
+  const codexPath = path.join(codexRoot, "rollout-usage.jsonl");
+  fs.writeFileSync(codexPath, [
+    JSON.stringify({ timestamp: "2026-10-01T11:00:00Z", type: "session_meta", payload: { id: "codex-usage", cwd: "/tmp/c" } }),
+    JSON.stringify({ timestamp: "2026-10-01T11:00:01Z", type: "turn_context", payload: { model: "gpt-5.2" } }),
+    JSON.stringify({ timestamp: "2026-10-01T11:00:02Z", type: "event_msg", payload: { type: "token_count", info: { total_token_usage: { input_tokens: 100, cached_input_tokens: 40, output_tokens: 50, reasoning_output_tokens: 20, total_tokens: 150 } } } }),
+    JSON.stringify({ timestamp: "2026-10-01T11:00:20Z", type: "event_msg", payload: { type: "token_count", info: { total_token_usage: { input_tokens: 300, cached_input_tokens: 140, output_tokens: 90, reasoning_output_tokens: 40, total_tokens: 390 } } } }),
+  ].join("\n") + "\n");
+  const codex = await sessions.readSession({ app: "codex", sourcePath: codexPath, home: tmpHome });
+  assert.deepEqual(
+    { inputTokens: codex.usage.inputTokens, cacheReadTokens: codex.usage.cacheReadTokens, outputTokens: codex.usage.outputTokens, reasoningTokens: codex.usage.reasoningTokens, totalTokens: codex.usage.totalTokens, model: codex.usage.model, inputInclusive: codex.usage.inputInclusive, durationMs: codex.usage.durationMs },
+    { inputTokens: 300, cacheReadTokens: 140, outputTokens: 90, reasoningTokens: 40, totalTokens: 390, model: "gpt-5.2", inputInclusive: true, durationMs: 20000 },
+  );
+
+  // Gemini: per-message tokens are summed; input includes cached tokens.
+  const chats = path.join(tmpHome, ".gemini", "tmp", "hashU", "chats");
+  fs.mkdirSync(chats, { recursive: true });
+  const geminiPath = path.join(chats, "session-usage.json");
+  fs.writeFileSync(geminiPath, JSON.stringify({
+    sessionId: "gem-usage",
+    startTime: "2026-10-01T12:00:00Z",
+    lastUpdated: "2026-10-01T12:01:00Z",
+    messages: [
+      { type: "user", content: "yo", timestamp: "2026-10-01T12:00:00Z" },
+      { type: "gemini", content: "sup", model: "gemini-3-pro", timestamp: "2026-10-01T12:00:30Z", tokens: { input: 500, output: 100, thoughts: 30, cached: 200 } },
+      { type: "gemini", content: "again", model: "gemini-3-pro", timestamp: "2026-10-01T12:00:50Z", tokens: { input: 100, output: 20, thoughts: 0, cached: 0 } },
+    ],
+  }));
+  const gemini = await sessions.readSession({ app: "gemini", sourcePath: geminiPath, home: tmpHome });
+  assert.deepEqual(
+    { inputTokens: gemini.usage.inputTokens, cacheReadTokens: gemini.usage.cacheReadTokens, outputTokens: gemini.usage.outputTokens, reasoningTokens: gemini.usage.reasoningTokens, totalTokens: gemini.usage.totalTokens, model: gemini.usage.model, durationMs: gemini.usage.durationMs },
+    { inputTokens: 600, cacheReadTokens: 200, outputTokens: 120, reasoningTokens: 30, totalTokens: 750, model: "gemini-3-pro", durationMs: 60000 },
+  );
+});
+
+test("sessions without usage data return null usage", async () => {
+  const filePath = writeClaudeSession(tmpHome, "session-nousage", [
+    JSON.stringify({ sessionId: "session-nousage", cwd: "/tmp/p", timestamp: "2026-10-01T10:00:00Z" }),
+    JSON.stringify({ type: "user", message: { role: "user", content: "plain question" }, timestamp: "2026-10-01T10:00:01Z" }),
+  ]);
+  const { usage } = await sessions.readSession({ app: "claude", sourcePath: filePath, home: tmpHome });
+  assert.equal(usage.totalTokens, 0);
+  assert.equal(usage.model, null);
+  assert.equal(usage.durationMs, 1000);
+});
+
+test("claude session usage keeps a per-model breakdown for mixed-model sessions", async () => {
+  const filePath = writeClaudeSession(tmpHome, "session-mixed", [
+    JSON.stringify({ sessionId: "session-mixed", cwd: "/tmp/p", timestamp: "2026-10-01T10:00:00Z" }),
+    JSON.stringify({ type: "user", message: { role: "user", content: "go" }, timestamp: "2026-10-01T10:00:01Z" }),
+    JSON.stringify({ type: "assistant", timestamp: "2026-10-01T10:00:02Z", message: { id: "m1", role: "assistant", model: "claude-opus-4-6", usage: { input_tokens: 100, output_tokens: 50 }, content: [{ type: "text", text: "main" }] } }),
+    JSON.stringify({ type: "assistant", timestamp: "2026-10-01T10:00:03Z", message: { id: "m2", role: "assistant", model: "claude-haiku-4-5", usage: { input_tokens: 10, output_tokens: 5 }, content: [{ type: "text", text: "side" }] } }),
+  ]);
+  const { usage } = await sessions.readSession({ app: "claude", sourcePath: filePath, home: tmpHome });
+  assert.deepEqual(usage.perModel, [
+    { model: "claude-opus-4-6", inputTokens: 100, outputTokens: 50, reasoningTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 },
+    { model: "claude-haiku-4-5", inputTokens: 10, outputTokens: 5, reasoningTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 },
+  ]);
+  assert.equal(usage.model, "claude-opus-4-6");
+});
+
+test("a retried claude row with a stop_reason beats a larger streaming snapshot without one", async () => {
+  const filePath = writeClaudeSession(tmpHome, "session-stopreason", [
+    JSON.stringify({ sessionId: "session-stopreason", cwd: "/tmp/p" }),
+    JSON.stringify({ type: "assistant", timestamp: "2026-10-01T10:00:02Z", message: { id: "m1", role: "assistant", model: "claude-sonnet-5", usage: { input_tokens: 100, output_tokens: 90 }, content: [{ type: "text", text: "partial" }] } }),
+    JSON.stringify({ type: "assistant", timestamp: "2026-10-01T10:00:03Z", message: { id: "m1", role: "assistant", model: "claude-sonnet-5", stop_reason: "end_turn", usage: { input_tokens: 100, output_tokens: 40 }, content: [{ type: "text", text: "final" }] } }),
+  ]);
+  const { usage } = await sessions.readSession({ app: "claude", sourcePath: filePath, home: tmpHome });
+  assert.equal(usage.outputTokens, 40);
+  // Id-less assistant usage rows are skipped, matching the upstream importer.
+  const noIdPath = writeClaudeSession(tmpHome, "session-noid", [
+    JSON.stringify({ sessionId: "session-noid", cwd: "/tmp/p" }),
+    JSON.stringify({ type: "assistant", timestamp: "2026-10-01T10:00:04Z", message: { role: "assistant", model: "claude-sonnet-5", usage: { input_tokens: 999, output_tokens: 999 }, content: [{ type: "text", text: "synthetic" }] } }),
+  ]);
+  const noId = await sessions.readSession({ app: "claude", sourcePath: noIdPath, home: tmpHome });
+  assert.equal(noId.usage.totalTokens, 0);
+  assert.deepEqual(noId.usage.perModel, []);
+});

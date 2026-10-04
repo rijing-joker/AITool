@@ -514,7 +514,10 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
       if (!requireMutation()) return true;
       const body = await readJsonBody(req);
       await store.reorderProviders(body.app, body.orderedIds);
-      json(res, { ok: true, ...(await store.listProviders(body.app)) });
+      // The page's handleDragEnd replaces its rows with this response
+      // wholesale, so the rows must carry the quotaProvider annotation too.
+      const state = await store.listProviders(body.app);
+      json(res, { ok: true, app: body.app, current: state.current, providers: annotateQuotaProviders(body.app, state.providers) });
       return true;
     }
 

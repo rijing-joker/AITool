@@ -17,7 +17,7 @@ AiTool is a local-first AI toolbox merging three products. A rebrand from TokenT
 - **Desktop shell** (`desktop/`, Tauri 2) — newest app: native window + system tray around the dashboard. Spawns `node bin/tracker.js serve` from the repo root on a free loopback port (compile-time `AITOOL_ROOT` / `AITOOL_NODE` overrides), close-to-tray, Quit stops server + proxy core. Built manually (`npx tauri build` → `AiTool.app` + dmg) — not part of the release workflows or the version registry.
 
 Data flow, analytics: AI CLI runs → hook fires → `rollout.js` parses → `queue.jsonl` → local API → dashboard.
-Data flow, proxy: proxied request → core emits a usage JSON on the RESP `usage` channel → `src/lib/proxy/usage-bridge.js` appends the raw record to `~/.aitool/proxy/usage/records-*.jsonl` and folds successes into cumulative half-hour buckets appended to the same `queue.jsonl` with `source: "cliproxy"`. Readers dedupe last-row-wins per bucket; bucket totals persist in `usage/buckets.json` so a bridge restart continues the same buckets instead of double-counting.
+Data flow, proxy: proxied request → core emits a usage JSON on the RESP `usage` channel → `src/lib/proxy/usage-bridge.js` normalizes it (`normalizeRecord` in `usage-record.js`) and appends the canonical row to `~/.aitool/proxy/usage/records-*.jsonl`, then folds successes into cumulative half-hour buckets appended to the same `queue.jsonl` with `source: "cliproxy"`. Readers dedupe last-row-wins per bucket; bucket totals persist in `usage/buckets.json` so a bridge restart continues the same buckets instead of double-counting.
 
 For the canonical list of supported providers, grep `parse*Incremental` in `src/lib/rollout.js` — the source of truth, not this file.
 

@@ -472,10 +472,10 @@ async function handleProxyApiRequest(req, res, url, ctx) {
         if (provider && !String(row.provider || "").toLowerCase().includes(provider)) return false;
         if (failed === "true" && !row.failed) return false;
         if (failed === "false" && row.failed) return false;
-        // Canceled rows carry failed=true (the core reports 499/context
-        // canceled as a failure), so success excludes them via failed and the
-        // canceled bucket must not double-require a clean failure flag.
-        if (result === "success" && row.failed) return false;
+        // Disjoint result buckets matching the stats aggregation below:
+        // success excludes canceled, canceled ⊆ failed∪canceled is never
+        // double-counted as failed.
+        if (result === "success" && (row.failed || row.canceled)) return false;
         if (result === "failed" && (!row.failed || row.canceled)) return false;
         if (result === "canceled" && !row.canceled) return false;
         const ts = recordTimestamp(row);

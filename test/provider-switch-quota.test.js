@@ -143,12 +143,15 @@ test("Command Code presets are registered for claude and codex", () => {
 
   const codex = PRESETS.codex.find((preset) => preset.id === "codex_commandcode");
   assert.ok(codex, "codex_commandcode preset exists");
-  assert.equal(codex.settingsConfig.config.model_provider, "command_code");
+  // The provider block must live in the `custom` slot — the projection
+  // pipeline (projectCodex/floor CODEX_PROVIDER_TABLE) owns only
+  // [model_providers.custom] and injects the relay key there.
+  assert.equal(codex.settingsConfig.config.model_provider, "custom");
   assert.equal(
-    codex.settingsConfig.config.model_providers.command_code.base_url,
+    codex.settingsConfig.config.model_providers.custom.base_url,
     "https://api.commandcode.ai/provider/v1",
   );
-  assert.equal(codex.settingsConfig.config.model_providers.command_code.wire_api, "responses");
+  assert.equal(codex.settingsConfig.config.model_providers.custom.wire_api, "responses");
 });
 
 test("credentials resolve per app and base URLs detect the Command Code provider", () => {
@@ -247,12 +250,52 @@ test("GET /api/provider-switch/quota annotates the list and serves the query", a
   const row = list.body.providers.find((provider) => provider.id === id);
   assert.equal(row.quotaProvider, "command_code", "list rows carry the detected quota provider");
 
-  const queried = await call(`/api/provider-switch/quota?app=claude&id=${id}`, {
-    // The route uses the global fetch; point it at nothing — the query must
-    // fail soft with an error envelope, not crash the route.
+  // Reorder must re-annotate: the page's handleDragEnd replaces its rows
+  // with this response wholesale, so quotaProvider has to survive the drag.
+  const reordered = await call("/api/provider-switch/providers/reorder", {
+    method: "POST",
+    body: JSON.stringify({ app: "claude", orderedIds: [id] }),
   });
+  assert.equal(reordered.status, 200, JSON.stringify(reordered.body));
+  const reorderedRow = reordered.body.providers.find((provider) => provider.id === id);
+  assert.equal(reorderedRow.quotaProvider, "command_code", "reorder rows keep the quota provider annotation");
+
+  // The route resolves fetchImpl lazily (global fetch); stub it so the test
+  // is deterministic and never touches the real control plane. A 401 on
+  // whoami maps to the expired-credential envelope.
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({ status: 401, ok: false, json: async () => ({ error: "unauthorized" }) });
+  const queried = await call(`/api/provider-switch/quota?app=claude&id=${id}`);
+  globalThis.fetch = previousFetch;
   assert.equal(queried.status, 200);
   assert.equal(queried.body.ok, true);
-  assert.equal(queried.body.quota.ok, false, "unreachable control plane degrades to an error envelope");
+  assert.equal(queried.body.quota.ok, false, "auth failure degrades to an error envelope");
+  assert.equal(queried.body.quota.credentialStatus, "expired", "401 maps to the expired credential status");
   assert.ok(queried.body.quota.error);
+});
+
+test("codex_commandcode preset projects end-to-end through the custom slot pipeline", () => {
+  // The Codex projection owns [model_providers.custom] exclusively; a preset
+  // using an arbitrary slot name would switch to a dangling model_provider
+  // pointer with no table and no credentials (code-review catch).
+  const targets = require("../src/lib/provider-switch/targets");
+  const codexPreset = PRESETS.codex.find((preset) => preset.id === "codex_commandcode");
+  const providerRow = {
+    category: "custom",
+    settingsConfig: JSON.parse(JSON.stringify(codexPreset.settingsConfig)),
+  };
+  providerRow.settingsConfig.auth.OPENAI_API_KEY = "sk-relay-key";
+
+  const out = targets.projectCodex({
+    prev: null,
+    target: providerRow,
+    liveToml: 'notify = ["bash", "/hooks/notify.sh"]\n',
+    liveAuth: {},
+  });
+  assert.match(out.configToml, /model_provider = "custom"/);
+  assert.match(out.configToml, /\[model_providers\.custom\]/);
+  assert.match(out.configToml, /base_url = "https:\/\/api\.commandcode\.ai\/provider\/v1"/);
+  assert.match(out.configToml, /wire_api = "responses"/);
+  assert.match(out.configToml, /experimental_bearer_token = "sk-relay-key"/, "the relay key lands in the custom route table");
+  assert.match(out.configToml, /notify = \["bash", "\/hooks\/notify\.sh"\]/, "user content survives");
 });

@@ -11,7 +11,13 @@ beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn(async () => ({ json: async () => response })));
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
-async function setup() { render(<RequestsTab />); await screen.findByText("fixture-model"); }
+async function setup(overrides = {}) {
+  if (Object.keys(overrides).length > 0) {
+    vi.stubGlobal("fetch", vi.fn(async () => ({ json: async () => ({ ...response, ...overrides }) })));
+  }
+  render(<RequestsTab />);
+  await screen.findByText("fixture-model");
+}
 it("coalesces typing into one filtered request", async () => {
   await setup();
   const input = screen.getByRole("combobox", { name: "proxy.requests.filter.model" });
@@ -50,16 +56,32 @@ it("does not fetch an incomplete or reversed custom range", async () => {
   expect(screen.getByRole("alert")).toHaveTextContent("proxy.requests.range.invalid");
   expect(fetch).toHaveBeenCalledTimes(1);
 });
-it("exports the loaded page as a CSV download", async () => {
-  await setup();
+it("exports the loaded page as a CSV download with the injection guard", async () => {
+  // A model id that would be interpreted as a formula by spreadsheet apps
+  // must be neutralized by the upstream's `'`-prefix guard.
+  const injectionRecord = {
+    id: "inj", request_id: "inj", timestamp: "2026-10-02T01:00:00Z",
+    model: "=cmd|'!A1", tokens: { totalTokens: 5 },
+  };
+  await setup({ records: [response.records[0], injectionRecord] });
   const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
   const createObjectURL = vi.fn(() => "blob:csv");
+  // jsdom's Blob lacks .text(); Node's can be read back.
+  const { Blob: NodeBlob } = await import("node:buffer");
+  vi.stubGlobal("Blob", NodeBlob);
   vi.stubGlobal("URL", Object.assign(URL, { createObjectURL }));
   fireEvent.click(screen.getByRole("button", { name: "proxy.requests.export" }));
   expect(click).toHaveBeenCalledTimes(1);
   expect(createObjectURL).toHaveBeenCalledTimes(1);
   const blob = createObjectURL.mock.calls[0][0];
   expect(blob).toBeInstanceOf(Blob);
+  // Blob.text() strips the BOM per spec, so assert on the raw bytes first.
+  const bytes = Buffer.from(await blob.arrayBuffer());
+  expect([bytes[0], bytes[1], bytes[2]]).toEqual([0xef, 0xbb, 0xbf]); // UTF-8 BOM for Excel
+  const csv = bytes.toString("utf8");
+  expect(csv).toContain('"total_tokens"');
+  expect(csv).toContain('"fixture-model"');
+  expect(csv).toContain('"\'=cmd|\'!A1"'); // guarded, quoted, not bare `=…`
   click.mockRestore();
   vi.unstubAllGlobals();
 });

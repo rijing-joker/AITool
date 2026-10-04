@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, History, RefreshCw, Search, User } from "lucide-react";
 import { copy } from "../lib/copy";
 import { Input } from "../ui/components";
@@ -139,15 +139,22 @@ export function CliSessionsPage() {
     return () => controller.abort();
   }, [activeApp, loadSessions]);
 
+  const openRequestIdRef = useRef(0);
   const openSession = async (session) => {
+    // Stale-response guard (same pattern as loadSessions' abort checks):
+    // a slow transcript read for session A must never render into the
+    // panel the user already pointed at session B.
+    const requestId = ++openRequestIdRef.current;
     setSelected(session);
     setMessages(null);
     try {
       const params = new URLSearchParams({ app: activeApp, path: session.sourcePath });
       const data = await fetch(`/api/cli-sessions/read?${params}`, { cache: "no-store" }).then((response) => response.json());
+      if (openRequestIdRef.current !== requestId) return;
       if (!data?.ok) throw new Error(data?.error || "HTTP transcript");
       setMessages(data.messages ?? []);
     } catch (e) {
+      if (openRequestIdRef.current !== requestId) return;
       setMessages([]);
       setError(e instanceof Error ? e.message : String(e));
     }

@@ -62,8 +62,13 @@ function resolveProviderCredential(app, provider) {
     const block = config.model_providers?.[slot] ?? {};
     return {
       baseUrl: String(block.base_url ?? "").trim(),
+      // Same resolution order and empty-string semantics as codexRowKey in
+      // targets.js: auth key → route-table bearer → top-level config bearer.
       apiKey: String(
-        settings.auth?.OPENAI_API_KEY ?? block.experimental_bearer_token ?? "",
+        settings.auth?.OPENAI_API_KEY ||
+        block.experimental_bearer_token ||
+        config.experimental_bearer_token ||
+        "",
       ).trim(),
     };
   }
@@ -123,7 +128,9 @@ function parseCommandCodeQuota({ creditsBody, subscriptionBody, summaryBody }) {
 }
 
 async function queryQuotaProvider({ provider: quotaProvider, baseUrl, apiKey, fetchImpl }) {
-  const origin = resolveCommandcodeOrigin(baseUrl);
+  // Validate the row's base URL (https / loopback-only) even though the
+  // /alpha calls below go to the fixed control-plane host.
+  resolveCommandcodeOrigin(baseUrl);
   // Resolve the org off the /alpha control plane, not the data-plane origin.
   const fetcher = async (path, params) => fetchCommandcodeJson({
     url: `${quotaProvider.apiBase}${path}${params?.length ? `?${new URLSearchParams(params)}` : ""}`,

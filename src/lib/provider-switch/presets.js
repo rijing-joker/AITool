@@ -893,6 +893,11 @@ const GROKBUILD_CUSTOM = {
 // Claude-family models are only served on /provider/v1/messages, so the
 // default catalog is limited to the models accepted by /provider/v1/responses
 // (cc-switch 793e67d) — the model dropdown still fetches the live list.
+// The provider block must live in the `custom` slot: the Codex projection
+// (targets.js projectCodex / floor.js CODEX_PROVIDER_TABLE) owns
+// [model_providers.custom] exclusively and applyCodexRouteAuth injects the
+// relay key only there — an arbitrary slot name would switch to a dangling
+// model_provider pointer with no table and no credentials.
 const CODEX_COMMANDCODE = {
   id: "codex_commandcode",
   name: "Command Code",
@@ -905,10 +910,10 @@ const CODEX_COMMANDCODE = {
     auth: { OPENAI_API_KEY: "" },
     config: {
       model: "deepseek/deepseek-v4.1-flash",
-      model_provider: "command_code",
+      model_provider: "custom",
       model_reasoning_effort: "high",
       model_providers: {
-        command_code: {
+        custom: {
           name: "command_code",
           base_url: "https://api.commandcode.ai/provider/v1",
           wire_api: "responses",

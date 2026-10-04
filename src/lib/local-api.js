@@ -1728,6 +1728,34 @@ function createLocalApiHandler({ queuePath, serverVersion = null }) {
       if (handled) return;
     }
 
+    // --- CLI session history (cc-switch session_manager port, read-only) ---
+    if (p === "/api/cli-sessions" || p.startsWith("/api/cli-sessions/")) {
+      const sessions = require("./sessions");
+      if (p === "/api/cli-sessions" && req.method === "GET") {
+        json(res, { ok: true, apps: sessions.listSessionApps() });
+        return;
+      }
+      if (p === "/api/cli-sessions/list" && req.method === "GET") {
+        const app = url.searchParams.get("app") || "claude";
+        try {
+          json(res, { ok: true, app, sessions: await sessions.listSessions({ app }) });
+        } catch (error) {
+          json(res, { ok: false, error: error?.message || String(error) }, 400);
+        }
+        return;
+      }
+      if (p === "/api/cli-sessions/read" && req.method === "GET") {
+        const app = url.searchParams.get("app") || "claude";
+        const sourcePath = url.searchParams.get("path") || "";
+        try {
+          json(res, { ok: true, app, ...(await sessions.readSession({ app, sourcePath })) });
+        } catch (error) {
+          json(res, { ok: false, error: error?.message || String(error) }, 400);
+        }
+        return;
+      }
+    }
+
     if (p === "/api/local-auth") {
       if (String(req.method || "GET").toUpperCase() !== "GET") {
         json(res, { error: "Method Not Allowed" }, 405);

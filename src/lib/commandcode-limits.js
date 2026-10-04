@@ -313,5 +313,7 @@ module.exports = {
   normalizeCommandcodeWindow,
   normalizeCommandcodeWindowLimits,
   resolveCommandcodeOrigin,
+  fetchCommandcodeJson,
+  withOrgParam,
   fetchCommandcodeLimits,
 };

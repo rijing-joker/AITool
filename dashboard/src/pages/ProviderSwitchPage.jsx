@@ -35,6 +35,7 @@ import { PageTabs } from "../ui/components/PageTabs";
 import { UnsavedChangesGuard } from "../ui/components/UnsavedChangesGuard";
 import { PresetIcon, presetAvatarClass, ProviderEditDialog } from "./provider-edit-dialog";
 import { ProviderMcpPanel } from "./provider-mcp-panel";
+import { ProviderQuotaLine } from "./provider-quota-line";
 
 // Provider config management — an interaction port of cc-switch's provider
 // module. Presets live in ~/.aitool/provider-switch (served by the local
@@ -69,7 +70,7 @@ function SectionTitle({ children, action = null }) {
   );
 }
 
-function SortableProviderCard({ provider, isCurrent, busy, dragLabel, onSwitch, onEdit, onDelete }) {
+function SortableProviderCard({ app, provider, isCurrent, busy, dragLabel, onSwitch, onEdit, onDelete }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: provider.id,
     disabled: busy,
@@ -139,6 +140,7 @@ function SortableProviderCard({ provider, isCurrent, busy, dragLabel, onSwitch, 
               <span className="truncate">{provider.websiteUrl.replace(/^https?:\/\//, "")}</span>
             </a>
           ) : null}
+          <ProviderQuotaLine app={app} provider={provider} />
         </div>
         <div className="ml-auto flex w-full shrink-0 items-center justify-end gap-1.5 sm:w-auto">
           <Button
@@ -433,6 +435,7 @@ export function ProviderSwitchPage() {
                 {providerRows.map((provider) => (
                   <SortableProviderCard
                     key={provider.id}
+                    app={activeApp}
                     provider={provider}
                     isCurrent={appState.current === provider.id}
                     busy={busy}

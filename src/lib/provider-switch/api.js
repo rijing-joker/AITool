@@ -11,6 +11,7 @@ const catalog = require("./catalog");
 const editor = require("./editor");
 const additive = require("./additive");
 const mcp = require("./mcp");
+const quota = require("./quota");
 
 // Dashboard-facing REST surface for the provider-switch layer, mounted by
 // local-api.js under /api/provider-switch/*. Mirrors the proxy/api.js
@@ -418,6 +419,24 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
       return true;
     }
 
+    // Provider quota (cc-switch's coding_plan service): detects a supported
+    // plan provider from the row's base URL and queries its balance/rolling
+    // windows with the row's own key. Read-only, so no mutation guard.
+    if (p === `${prefix}/quota` && method === "GET") {
+      const app = url.searchParams.get("app") || "claude";
+      const id = url.searchParams.get("id") || "";
+      if (!store.isSupportedApp(app)) throw new Error(`Unsupported app: ${app}`);
+      const provider = await store.getProvider(app, id);
+      if (!provider) throw new Error(`Unknown provider: ${id}`);
+      const quotaResult = await quota.queryProviderQuota({
+        app,
+        provider,
+        bypassCache: url.searchParams.get("nocache") === "1",
+      });
+      json(res, { ok: true, app, id, quota: quotaResult });
+      return true;
+    }
+
     const liveMatch = p.match(new RegExp(`^${prefix}/live$`));
     const defaultFileId = (app) => paths.targetFiles(app)[0]?.id || null;
     if (liveMatch && method === "GET") {
@@ -513,7 +532,8 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
       if (method === "GET" && !providerId) {
         const app = url.searchParams.get("app") || "claude";
         if (!store.isSupportedApp(app)) throw new Error(`Unsupported app: ${app}`);
-        json(res, { ok: true, app, ...(await store.listProviders(app)) });
+        const state = await store.listProviders(app);
+        json(res, { ok: true, app, current: state.current, providers: annotateQuotaProviders(app, state.providers) });
         return true;
       }
       if (!requireMutation()) return true;
@@ -741,6 +761,20 @@ async function fetchModelList({ baseUrl, apiKey, modelsUrl, isFullUrl }) {
   throw new Error(errors.join("; ") || "No model list found");
 }
 
+// Rows that carry a supported plan provider get `quotaProvider` set so the
+// dashboard only renders quota lines where a query can actually succeed.
+// Applied on every provider-listing surface (/status, /providers) since the
+// page's initial data comes from the status snapshot.
+function annotateQuotaProviders(app, providers) {
+  return (Array.isArray(providers) ? providers : []).map((provider) => ({
+    ...provider,
+    quotaProvider: quota.detectQuotaProvider(
+      quota.resolveProviderCredential(app, provider)?.baseUrl,
+      app,
+    )?.id ?? null,
+  }));
+}
+
 async function buildStatus() {
   const state = await store.readStore();
   const apps = [];
@@ -754,7 +788,7 @@ async function buildStatus() {
     apps.push({
       app,
       current: appState.current,
-      providers: appState.providers,
+      providers: annotateQuotaProviders(app, appState.providers),
       files,
     });
   }

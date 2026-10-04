@@ -58,6 +58,28 @@ export interface ProviderSwitchProvider {
   sortIndex: number;
   createdAt: string;
   updatedAt: string;
+  /** Set when the row's base URL matches a supported plan provider (cc-switch coding_plan). */
+  quotaProvider?: string | null;
+}
+
+export interface ProviderSwitchQuotaTier {
+  id: string;
+  label: string;
+  used_percent: number;
+  reset_at: string | null;
+  limit_window_seconds?: number | null;
+}
+
+export interface ProviderSwitchQuota {
+  ok: boolean;
+  provider: string;
+  plan?: string | null;
+  status?: string | null;
+  tiers?: ProviderSwitchQuotaTier[];
+  credits?: { monthly: number; purchased: number; free: number; spent: number } | null;
+  credentialStatus?: "valid" | "expired" | "error";
+  error?: string;
+  cached?: boolean;
 }
 
 // Port of cc-switch's ProviderMeta, reduced to the keys this port consumes.
@@ -189,6 +211,15 @@ export const providerSwitchApi = {
 
   getPresets(app: ProviderSwitchApp): Promise<{ ok: true; app: string; presets: ProviderSwitchPreset[] }> {
     return get(`/api/provider-switch/presets?app=${encodeURIComponent(app)}`);
+  },
+
+  getQuota(
+    app: ProviderSwitchApp,
+    id: string,
+    opts?: { nocache?: boolean },
+  ): Promise<{ ok: true; app: string; id: string; quota: ProviderSwitchQuota }> {
+    const nocache = opts?.nocache ? "&nocache=1" : "";
+    return get(`/api/provider-switch/quota?app=${encodeURIComponent(app)}&id=${encodeURIComponent(id)}${nocache}`);
   },
 
   getEditorView(

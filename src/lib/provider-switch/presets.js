@@ -132,6 +132,38 @@ const CLAUDE_MODELSCOPE = {
   ],
 };
 
+const CLAUDE_COMMANDCODE = {
+  id: "claude_commandcode",
+  name: "Command Code",
+  group: "community",
+  icon: "square-terminal",
+  color: "blue",
+  websiteUrl: "https://commandcode.ai",
+  endpointCandidates: ["https://api.commandcode.ai/provider"],
+  // The Anthropic-compatible data plane lives under /provider; /models is
+  // served on the sibling /provider/v1 (cc-switch 793e67d).
+  modelsUrl: "https://api.commandcode.ai/provider/v1/models",
+  settingsConfig: {
+    env: {
+      ANTHROPIC_BASE_URL: "https://api.commandcode.ai/provider",
+      ANTHROPIC_AUTH_TOKEN: "",
+      ANTHROPIC_MODEL: "deepseek/deepseek-v4.1-flash",
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: "deepseek/deepseek-v4.1-flash",
+      ANTHROPIC_DEFAULT_SONNET_MODEL: "deepseek/deepseek-v4.1-flash",
+      ANTHROPIC_DEFAULT_OPUS_MODEL: "deepseek/deepseek-v4.1-flash",
+    },
+  },
+  formFields: [
+    {
+      id: "api_key",
+      path: "env.ANTHROPIC_AUTH_TOKEN",
+      labelKey: "pswitch.field.api_key",
+      placeholder: "sk-…",
+      secret: true,
+    },
+  ],
+};
+
 const CLAUDE_CUSTOM = {
   id: "claude_custom",
   name: "Custom Relay",
@@ -857,9 +889,54 @@ const GROKBUILD_CUSTOM = {
   formFields: GROKBUILD_FORM_FIELDS,
 };
 
+// Command Code's Codex endpoint: the Responses API lives under /provider/v1.
+// Claude-family models are only served on /provider/v1/messages, so the
+// default catalog is limited to the models accepted by /provider/v1/responses
+// (cc-switch 793e67d) — the model dropdown still fetches the live list.
+const CODEX_COMMANDCODE = {
+  id: "codex_commandcode",
+  name: "Command Code",
+  group: "community",
+  icon: "square-terminal",
+  color: "blue",
+  websiteUrl: "https://commandcode.ai",
+  endpointCandidates: ["https://api.commandcode.ai/provider/v1"],
+  settingsConfig: {
+    auth: { OPENAI_API_KEY: "" },
+    config: {
+      model: "deepseek/deepseek-v4.1-flash",
+      model_provider: "command_code",
+      model_reasoning_effort: "high",
+      model_providers: {
+        command_code: {
+          name: "command_code",
+          base_url: "https://api.commandcode.ai/provider/v1",
+          wire_api: "responses",
+        },
+      },
+    },
+  },
+  formFields: [
+    {
+      id: "api_key",
+      path: "auth.OPENAI_API_KEY",
+      labelKey: "pswitch.field.api_key",
+      placeholderKey: "pswitch.field.codex_key_placeholder",
+      secret: true,
+    },
+    {
+      id: "model",
+      path: "config.model",
+      labelKey: "pswitch.field.default_model",
+      placeholder: "",
+      hintKey: "pswitch.field.default_model_hint",
+    },
+  ],
+};
+
 const PRESETS = {
-  claude: [CLAUDE_OFFICIAL, CLAUDE_KIMI, CLAUDE_DEEPSEEK, CLAUDE_MODELSCOPE, CLAUDE_CUSTOM],
-  codex: [CODEX_OFFICIAL, CODEX_CUSTOM],
+  claude: [CLAUDE_OFFICIAL, CLAUDE_KIMI, CLAUDE_DEEPSEEK, CLAUDE_MODELSCOPE, CLAUDE_COMMANDCODE, CLAUDE_CUSTOM],
+  codex: [CODEX_OFFICIAL, CODEX_COMMANDCODE, CODEX_CUSTOM],
   gemini: [GEMINI_OFFICIAL, GEMINI_CUSTOM],
   opencode: [OPENCODE_KIMI, OPENCODE_DEEPSEEK, OPENCODE_MODELSCOPE, OPENCODE_CUSTOM],
   openclaw: [OPENCLAW_KIMI, OPENCLAW_DEEPSEEK, OPENCLAW_CUSTOM],

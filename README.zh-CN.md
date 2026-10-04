@@ -91,6 +91,7 @@ docker compose up -d --build
 | **编辑器** | 添加/编辑弹窗显示切换到该供应商之后的完整配置文件（cc-switch 的编辑器视图）；保存时关键字段写回供应商行，其余改动经三方比对写入本机配置文件（保留我的 / 保留对方的） |
 | **Codex 凭据** | 中转密钥写入 `config.toml` 中 `[model_providers.custom]` 的 `experimental_bearer_token` —— Codex CLI 0.149+ 不再从 `auth.json` 读取中转密钥，`auth.json` 只保存官方 ChatGPT 登录（添加/编辑弹窗的 Codex 编辑器相应拆分：`auth.json` JSON + `config.toml` TOML） |
 | **MCP 服务器** | 页面的 MCP 标签维护一份所有 agent 共用的 MCP 服务器列表（cc-switch 的统一 `mcp_servers` 模块），按应用开关即投影进对应应用的原生 MCP 配置 —— Claude（`~/.claude.json`）、Codex（`config.toml` 的 `[mcp_servers.*]`）、Gemini（`settings.json`）、Grok Build、OpenCode、Hermes、MiniMax Code（`~/.minimax/mcp.json`），并可从各工具已配置的服务器导入 |
+| **额度查询** | Base URL 命中受支持套餐供应商的卡片会显示各窗口「剩余百分比」（cc-switch 的 coding_plan 额度服务）；内置 Claude Code / Codex 的 Command Code 预设，查询使用该供应商行自己的密钥访问其 `/alpha` 控制面 |
 | **安全性** | 原子写入（凭据文件 0600）、每文件首次写入前自动备份（可在仪表盘恢复）、配置文件编辑器内置于添加/编辑弹窗；Codex 官方 ChatGPT 登录在切向第三方中转时自动暂存、切回时还原 |
 | **存储位置** | `~/.aitool/provider-switch/` —— `providers.json`（预设 + 当前指针）、`mcp-servers.json`（共享 MCP 服务器列表）、`codex-auth-stash.json`、`backups/` |
 

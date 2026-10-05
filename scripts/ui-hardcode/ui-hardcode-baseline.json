@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-04T03:16:31.404Z",
+  "generatedAt": "2026-10-05T15:33:16.283Z",
   "root": "dashboard/src",
   "rules": {
     "colors": "hex/rgb(a) literals",
@@ -7,7 +7,7 @@
   },
   "totals": {
     "colors": 412,
-    "rawText": 216
+    "rawText": 219
   },
   "files": {
     "dashboard/src/components/InsforgeUserHeaderControls.jsx": {
@@ -153,6 +153,13 @@
         "Token Tracker"
       ]
     },
+    "dashboard/src/pages/ProviderSwitchPage.jsx": {
+      "colors": 0,
+      "rawText": 1,
+      "rawTextTokens": [
+        ") : appInfo.suggestion ? ("
+      ]
+    },
     "dashboard/src/pages/ProxyPage.jsx": {
       "colors": 0,
       "rawText": 4,
@@ -259,15 +266,21 @@
         "WebSocket"
       ]
     },
+    "dashboard/src/pages/provider-quota-line.jsx": {
+      "colors": 0,
+      "rawText": 1,
+      "rawTextTokens": [
+        "0 ? value : 0); const total = sum(credits.monthly) + sum(credits.purchased) + sum(credits.free); if (total"
+      ]
+    },
     "dashboard/src/pages/requests-tab.jsx": {
       "colors": 0,
-      "rawText": 18,
+      "rawText": 19,
       "rawTextTokens": [
         ") : record.alias && record.alias !== record.model ? (",
         ") : records.length === 0 ? (",
         "); case \"cache\": return (",
         "); case \"cacheRate\": return (",
-        "); case \"input\": return",
         "); case \"key\": return (",
         "); case \"provider\": return (",
         "); case \"request\": return (",
@@ -279,7 +292,8 @@
         "0 ? (",
         "; case \"output\": return",
         "; case \"reasoning\": return",
-        "; default: return"
+        "; default: return",
+        "entry.level === \"exceeded\"); return ("
       ]
     },
     "dashboard/src/pages/upstreams-tab.jsx": {

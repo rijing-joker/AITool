@@ -13,6 +13,7 @@ const additive = require("./additive");
 const mcp = require("./mcp");
 const prompts = require("./prompts");
 const quota = require("./quota");
+const failover = require("./failover");
 
 // Dashboard-facing REST surface for the provider-switch layer, mounted by
 // local-api.js under /api/provider-switch/*. Mirrors the proxy/api.js
@@ -357,6 +358,34 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
   try {
     if (p === `${prefix}/status`) {
       json(res, await buildStatus());
+      return true;
+    }
+
+    // Failover monitor (AiTool-original): failure-rate cooldowns over the
+    // proxy's usage records, with switch suggestions or auto-switching.
+    if (p === `${prefix}/failover` && method === "PUT") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      json(res, { ok: true, config: await failover.updateConfig(body.failover || body) });
+      return true;
+    }
+    if (p === `${prefix}/failover/cooldowns` && method === "DELETE") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      await failover.clearCooldown(String(body.app || ""), String(body.id || ""));
+      json(res, { ok: true });
+      return true;
+    }
+    // Open GET never switches or needs auth: it evaluates read-only advice
+    // and persists only benign cooldown bookkeeping. Auto-switching runs
+    // exclusively through the authenticated POST below.
+    if (p === `${prefix}/failover`) {
+      json(res, { ok: true, failover: await failover.evaluate({ switchFn: null }) });
+      return true;
+    }
+    if (p === `${prefix}/failover/evaluate` && method === "POST") {
+      if (!requireMutation()) return true;
+      json(res, { ok: true, failover: await failover.evaluate({ switchFn: switchProvider }) });
       return true;
     }
 

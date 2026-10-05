@@ -14,9 +14,9 @@ const TIER_LABEL_KEYS = {
   monthly: "pswitch.quota.tier.monthly",
 };
 
-function countdown(resetAt) {
+function countdown(resetAt, now) {
   if (!resetAt) return null;
-  const diffMs = new Date(resetAt).getTime() - Date.now();
+  const diffMs = new Date(resetAt).getTime() - now;
   if (!Number.isFinite(diffMs) || diffMs <= 0) return null;
   const hours = Math.floor(diffMs / (60 * 60 * 1000));
   const minutes = Math.floor((diffMs % (60 * 60 * 1000)) / (60 * 1000));
@@ -25,9 +25,20 @@ function countdown(resetAt) {
   return `${minutes}m`;
 }
 
+// Command Code credits: monthly/purchased/free are the REMAINING pools and
+// spent is the period cost, so the visible balance is the sum of the pools.
+function creditsRemaining(credits) {
+  if (!credits || typeof credits !== "object") return null;
+  const sum = (value) => (Number.isFinite(value) && value > 0 ? value : 0);
+  const total = sum(credits.monthly) + sum(credits.purchased) + sum(credits.free);
+  if (total <= 0) return null;
+  return Math.round(total * 10) / 10;
+}
+
 export function ProviderQuotaLine({ app, provider }) {
   const [quota, setQuota] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
   const providerId = provider.id;
 
   const load = useCallback(async (nocache = false) => {
@@ -35,6 +46,7 @@ export function ProviderQuotaLine({ app, provider }) {
     try {
       const response = await providerSwitchApi.getQuota(app, providerId, { nocache });
       setQuota(response.quota ?? null);
+      setNow(Date.now());
     } catch {
       setQuota({ ok: false, provider: "", error: "network" });
     } finally {
@@ -45,6 +57,13 @@ export function ProviderQuotaLine({ app, provider }) {
   useEffect(() => {
     if (provider.quotaProvider) void load();
   }, [load, provider.quotaProvider]);
+
+  // Keep the reset countdowns live without re-querying the server.
+  useEffect(() => {
+    if (!quota?.ok) return undefined;
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, [quota?.ok]);
 
   if (!provider.quotaProvider) return null;
 
@@ -81,14 +100,35 @@ export function ProviderQuotaLine({ app, provider }) {
       <>
         {tiers.map((tier) => {
           const left = Math.max(0, Math.round(100 - (tier.used_percent ?? 0)));
-          const reset = countdown(tier.reset_at);
+          const reset = countdown(tier.reset_at, now);
           return (
-            <span key={tier.id} className={`inline-flex items-center gap-1 tabular-nums ${tierTone(left)}`} title={reset ? copy("pswitch.quota.reset_in", { time: reset }) : undefined}>
+            <span
+              key={tier.id}
+              className={`inline-flex items-center gap-1 tabular-nums ${tierTone(left)}`}
+              title={tier.reset_at ? `${copy("pswitch.quota.reset_in", { time: reset ?? "—" })} (${new Date(tier.reset_at).toLocaleString()})` : undefined}
+            >
               {copy(TIER_LABEL_KEYS[tier.id] ?? "pswitch.quota.tier.monthly")}
               {copy("pswitch.quota.left", { value: left })}
+              {reset ? (
+                <span className="text-oai-gray-400 dark:text-oai-gray-500">
+                  · {copy("pswitch.quota.reset_in", { time: reset })}
+                </span>
+              ) : null}
             </span>
           );
         })}
+        {creditsRemaining(quota.credits) !== null ? (
+          <span
+            className="inline-flex items-center gap-1 tabular-nums text-oai-gray-500 dark:text-oai-gray-400"
+            title={copy("pswitch.quota.credits_breakdown", {
+              monthly: quota.credits.monthly ?? 0,
+              purchased: quota.credits.purchased ?? 0,
+              free: quota.credits.free ?? 0,
+            })}
+          >
+            {copy("pswitch.quota.credits", { value: creditsRemaining(quota.credits) })}
+          </span>
+        ) : null}
         {quota.plan ? (
           <span className="text-oai-gray-400" title={quota.status || undefined}>{quota.plan}</span>
         ) : null}

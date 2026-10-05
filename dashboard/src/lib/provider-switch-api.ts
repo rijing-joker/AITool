@@ -203,6 +203,24 @@ export const providerSwitchApi = {
     return get<ProviderSwitchStatus>("/api/provider-switch/status");
   },
 
+  async getFailover(signal?: AbortSignal): Promise<{ ok: true; failover: ProviderSwitchFailover }> {
+    return parseResponse(await fetch("/api/provider-switch/failover", { cache: "no-store", signal }));
+  },
+
+  // Authenticated evaluation pass: this is the only path that may execute an
+  // auto-switch (live config writes); the open GET never switches.
+  runFailoverEvaluation(): Promise<{ ok: true; failover: ProviderSwitchFailover }> {
+    return mutate("/api/provider-switch/failover/evaluate", "POST", {});
+  },
+
+  updateFailover(config: Partial<ProviderSwitchFailoverConfig>): Promise<{ ok: true; config: ProviderSwitchFailoverConfig }> {
+    return mutate("/api/provider-switch/failover", "PUT", { failover: config });
+  },
+
+  clearFailoverCooldown(app: ProviderSwitchApp, id: string): Promise<{ ok: true }> {
+    return mutate("/api/provider-switch/failover/cooldowns", "DELETE", { app, id });
+  },
+
   updateVisibleApps(
     visibleApps: Record<ProviderSwitchApp, boolean>,
   ): Promise<{ ok: true; visibleApps: Record<ProviderSwitchApp, boolean> }> {
@@ -306,6 +324,38 @@ export const providerSwitchApi = {
 // ---------------------------------------------------------------------------
 // MCP servers (cc-switch's unified mcp_servers module)
 // ---------------------------------------------------------------------------
+
+export type ProviderSwitchFailoverConfig = {
+  enabled: boolean;
+  autoSwitch: boolean;
+  windowMinutes: number;
+  minRequests: number;
+  failureRatePct: number;
+  cooldownMinutes: number;
+};
+
+export type ProviderSwitchFailoverHealth = {
+  requests: number;
+  failed: number;
+  ratePct: number;
+};
+
+export type ProviderSwitchFailoverApp = {
+  current: string | null;
+  health: ProviderSwitchFailoverHealth | null;
+  cooldown: { until: number; reason: string; since: number; remainingMs: number } | null;
+  suggestion: { id: string; name: string } | null;
+  switchedTo: string | null;
+  switchError?: string;
+};
+
+export type ProviderSwitchFailover = {
+  config: ProviderSwitchFailoverConfig;
+  apps: Partial<Record<ProviderSwitchApp, ProviderSwitchFailoverApp>>;
+  suggestions: { app: ProviderSwitchApp; from: string; to: string; id: string }[];
+  cooldowns: { app: ProviderSwitchApp; id: string; until: number; reason: string; remainingMs: number }[];
+  actions: { app: ProviderSwitchApp; from: string; to: string; at: number }[];
+};
 
 export type McpAppId = "claude" | "codex" | "gemini" | "grokbuild" | "opencode" | "hermes" | "mcode";
 

@@ -1,11 +1,13 @@
 import React, { useCallback, useEffect, useId, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, Brain, ChevronLeft, ChevronRight, Columns3, Database, Download, RefreshCw, RotateCcw, TriangleAlert, Zap } from "lucide-react";
+import { ArrowDown, ArrowUp, Brain, ChevronLeft, ChevronRight, Columns3, Database, Download, RefreshCw, RotateCcw, Settings2, TriangleAlert, Zap } from "lucide-react";
 import { copy } from "../lib/copy";
 import { formatCostUsd } from "../lib/cost-format";
 import { Card } from "../ui/components";
 import { ModalFrame } from "../ui/components/ModalFrame";
 import { showToast } from "../ui/components/Toast";
 import { useVisiblePolling } from "../hooks/use-visible-polling";
+import { sendBudgetAlerts } from "../lib/budget-alerts";
+import { getLocalApiAuthHeaders } from "../lib/local-api-auth";
 
 // ---------------------------------------------------------------------------
 // Requests tab (请求记录) — interaction ported from EasyCLIProxyAPI's
@@ -498,6 +500,187 @@ function exportCsv(records, page) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+function BudgetEditDialog({ draft, setDraft, saving, onClose, onSave }) {
+  // Read currentTarget synchronously — React nulls it before a setState
+  // updater runs, and StrictMode replays updaters.
+  const field = (key) => ({
+    value: draft[key],
+    onChange: (event) => {
+      const { value } = event.currentTarget;
+      setDraft((current) => ({ ...current, [key]: value }));
+    },
+    inputMode: "decimal",
+    "aria-label": copy(`budget.edit.${key === "daily" ? "daily" : key === "monthly" ? "monthly" : "threshold"}`),
+    className: "h-10 w-32 rounded-lg border border-oai-gray-200 bg-transparent px-2 text-sm tabular-nums dark:border-oai-gray-700",
+  });
+  return (
+    <ModalFrame open onClose={onClose} label={copy("budget.edit.title")}>
+      <div className="flex items-center justify-between border-b border-oai-gray-100 px-5 py-3.5 dark:border-oai-gray-800">
+        <h2 className="text-sm font-semibold">{copy("budget.edit.title")}</h2>
+        <button type="button" onClick={onClose} aria-label={copy("proxy.upstream.common.close")} className="rounded-lg p-1.5 text-oai-gray-500 hover:bg-oai-gray-100 dark:hover:bg-oai-gray-800">
+          <span aria-hidden="true" className="text-base leading-none">×</span>
+        </button>
+      </div>
+      <div className="space-y-3 px-5 py-4 text-sm">
+        <label className="flex min-h-8 items-center gap-2">
+          <input
+            type="checkbox"
+            checked={draft.enabled}
+            onChange={(event) => {
+              const { checked } = event.currentTarget;
+              setDraft((current) => ({ ...current, enabled: checked }));
+            }}
+            className="h-4 w-4 accent-oai-brand-600"
+          />
+          {copy("budget.edit.enable")}
+        </label>
+        <div className="flex items-center justify-between gap-4">
+          <span>{copy("budget.edit.daily")}</span>
+          <input {...field("daily")} />
+        </div>
+        <div className="flex items-center justify-between gap-4">
+          <span>{copy("budget.edit.monthly")}</span>
+          <input {...field("monthly")} />
+        </div>
+        <div className="flex items-center justify-between gap-4">
+          <span>{copy("budget.edit.threshold")}</span>
+          <input {...field("threshold")} />
+        </div>
+        <p className="text-xs text-oai-gray-400 dark:text-oai-gray-500">{copy("budget.edit.hint")}</p>
+      </div>
+      <div className="flex justify-end gap-2 border-t border-oai-gray-100 px-5 py-3 dark:border-oai-gray-800">
+        <button type="button" onClick={onClose} className="min-h-10 rounded-lg border border-oai-gray-200 px-3 font-medium hover:bg-oai-gray-50 sm:min-h-0 dark:border-oai-gray-700 dark:hover:bg-oai-gray-800">{copy("shared.action.cancel")}</button>
+        <button type="button" onClick={onSave} disabled={saving} className="min-h-10 rounded-lg bg-oai-black px-3 font-medium text-white hover:bg-oai-gray-800 disabled:opacity-50 sm:min-h-0 dark:bg-white dark:text-oai-black dark:hover:bg-oai-gray-200">{copy("shared.action.save")}</button>
+      </div>
+    </ModalFrame>
+  );
+}
+
+// Budget + burn-rate strip: polls /api/proxy/budget (60s), surfaces threshold
+// alerts as a banner and native/web notifications, and edits the budget
+// settings persisted in the proxy settings.json.
+function BudgetBar() {
+  const [budget, setBudget] = useState(null);
+  const [pricingAvailable, setPricingAvailable] = useState(true);
+  const [editOpen, setEditOpen] = useState(false);
+  const [draft, setDraft] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async (signal) => {
+    try {
+      const data = await fetch("/api/proxy/budget", { cache: "no-store", signal }).then((response) => response.json());
+      if (signal.aborted) return true;
+      if (data?.ok) {
+        setBudget(data.budget);
+        setPricingAvailable(data.pricingAvailable !== false);
+        sendBudgetAlerts(data.budget);
+      }
+    } catch { /* offline or server restarting; the poll retries */ }
+    return true;
+  }, []);
+  const refreshBudget = useVisiblePolling(load, 60_000);
+
+  const openEdit = () => {
+    const source = budget?.budgets ?? {};
+    setDraft({
+      enabled: source.enabled === true,
+      daily: source.dailyLimitUsd ? String(source.dailyLimitUsd) : "",
+      monthly: source.monthlyLimitUsd ? String(source.monthlyLimitUsd) : "",
+      threshold: String(source.alertThresholdPct || 80),
+    });
+    setEditOpen(true);
+  };
+
+  const save = async () => {
+    if (!draft || saving) return;
+    setSaving(true);
+    try {
+      const headers = await getLocalApiAuthHeaders();
+      const response = await fetch("/api/proxy/budget", {
+        method: "PUT",
+        headers: { ...headers, "content-type": "application/json" },
+        body: JSON.stringify({
+          budgets: {
+            enabled: draft.enabled,
+            dailyLimitUsd: Number(draft.daily) || 0,
+            monthlyLimitUsd: Number(draft.monthly) || 0,
+            alertThresholdPct: Number(draft.threshold) || 80,
+          },
+        }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!data?.ok) throw new Error(data?.error || `HTTP ${response.status}`);
+      showToast({ title: copy("budget.saved"), type: "success" });
+      setEditOpen(false);
+      refreshBudget();
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      showToast({ title: `${copy("budget.save_failed")}: ${detail}`, type: "error" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const config = budget?.budgets ?? null;
+  const windows = config?.enabled && budget
+    ? [budget.daily && { which: "daily", ...budget.daily }, budget.monthly && { which: "monthly", ...budget.monthly }].filter(Boolean)
+    : [];
+  const alerted = windows.filter((entry) => entry.level === "warning" || entry.level === "exceeded");
+  const exceeded = alerted.some((entry) => entry.level === "exceeded");
+
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-oai-gray-500 dark:text-oai-gray-400">
+          {config?.enabled && budget ? (
+            <>
+              <span className="tabular-nums">{copy("budget.banner.today", { value: formatCostUsd(budget.todayUsd) ?? "$0" })}</span>
+              <span className="tabular-nums">{copy("budget.banner.month", { value: formatCostUsd(budget.monthUsd) ?? "$0" })}</span>
+              <span
+                className="tabular-nums"
+                title={copy("budget.banner.burn_hint", { value: formatCostUsd(budget.burn?.projectedTodayUsd) ?? "—" })}
+              >
+                {copy("budget.banner.burn", { value: formatCostUsd(budget.burn?.lastHourUsd) ?? "$0" })}
+              </span>
+              {!pricingAvailable ? <span>{copy("budget.banner.pricing_missing")}</span> : null}
+            </>
+          ) : null}
+        </div>
+        <button
+          type="button"
+          onClick={openEdit}
+          disabled={budget === null}
+          title={copy("budget.edit.title")}
+          aria-label={copy("budget.edit.title")}
+          className="inline-flex h-10 sm:h-8 items-center gap-1.5 rounded-lg border border-oai-gray-200 px-2.5 font-medium hover:bg-oai-gray-50 disabled:opacity-50 dark:border-oai-gray-700 dark:hover:bg-oai-gray-800"
+        >
+          <Settings2 size={13} aria-hidden="true" />
+          <span className="hidden sm:inline">{copy("budget.edit.title")}</span>
+        </button>
+      </div>
+      {alerted.length > 0 ? (
+        <div
+          role="alert"
+          className={`flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg px-3 py-2 text-xs font-medium ${
+            exceeded
+              ? "bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300"
+              : "bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300"
+          }`}
+        >
+          {alerted.map((entry) => (
+            <span key={entry.which} className="tabular-nums">
+              {copy(`budget.banner.${entry.which}_${entry.level === "exceeded" ? "exceeded" : "warning"}`, { pct: entry.pct })}
+            </span>
+          ))}
+        </div>
+      ) : null}
+      {editOpen && draft ? (
+        <BudgetEditDialog draft={draft} setDraft={setDraft} saving={saving} onClose={() => setEditOpen(false)} onSave={save} />
+      ) : null}
+    </div>
+  );
+}
+
 export function RequestsTab() {
   const [records, setRecords] = useState(null);
   const [stats, setStats] = useState(null);
@@ -805,6 +988,7 @@ export function RequestsTab() {
       ) : null}
 
       {invalidRange ? <p role="alert" className="text-sm text-amber-700 dark:text-amber-300">{copy("proxy.requests.range.invalid")}</p> : null}
+      <BudgetBar />
       {stats ? (
         <div className="grid grid-cols-3 gap-2 lg:grid-cols-6">
           <StatTile label={copy("proxy.metric.requests")} value={fullTokens.format(stats.total_requests)} />

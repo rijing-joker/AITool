@@ -859,6 +859,28 @@ skills.toast.removed,ui,SkillsPage,SkillsPage,toast_removed,"Removed {{name}}.",
 shared.action.undo,shared,*,Shared,action_undo,"Undo",,active
 shared.action.dismiss,shared,*,Shared,action_dismiss,"Dismiss",,active
 shared.action.cancel,shared,*,Shared,action_cancel,"Cancel",,active
+shared.action.save,shared,*,Shared,action_save,"Save",,active
+budget.banner.today,budget,ProxyPage,RequestsTab,budget_today,"Today {{value}}",,active
+budget.banner.month,budget,ProxyPage,RequestsTab,budget_month,"Month {{value}}",,active
+budget.banner.burn,budget,ProxyPage,RequestsTab,budget_burn,"Last 1h {{value}}",,active
+budget.banner.burn_hint,budget,ProxyPage,RequestsTab,budget_burn_hint,"Cost of the last hour; about {{value}}/day at this pace",,active
+budget.banner.pricing_missing,budget,ProxyPage,RequestsTab,budget_pricing_missing,"Pricing index not synced yet; budget cost is unavailable",,active
+budget.banner.daily_warning,budget,ProxyPage,RequestsTab,budget_daily_warning,"Daily budget at {{pct}}%",,active
+budget.banner.daily_exceeded,budget,ProxyPage,RequestsTab,budget_daily_exceeded,"Daily budget exceeded ({{pct}}%)",,active
+budget.banner.monthly_warning,budget,ProxyPage,RequestsTab,budget_monthly_warning,"Monthly budget at {{pct}}%",,active
+budget.banner.monthly_exceeded,budget,ProxyPage,RequestsTab,budget_monthly_exceeded,"Monthly budget exceeded ({{pct}}%)",,active
+budget.edit.title,budget,ProxyPage,RequestsTab,budget_edit_title,"Budget",,active
+budget.edit.enable,budget,ProxyPage,RequestsTab,budget_edit_enable,"Enable budget alerts",,active
+budget.edit.daily,budget,ProxyPage,RequestsTab,budget_edit_daily,"Daily limit (USD)",,active
+budget.edit.monthly,budget,ProxyPage,RequestsTab,budget_edit_monthly,"Monthly limit (USD)",,active
+budget.edit.threshold,budget,ProxyPage,RequestsTab,budget_edit_threshold,"Alert threshold (%)",,active
+budget.edit.hint,budget,ProxyPage,RequestsTab,budget_edit_hint,"Estimated from proxied requests using models.dev prices; 0 means no limit.",,active
+budget.saved,budget,ProxyPage,RequestsTab,budget_saved,"Budget saved",,active
+budget.save_failed,budget,ProxyPage,RequestsTab,budget_save_failed,"Failed to save budget",,active
+budget.alert.daily_title,budget,ProxyPage,RequestsTab,budget_alert_daily_title,"Daily budget at {{pct}}%",,active
+budget.alert.daily_body,budget,ProxyPage,RequestsTab,budget_alert_daily_body,"Spent ${{spent}} of ${{limit}} today",,active
+budget.alert.monthly_title,budget,ProxyPage,RequestsTab,budget_alert_monthly_title,"Monthly budget at {{pct}}%",,active
+budget.alert.monthly_body,budget,ProxyPage,RequestsTab,budget_alert_monthly_body,"Spent ${{spent}} of ${{limit}} this month",,active
 shared.action.apply,shared,*,Shared,action_apply,"Apply",,active
 skills.empty.my,ui,SkillsPage,SkillsPage,empty_my,"No skills yet. Open Discover to search and install.",,active
 skills.empty.my_cta,ui,SkillsPage,SkillsPage,empty_my_cta,"Browse",,active
@@ -1887,6 +1909,16 @@ proxy.upstream.modelDialog.fetching,proxy,ProxyPage,Upstreams,model_dialog_fetch
 proxy.upstream.modelDialog.noMatch,proxy,ProxyPage,Upstreams,model_dialog_no_match,No matching models,,active
 proxy.upstream.modelDialog.apply,proxy,ProxyPage,Upstreams,model_dialog_apply,Apply selection ({{count}}),,active
 proxy.upstream.health.action,proxy,ProxyPage,Upstreams,health_action,Health check,,active
+proxy.upstream.batch.action,proxy,ProxyPage,Upstreams,batch_action,Check all,,active
+proxy.upstream.batch.progress,proxy,ProxyPage,Upstreams,batch_progress,Checking {{checked}}/{{total}},,active
+proxy.upstream.batch.healthy,proxy,ProxyPage,Upstreams,batch_healthy,{{latency}}ms,,active
+proxy.upstream.batch.healthy_short,proxy,ProxyPage,Upstreams,batch_healthy_short,OK,,active
+proxy.upstream.batch.failed,proxy,ProxyPage,Upstreams,batch_failed,Failed,,active
+proxy.upstream.batch.skipped,proxy,ProxyPage,Upstreams,batch_skipped,Skipped,,active
+proxy.upstream.batch.skip_no_key,proxy,ProxyPage,Upstreams,batch_skip_no_key,No direct API key to probe with,,active
+proxy.upstream.batch.skip_no_model,proxy,ProxyPage,Upstreams,batch_skip_no_model,No model configured,,active
+proxy.upstream.balance.chip,proxy,ProxyPage,Upstreams,balance_chip,${{value}},,active
+proxy.upstream.balance.hint,proxy,ProxyPage,Upstreams,balance_hint,Remaining {{remaining}} of {{total}}, read from the relay station's billing API (best effort),,active
 proxy.upstream.health.title,proxy,ProxyPage,Upstreams,health_title,Model health check,,active
 proxy.upstream.health.description,proxy,ProxyPage,Upstreams,health_description,{{provider}},,active
 proxy.upstream.health.search,proxy,ProxyPage,Upstreams,health_search,Search model names or aliases,,active
@@ -2375,6 +2407,25 @@ pswitch.quota.reset_in,pswitch,ProviderSwitchPage,ProviderQuotaLine,quota_reset_
 pswitch.quota.tier.five_hour,pswitch,ProviderSwitchPage,ProviderQuotaLine,quota_tier_five_hour,"5h",,active
 pswitch.quota.tier.weekly,pswitch,ProviderSwitchPage,ProviderQuotaLine,quota_tier_weekly,"Weekly",,active
 pswitch.quota.tier.monthly,pswitch,ProviderSwitchPage,ProviderQuotaLine,quota_tier_monthly,"Monthly",,active
+pswitch.quota.credits,pswitch,ProviderSwitchPage,ProviderQuotaLine,quota_credits,"Credits {{value}}",,active
+pswitch.quota.credits_breakdown,pswitch,ProviderSwitchPage,ProviderQuotaLine,quota_credits_breakdown,"Monthly {{monthly}} · Purchased {{purchased}} · Free {{free}}",,active
+pswitch.failover.off,pswitch,ProviderSwitchPage,FailoverBar,failover_off,"Failover monitoring is off: providers that keep failing get cooled down and a switch is suggested.",,active
+pswitch.failover.settings,pswitch,ProviderSwitchPage,FailoverBar,failover_settings,"Failover settings",,active
+pswitch.failover.health,pswitch,ProviderSwitchPage,FailoverBar,failover_health,"Last {{window}}m: {{requests}} requests · {{failed}} failed ({{ratePct}}%)",,active
+pswitch.failover.no_data,pswitch,ProviderSwitchPage,FailoverBar,failover_no_data,"No proxy request data in this window (direct upstream connections are not observable)",,active
+pswitch.failover.cooldown,pswitch,ProviderSwitchPage,FailoverBar,failover_cooldown,"Current provider is cooling down: {{reason}}",,active
+pswitch.failover.switched,pswitch,ProviderSwitchPage,FailoverBar,failover_switched,"Auto-switched to {{name}}",,active
+pswitch.failover.switch_to,pswitch,ProviderSwitchPage,FailoverBar,failover_switch_to,"Switch to {{name}}",,active
+pswitch.failover.auto_hint,pswitch,ProviderSwitchPage,FailoverBar,failover_auto_hint,"Auto-switch is on; the monitor switches on its own next evaluation",,active
+pswitch.failover.no_candidate,pswitch,ProviderSwitchPage,FailoverBar,failover_no_candidate,"No available alternative provider",,active
+pswitch.failover.cooldown_badge,pswitch,ProviderSwitchPage,SortableProviderCard,failover_cooldown_badge,"Cooldown · {{minutes}}m",,active
+pswitch.failover.enable,pswitch,ProviderSwitchPage,FailoverEditDialog,failover_enable,"Enable failover monitoring",,active
+pswitch.failover.auto_switch,pswitch,ProviderSwitchPage,FailoverEditDialog,failover_auto_switch,"Auto-switch on failure (otherwise suggest only)",,active
+pswitch.failover.window,pswitch,ProviderSwitchPage,FailoverEditDialog,failover_window,"Observation window (minutes)",,active
+pswitch.failover.min_requests,pswitch,ProviderSwitchPage,FailoverEditDialog,failover_min_requests,"Minimum requests",,active
+pswitch.failover.rate,pswitch,ProviderSwitchPage,FailoverEditDialog,failover_rate,"Failure threshold (%)",,active
+pswitch.failover.cooldown_minutes,pswitch,ProviderSwitchPage,FailoverEditDialog,failover_cooldown_minutes,"Cooldown duration (minutes)",,active
+pswitch.failover.hint,pswitch,ProviderSwitchPage,FailoverEditDialog,failover_hint,"Evaluates proxied requests (core traffic) by API key / provider name; direct upstream connections are invisible.",,active
 pswitch.provider.dialog.add_title,pswitch,ProviderSwitchPage,ProviderSwitchPage,provider_dialog_add_title,Add provider,,active
 pswitch.provider.dialog.edit_title,pswitch,ProviderSwitchPage,ProviderSwitchPage,provider_dialog_edit_title,Edit provider,,active
 pswitch.backups.empty,pswitch,ProviderSwitchPage,ProviderSwitchPage,backups_empty,No backups yet. A backup is taken before the first managed write to each file.,,active

@@ -928,6 +928,38 @@ export async function checkProviderModelHealth(
   };
 }
 
+export type ProviderBalanceResult = {
+  ok: boolean;
+  totalUsd?: number;
+  usedUsd?: number;
+  remainingUsd?: number;
+  endpoint?: string;
+  error?: string;
+};
+
+// Best-effort balance query against the one-api/new-api style billing
+// endpoints; unsupported upstreams return ok:false and the UI hides the chip.
+export async function checkProviderBalance(
+  baseUrl: string,
+  apiKey: string,
+  timeoutMs = 10_000,
+): Promise<ProviderBalanceResult> {
+  if (!apiKey.trim()) return { ok: false, error: "missing-direct-key" };
+  try {
+    const headers = await getLocalApiAuthHeaders();
+    const response = await fetch("/api/proxy/balance-check", {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({ baseUrl, apiKey: apiKey.trim(), timeoutMs }),
+    });
+    const payload = (await response.json().catch(() => null)) as ProviderBalanceResult | null;
+    if (!payload?.ok) return { ok: false, error: payload?.error || `HTTP ${response.status}` };
+    return payload;
+  } catch (error) {
+    return { ok: false, error: errorMessage(error) };
+  }
+}
+
 export async function runProviderModelHealthChecks(
   models: ModelOption[],
   checkModel: (model: ModelOption, index: number) => Promise<ProviderModelHealthResult>,

@@ -138,6 +138,8 @@ function computeOverview(rows) {
 // ---------------------------------------------------------------------------
 
 const providerHealth = require("./provider-health");
+const balance = require("./balance");
+const budget = require("./budget");
 
 const REMARK_SECTIONS = new Set(["gemini-api-key", "codex-api-key", "claude-api-key", "openai-compatibility"]);
 
@@ -635,6 +637,43 @@ async function handleProxyApiRequest(req, res, url, ctx) {
       } catch (error) {
         json(res, { ok: false, error: error?.message || String(error) });
       }
+      return true;
+    }
+
+    if (p === "/api/proxy/balance-check" && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      json(res, await balance.checkBalance({
+        baseUrl: body.baseUrl,
+        apiKey: body.apiKey,
+        timeoutMs: body.timeoutMs,
+      }));
+      return true;
+    }
+
+    // --- budgets (AiTool-side settings, monitored over proxy records) ---
+    if (p === "/api/proxy/budget" && method === "PUT") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      const settings = config.readSettings();
+      settings.budgets = budget.normalizeBudgets(body.budgets || body);
+      config.writeSettings(settings);
+      json(res, { ok: true });
+      return true;
+    }
+    if (p === "/api/proxy/budget") {
+      const budgets = budget.normalizeBudgets(config.readSettings().budgets);
+      const rows = await recordStore.readRecords(paths.usageDir);
+      const pricingSnapshot = await pricing.getPricingSnapshot(paths.pricingPath);
+      const pricingModels = pricingSnapshot.models;
+      const costOf = pricingModels
+        ? (row) => pricing.estimateCostUsd(pricingModels, String(row.response_model || row.model || ""), row.tokens, { executorType: row.executor_type })
+        : () => null;
+      json(res, {
+        ok: true,
+        budget: budget.computeBudgetStatus({ budgets, rows, costOf }),
+        pricingAvailable: Boolean(pricingModels),
+      });
       return true;
     }
 

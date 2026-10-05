@@ -117,13 +117,14 @@ export function ProviderMcpPanel() {
     try {
       const result = await action();
       if (result && Array.isArray(result.servers)) setServers(result.servers);
-      if (successTitle) {
-        const failures = result && Array.isArray(result.failures) ? result.failures : [];
-        if (failures.length) {
-          showToast({ title: `${successTitle} — ${failures[0]}` });
-        } else {
-          showToast({ title: successTitle });
-        }
+      // A projection failure leaves the live config unwritten while the store
+      // already flipped, so it has to surface even for actions (toggles) that
+      // ask for no success toast.
+      const failures = result && Array.isArray(result.failures) ? result.failures : [];
+      if (failures.length) {
+        showToast({ title: `${successTitle || copy("pswitch.mcp.toast_error")} — ${failures[0]}` });
+      } else if (successTitle) {
+        showToast({ title: successTitle });
       }
       return result;
     } catch (error) {
@@ -183,7 +184,7 @@ export function ProviderMcpPanel() {
     const list = servers || [];
     const needle = search.trim().toLowerCase();
     if (!needle) return list;
-    return list.filter((server) => searchhay(server).includes(needle));
+    return list.filter((server) => searchHay(server).includes(needle));
   }, [servers, search]);
 
   const countFor = (app) => (servers || []).filter((server) => server.apps && server.apps[app] === true).length;

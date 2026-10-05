@@ -12,6 +12,7 @@ const path = require("node:path");
 const { Readable } = require("node:stream");
 const { test, beforeEach, afterEach } = require("node:test");
 const { parse: tomlParse } = require("smol-toml");
+const YAML = require("yaml");
 
 let tmpHome;
 let prevHome;
@@ -293,6 +294,91 @@ test("mcode: entries carry enabled inline, unknown fields survive, projection ne
   assert.equal(doc.mcpServers.unmanaged.command, "keep-me");
 });
 
+test("mcp: an inline [mcp_servers] entry is migrated, never defined twice", async () => {
+  // A hand-written config may keep entries inline under [mcp_servers]. Writing
+  // a [mcp_servers.fetch] block next to `fetch = { … }` defines the same table
+  // twice, which makes the whole config.toml unloadable for Codex.
+  fs.mkdirSync(homePath(".codex"), { recursive: true });
+  const configPath = homePath(".codex", "config.toml");
+  fs.writeFileSync(configPath, [
+    "model = \"gpt-5\"",
+    "",
+    "[mcp_servers]",
+    "fetch = { command = \"uvx\", args = [\"mcp-server-fetch\"] }",
+    "keep = { command = \"stay\" }",
+    "",
+    "[tui]",
+    "theme = \"dark\"",
+    "",
+  ].join("\n"));
+
+  const res = await post("/api/provider-switch/mcp", {
+    server: { id: "fetch", server: stdioSpec, apps: { codex: true } },
+  });
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body.failures, []);
+
+  const text = fs.readFileSync(configPath, "utf8");
+  const doc = tomlParse(text); // throws on a redefined table
+  assert.equal(doc.mcp_servers.fetch.command, "npx");
+  assert.deepEqual(doc.mcp_servers.fetch.args, ["-y", "@modelcontextprotocol/server-fetch"]);
+  assert.equal(doc.mcp_servers.keep.command, "stay", "sibling inline entries survive");
+  assert.equal(doc.model, "gpt-5");
+  assert.equal(doc.tui.theme, "dark");
+
+  // Disabling must clear the inline form too, or the server stays live in
+  // Codex while the dashboard shows it off.
+  const off = await post("/api/provider-switch/mcp/toggle", { id: "fetch", app: "codex", enabled: false });
+  assert.deepEqual(off.body.failures, []);
+  const after = tomlParse(fs.readFileSync(configPath, "utf8"));
+  assert.equal(after.mcp_servers.fetch, undefined);
+  assert.equal(after.mcp_servers.keep.command, "stay");
+});
+
+test("mcp: a dotted top-level mcp_servers.<id> key is migrated to a block", async () => {
+  fs.mkdirSync(homePath(".grok"), { recursive: true });
+  const configPath = homePath(".grok", "config.toml");
+  fs.writeFileSync(configPath, "mcp_servers.fetch = { command = \"old\" }\nmodel = \"grok\"\n");
+
+  const res = await post("/api/provider-switch/mcp", {
+    server: { id: "fetch", server: stdioSpec, apps: { grokbuild: true } },
+  });
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body.failures, []);
+  const doc = tomlParse(fs.readFileSync(configPath, "utf8"));
+  assert.equal(doc.mcp_servers.fetch.command, "npx");
+  assert.equal(doc.model, "grok");
+});
+
+test("mcp: url-only specs project as remote, not a local entry with an empty command", async () => {
+  fs.mkdirSync(homePath(".config", "opencode"), { recursive: true });
+  fs.mkdirSync(homePath(".hermes"), { recursive: true });
+  const opencodePath = homePath(".config", "opencode", "opencode.json");
+  fs.writeFileSync(opencodePath, JSON.stringify({ mcp: {} }));
+
+  // No `type`, url only — validateServerSpec accepts it as http, so every
+  // projection has to infer the same transport.
+  const res = await post("/api/provider-switch/mcp", {
+    server: {
+      id: "remote",
+      server: { url: "https://mcp.example.com/mcp", headers: { Authorization: "Bearer t" } },
+      apps: { opencode: true, hermes: true },
+    },
+  });
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body.failures, []);
+
+  const doc = JSON.parse(fs.readFileSync(opencodePath, "utf8"));
+  assert.equal(doc.mcp.remote.type, "remote");
+  assert.equal(doc.mcp.remote.url, "https://mcp.example.com/mcp");
+  assert.equal(doc.mcp.remote.command, undefined);
+  assert.equal(doc.mcp.remote.headers.Authorization, "Bearer t");
+
+  const hermes = YAML.parse(fs.readFileSync(homePath(".hermes", "config.yaml"), "utf8"));
+  assert.equal(hermes.mcp_servers.remote.url, "https://mcp.example.com/mcp");
+  assert.equal(hermes.mcp_servers.remote.command, undefined);
+});
+
 // ---------------------------------------------------------------------------
 // Imports
 // ---------------------------------------------------------------------------
@@ -361,6 +447,66 @@ test("mcp: re-importing an existing server only flips the app flag", async () =>
   assert.equal(fetchServer.server.codexStyle, undefined);
   assert.equal(fetchServer.apps.codex, true);
   assert.equal(fetchServer.apps.opencode, true);
+});
+
+test("mcp: import keeps a live entry's disabled state instead of enabling it", async () => {
+  fs.mkdirSync(homePath(".minimax"), { recursive: true });
+  fs.mkdirSync(homePath(".hermes"), { recursive: true });
+  fs.mkdirSync(homePath(".config", "opencode"), { recursive: true });
+  fs.writeFileSync(homePath(".minimax", "mcp.json"), JSON.stringify({
+    mcpServers: {
+      on: { type: "stdio", command: "a" },
+      off: { type: "stdio", command: "b", enabled: false },
+    },
+  }));
+  fs.writeFileSync(homePath(".config", "opencode", "opencode.json"), JSON.stringify({
+    mcp: { ocoff: { type: "local", command: ["d"], enabled: false } },
+  }));
+  fs.writeFileSync(homePath(".hermes", "config.yaml"), [
+    "mcp_servers:",
+    "  hoff:",
+    "    command: c",
+    "    enabled: false",
+  ].join("\n"));
+
+  const res = await post("/api/provider-switch/mcp/import", { apps: ["mcode", "hermes", "opencode"] });
+  assert.equal(res.status, 200);
+  const byId = (id) => res.body.servers.find((s) => s.id === id);
+  assert.equal(byId("on").apps.mcode, true);
+  assert.equal(byId("off").apps.mcode, false, "a disabled entry must not import as enabled");
+  assert.equal(byId("hoff").apps.hermes, false);
+  assert.equal(byId("ocoff").apps.opencode, false);
+
+  // A later batch sync must not flip the import back on. mcode keeps the
+  // entry with its inline enabled:false; everywhere else "disabled" means
+  // absent, exactly as the dashboard's own toggle-off projects it.
+  await post("/api/provider-switch/mcp/sync", { apps: ["mcode", "hermes"] });
+  const mcode = JSON.parse(fs.readFileSync(homePath(".minimax", "mcp.json"), "utf8"));
+  assert.equal(mcode.mcpServers.off.enabled, false);
+  assert.equal(mcode.mcpServers.on.enabled, true);
+  const hermes = YAML.parse(fs.readFileSync(homePath(".hermes", "config.yaml"), "utf8"));
+  assert.notEqual(hermes.mcp_servers.hoff?.enabled, true, "sync never re-enables an imported-off server");
+});
+
+test("mcp: a backup of an MCP-only live file can be restored", async () => {
+  // claude's MCP registry is ~/.claude.json, which is not a provider-switch
+  // target file — the restore route has to resolve it anyway.
+  fs.mkdirSync(homePath(".claude"), { recursive: true });
+  fs.writeFileSync(homePath(".claude.json"), JSON.stringify({ userID: "u1", mcpServers: {} }));
+  await post("/api/provider-switch/mcp", {
+    server: { id: "fetch", server: stdioSpec, apps: { claude: true } },
+  });
+
+  const listed = await call(handler(), { url: "/api/provider-switch/backups?app=claude" });
+  assert.equal(listed.status, 200);
+  const entry = listed.body.backups.find((b) => b.name.startsWith(".claude.json."));
+  assert.ok(entry, "the MCP projection's backup is listed");
+
+  const restore = await post("/api/provider-switch/backups/restore", { app: "claude", backup: entry.name });
+  assert.equal(restore.status, 200);
+  const doc = JSON.parse(fs.readFileSync(homePath(".claude.json"), "utf8"));
+  assert.equal(doc.userID, "u1");
+  assert.equal(doc.mcpServers.fetch, undefined, "restore brings back the pre-projection file");
 });
 
 // ---------------------------------------------------------------------------

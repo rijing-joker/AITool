@@ -236,9 +236,11 @@ async function removeFromJsonMap(app, filePath, mapKey, id) {
 // ---------------------------------------------------------------------------
 
 // OpenCode: stdio → {type:"local", command:[cmd, ...args], environment?},
-// http/sse → {type:"remote", url, headers?}; always enabled:true.
+// http/sse → {type:"remote", url, headers?}; always enabled:true. Transport
+// comes from specTransportType, so a url-only spec becomes a remote entry
+// rather than a local one with an empty command.
 function toOpencodeSpec(spec) {
-  const type = typeof spec.type === "string" ? spec.type : "stdio";
+  const type = specTransportType(spec);
   if (type === "stdio") {
     const out = { type: "local", command: [String(spec.command || "")] };
     for (const arg of Array.isArray(spec.args) ? spec.args : []) out.command.push(arg);
@@ -289,7 +291,7 @@ function fromOpencodeSpec(id, spec) {
 const HERMES_EXTRA_FIELDS = ["enabled", "timeout", "connect_timeout", "tools", "sampling", "roots", "auth"];
 
 function toHermesSpec(spec) {
-  const type = typeof spec.type === "string" ? spec.type : "stdio";
+  const type = specTransportType(spec);
   const out = {};
   if (type === "stdio") {
     out.command = String(spec.command || "");
@@ -527,8 +529,18 @@ async function upsertServerInApp(app, id, spec) {
   // codex + grokbuild: line-preserving [mcp_servers.<id>] tables.
   const text = (await readText(file.path)) ?? "";
   const entries = specToTomlEntries(spec, { codexStyle: app === "codex" });
-  const next = toml.setTable(text, `mcp_servers.${id}`, entries);
+  const next = toml.setTable(stripInlineMcpEntry(text, id), `mcp_servers.${id}`, entries);
   await writeOwnedFile(app, file.path, next);
+}
+
+// A hand-written config may hold the entry inline — `fetch = { command = … }`
+// under [mcp_servers], or a dotted `mcp_servers.fetch = { … }` at top level —
+// instead of as its own [mcp_servers.<id>] block. setTable only replaces the
+// block form, so appending one next to an inline key would define the same
+// table twice and leave a config.toml that Codex/Grok refuse to load. Drop
+// the inline form first; the block that follows takes its place.
+function stripInlineMcpEntry(text, id) {
+  return toml.removeTopLevelKey(toml.removeTableKey(text, "mcp_servers", id), `mcp_servers.${id}`);
 }
 
 async function removeServerFromApp(app, id) {
@@ -553,7 +565,9 @@ async function removeServerFromApp(app, id) {
   }
   const text = await readText(file.path);
   if (text === null || !text.trim()) return;
-  const next = toml.setTable(text, `mcp_servers.${id}`, null);
+  // Disabling must clear the inline form too, or the server stays live in the
+  // app while the dashboard shows it off.
+  const next = toml.setTable(stripInlineMcpEntry(text, id), `mcp_servers.${id}`, null);
   await writeOwnedFile(app, file.path, next);
 }
 
@@ -651,8 +665,8 @@ async function toggleServerApp(id, app, enabled) {
 }
 
 // Import MCP entries from one app's live config (or all apps) into the SSOT.
-// Existing servers only get the app flag flipped on; their spec stays
-// user-owned. Returns the change count and the per-entry skip reasons.
+// Existing servers only get the app flag synced to the live state; their spec
+// stays user-owned. Returns the change count and the per-entry skip reasons.
 async function importFromApps(apps) {
   const targets = Array.isArray(apps) && apps.length ? apps.filter((app) => MCP_APPS.includes(app)) : MCP_APPS.slice();
   let changed = 0;
@@ -676,7 +690,10 @@ async function importFromApp(app) {
     const doc = await readJsonDoc(file.path).catch(() => null);
     const map = doc ? jsonMapGet(doc, file.mapKey) : null;
     if (!map) return { changed: 0, skipped: [] };
-    entries = Object.entries(map).map(([id, value]) => ({ id, value, enabled: app === "mcode" ? value?.enabled !== false : true }));
+    // mcode and opencode entries carry their own `enabled` flag; claude and
+    // gemini have none, so presence means enabled.
+    const hasEnabledFlag = app === "mcode" || app === "opencode";
+    entries = Object.entries(map).map(([id, value]) => ({ id, value, enabled: hasEnabledFlag ? value?.enabled !== false : true }));
   } else if (app === "hermes") {
     const text = await readText(file.path);
     if (text === null || !text.trim()) return { changed: 0, skipped: [] };
@@ -718,11 +735,13 @@ async function importFromApp(app) {
     }
     const existing = store.servers.find((s) => s.id === id);
     if (existing) {
-      if (existing.apps?.[app] !== true) {
+      // Mirror the live flag, including off: an entry the user disabled in the
+      // app must not come back enabled on the next projection.
+      if (existing.apps?.[app] !== enabled) {
         await mutateMcpStore((current) => {
           const index = current.servers.findIndex((s) => s.id === id);
           if (index !== -1) {
-            current.servers[index].apps = { ...normalizeApps(current.servers[index].apps), [app]: true };
+            current.servers[index].apps = { ...normalizeApps(current.servers[index].apps), [app]: enabled };
             current.servers[index].updatedAt = new Date().toISOString();
           }
           return current;
@@ -736,7 +755,7 @@ async function importFromApp(app) {
           id,
           name: id,
           server: spec,
-          apps: { ...defaultApps(), [app]: true },
+          apps: { ...defaultApps(), [app]: enabled },
           description: "",
           homepage: "",
           docs: "",

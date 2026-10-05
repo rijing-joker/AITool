@@ -109,6 +109,7 @@ UTC, half-hour buckets, append-only — readers take the latest entry per `(sour
 - Env-var prefixes: `TOKENTRACKER_` (analytics CLI — legacy but load-bearing), `AITOOL_` (proxy/desktop: `AITOOL_CORE_BIN`, `AITOOL_CORE_REPO`, `AITOOL_ROOT`, `AITOOL_NODE`), `VITE_` for dashboard.
 - Git commits in **English**, conventional style (`feat:` / `fix:` / `refactor:` / `chore:` / `docs:` / `test:` / `ci:`).
 - **Privacy**: token counts only — never prompts, messages, or conversation bodies.
+- **Cloud sync is opt-in** (TokenTracker v1.1.11 merge): default off and fail-closed on unset/garbage/unreadable prefs (`src/lib/cloud-sync-prefs.js` + `dashboard/src/lib/cloud-sync-prefs.ts`; a monotonic `changedAtMs` keeps a delayed re-enable from overwriting a newer opt-out). Every automatic upload path — hook/background/retry/notify-driven sync, native publication, mid-drain — gates behind `canUpload()`; manual `aitool sync` remains a one-time upload request and does not change the toggle. Never add an automatic upload without the same gate.
 - `TokenTrackerBar/EmbeddedServer/` is gitignored; built on demand by `TokenTrackerBar/scripts/bundle-node.sh`.
 - After editing `TokenTrackerBar/project.yml`: `(cd TokenTrackerBar && xcodegen generate && ruby scripts/patch-pbxproj-icon.rb)`.
 

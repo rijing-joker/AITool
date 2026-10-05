@@ -10,7 +10,7 @@ AiTool 把三个开源项目融合为一个本地优先的产品：
 
 - **AI 代理**（来自 [EasyCLIProxyAPI](https://github.com/router-for-me/EasyCLIProxyAPI) / [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI)，MIT）—— 在本地运行网关，把你的服务提供方账号通过 OpenAI / Anthropic / Gemini 兼容端点暴露出去，并记录每次请求的用量。
 - **Token 用量分析**（来自 [TokenTracker](https://github.com/xiufengsun/TokenTracker)，MIT）—— 本地优先的仪表盘，追踪 43 款 AI 编码工具的 Token 用量与成本。
-- **供应商配置管理**（来自 [cc-switch](https://github.com/farion1231/cc-switch)，MIT）—— 管理各工具的供应商预设，一键切换 Claude Code / Codex CLI / Gemini CLI 的配置文件，无需手改 JSON / TOML。
+- **供应商配置管理**（来自 [cc-switch](https://github.com/farion1231/cc-switch)，MIT）—— 管理各工具的供应商预设，一键切换 Claude Code / Codex CLI / Gemini CLI 的配置文件，还带共享 MCP 服务器、按应用的提示词管理、套餐额度查询和只读 CLI 会话历史，无需手改 JSON / TOML。
 
 UI 全程使用 TokenTracker 的设计语言 —— 一个仪表盘覆盖两个世界：代理请求会汇入与原生 CLI 工具相同的趋势、模型分解和成本视图。
 
@@ -25,6 +25,7 @@ UI 全程使用 TokenTracker 的设计语言 —— 一个仪表盘覆盖两个�
 │  侧边栏                                                                                       │
 │  ├── AI Proxy        ← 新增：代理生命周期、服务提供方、密钥、请求级记录、配置                    │
 │  ├── Provider Configs ← 新增：一键切换 AI CLI 配置文件（cc-switch 移植）                         │
+│  ├── CLI Sessions     ← 新增：只读的 claude/codex/gemini 会话记录 + 成本（cc-switch 移植）       │
 │  └── Tokens / Sessions / Limits / …  ← TokenTracker 分析（43 款 CLI 工具），保持不变            │
 └──────────────┬──────────────────────────────────────────────────────────┬────────────────────┘
                │ /api/proxy/*                                             │ /functions/*（本地 API）
@@ -91,9 +92,10 @@ docker compose up -d --build
 | **编辑器** | 添加/编辑弹窗显示切换到该供应商之后的完整配置文件（cc-switch 的编辑器视图）；保存时关键字段写回供应商行，其余改动经三方比对写入本机配置文件（保留我的 / 保留对方的） |
 | **Codex 凭据** | 中转密钥写入 `config.toml` 中 `[model_providers.custom]` 的 `experimental_bearer_token` —— Codex CLI 0.149+ 不再从 `auth.json` 读取中转密钥，`auth.json` 只保存官方 ChatGPT 登录（添加/编辑弹窗的 Codex 编辑器相应拆分：`auth.json` JSON + `config.toml` TOML） |
 | **MCP 服务器** | 页面的 MCP 标签维护一份所有 agent 共用的 MCP 服务器列表（cc-switch 的统一 `mcp_servers` 模块），按应用开关即投影进对应应用的原生 MCP 配置 —— Claude（`~/.claude.json`）、Codex（`config.toml` 的 `[mcp_servers.*]`）、Gemini（`settings.json`）、Grok Build、OpenCode、Hermes、MiniMax Code（`~/.minimax/mcp.json`），并可从各工具已配置的服务器导入 |
+| **提示词** | 页面的 Prompts 标签维护按应用命名的提示词列表（cc-switch 的提示词模块）；启用某条提示词即覆写对应应用的指令文件 —— `~/.claude/CLAUDE.md`、`AGENTS.md`（Codex、Grok Build、OpenCode、OpenClaw、pi、mcode）、`~/.gemini/GEMINI.md`、`~/.hermes/SOUL.md` —— 并先把现有文件内容捕获进存储，手写的指令文件不会被悄悄覆盖 |
 | **额度查询** | Base URL 命中受支持套餐供应商的卡片会显示各窗口「剩余百分比」（cc-switch 的 coding_plan 额度服务）；内置 Claude Code / Codex 的 Command Code 预设，查询使用该供应商行自己的密钥访问其 `/alpha` 控制面 |
 | **安全性** | 原子写入（凭据文件 0600）、每文件首次写入前自动备份（可在仪表盘恢复）、配置文件编辑器内置于添加/编辑弹窗；Codex 官方 ChatGPT 登录在切向第三方中转时自动暂存、切回时还原 |
-| **存储位置** | `~/.aitool/provider-switch/` —— `providers.json`（预设 + 当前指针）、`mcp-servers.json`（共享 MCP 服务器列表）、`codex-auth-stash.json`、`backups/` |
+| **存储位置** | `~/.aitool/provider-switch/` —— `providers.json`（预设 + 当前指针）、`mcp-servers.json`（共享 MCP 服务器列表）、`prompts.json`（按应用的提示词列表）、`codex-auth-stash.json`、`backups/` |
 
 ## AI 代理能力（来自 EasyCLIProxyAPI）
 
@@ -105,7 +107,7 @@ docker compose up -d --build
 | 客户端访问密钥（`access.api-keys`） | Access Keys |
 | 兼容端点 —— `/v1/chat/completions`、`/v1/messages`、`/v1beta/models` | Access Keys |
 | 服务提供方凭据文件（上传 / 列表 / 删除 / 刷新） | Providers |
-| 请求级用量记录（模型、提供商、Token、延迟、失败） | Requests |
+| 请求级用量记录（模型、提供商、Token、延迟、失败）+ 成本估算（models.dev 定价同步） | Requests |
 | 通过 core 管理 API 编辑 `config.yaml` | Settings |
 | 随仪表盘自启动 | Settings |
 
@@ -120,6 +122,7 @@ docker compose up -d --build
 | **支持的 AI 工具数** | **43** |
 | **仪表盘** | localhost:7680 —— 趋势、模型分解、成本、热力图 |
 | **代理用量来源** | `cliproxy` —— 自动汇入同一批视图 |
+| **CLI 会话历史** | `/cli-sessions` —— 只读的 Claude Code / Codex / Gemini 会话记录，附会话级成本估算 |
 
 并入的 TokenTracker CLI 全部功能继续可用：43 款 AI 编码工具（Claude Code、Codex、Gemini、Cursor、Droid、Cline、Command Code、TRAE 等）的 hook 安装、本地 JSONL 解析、成本引擎、sessions、限额、成就、技能面板、桌面宠物、小组件 —— 同一个仪表盘在 `localhost:7680`。代理用量以 `cliproxy` 来源出现在同一批视图中。
 
@@ -136,11 +139,12 @@ aitool doctor     # 健康检查
 bin/tracker.js           CLI 入口 (aitool)
 src/cli.js               命令分发（serve/sync/status/…/proxy）
 src/lib/local-api.js     本地 API：/functions/*（用量）+ /api/proxy/*（新增）
-src/lib/proxy/           新增 — paths / config / manager / 管理 API 客户端 / 用量桥 / REST 处理
+src/lib/proxy/           新增 — paths / config / manager / 管理 API 客户端 / 用量桥 / REST 处理 / models.dev 定价同步
 src/commands/proxy.js    新增 — `aitool proxy …` 命令
 dashboard/               TokenTracker 仪表盘（Vite + React + Tailwind，oai 设计系统）
   └── src/pages/ProxyPage.jsx   新增 — AI Proxy 页（7 个标签）
 src/lib/provider-switch/ 新增 — cc-switch 移植：供应商预设 → 配置文件切换（关键字段投影 / 备份）
+src/lib/sessions.js      新增 — CLI 会话历史（只读的 claude/codex/gemini 记录 + 会话级成本）
 src/commands/…           src/lib/local-api.js 同时挂载 /api/provider-switch/*
 dashboard/…/ProviderSwitchPage.jsx  新增 — /provider-switch 页（供应商配置）
 scripts/fetch-core.cjs   新增 — 下载钉住版本的 CLIProxyAPI release 二进制

@@ -1,62 +1,64 @@
-# Contributing to TokenTracker
+# Contributing to AiTool
 
-Thanks for considering a contribution! TokenTracker is a small project, so the process is intentionally lightweight.
+Thanks for considering a contribution! AiTool is a local-first AI toolbox merging an AI gateway (EasyCLIProxyAPI / CLIProxyAPI parity), provider config management (cc-switch port), and the vendored TokenTracker analytics. The process is intentionally lightweight.
 
 ## Setup
 
 ```bash
-git clone https://github.com/xiufengsun/TokenTracker.git
-cd TokenTracker
+git clone https://github.com/rijing-joker/AITool.git
+cd AITool
 npm install
+npm --prefix dashboard install
 
 # Build the dashboard once so the CLI can serve it
-cd dashboard && npm install && npm run build && cd ..
+npm run dashboard:build
+
+# Optional — only needed for AI-proxy work: fetch the pinned cli-proxy-api core
+node bin/tracker.js proxy install
 ```
 
 ## Run the CLI locally
 
 ```bash
-node bin/tracker.js              # Start the local dashboard server (default: http://localhost:7680)
-node bin/tracker.js sync         # Manual sync
-node bin/tracker.js status       # Check hook status
-node bin/tracker.js doctor       # Health check
+node bin/tracker.js serve         # Dashboard at http://localhost:7680 (proxy core starts with it)
+node bin/tracker.js sync          # Manual sync
+node bin/tracker.js status        # Check hook status
+node bin/tracker.js doctor        # Health check
+node bin/tracker.js proxy status  # AI proxy core + usage bridge
 ```
 
 ## Tests
 
 ```bash
-npm test                                     # Full suite (96 test files, node --test)
-node --test test/rollout-parser.test.js      # A single test file
-npm run ci:local                             # Tests + validations + builds (everything CI runs)
+npm test                                    # Full suite (node --test test/*.test.js)
+node --test test/rollout-parser.test.js     # A single test file
+npm --prefix dashboard test                 # Dashboard vitest suite
+npm run ci:local                            # Tests + validators + dashboard build (everything CI runs)
 ```
 
-If you're touching the dashboard:
+If you're touching the dashboard UI:
 
 ```bash
-npm run dashboard:dev                        # Vite dev server with mocked API
-npm run dashboard:build                      # Production build (output: dashboard/dist/)
-npm run validate:copy                        # Validate copy registry completeness
+npm run dashboard:dev             # Vite dev server with mocked API (skips the CLI backend)
+npm run validate:copy             # copy.csv registry completeness — user-facing strings live there, never hardcoded
 ```
 
 ## Pull Request Checklist
 
-- [ ] Tests pass (`npm test`)
-- [ ] If you added user-facing strings, add them to `dashboard/src/content/copy.csv`
-- [ ] If you changed Swift, run `xcodegen generate` after editing `TokenTrackerBar/project.yml`
-- [ ] Conventional commit style: `feat:`, `fix:`, `refactor:`, `docs:`, `chore:`, `ci:`, `test:`
+- [ ] Tests pass (`npm test`, plus `npm --prefix dashboard test` for dashboard changes)
+- [ ] User-facing strings added to `dashboard/src/content/copy.csv` (validators fail on hardcoding)
+- [ ] Swift changes: run `xcodegen generate` after editing `TokenTrackerBar/project.yml`
+- [ ] Conventional commit style in English: `feat:`, `fix:`, `refactor:`, `docs:`, `chore:`, `ci:`, `test:`
 - [ ] PR description explains *why*, not just *what*
 
-## Adding a New AI Tool Integration
+## Where things live
 
-This is the most common kind of contribution. The pattern:
+[CLAUDE.md](CLAUDE.md)'s "What's where" table is the map. The most common contributions:
 
-1. **Add a parser to `src/lib/rollout.js`** — most tools write JSONL or SQLite logs. The parser should normalize tokens into the canonical shape: `{input_tokens, output_tokens, cached_input_tokens, cache_creation_input_tokens, total_tokens, model, source, hour_start}`.
-2. **Add a hook installer in `src/commands/init.js`** — most tools support a config file or hook script you can patch. Make it idempotent (safe to re-run).
-3. **Add a status check in `src/commands/status.js`** — show whether the hook is installed and whether data has been collected.
-4. **Add a parser test in `test/rollout-parser.test.js`** — use a real (anonymized) sample log fixture.
-5. **Update `README.md` Supported AI Tools table** with the new row.
-
-Look at how Claude Code, Codex, or Gemini are wired in for reference — they're the simplest examples.
+- **New AI tool integration** (analytics): add a `parse*Incremental` parser in `src/lib/rollout.js`, a hook installer in `src/commands/init.js`, a status check in `src/commands/status.js`, and a parser test with a real (anonymized) log fixture. Follow the token normalization in CLAUDE.md — `input_tokens` is non-cached input only; verify the provider's semantics before shipping (e.g. Codex's `input` includes cached tokens).
+- **Proxy REST endpoint**: `src/lib/proxy/api.js` (mounted under `/api/proxy/*`).
+- **Provider switching / MCP / prompts / quota**: `src/lib/provider-switch/` — presets project "floor" key fields into live config files as minimal patches; keep projections line-preserving and never touch user-owned content.
+- **Dashboard page**: lazy-imported from `dashboard/src/App.jsx` (exception: `NativeAuthCallbackPage` must stay eager-imported — see CLAUDE.md).
 
 ## Code Style
 
@@ -65,10 +67,12 @@ Look at how Claude Code, Codex, or Gemini are wired in for reference — they're
 - **macOS (`TokenTrackerBar/`)**: Swift 5.9, SwiftUI + AppKit. Match the existing style.
 - No linter wars. Be reasonable.
 
-## Privacy Rule (non-negotiable)
+## Privacy Rules (non-negotiable)
 
-TokenTracker tracks **only token counts and timestamps**. Never log, store, transmit, or print any prompt content, response content, file paths from user code, or anything that could leak what the user is working on. If your change touches a parser, double-check this.
+AiTool tracks **only token counts and timestamps**. Never log, store, transmit, or print any prompt content, response content, file paths from user code, or anything that could leak what the user is working on. If your change touches a parser, double-check this.
+
+Cloud sync is opt-in and fail-closed: any new automatic upload path must gate behind the same `canUpload()` check (`src/lib/cloud-sync-prefs.js` / `dashboard/src/lib/cloud-sync-prefs.ts`).
 
 ## Releasing (maintainers only)
 
-See the "Release Workflow" section in [CLAUDE.md](CLAUDE.md).
+See the "Release workflow" section in [CLAUDE.md](CLAUDE.md).

@@ -1,6 +1,6 @@
 # Privacy Policy
 
-_Last updated: 2026-09-12 · Applies to the `tokentracker-cli` npm package, the macOS app, the Windows app, the Linux app, and [www.tokentracker.cc](https://www.tokentracker.cc)._
+_Last updated: 2026-10-05 · Applies to the `tokentracker-cli` npm package, the macOS app, the Windows app, the Linux app, and [www.tokentracker.cc](https://www.tokentracker.cc)._
 
 TokenTracker reads the local logs that AI coding tools already write to your disk, and turns them into token counts and cost estimates. It is local-first: the dashboard, the parsers and the database all run on your machine.
 
@@ -43,6 +43,8 @@ Everything lives under `~/.tokentracker/` (`%USERPROFILE%\.tokentracker\` on Win
 
 To erase everything TokenTracker knows about you, delete that directory. `tokentracker uninstall` additionally removes the hooks it installed into your AI tools.
 
+The AiTool additions store under `~/.aitool/`: the AI proxy keeps per-request usage records (`~/.aitool/proxy/usage/*.jsonl` — model, provider, token counts, latency, cost estimates; these records stay local and are never uploaded), its core binary, config and logs (`bin/`, `config.yaml`, `logs/`), the provider auth files you give the proxy (`auths/`), and the provider-config presets, MCP server list, prompt lists, and pre-write backups (`~/.aitool/provider-switch/`). Only the aggregated hourly buckets described in §4 ever reach the cloud — never the per-request records.
+
 ---
 
 ## 3. Network requests
@@ -58,6 +60,7 @@ To erase everything TokenTracker knows about you, delete that directory. `tokent
 | **GitHub star count** | `api.github.com` | Nothing but the request itself (public repo metadata) | On dashboard load |
 | **Update check** | `api.github.com` | Nothing but the request itself | Windows: once at launch. macOS: only when you click "Check for Updates" |
 | **Pricing data refresh** | `raw.githubusercontent.com` | Nothing but the request itself (public model pricing JSON from BerriAI/litellm) | At most once every 24 hours when the local pricing cache is missing or stale |
+| **Proxy pricing refresh** | `models.dev` | Nothing but the request itself (public model pricing JSON) | At most once every 24 hours while the AI proxy's Requests view or a CLI-session cost estimate needs pricing (cached in `~/.aitool/proxy/usage/models-dev-pricing.json`; failures back off and never delay a response) |
 
 Both telemetry items are disabled together by a single switch:
 
@@ -74,7 +77,7 @@ Audit: [`src/lib/telemetry.js`](../src/lib/telemetry.js), [`dashboard/src/lib/an
 | Request | Destination | What is sent | Trigger |
 |---|---|---|---|
 | **Devin quota read** | `server.codeium.com` (Devin's official `GetPlanStatus` RPC) | An empty JSON body, authenticated with the Devin CLI session token already stored on your machine. The token is never persisted or logged by TokenTracker. | Off by default — only while the Devin provider switch in Settings → Usage & Limits → Providers is on, and only on a locally authenticated request |
-| **Cloud sync / leaderboard** | `srctyff5.us-east.insforge.app` | Hourly buckets only — see §4 | Signing in to a TokenTracker account |
+| **Cloud sync / leaderboard** | `srctyff5.us-east.insforge.app` | Hourly buckets only — see §4 | Signing in to a TokenTracker account **and** an explicit cloud-sync opt-in (default off — see §4) |
 | **Exchange rates** | `open.er-api.com` | Nothing but the request itself | Selecting a non-USD display currency |
 | **Desktop pet download** | `codex-pets.net` | The pet id you chose | Importing a pet from a link |
 | **IP check page** | `ip.net.coffee`, `claude.ai`, `1.1.1.1` | Your IP address is, by design, what these endpoints observe — that page exists to tell you how providers see your network | Opening the IP Check page |
@@ -92,6 +95,8 @@ Audit: [`src/lib/telemetry.js`](../src/lib/telemetry.js), [`dashboard/src/lib/an
 ## 4. Cloud account and leaderboard
 
 Signing in is **entirely optional**. TokenTracker is fully functional without an account; the leaderboard, cross-device aggregation, badges and public profiles are the only features that require one.
+
+**Cloud sync is opt-in and off by default.** Since the v1.1.11 merge, signing in alone uploads nothing: automatic uploads (background syncs, retries, notification-driven runs, native publication) only fire while the cloud-sync preference is explicitly enabled in Settings, and the preference fails closed — an unset, corrupted, or unreadable state counts as off. A delayed re-enable can never overwrite a newer opt-out. A manual `aitool sync` remains a one-time upload request; it does not change the toggle.
 
 **Sent when signed in:**
 
@@ -134,7 +139,7 @@ AI providers whose quota endpoints TokenTracker reads (Anthropic, OpenAI, Cursor
 | `DO_NOT_TRACK=1` | Same as above (respects the standard) |
 | `TOKENTRACKER_DISABLE_GIT_ATTRIBUTION=1` | Stops TokenTracker running `git log` inside your project directories |
 
-Signing out removes cloud sync. Not signing in means it never starts.
+Signing out removes cloud sync. Not signing in means it never starts — and since v1.1.11, cloud sync is additionally opt-in: with the preference off (the default), nothing uploads even when you are signed in.
 
 ---
 

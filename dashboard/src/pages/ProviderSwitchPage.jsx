@@ -35,6 +35,8 @@ import { PageTabs } from "../ui/components/PageTabs";
 import { UnsavedChangesGuard } from "../ui/components/UnsavedChangesGuard";
 import { PresetIcon, presetAvatarClass, ProviderEditDialog } from "./provider-edit-dialog";
 import { ProviderMcpPanel } from "./provider-mcp-panel";
+import { ProviderPromptsPanel } from "./provider-prompts-panel";
+import { ProviderQuotaLine } from "./provider-quota-line";
 
 // Provider config management — an interaction port of cc-switch's provider
 // module. Presets live in ~/.aitool/provider-switch (served by the local
@@ -69,7 +71,7 @@ function SectionTitle({ children, action = null }) {
   );
 }
 
-function SortableProviderCard({ provider, isCurrent, busy, dragLabel, onSwitch, onEdit, onDelete }) {
+function SortableProviderCard({ app, provider, isCurrent, busy, dragLabel, onSwitch, onEdit, onDelete }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: provider.id,
     disabled: busy,
@@ -139,6 +141,7 @@ function SortableProviderCard({ provider, isCurrent, busy, dragLabel, onSwitch, 
               <span className="truncate">{provider.websiteUrl.replace(/^https?:\/\//, "")}</span>
             </a>
           ) : null}
+          <ProviderQuotaLine app={app} provider={provider} />
         </div>
         <div className="ml-auto flex w-full shrink-0 items-center justify-end gap-1.5 sm:w-auto">
           <Button
@@ -193,7 +196,12 @@ export function ProviderSwitchPage() {
   const appState = useMemo(() => {
     return status?.apps.find((app) => app.app === activeApp) || null;
   }, [status, activeApp]);
+  // "mcp" and "prompts" are tool tabs, not per-app provider lists — the
+  // provider header buttons and ProviderEditDialog (which unconditionally
+  // reads the active app's endpoint paths) don't apply to them.
   const isMcpTab = activeApp === "mcp";
+  const isPromptsTab = activeApp === "prompts";
+  const isUtilityTab = isMcpTab || isPromptsTab;
 
   // Visible tabs follow the settings-page toggle (cc-switch's
   // AppVisibilitySettings); the backend guarantees at least one stays on.
@@ -202,9 +210,9 @@ export function ProviderSwitchPage() {
   }, [status]);
 
   useEffect(() => {
-    // "mcp" is the MCP-servers tab — not an app, so the visible-apps filter
-    // doesn't apply to it.
-    if (activeApp === "mcp") return;
+    // "mcp" and "prompts" are tool tabs — not apps, so the visible-apps
+    // filter doesn't apply to them.
+    if (activeApp === "mcp" || activeApp === "prompts") return;
     if (!visibleApps.some(({ id }) => id === activeApp) && visibleApps.length > 0) {
       setActiveApp(visibleApps[0].id);
     }
@@ -243,6 +251,8 @@ export function ProviderSwitchPage() {
   }, [refreshStatus]);
 
   useEffect(() => {
+    // The tool tabs have no per-app backup list; skip the doomed request.
+    if (activeApp === "mcp" || activeApp === "prompts") return;
     void refreshBackups(activeApp);
   }, [activeApp, refreshBackups]);
 
@@ -385,13 +395,14 @@ export function ProviderSwitchPage() {
           options={[
             ...visibleApps.map((item) => ({ ...item, label: copy(item.labelKey) })),
             { id: "mcp", label: copy("pswitch.mcp.tab") },
+            { id: "prompts", label: copy("pswitch.prompts.tab") },
           ]}
           value={activeApp}
           onChange={setActiveApp}
           label={copy("pswitch.title")}
           panelId="provider-panel"
         />
-        {!isMcpTab ? (
+        {!isUtilityTab ? (
           <div className="flex items-center gap-2">
             <Button variant="secondary" size="sm" disabled={busy} onClick={() => void importFromLive()}>
               <Import className="h-4 w-4" />
@@ -406,8 +417,8 @@ export function ProviderSwitchPage() {
       </div>
 
       <div role="tabpanel" id="provider-panel" aria-labelledby={`provider-panel-${activeApp}`}>
-      {isMcpTab ? (
-        <ProviderMcpPanel />
+      {isUtilityTab ? (
+        isMcpTab ? <ProviderMcpPanel /> : <ProviderPromptsPanel />
       ) : (
       <>
       <section className="mb-8">
@@ -433,6 +444,7 @@ export function ProviderSwitchPage() {
                 {providerRows.map((provider) => (
                   <SortableProviderCard
                     key={provider.id}
+                    app={activeApp}
                     provider={provider}
                     isCurrent={appState.current === provider.id}
                     busy={busy}
@@ -485,7 +497,7 @@ export function ProviderSwitchPage() {
         </p>
       ) : null}
 
-      {!isMcpTab ? (
+      {!isUtilityTab ? (
         <ProviderEditDialog
           onDirtyChange={onDialogDirty}
           open={dialogOpen}

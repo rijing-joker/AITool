@@ -11,6 +11,8 @@ const catalog = require("./catalog");
 const editor = require("./editor");
 const additive = require("./additive");
 const mcp = require("./mcp");
+const prompts = require("./prompts");
+const quota = require("./quota");
 
 // Dashboard-facing REST surface for the provider-switch layer, mounted by
 // local-api.js under /api/provider-switch/*. Mirrors the proxy/api.js
@@ -431,10 +433,74 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
       return true;
     }
 
+    // Per-app prompt lists (cc-switch's prompt module): enable writes the
+    // prompt over the app's instruction file; reads backfill the enabled
+    // prompt from the live file so external edits survive. Read-only import
+    // is guarded like the other mutations because it appends to the store.
+    if (p === `${prefix}/prompts` && method === "GET") {
+      const app = url.searchParams.get("app") || "claude";
+      const result = await prompts.listPrompts(app);
+      json(res, { ok: true, app, prompts: result, targetPath: prompts.promptFilePath(app) });
+      return true;
+    }
+    if (p === `${prefix}/prompts` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      const result = await prompts.upsertPrompt(String(body.app || ""), body.prompt || body);
+      json(res, { ok: true, ...result });
+      return true;
+    }
+    if (p === `${prefix}/prompts/enable` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      const result = await prompts.enablePrompt(String(body.app || ""), String(body.id || ""));
+      json(res, { ok: true, ...result });
+      return true;
+    }
+    if (p === `${prefix}/prompts/delete` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      const result = await prompts.deletePrompt(String(body.app || ""), String(body.id || ""));
+      json(res, { ok: true, ...result });
+      return true;
+    }
+    if (p === `${prefix}/prompts/import` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      const result = await prompts.importFromFile(String(body.app || ""));
+      json(res, { ok: true, ...result });
+      return true;
+    }
+    if (p === `${prefix}/prompts/sync` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      const result = await prompts.syncPrompts(Array.isArray(body.apps) ? body.apps : null);
+      json(res, { ok: true, ...result });
+      return true;
+    }
+
     if (p === `${prefix}/presets`) {
       const app = url.searchParams.get("app") || "claude";
       if (!store.isSupportedApp(app)) throw new Error(`Unsupported app: ${app}`);
       json(res, { ok: true, app, presets: presetsModule.listPresets(app) });
+      return true;
+    }
+
+    // Provider quota (cc-switch's coding_plan service): detects a supported
+    // plan provider from the row's base URL and queries its balance/rolling
+    // windows with the row's own key. Read-only, so no mutation guard.
+    if (p === `${prefix}/quota` && method === "GET") {
+      const app = url.searchParams.get("app") || "claude";
+      const id = url.searchParams.get("id") || "";
+      if (!store.isSupportedApp(app)) throw new Error(`Unsupported app: ${app}`);
+      const provider = await store.getProvider(app, id);
+      if (!provider) throw new Error(`Unknown provider: ${id}`);
+      const quotaResult = await quota.queryProviderQuota({
+        app,
+        provider,
+        bypassCache: url.searchParams.get("nocache") === "1",
+      });
+      json(res, { ok: true, app, id, quota: quotaResult });
       return true;
     }
 
@@ -515,7 +581,10 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
       if (!requireMutation()) return true;
       const body = await readJsonBody(req);
       await store.reorderProviders(body.app, body.orderedIds);
-      json(res, { ok: true, ...(await store.listProviders(body.app)) });
+      // The page's handleDragEnd replaces its rows with this response
+      // wholesale, so the rows must carry the quotaProvider annotation too.
+      const state = await store.listProviders(body.app);
+      json(res, { ok: true, app: body.app, current: state.current, providers: annotateQuotaProviders(body.app, state.providers) });
       return true;
     }
 
@@ -533,7 +602,8 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
       if (method === "GET" && !providerId) {
         const app = url.searchParams.get("app") || "claude";
         if (!store.isSupportedApp(app)) throw new Error(`Unsupported app: ${app}`);
-        json(res, { ok: true, app, ...(await store.listProviders(app)) });
+        const state = await store.listProviders(app);
+        json(res, { ok: true, app, current: state.current, providers: annotateQuotaProviders(app, state.providers) });
         return true;
       }
       if (!requireMutation()) return true;
@@ -761,6 +831,20 @@ async function fetchModelList({ baseUrl, apiKey, modelsUrl, isFullUrl }) {
   throw new Error(errors.join("; ") || "No model list found");
 }
 
+// Rows that carry a supported plan provider get `quotaProvider` set so the
+// dashboard only renders quota lines where a query can actually succeed.
+// Applied on every provider-listing surface (/status, /providers) since the
+// page's initial data comes from the status snapshot.
+function annotateQuotaProviders(app, providers) {
+  return (Array.isArray(providers) ? providers : []).map((provider) => ({
+    ...provider,
+    quotaProvider: quota.detectQuotaProvider(
+      quota.resolveProviderCredential(app, provider)?.baseUrl,
+      app,
+    )?.id ?? null,
+  }));
+}
+
 async function buildStatus() {
   const state = await store.readStore();
   const apps = [];
@@ -774,7 +858,7 @@ async function buildStatus() {
     apps.push({
       app,
       current: appState.current,
-      providers: appState.providers,
+      providers: annotateQuotaProviders(app, appState.providers),
       files,
     });
   }

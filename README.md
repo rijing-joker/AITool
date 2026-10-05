@@ -10,7 +10,7 @@ AiTool merges three open-source projects into a single local-first product:
 
 - **AI Proxy** (from [EasyCLIProxyAPI](https://github.com/router-for-me/EasyCLIProxyAPI) / [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI), MIT) — run a local gateway that exposes your provider accounts through OpenAI / Anthropic / Gemini compatible endpoints, with per-request usage records.
 - **Token usage analytics** (from [TokenTracker](https://github.com/xiufengsun/TokenTracker), MIT) — the local-first dashboard that tracks token usage and cost across 43 AI coding tools.
-- **Provider config management** (from [cc-switch](https://github.com/farion1231/cc-switch), MIT) — manage per-tool provider presets and one-click switch the live config files of Claude Code / Codex CLI / Gemini CLI, without hand-editing JSON / TOML.
+- **Provider config management** (from [cc-switch](https://github.com/farion1231/cc-switch), MIT) — manage per-tool provider presets and one-click switch the live config files of Claude Code / Codex CLI / Gemini CLI, plus shared MCP servers, per-app instruction prompts, plan-quota reads, and read-only CLI session history — without hand-editing JSON / TOML.
 
 The UI is TokenTracker's design language throughout — one dashboard for both worlds: proxied requests flow into the same trends, model breakdown, and cost views as your native CLI tools.
 
@@ -25,6 +25,7 @@ The UI is TokenTracker's design language throughout — one dashboard for both w
 │  Sidebar                                                                                     │
 │  ├── AI Proxy        ← NEW: proxy lifecycle, providers, keys, per-request records, config    │
 │  ├── Provider Configs ← NEW: one-click AI-CLI config-file switching (cc-switch port)         │
+│  ├── CLI Sessions     ← NEW: read-only claude/codex/gemini transcripts + cost (cc-switch)    │
 │  └── Tokens / Sessions / Limits / …  ← TokenTracker analytics (43 CLI tools), unchanged      │
 └──────────────┬──────────────────────────────────────────────────────────┬────────────────────┘
                │ /api/proxy/*                                             │ /functions/* (local API)
@@ -96,8 +97,10 @@ A Node port of [cc-switch](https://github.com/farion1231/cc-switch)'s config-fil
 | **Editor** | The add/edit dialog shows the full config file as it would look after switching to this provider (cc-switch's editor view); on save, key fields go back to the provider row while other edits are written into the live files with three-way conflict detection (keep mine / keep theirs) |
 | **Codex credentials** | The relay key is written to `experimental_bearer_token` under `[model_providers.custom]` in `config.toml` — Codex CLI 0.149+ no longer reads relay keys from `auth.json`, which holds only the official ChatGPT login (the add/edit dialog's Codex editors are split accordingly: `auth.json` JSON + `config.toml` TOML) |
 | **MCP servers** | The page's MCP tab keeps one list of MCP servers (cc-switch's unified `mcp_servers` module) with per-app toggles that project each spec into the app's native MCP config — Claude (`~/.claude.json`), Codex (`[mcp_servers.*]` in `config.toml`), Gemini (`settings.json`), Grok Build, OpenCode, Hermes, MiniMax Code (`~/.minimax/mcp.json`) — and can import what the tools already configured |
+| **Prompts** | The page's Prompts tab keeps named per-app prompt lists (cc-switch's prompt module); enabling one writes it over the app's instruction file — `~/.claude/CLAUDE.md`, `AGENTS.md` (Codex, Grok Build, OpenCode, OpenClaw, pi, mcode), `~/.gemini/GEMINI.md`, `~/.hermes/SOUL.md` — capturing the live file's content into the store first, so hand-written instruction files are never silently overwritten |
+| **Quota** | Providers whose base URL matches a supported plan provider (Command Code presets included for Claude Code and Codex) show per-window "left %" lines on their card (cc-switch's coding_plan quota service); the query uses the row's own API key against the provider's `/alpha` control plane |
 | **Safety** | Atomic writes (`0600` for credential files), first-write backup per file restorable from the dashboard, and config-file editors built into the add/edit dialog; Codex's official ChatGPT login is stashed when switching to a third-party relay and restored on switch-back |
-| **Storage** | `~/.aitool/provider-switch/` — `providers.json` (presets + current pointer), `mcp-servers.json` (shared MCP server list), `codex-auth-stash.json`, `backups/` |
+| **Storage** | `~/.aitool/provider-switch/` — `providers.json` (presets + current pointer), `mcp-servers.json` (shared MCP server list), `prompts.json` (per-app prompt lists), `codex-auth-stash.json`, `backups/` |
 
 ## AI Proxy capabilities (from EasyCLIProxyAPI)
 
@@ -109,7 +112,7 @@ Managed through the dashboard's **AI Proxy** page (tabs) or the core's managemen
 | Client access keys (`access.api-keys`) | Access Keys |
 | Compatible endpoints — `/v1/chat/completions`, `/v1/messages`, `/v1beta/models` | Access Keys |
 | Provider auth files (upload / list / delete / refresh) | Providers |
-| Per-request usage records (model, provider, tokens, latency, failures) | Requests |
+| Per-request usage records (model, provider, tokens, latency, failures) with cost estimates (models.dev pricing sync) | Requests |
 | `config.yaml` editor via the core's management API | Settings |
 | Auto-start with the dashboard | Settings |
 
@@ -133,6 +136,7 @@ Default endpoint: `http://127.0.0.1:8318` (loopback-only; port configurable in c
 | **AI tools supported** | **43** |
 | **Dashboard** | localhost:7680 — trends, model breakdown, cost, heatmap |
 | **Proxy usage source** | `cliproxy` — folded into the same views automatically |
+| **CLI session history** | `/cli-sessions` — read-only transcripts from Claude Code / Codex / Gemini with per-session cost estimates |
 
 Everything in the vendored TokenTracker CLI keeps working: hook installation for 43 AI coding tools (Claude Code, Codex, Gemini, Cursor, Droid, Cline, Command Code, TRAE, …), local JSONL parsing, the cost engine, sessions, limits, achievements, skills panel, desktop pet, widgets — with the same dashboard at `localhost:7680`. Proxy usage appears as a `cliproxy` source in the same views.
 
@@ -151,11 +155,12 @@ Advanced per-tool overrides (vendored from TokenTracker): `TOKENTRACKER_LMSTUDIO
 bin/tracker.js           CLI entry (aitool)
 src/cli.js               command dispatch (serve/sync/status/…/proxy)
 src/lib/local-api.js     local API: /functions/* (usage) + /api/proxy/* (new)
-src/lib/proxy/           NEW — paths / config / manager / management client / usage bridge / REST handlers
+src/lib/proxy/           NEW — paths / config / manager / management client / usage bridge / REST handlers / models.dev pricing sync
 src/commands/proxy.js    NEW — `aitool proxy …` command
 dashboard/               TokenTracker dashboard (Vite + React + Tailwind, oai design system)
   └── src/pages/ProxyPage.jsx   NEW — AI Proxy page (7 tabs)
 src/lib/provider-switch/ NEW — cc-switch port: provider presets → live config files (floors, projections, backups)
+src/lib/sessions.js      NEW — CLI session history (read-only claude/codex/gemini transcripts + per-session cost)
 src/commands/…           src/lib/local-api.js also mounts /api/provider-switch/*
 dashboard/…/ProviderSwitchPage.jsx  NEW — /provider-switch page (Provider Configs)
 scripts/fetch-core.cjs   NEW — downloads the pinned CLIProxyAPI release binary

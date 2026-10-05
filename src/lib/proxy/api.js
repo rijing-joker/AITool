@@ -7,6 +7,7 @@ const manager = require("./manager");
 const bridge = require("./usage-bridge");
 const management = require("./management");
 const recordStore = require("./usage-records").createUsageRecordStore();
+const pricing = require("./pricing");
 const coreInstall = require("./core-install").getInstance;
 
 // Dashboard-facing REST surface for the proxy layer. Mounted by local-api.js
@@ -56,9 +57,10 @@ function recordTimestamp(record) {
 
 function computeOverview(rows) {
   const now = Date.now();
+  // Disjoint result buckets — canceled rows carry failed=true.
   const success = rows.filter((r) => !r.failed && !r.canceled);
-  const failed = rows.filter((r) => r.failed);
-  const canceled = rows.filter((r) => r.canceled && !r.failed);
+  const failed = rows.filter((r) => r.failed && !r.canceled);
+  const canceled = rows.filter((r) => r.canceled);
   const sumTokens = (list, key) => list.reduce((acc, r) => acc + (Number(r?.tokens?.[key]) || 0), 0);
 
   const byModel = new Map();
@@ -96,8 +98,9 @@ function computeOverview(rows) {
   for (const row of rows) {
     const point = timelineIndex.get(Math.floor(recordTimestamp(row) / 1_800_000) * 1_800_000);
     if (!point) continue;
+    if (row.canceled) continue;
     if (row.failed) point.failures += 1;
-    else if (!row.canceled) point.requests += 1;
+    else point.requests += 1;
     point.total_tokens += Number(row?.tokens?.totalTokens) || 0;
   }
 
@@ -457,6 +460,12 @@ async function handleProxyApiRequest(req, res, url, ctx) {
       json(res, { ok: true, overview: computeOverview(await recordStore.readRecords(paths.usageDir)), bridge: bridge.bridgeStatus() });
       return true;
     }
+    if (p === "/api/proxy/pricing" && method === "GET") {
+      // Read-only pricing sync state for the dashboard's cost column tooltip.
+      const snapshot = await pricing.getPricingSnapshot(paths.pricingPath);
+      json(res, { ok: true, modelCount: snapshot.modelCount, fetchedAt: snapshot.fetchedAt, stale: snapshot.stale, syncing: snapshot.syncing });
+      return true;
+    }
     if (p === "/api/proxy/usage/records") {
       const rows = await recordStore.readRecords(paths.usageDir);
       const model = (url.searchParams.get("model") || "").trim().toLowerCase();
@@ -470,9 +479,12 @@ async function handleProxyApiRequest(req, res, url, ctx) {
         if (provider && !String(row.provider || "").toLowerCase().includes(provider)) return false;
         if (failed === "true" && !row.failed) return false;
         if (failed === "false" && row.failed) return false;
+        // Disjoint result buckets matching the stats aggregation below:
+        // success excludes canceled, canceled ⊆ failed∪canceled is never
+        // double-counted as failed.
         if (result === "success" && (row.failed || row.canceled)) return false;
-        if (result === "failed" && !row.failed) return false;
-        if (result === "canceled" && (!row.canceled || row.failed)) return false;
+        if (result === "failed" && (!row.failed || row.canceled)) return false;
+        if (result === "canceled" && !row.canceled) return false;
         const ts = recordTimestamp(row);
         if (Number.isFinite(since) && (!Number.isFinite(ts) || ts < since)) return false;
         if (Number.isFinite(until) && (!Number.isFinite(ts) || ts > until)) return false;
@@ -481,9 +493,11 @@ async function handleProxyApiRequest(req, res, url, ctx) {
       const statsOnly = Boolean(url.searchParams.get("stats"));
       let stats;
       if (statsOnly || url.searchParams.get("includeStats") === "1") {
+        // Disjoint result buckets: canceled rows carry failed=true (499 /
+        // context canceled), so counting failed rows alone would swallow them.
         const success = filtered.filter((row) => !row.failed && !row.canceled);
-        const failedRows = filtered.filter((row) => row.failed);
-        const canceled = filtered.filter((row) => row.canceled && !row.failed);
+        const failedRows = filtered.filter((row) => row.failed && !row.canceled);
+        const canceled = filtered.filter((row) => row.canceled);
         const totalTokens = success.reduce((acc, row) => acc + (Number(row?.tokens?.totalTokens) || 0), 0);
         const byModel = new Map();
         const byProvider = new Map();
@@ -516,6 +530,24 @@ async function handleProxyApiRequest(req, res, url, ctx) {
           providers: Array.from(byProvider.values()).sort((a, b) => b.requests - a.requests),
         };
       }
+      // Cost estimation (models.dev pricing): add a total over all filtered
+      // successful requests and annotate the returned page. Without a pricing
+      // index (never synced, offline) stats and records pass through
+      // untouched. This runs before the stats-only early return so both
+      // response shapes carry the same stats object.
+      const pricingSnapshot = await pricing.getPricingSnapshot(paths.pricingPath);
+      const pricingModels = pricingSnapshot.models;
+      if (stats && pricingModels) {
+        let totalCostUsd = 0;
+        // Same disjoint success bucket as the stats aggregation above (the
+        // `success` list itself is scoped to that block).
+        for (const row of filtered) {
+          if (row.failed || row.canceled) continue;
+          const cost = pricing.estimateCostUsd(pricingModels, String(row.response_model || row.model || ""), row.tokens, { executorType: row.executor_type });
+          if (cost != null) totalCostUsd += cost;
+        }
+        stats.total_cost_usd = totalCostUsd;
+      }
       if (statsOnly) {
         json(res, { ok: true, stats });
         return true;
@@ -523,12 +555,16 @@ async function handleProxyApiRequest(req, res, url, ctx) {
       const pageSize = Math.min(Math.max(Number(url.searchParams.get("pageSize")) || 50, 1), 500);
       const page = Math.max(Number(url.searchParams.get("page")) || 0, 0);
       const start = page * pageSize;
+      const pageRecords = filtered.slice(start, start + pageSize).map((record) => {
+        const costUsd = pricing.estimateCostUsd(pricingModels, String(record.response_model || record.model || ""), record.tokens, { executorType: record.executor_type });
+        return costUsd == null ? record : { ...record, costUsd };
+      });
       json(res, {
         ok: true,
         total: filtered.length,
         page,
         pageSize,
-        records: filtered.slice(start, start + pageSize),
+        records: pageRecords,
         ...(stats ? { stats } : {}),
       });
       return true;

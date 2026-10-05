@@ -1,15 +1,18 @@
-import React, { useCallback, useEffect, useId, useState } from "react";
-import { ChevronDown, ChevronRight, RefreshCw, Zap } from "lucide-react";
+import React, { useCallback, useEffect, useId, useRef, useState } from "react";
+import { ArrowDown, ArrowUp, Brain, ChevronLeft, ChevronRight, Columns3, Database, Download, RefreshCw, RotateCcw, TriangleAlert, Zap } from "lucide-react";
 import { copy } from "../lib/copy";
+import { formatCostUsd } from "../lib/cost-format";
 import { Card } from "../ui/components";
+import { ModalFrame } from "../ui/components/ModalFrame";
 import { showToast } from "../ui/components/Toast";
 import { useVisiblePolling } from "../hooks/use-visible-polling";
 
 // ---------------------------------------------------------------------------
 // Requests tab (请求记录) — interaction ported from EasyCLIProxyAPI's
-// UsageRecordsPage onto the local usage store: time-range presets with a
-// custom range, model/provider/result filters, aggregate stat tiles, an
-// expandable per-request detail row, and auto refresh.
+// UsageEventsView (d5c82f8) onto the local usage store: a compact per-request
+// event log with grouped token/cache/latency cells, resizable + hideable
+// columns, top scrollbar sync, footer pagination with a page-size selector and
+// per-page CSV export. Column layout persists in localStorage.
 // ---------------------------------------------------------------------------
 
 const compactTokens = new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 });
@@ -20,19 +23,420 @@ function formatTokens(value) {
   return compactTokens.format(value);
 }
 
-function formatLatency(ms) {
-  if (ms == null || !Number.isFinite(ms)) return "—";
-  return `${Math.round(ms)} ms`;
+function formatCount(value) {
+  return fullTokens.format(Number(value) || 0);
 }
 
-function formatTime(timestamp) {
+function formatDuration(ms) {
+  if (ms == null || !Number.isFinite(ms) || ms < 0) return "—";
+  if (ms < 1000) return `${Math.round(ms)} ms`;
+  const seconds = ms / 1000;
+  if (seconds < 60) return `${seconds.toFixed(seconds < 10 ? 2 : 1)} s`;
+  const minutes = Math.floor(seconds / 60);
+  return `${minutes}m${Math.round(seconds % 60)}s`;
+}
+
+function formatSpeed(outputTokens, latencyMs) {
+  if (!Number.isFinite(outputTokens) || !Number.isFinite(latencyMs) || outputTokens <= 0 || latencyMs <= 0) return "—";
+  const speed = outputTokens / (latencyMs / 1000);
+  return Number.isFinite(speed) && speed > 0 ? `${speed.toFixed(1)} t/s` : "—";
+}
+
+function formatCacheRate(inputTokens, cacheReadTokens) {
+  if (!Number.isFinite(inputTokens) || inputTokens <= 0 || !Number.isFinite(cacheReadTokens) || cacheReadTokens <= 0) return "—";
+  return `${(Math.min(cacheReadTokens, inputTokens) / inputTokens * 100).toFixed(2)}%`;
+}
+
+function formatClock(timestamp) {
   if (!timestamp) return "—";
   const date = new Date(timestamp);
-  if (!Number.isFinite(date.getTime())) return timestamp;
-  return date.toLocaleString([], {
-    month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
-  });
+  if (!Number.isFinite(date.getTime())) return String(timestamp);
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
 }
+
+function formatDay(timestamp) {
+  if (!timestamp) return "";
+  const date = new Date(timestamp);
+  if (!Number.isFinite(date.getTime())) return "";
+  return date.toLocaleDateString([], { year: "numeric", month: "2-digit", day: "2-digit" });
+}
+
+// ---------------------------------------------------------------------------
+// Event columns
+// ---------------------------------------------------------------------------
+
+const EVENT_COLUMNS = [
+  { key: "time", labelKey: "proxy.requests.time", defaultWidth: 96, minWidth: 76 },
+  { key: "key", labelKey: "proxy.requests.col.key", defaultWidth: 124, minWidth: 96 },
+  { key: "source", labelKey: "proxy.requests.col.source", defaultWidth: 150, minWidth: 110 },
+  { key: "model", labelKey: "proxy.requests.model", defaultWidth: 168, minWidth: 110 },
+  { key: "effort", labelKey: "proxy.requests.col.effort", defaultWidth: 78, minWidth: 64 },
+  { key: "result", labelKey: "proxy.requests.status", defaultWidth: 96, minWidth: 72 },
+  { key: "request", labelKey: "proxy.requests.col.request", defaultWidth: 112, minWidth: 88 },
+  { key: "latency", labelKey: "proxy.requests.latency", defaultWidth: 116, minWidth: 96 },
+  { key: "speed", labelKey: "proxy.requests.col.speed", defaultWidth: 88, minWidth: 72 },
+  { key: "total", labelKey: "proxy.requests.tokens", defaultWidth: 148, minWidth: 116 },
+  { key: "cache", labelKey: "proxy.requests.col.cache", defaultWidth: 132, minWidth: 100 },
+  { key: "cost", labelKey: "proxy.requests.col.cost", defaultWidth: 96, minWidth: 72 },
+  { key: "provider", labelKey: "proxy.requests.provider", defaultWidth: 110, minWidth: 88 },
+  { key: "input", labelKey: "proxy.requests.detail.input", defaultWidth: 84, minWidth: 60 },
+  { key: "output", labelKey: "proxy.requests.detail.output", defaultWidth: 84, minWidth: 60 },
+  { key: "reasoning", labelKey: "proxy.requests.detail.reasoning", defaultWidth: 84, minWidth: 60 },
+  { key: "cacheRate", labelKey: "proxy.requests.col.cacheRate", defaultWidth: 92, minWidth: 72 },
+  { key: "ttft", labelKey: "proxy.requests.col.ttft", defaultWidth: 92, minWidth: 76 },
+];
+
+const DEFAULT_VISIBLE_COLUMNS = [
+  "time", "key", "source", "model", "result", "request", "latency", "speed", "total", "cache", "cost", "provider",
+];
+
+// Defaults before the cost column joined. Seeds the migration marker so only
+// newly-added defaults one-time-merge into a saved layout — columns the user
+// deliberately hid (from the old defaults) stay hidden.
+const PREVIOUS_DEFAULT_VISIBLE_COLUMNS = [
+  "time", "key", "source", "model", "result", "request", "latency", "speed", "total", "cache", "provider",
+];
+
+const WIDTHS_STORAGE_KEY = "aitool.usage-events-col-widths.v1";
+const VISIBLE_STORAGE_KEY = "aitool.usage-events-visible-cols.v1";
+// Defaults already offered to the saved layout; lets later-added columns (e.g.
+// cost) start visible once without re-appearing after the user hides them.
+const MIGRATED_DEFAULTS_STORAGE_KEY = "aitool.usage-events-migrated-defaults.v1";
+const MAX_COLUMN_WIDTH = 800;
+
+const allColumnKeys = () => EVENT_COLUMNS.map((column) => column.key);
+
+function persistMigratedDefaults(keys) {
+  try { localStorage.setItem(MIGRATED_DEFAULTS_STORAGE_KEY, JSON.stringify([...new Set(keys)])); } catch {}
+}
+
+function loadVisibleColumns() {
+  try {
+    const raw = localStorage.getItem(VISIBLE_STORAGE_KEY);
+    if (!raw) {
+      persistMigratedDefaults(DEFAULT_VISIBLE_COLUMNS);
+      return [...DEFAULT_VISIBLE_COLUMNS];
+    }
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      persistMigratedDefaults(DEFAULT_VISIBLE_COLUMNS);
+      return [...DEFAULT_VISIBLE_COLUMNS];
+    }
+    const known = new Set(allColumnKeys());
+    const saved = [...new Set(parsed)].filter((key) => typeof key === "string" && known.has(key));
+    if (saved.length === 0) {
+      persistMigratedDefaults(DEFAULT_VISIBLE_COLUMNS);
+      return [...DEFAULT_VISIBLE_COLUMNS];
+    }
+    let migrated = null;
+    try { migrated = JSON.parse(localStorage.getItem(MIGRATED_DEFAULTS_STORAGE_KEY) || "null"); } catch {}
+    const migratedSet = new Set(Array.isArray(migrated) && migrated.length > 0 ? migrated : PREVIOUS_DEFAULT_VISIBLE_COLUMNS);
+    for (const key of DEFAULT_VISIBLE_COLUMNS) {
+      if (!migratedSet.has(key) && !saved.includes(key)) saved.push(key);
+    }
+    persistMigratedDefaults([...DEFAULT_VISIBLE_COLUMNS, ...migratedSet]);
+    return saved;
+  } catch {
+    return [...DEFAULT_VISIBLE_COLUMNS];
+  }
+}
+
+function loadColumnWidths() {
+  const defaults = {};
+  for (const column of EVENT_COLUMNS) defaults[column.key] = column.defaultWidth;
+  try {
+    const raw = localStorage.getItem(WIDTHS_STORAGE_KEY);
+    if (!raw) return defaults;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return defaults;
+    for (const column of EVENT_COLUMNS) {
+      const value = Number(parsed[column.key]);
+      if (Number.isFinite(value) && value >= column.minWidth) {
+        defaults[column.key] = Math.min(MAX_COLUMN_WIDTH, Math.round(value));
+      }
+    }
+  } catch {}
+  return defaults;
+}
+
+// ---------------------------------------------------------------------------
+// Horizontal scrollbar synced with the table below it (easy's TableTopScrollbar)
+// ---------------------------------------------------------------------------
+
+function TableTopScrollbar({ tableWrapRef }) {
+  const scrollbarRef = useRef(null);
+  const trackRef = useRef(null);
+
+  useEffect(() => {
+    const scrollbar = scrollbarRef.current;
+    const track = trackRef.current;
+    const tableWrap = tableWrapRef.current;
+    if (!scrollbar || !track || !tableWrap) return;
+
+    // Remember applied positions instead of locking a whole frame so delayed
+    // programmatic scrolls don't drop newer drag input on either surface.
+    let lastScrollbarLeft = scrollbar.scrollLeft;
+    let lastTableLeft = tableWrap.scrollLeft;
+
+    const syncTable = () => {
+      const left = scrollbar.scrollLeft;
+      if (left === lastScrollbarLeft) return;
+      lastScrollbarLeft = left;
+      tableWrap.scrollLeft = left;
+      lastTableLeft = tableWrap.scrollLeft;
+    };
+    const syncScrollbar = () => {
+      const left = tableWrap.scrollLeft;
+      if (left === lastTableLeft) return;
+      lastTableLeft = left;
+      scrollbar.scrollLeft = left;
+      lastScrollbarLeft = scrollbar.scrollLeft;
+    };
+    const updateLayout = () => {
+      const clientWidth = tableWrap.clientWidth;
+      const maxScroll = Math.max(0, tableWrap.scrollWidth - clientWidth);
+      const left = Math.min(tableWrap.scrollLeft, maxScroll);
+      scrollbar.classList.toggle("hidden", maxScroll <= 1);
+      track.style.width = `${(scrollbar.clientWidth || clientWidth) + maxScroll}px`;
+      tableWrap.scrollLeft = left;
+      scrollbar.scrollLeft = left;
+      lastTableLeft = tableWrap.scrollLeft;
+      lastScrollbarLeft = scrollbar.scrollLeft;
+    };
+
+    updateLayout();
+    scrollbar.addEventListener("scroll", syncTable, { passive: true });
+    tableWrap.addEventListener("scroll", syncScrollbar, { passive: true });
+    const observer = new ResizeObserver(updateLayout);
+    observer.observe(tableWrap);
+    observer.observe(scrollbar);
+    if (tableWrap.firstElementChild) observer.observe(tableWrap.firstElementChild);
+    return () => {
+      scrollbar.removeEventListener("scroll", syncTable);
+      tableWrap.removeEventListener("scroll", syncScrollbar);
+      observer.disconnect();
+    };
+  }, [tableWrapRef]);
+
+  return (
+    <div ref={scrollbarRef} aria-hidden="true" className="overflow-x-auto overflow-y-hidden">
+      <div ref={trackRef} style={{ height: "1px" }} />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Cells
+// ---------------------------------------------------------------------------
+
+function MetricRow({ icon: Icon, tone, title, label, value }) {
+  return (
+    <span className={`inline-flex max-w-full items-center gap-1 text-[11px] tabular-nums ${tone}`} title={title}>
+      <Icon size={11} aria-hidden="true" className="shrink-0" />
+      <span className="truncate">{formatTokens(value)}</span>
+      <span className="sr-only">{label}</span>
+    </span>
+  );
+}
+
+function EventCell({ record, column }) {
+  const tokens = record.tokens ?? {};
+  switch (column.key) {
+    case "time":
+      return (
+        <td className="px-2 py-2 align-top" title={record.timestamp || undefined}>
+          <span className="block whitespace-nowrap font-medium tabular-nums">{formatClock(record.timestamp)}</span>
+          <span className="block whitespace-nowrap text-[10px] tabular-nums text-oai-gray-500 dark:text-oai-gray-400">{formatDay(record.timestamp)}</span>
+        </td>
+      );
+    case "key":
+      return (
+        <td className="max-w-0 px-2 py-2 align-top">
+          <span className="block truncate font-mono text-xs" title={record.api_key_display || undefined}>{record.api_key_display || "—"}</span>
+          {record.api_key_hash ? (
+            <span className="block truncate font-mono text-[10px] text-oai-gray-500 dark:text-oai-gray-400" title={record.api_key_hash}>{record.api_key_hash.slice(0, 12)}</span>
+          ) : null}
+        </td>
+      );
+    case "source":
+      return (
+        <td className="max-w-0 px-2 py-2 align-top" title={record.source || undefined}>
+          <span className="inline-flex max-w-full items-center gap-1 text-xs">
+            <Zap size={11} aria-hidden="true" className="shrink-0 text-oai-gray-400" />
+            <span className="truncate">{record.source || "—"}</span>
+          </span>
+        </td>
+      );
+    case "model": {
+      const requested = record.model || record.alias || "—";
+      const responseModel = String(record.response_model || "").trim();
+      const substituted = responseModel !== "" && responseModel !== requested;
+      return (
+        <td className="max-w-0 px-2 py-2 align-top font-mono text-xs">
+          <span className="block truncate" title={requested}>{requested}</span>
+          {substituted ? (
+            <span className="mt-0.5 block truncate rounded bg-amber-50 px-1 text-[10px] font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-300" title={copy("proxy.requests.substituted_hint")}>
+              {responseModel}
+            </span>
+          ) : record.alias && record.alias !== record.model ? (
+            <span className="mt-0.5 block truncate text-[10px] text-oai-gray-500 dark:text-oai-gray-400" title={record.model}>{record.model}</span>
+          ) : null}
+        </td>
+      );
+    }
+    case "effort":
+      return (
+        <td className="max-w-0 px-2 py-2 align-top text-xs" title={record.reasoning_effort || "auto"}>
+          <span className="block truncate">{record.reasoning_effort || "auto"}</span>
+        </td>
+      );
+    case "request":
+      return (
+        <td className="max-w-0 px-2 py-2 align-top font-mono text-xs" title={record.endpoint || undefined}>
+          <span className="block truncate">{record.endpoint || "—"}</span>
+        </td>
+      );
+    case "provider":
+      return (
+        <td className="max-w-0 px-2 py-2 align-top" title={record.provider || undefined}>
+          <span className="inline-block max-w-full truncate rounded-md bg-oai-gray-100 px-1.5 py-0.5 text-xs dark:bg-oai-gray-800">{record.provider || "—"}</span>
+        </td>
+      );
+    case "result": {
+      const state = record.canceled ? "canceled" : record.failed ? "failed" : "success";
+      const detail = [record.failure_status > 0 ? `HTTP ${record.failure_status}` : "", String(record.failure_body || "").trim()].filter(Boolean).join(" · ");
+      const label = state === "canceled" ? copy("proxy.requests.canceled") : state === "failed" ? (record.failure_status ? `HTTP ${record.failure_status}` : copy("proxy.requests.failed")) : copy("proxy.requests.ok");
+      const tone = state === "failed"
+        ? "bg-red-50 text-red-600 dark:bg-red-950/40 dark:text-red-400"
+        : state === "canceled"
+          ? "bg-oai-gray-100 text-oai-gray-500 dark:bg-oai-gray-800 dark:text-oai-gray-400"
+          : "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400";
+      return (
+        <td className="max-w-0 px-2 py-2 align-top" title={detail || label}>
+          <span className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium ${tone}`}>
+            <span className={`h-1.5 w-1.5 rounded-full ${state === "failed" ? "bg-red-500" : state === "canceled" ? "bg-oai-gray-400" : "bg-emerald-500"}`} />
+            <span className="truncate">{label}</span>
+          </span>
+          {state === "failed" && detail ? <span className="mt-0.5 block truncate text-[10px] text-oai-gray-500 dark:text-oai-gray-400" title={detail}>{detail}</span> : null}
+        </td>
+      );
+    }
+    case "latency":
+      return (
+        <td className="px-2 py-2 align-top" title={`${record.latencyMs ?? 0} ms`}>
+          <span className="block whitespace-nowrap text-xs font-medium tabular-nums">{formatDuration(record.latencyMs)}</span>
+          <span className="block whitespace-nowrap text-[10px] tabular-nums text-oai-gray-500 dark:text-oai-gray-400" title={record.ttftMs != null ? `${record.ttftMs} ms` : undefined}>
+            TTFT {record.ttftMs == null ? "—" : formatDuration(record.ttftMs)}
+          </span>
+        </td>
+      );
+    case "ttft":
+      return (
+        <td className="px-2 py-2 align-top text-xs tabular-nums" title={record.ttftMs != null ? `${record.ttftMs} ms` : undefined}>
+          {record.ttftMs == null ? "—" : formatDuration(record.ttftMs)}
+        </td>
+      );
+    case "speed":
+      return (
+        <td className="px-2 py-2 align-top text-xs tabular-nums" title={formatSpeed(tokens.outputTokens, record.latencyMs)}>
+          {formatSpeed(tokens.outputTokens, record.latencyMs)}
+        </td>
+      );
+    case "cacheRate":
+      return (
+        <td className="px-2 py-2 align-top text-xs tabular-nums" title={formatCacheRate(tokens.inputTokens, tokens.cacheReadTokens)}>
+          {formatCacheRate(tokens.inputTokens, tokens.cacheReadTokens)}
+        </td>
+      );
+    case "total":
+      return (
+        <td className="px-2 py-2 align-top" title={`${formatCount(tokens.totalTokens)} tokens`}>
+          <span className="block text-xs font-semibold tabular-nums">{formatTokens(tokens.totalTokens)}</span>
+          <span className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5">
+            <MetricRow icon={ArrowUp} tone="text-oai-gray-500 dark:text-oai-gray-400" title={`${copy("proxy.requests.detail.input")}: ${formatCount(tokens.inputTokens)}`} label={copy("proxy.requests.detail.input")} value={tokens.inputTokens} />
+            <MetricRow icon={ArrowDown} tone="text-oai-gray-500 dark:text-oai-gray-400" title={`${copy("proxy.requests.detail.output")}: ${formatCount(tokens.outputTokens)}`} label={copy("proxy.requests.detail.output")} value={tokens.outputTokens} />
+            {tokens.reasoningTokens > 0 ? (
+              <MetricRow icon={Brain} tone="text-violet-600 dark:text-violet-400" title={`${copy("proxy.requests.detail.reasoning")}: ${formatCount(tokens.reasoningTokens)}`} label={copy("proxy.requests.detail.reasoning")} value={tokens.reasoningTokens} />
+            ) : null}
+          </span>
+        </td>
+      );
+    case "cache":
+      return (
+        <td className="px-2 py-2 align-top" title={`${copy("proxy.requests.detail.cacheRead")}: ${formatCount(tokens.cacheReadTokens)} / ${copy("proxy.requests.detail.cacheCreation")}: ${formatCount(tokens.cacheCreationTokens)}`}>
+          <span className="block text-xs font-semibold tabular-nums">{formatCacheRate(tokens.inputTokens, tokens.cacheReadTokens)}</span>
+          <span className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5">
+            <MetricRow icon={Database} tone="text-sky-600 dark:text-sky-400" title={`${copy("proxy.requests.detail.cacheRead")}: ${formatCount(tokens.cacheReadTokens)}`} label={copy("proxy.requests.detail.cacheRead")} value={tokens.cacheReadTokens} />
+            {tokens.cacheCreationTokens > 0 ? (
+              <MetricRow icon={Database} tone="text-amber-600 dark:text-amber-400" title={`${copy("proxy.requests.detail.cacheCreation")}: ${formatCount(tokens.cacheCreationTokens)}`} label={copy("proxy.requests.detail.cacheCreation")} value={tokens.cacheCreationTokens} />
+            ) : null}
+          </span>
+        </td>
+      );
+    case "cost": {
+      const costText = formatCostUsd(record.costUsd) ?? "—";
+      return (
+        <td className="px-2 py-2 align-top text-xs tabular-nums" title={record.costUsd != null ? `$${record.costUsd.toFixed(6)}` : undefined}>
+          {costText}
+        </td>
+      );
+    }
+    case "input":
+      return <td className="px-2 py-2 align-top text-xs tabular-nums" title={`${formatCount(tokens.inputTokens)} tokens`}>{formatTokens(tokens.inputTokens)}</td>;
+    case "output":
+      return <td className="px-2 py-2 align-top text-xs tabular-nums" title={`${formatCount(tokens.outputTokens)} tokens`}>{formatTokens(tokens.outputTokens)}</td>;
+    case "reasoning":
+      return <td className="px-2 py-2 align-top text-xs tabular-nums" title={`${formatCount(tokens.reasoningTokens)} tokens`}>{formatTokens(tokens.reasoningTokens)}</td>;
+    default:
+      return <td className="px-2 py-2" />;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Column settings dialog
+// ---------------------------------------------------------------------------
+
+function ColumnSettingsDialog({ open, onClose, draft, onToggle, onSelectAll, onApply }) {
+  return (
+    <ModalFrame open={open} onClose={onClose} label={copy("proxy.requests.col_settings")}>
+      <div className="flex items-center justify-between border-b border-oai-gray-100 px-5 py-3.5 dark:border-oai-gray-800">
+        <h2 className="text-sm font-semibold">{copy("proxy.requests.col_settings")}</h2>
+        <button type="button" onClick={onClose} aria-label={copy("proxy.upstream.common.close")} className="rounded-lg p-1.5 text-oai-gray-500 hover:bg-oai-gray-100 dark:hover:bg-oai-gray-800">
+          <span aria-hidden="true" className="text-base leading-none">×</span>
+        </button>
+      </div>
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 overflow-y-auto px-5 py-4 sm:grid-cols-3">
+        {EVENT_COLUMNS.map((column) => {
+          const checked = draft.includes(column.key);
+          return (
+            <label key={column.key} className="flex min-h-8 items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={checked}
+                disabled={checked && draft.length === 1}
+                onChange={() => onToggle(column.key)}
+                className="h-4 w-4 accent-oai-brand-600"
+              />
+              <span className="truncate">{copy(column.labelKey)}</span>
+            </label>
+          );
+        })}
+      </div>
+      <div className="flex items-center justify-between gap-2 border-t border-oai-gray-100 px-5 py-3 text-xs text-oai-gray-500 dark:border-oai-gray-800 dark:text-oai-gray-400">
+        <span>{copy("proxy.requests.col_selected", { selected: draft.length, total: EVENT_COLUMNS.length })}</span>
+        <button type="button" onClick={onSelectAll} className="min-h-10 px-2 font-medium text-oai-brand-600 sm:min-h-0 dark:text-oai-brand-400">{copy("proxy.requests.col_select_all")}</button>
+      </div>
+      <div className="flex justify-end gap-2 border-t border-oai-gray-100 px-5 py-3 dark:border-oai-gray-800">
+        <button type="button" onClick={onClose} className="min-h-10 rounded-lg border border-oai-gray-200 px-3 text-sm font-medium hover:bg-oai-gray-50 sm:min-h-0 dark:border-oai-gray-700 dark:hover:bg-oai-gray-800">{copy("shared.action.cancel")}</button>
+        <button type="button" onClick={onApply} className="min-h-10 rounded-lg bg-oai-black px-3 text-sm font-medium text-white hover:bg-oai-gray-800 sm:min-h-0 dark:bg-white dark:text-oai-black dark:hover:bg-oai-gray-200">{copy("shared.action.apply")}</button>
+      </div>
+    </ModalFrame>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main tab
+// ---------------------------------------------------------------------------
 
 const RANGES = [
   { id: "1h", ms: 60 * 60 * 1000 },
@@ -66,45 +470,32 @@ function StatTile({ label, value, tone }) {
   );
 }
 
-function RecordDetail({ record }) {
-  const tokens = record.tokens ?? {};
-  const rows = [
-    ["proxy.requests.detail.input", tokens.inputTokens],
-    ["proxy.requests.detail.output", tokens.outputTokens],
-    ["proxy.requests.detail.reasoning", tokens.reasoningTokens],
-    ["proxy.requests.detail.cacheRead", tokens.cacheReadTokens],
-    ["proxy.requests.detail.cacheCreation", tokens.cacheCreationTokens],
-    ["proxy.requests.detail.total", tokens.totalTokens],
-  ];
-  return (
-    <tr className="bg-oai-gray-50 dark:bg-oai-gray-800/40">
-      <td colSpan={7} className="px-4 sm:px-12 py-3">
-        <dl className="grid grid-cols-2 gap-x-3 sm:gap-x-6 gap-y-1.5 text-xs sm:grid-cols-4">
-          {[
-            ["proxy.requests.model", record.model || record.alias],
-            ["proxy.requests.response_model", record.response_model],
-            ["proxy.requests.provider", record.provider],
-          ].map(([key, value]) => <div key={key} className="col-span-2 min-w-0"><dt className="text-oai-gray-500">{copy(key)}</dt><dd className="break-all font-mono">{value || "—"}</dd></div>)}
-          {rows.map(([key, value]) => (
-            <div key={key} className="flex items-center justify-between gap-2">
-              <dt className="text-oai-gray-500 dark:text-oai-gray-400">{copy(key)}</dt>
-              <dd className="font-medium tabular-nums">{value == null ? "—" : fullTokens.format(Number(value) || 0)}</dd>
-            </div>
-          ))}
-          <div className="flex items-center justify-between gap-2">
-            <dt className="text-oai-gray-500 dark:text-oai-gray-400">{copy("proxy.requests.latency")}</dt>
-            <dd className="font-medium tabular-nums">{formatLatency(record.latencyMs)}</dd>
-          </div>
-          {record.failure_message ? (
-            <div className="col-span-2 sm:col-span-4">
-              <dt className="text-oai-gray-500 dark:text-oai-gray-400">{copy("proxy.requests.detail.failureMessage")}</dt>
-              <dd className="mt-0.5 break-words font-mono text-red-600 dark:text-red-400">{record.failure_message}</dd>
-            </div>
-          ) : null}
-        </dl>
-      </td>
-    </tr>
-  );
+function exportCsv(records, page) {
+  const headers = ["id", "request_id", "timestamp", "api_key_display", "api_key_hash", "source", "provider", "model", "alias", "response_model", "reasoning_effort", "endpoint", "failed", "canceled", "failure_status", "failure_body", "latency_ms", "ttft_ms", "input_tokens", "output_tokens", "reasoning_tokens", "cache_read_tokens", "cache_creation_tokens", "total_tokens", "estimated_cost_usd"];
+  const cell = (value) => {
+    const text = value == null ? "" : String(value);
+    // Guard against CSV injection the same way the upstream port does.
+    const safe = /^[\s\0]*[=+@-]/.test(text) ? `'${text}` : text;
+    return `"${safe.replace(/"/g, '""')}"`;
+  };
+  const rows = records.map((record) => [
+    record.id, record.request_id, record.timestamp, record.api_key_display, record.api_key_hash,
+    record.source, record.provider, record.model, record.alias, record.response_model,
+    record.reasoning_effort, record.endpoint, record.failed, record.canceled,
+    record.failure_status, record.failure_body, record.latencyMs, record.ttftMs,
+    record.tokens?.inputTokens, record.tokens?.outputTokens, record.tokens?.reasoningTokens,
+    record.tokens?.cacheReadTokens, record.tokens?.cacheCreationTokens, record.tokens?.totalTokens,
+    record.costUsd,
+  ]);
+  const csv = `\uFEFF${[headers, ...rows].map((row) => row.map(cell).join(",")).join("\r\n")}`;
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8;" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `usage-events-page-${page + 1}-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 export function RequestsTab() {
@@ -112,26 +503,36 @@ export function RequestsTab() {
   const [stats, setStats] = useState(null);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(50);
   const [range, setRange] = useState("24h");
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
   const [model, setModel] = useState("");
   const [provider, setProvider] = useState("");
   const [result, setResult] = useState("all");
-  const [expanded, setExpanded] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
   const [query, setQuery] = useState({ model: "", provider: "" });
+
+  const [widths, setWidths] = useState(loadColumnWidths);
+  const [visibleColumns, setVisibleColumns] = useState(loadVisibleColumns);
+  const [columnDialogOpen, setColumnDialogOpen] = useState(false);
+  const [draftColumns, setDraftColumns] = useState(visibleColumns);
+  const [resizingCol, setResizingCol] = useState(null);
+  const tableWrapRef = useRef(null);
+  const resizeCleanupRef = useRef(null);
+  useEffect(() => () => resizeCleanupRef.current?.(), []);
+
   const listId = useId();
   useEffect(() => {
-    const timer = setTimeout(() => { setPage(0); setExpanded(null); setQuery((previous) => previous.model === model.trim() && previous.provider === provider.trim() ? previous : { model: model.trim(), provider: provider.trim() }); }, 300);
+    const timer = setTimeout(() => { setPage(0); setQuery((previous) => previous.model === model.trim() && previous.provider === provider.trim() ? previous : { model: model.trim(), provider: provider.trim() }); }, 300);
     return () => clearTimeout(timer);
   }, [model, provider]);
   const searchPending = model.trim() !== query.model || provider.trim() !== query.provider;
   const invalidRange = range === "custom" && (!customStart || !customEnd || !Number.isFinite(Date.parse(customStart)) || !Number.isFinite(Date.parse(customEnd)) || Date.parse(customStart) >= Date.parse(customEnd));
   const filtered = !!model || !!provider || result !== "all" || range !== "24h";
-  const clearFilters = () => { setModel(""); setProvider(""); setQuery({ model: "", provider: "" }); setResult("all"); setRange("24h"); setPage(0); setExpanded(null); };
-  const pageSize = 50;
+  const clearFilters = () => { setModel(""); setProvider(""); setQuery({ model: "", provider: "" }); setResult("all"); setRange("24h"); setPage(0); };
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   const load = useCallback(async (signal) => {
     if (invalidRange || searchPending) { setLoading(false); return false; }
@@ -162,14 +563,99 @@ export function RequestsTab() {
     } finally {
       if (!signal.aborted) setLoading(false);
     }
-  }, [page, result, query, range, customStart, customEnd, invalidRange, searchPending]);
+  }, [page, pageSize, result, query, range, customStart, customEnd, invalidRange, searchPending]);
 
   const refreshRecords = useVisiblePolling(load, 10_000);
 
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
-
   const refresh = async () => {
     if (await refreshRecords()) showToast({ title: copy("proxy.requests.refreshed"), type: "success" });
+  };
+
+  const persistWidths = (next) => {
+    setWidths(next);
+    try { localStorage.setItem(WIDTHS_STORAGE_KEY, JSON.stringify(next)); } catch {}
+  };
+
+  const resetAllWidths = () => {
+    const defaults = {};
+    for (const column of EVENT_COLUMNS) defaults[column.key] = column.defaultWidth;
+    persistWidths(defaults);
+  };
+
+  const resetSingleColumn = (key) => {
+    const column = EVENT_COLUMNS.find((entry) => entry.key === key);
+    if (!column) return;
+    persistWidths((current) => ({ ...current, [key]: column.defaultWidth }));
+  };
+
+  const handleResizeKeyDown = (key, event) => {
+    const column = EVENT_COLUMNS.find((entry) => entry.key === key);
+    if (!column) return;
+    const step = event.shiftKey ? 25 : 10;
+    const current = widths[key] ?? column.defaultWidth;
+    const next = event.key === "Home"
+      ? column.defaultWidth
+      : event.key === "ArrowLeft"
+        ? Math.max(column.minWidth, current - step)
+        : event.key === "ArrowRight"
+          ? Math.min(MAX_COLUMN_WIDTH, current + step)
+          : null;
+    if (next === null) return;
+    event.preventDefault();
+    persistWidths({ ...widths, [key]: next });
+  };
+
+  const handleResizeStart = (key, event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const column = EVENT_COLUMNS.find((entry) => entry.key === key);
+    const minWidth = column?.minWidth ?? 50;
+    const startX = event.clientX;
+    const startWidth = widths[key] ?? column?.defaultWidth ?? 100;
+    setResizingCol(key);
+    document.body.classList.add("table-col-resizing");
+    let currentWidth = startWidth;
+
+    const onPointerMove = (moveEvent) => {
+      currentWidth = Math.min(MAX_COLUMN_WIDTH, Math.max(minWidth, Math.round(startWidth + moveEvent.clientX - startX)));
+      setWidths((prev) => ({ ...prev, [key]: currentWidth }));
+    };
+    const cleanup = () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      window.removeEventListener("pointercancel", onPointerUp);
+      document.body.classList.remove("table-col-resizing");
+      resizeCleanupRef.current = null;
+    };
+    const onPointerUp = () => {
+      cleanup();
+      setResizingCol(null);
+      persistWidths({ ...widths, [key]: currentWidth });
+    };
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    window.addEventListener("pointercancel", onPointerUp);
+    resizeCleanupRef.current = cleanup;
+  };
+
+  const columns = EVENT_COLUMNS.filter((column) => visibleColumns.includes(column.key));
+  const widthsCustomized = EVENT_COLUMNS.some((column) => widths[column.key] !== column.defaultWidth);
+  const tableWidth = columns.reduce((sum, column) => sum + (widths[column.key] ?? column.defaultWidth), 0);
+  const startRecord = total > 0 ? page * pageSize + 1 : 0;
+  const endRecord = Math.min((page + 1) * pageSize, total);
+
+  const applyColumns = () => {
+    const next = draftColumns.length > 0 ? draftColumns : allColumnKeys();
+    setVisibleColumns(next);
+    try { localStorage.setItem(VISIBLE_STORAGE_KEY, JSON.stringify(next)); } catch {}
+    setColumnDialogOpen(false);
+  };
+
+  const toggleDraftColumn = (key) => {
+    setDraftColumns((current) => {
+      if (current.includes(key)) return current.length > 1 ? current.filter((entry) => entry !== key) : current;
+      return EVENT_COLUMNS.filter((column) => current.includes(column.key) || column.key === key).map((column) => column.key);
+    });
   };
 
   const rangeButton = (id) => (
@@ -252,9 +738,42 @@ export function RequestsTab() {
 
       <datalist id={`${listId}-models`}>{(stats?.models ?? []).map((item) => <option key={item.model} value={item.model} />)}</datalist>
       <datalist id={`${listId}-providers`}>{(stats?.providers ?? []).map((item) => <option key={item.provider} value={item.provider} />)}</datalist>
-      <div className="flex items-center justify-between gap-2 text-xs text-oai-gray-500 dark:text-oai-gray-400">
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-oai-gray-500 dark:text-oai-gray-400">
         <span role="status">{loading || searchPending ? copy("proxy.loading") : copy("proxy.requests.count", { count: fullTokens.format(total) })}</span>
-        {filtered ? <button type="button" className="min-h-10 px-2 font-medium text-oai-brand-600 dark:text-oai-brand-400 sm:min-h-0" onClick={clearFilters}>{copy("proxy.requests.clear_filters")}</button> : null}
+        <span className="flex items-center gap-1.5">
+          {filtered ? <button type="button" className="min-h-10 px-2 font-medium text-oai-brand-600 dark:text-oai-brand-400 sm:min-h-0" onClick={clearFilters}>{copy("proxy.requests.clear_filters")}</button> : null}
+          <button
+            type="button"
+            onClick={() => { setDraftColumns(visibleColumns); setColumnDialogOpen(true); }}
+            title={copy("proxy.requests.col_settings")}
+            aria-label={copy("proxy.requests.col_settings")}
+            className="inline-flex h-10 sm:h-8 items-center gap-1.5 rounded-lg border border-oai-gray-200 px-2.5 font-medium hover:bg-oai-gray-50 dark:border-oai-gray-700 dark:hover:bg-oai-gray-800"
+          >
+            <Columns3 size={13} aria-hidden="true" />
+            <span className="hidden sm:inline">{copy("proxy.requests.col_settings")}</span>
+          </button>
+          {widthsCustomized ? (
+            <button
+              type="button"
+              onClick={resetAllWidths}
+              title={copy("proxy.requests.col_reset")}
+              aria-label={copy("proxy.requests.col_reset")}
+              className="inline-flex h-10 sm:h-8 w-10 sm:w-8 items-center justify-center rounded-lg border border-oai-gray-200 text-oai-gray-500 hover:bg-oai-gray-50 dark:border-oai-gray-700 dark:hover:bg-oai-gray-800"
+            >
+              <RotateCcw size={13} aria-hidden="true" />
+            </button>
+          ) : null}
+          <button
+            type="button"
+            disabled={loading || !records?.length}
+            onClick={() => exportCsv(records ?? [], page)}
+            title={copy("proxy.requests.export_hint")}
+            className="inline-flex h-10 sm:h-8 items-center gap-1.5 rounded-lg border border-oai-gray-200 px-2.5 font-medium hover:bg-oai-gray-50 disabled:opacity-40 dark:border-oai-gray-700 dark:hover:bg-oai-gray-800"
+          >
+            <Download size={13} aria-hidden="true" />
+            <span className="hidden sm:inline">{copy("proxy.requests.export")}</span>
+          </button>
+        </span>
       </div>
       {range === "custom" ? (
         <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -293,6 +812,9 @@ export function RequestsTab() {
           <StatTile label={copy("proxy.requests.filter.failed")} value={fullTokens.format(stats.failure_count)} tone="text-red-600 dark:text-red-400" />
           <StatTile label={copy("proxy.requests.canceled")} value={fullTokens.format(stats.canceled_count)} />
           <StatTile label={copy("proxy.requests.tokens")} value={formatTokens(stats.total_tokens)} />
+          {stats.total_cost_usd != null ? (
+            <StatTile label={copy("proxy.requests.cost")} value={formatCostUsd(stats.total_cost_usd) ?? "—"} />
+          ) : null}
           <StatTile
             label={copy("proxy.metric.top_model")}
             value={stats.models?.[0]?.model || "—"}
@@ -305,132 +827,102 @@ export function RequestsTab() {
           <div className="px-5 py-8 text-center text-sm text-oai-gray-400">{error || (invalidRange ? copy("proxy.requests.range.invalid") : copy("proxy.loading"))}</div>
         ) : records.length === 0 ? (
           <div className="px-5 py-10 text-center">
-            <Zap className="mx-auto h-8 w-8 text-oai-gray-300 dark:text-oai-gray-600" />
+            <TriangleAlert className="mx-auto h-8 w-8 text-oai-gray-300 dark:text-oai-gray-600" />
             <p className="mt-3 text-sm text-oai-gray-500 dark:text-oai-gray-400">{copy(filtered ? "proxy.requests.no_matches" : "proxy.requests.empty")}</p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full table-fixed sm:table-auto text-sm">
-              <thead>
-                <tr className="border-b border-oai-gray-200 dark:border-oai-gray-800 text-left">
-                  <th className="w-10 sm:w-8 px-1 py-3" aria-label={copy("proxy.requests.detail.title")} />
-                  <th className="hidden sm:table-cell px-2 py-3 text-xs font-semibold text-oai-gray-500 dark:text-oai-gray-400">
-                    {copy("proxy.requests.time")}
-                  </th>
-                  <th className="px-4 py-3 text-xs font-semibold text-oai-gray-500 dark:text-oai-gray-400">
-                    {copy("proxy.requests.model")}
-                  </th>
-                  <th className="hidden sm:table-cell px-4 py-3 text-xs font-semibold text-oai-gray-500 dark:text-oai-gray-400">
-                    {copy("proxy.requests.response_model")}
-                  </th>
-                  <th className="hidden sm:table-cell px-4 py-3 text-xs font-semibold text-oai-gray-500 dark:text-oai-gray-400">
-                    {copy("proxy.requests.provider")}
-                  </th>
-                  <th className="w-16 sm:w-auto px-1 sm:px-4 py-3 text-right text-xs font-semibold text-oai-gray-500 dark:text-oai-gray-400">
-                    {copy("proxy.requests.tokens")}
-                  </th>
-                  <th className="w-[4.5rem] sm:w-auto px-1 sm:px-5 py-3 text-right text-xs font-semibold text-oai-gray-500 dark:text-oai-gray-400">
-                    {copy("proxy.requests.status")}
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-oai-gray-100 dark:divide-oai-gray-800">
-                {records.map((record, index) => {
-                  const key = record.id ?? `${record.timestamp}-${index}`;
-                  const open = expanded === key;
-                  return (
-                    <React.Fragment key={key}>
-                      <tr
-                        className={`cursor-pointer hover:bg-oai-gray-50 dark:hover:bg-oai-gray-800/50 ${open ? "bg-oai-gray-50 dark:bg-oai-gray-800/40" : ""}`}
-                        onClick={() => setExpanded(open ? null : key)}
-                        aria-expanded={open}
-                      >
-                        <td className="p-0 text-oai-gray-400">
-                          <button type="button" aria-label={copy("proxy.requests.detail.title")} aria-expanded={open}
-                            onClick={(event) => { event.stopPropagation(); setExpanded(open ? null : key); }}
-                            className="flex h-10 w-10 items-center justify-center rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-oai-brand-500">
-                            {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-                          </button>
-                        </td>
-                        <td className="hidden sm:table-cell whitespace-nowrap px-2 py-2.5 tabular-nums text-oai-gray-500 dark:text-oai-gray-400">
-                          {formatTime(record.timestamp)}
-                        </td>
-                        <td className="max-w-[200px] px-1 sm:px-4 py-2.5 font-mono text-xs">
-                          <span className="block truncate" title={record.model || record.alias}>{record.model || record.alias || "—"}</span>
-                          <span className="mt-1 block text-[10px] tabular-nums text-oai-gray-500 sm:hidden">{formatTime(record.timestamp)}</span>
-                        </td>
-                        {(() => {
-                          // issue 308 port: surface the upstream-reported model so
-                          // silent model substitution is visible — amber cell when
-                          // the response model differs from the requested one.
-                          const requested = record.model || record.alias || "";
-                          const responseModel = String(record.response_model || "").trim();
-                          const substituted = responseModel !== "" && responseModel !== requested;
-                          return (
-                            <td
-                              className={`hidden sm:table-cell max-w-[200px] truncate px-4 py-2.5 font-mono text-xs ${
-                                substituted
-                                  ? "rounded bg-amber-50 dark:bg-amber-950/40 font-medium text-amber-700 dark:text-amber-300"
-                                  : "text-oai-gray-500 dark:text-oai-gray-400"
-                              }`}
-                              title={substituted ? copy("proxy.requests.substituted_hint") : undefined}
-                            >
-                              {responseModel || "—"}
-                            </td>
-                          );
-                        })()}
-                        <td className="hidden sm:table-cell px-4 py-2.5 capitalize text-oai-gray-600 dark:text-oai-gray-300">
-                          {record.provider || "—"}
-                        </td>
-                        <td className="whitespace-nowrap px-1 sm:px-4 py-2.5 text-right tabular-nums">
-                          {formatTokens(record.tokens?.totalTokens ?? 0)}
-                        </td>
-                        <td className="px-1 sm:px-5 py-2.5 text-right break-words">
-                          {record.failed ? (
-                            <span className="inline-flex items-center gap-1 rounded-md bg-red-50 dark:bg-red-950/40 px-1.5 py-0.5 text-xs font-medium text-red-600 dark:text-red-400">
-                              {record.failure_status ? `HTTP ${record.failure_status}` : copy("proxy.requests.failed")}
-                            </span>
-                          ) : record.canceled ? (
-                            <span className="text-xs text-oai-gray-400">{copy("proxy.requests.canceled")}</span>
-                          ) : (
-                            <span className="text-xs font-medium text-oai-brand-600 dark:text-oai-brand-400">
-                              {copy("proxy.requests.ok")}
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                      {open ? <RecordDetail record={record} /> : null}
-                    </React.Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <>
+            <div ref={tableWrapRef} className="overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" tabIndex={0} role="region" aria-label={copy("proxy.requests.subtitle", { total: fullTokens.format(total) })}>
+              <table className="border-separate border-spacing-0 text-sm" style={{ width: `${tableWidth}px` }}>
+                <colgroup>
+                  {columns.map((column) => <col key={column.key} style={{ width: `${widths[column.key] ?? column.defaultWidth}px` }} />)}
+                </colgroup>
+                <thead>
+                  <tr>
+                    {columns.map((column) => {
+                      const label = copy(column.labelKey);
+                      return (
+                        <th key={column.key} className="relative border-b border-oai-gray-200 bg-oai-gray-50/60 px-2 py-2.5 text-left text-xs font-semibold text-oai-gray-500 dark:border-oai-gray-800 dark:bg-oai-gray-800/40 dark:text-oai-gray-400" style={{ width: `${widths[column.key] ?? column.defaultWidth}px` }}>
+                          <span className="block truncate" title={label}>{label}</span>
+                          <div
+                            role="separator"
+                            tabIndex={0}
+                            aria-label={`${label}: ${copy("proxy.requests.resize_hint")}`}
+                            aria-orientation="vertical"
+                            aria-valuemin={column.minWidth}
+                            aria-valuemax={MAX_COLUMN_WIDTH}
+                            aria-valuenow={widths[column.key] ?? column.defaultWidth}
+                            onPointerDown={(event) => handleResizeStart(column.key, event)}
+                            onDoubleClick={() => resetSingleColumn(column.key)}
+                            onKeyDown={(event) => handleResizeKeyDown(column.key, event)}
+                            title={copy("proxy.requests.resize_hint")}
+                            className={`absolute inset-y-0 right-0 w-1.5 cursor-col-resize touch-none select-none bg-transparent hover:bg-oai-brand-500/40 focus-visible:bg-oai-brand-500/60 focus-visible:outline-none ${resizingCol === column.key ? "bg-oai-brand-500/60" : ""}`}
+                          />
+                        </th>
+                      );
+                    })}
+                  </tr>
+                </thead>
+                <tbody>
+                  {records.map((record, index) => (
+                    <tr key={record.id ?? record.request_id ?? `${record.timestamp}-${index}`} className="odd:bg-white even:bg-oai-gray-50/40 dark:odd:bg-transparent dark:even:bg-oai-gray-900/30">
+                      {columns.map((column) => <EventCell key={column.key} record={record} column={column} />)}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <TableTopScrollbar tableWrapRef={tableWrapRef} />
+          </>
         )}
-        {total > pageSize ? (
-          <div className="flex items-center justify-between border-t border-oai-gray-100 dark:border-oai-gray-800 px-4 sm:px-5 py-3 text-xs text-oai-gray-500 dark:text-oai-gray-400">
-            <button
-              type="button"
-              onClick={() => setPage((current) => Math.max(0, current - 1))}
-              disabled={page === 0}
-              className="min-h-10 rounded-md px-2 py-1 hover:bg-oai-gray-100 dark:hover:bg-oai-gray-800 disabled:opacity-40"
-            >
-              ← {copy("proxy.requests.prev")}
-            </button>
-            <span>
-              {page + 1} / {totalPages}
-            </span>
-            <button
-              type="button"
-              onClick={() => setPage((current) => Math.min(totalPages - 1, current + 1))}
-              disabled={page >= totalPages - 1}
-              className="min-h-10 rounded-md px-2 py-1 hover:bg-oai-gray-100 dark:hover:bg-oai-gray-800 disabled:opacity-40"
-            >
-              {copy("proxy.requests.next")} →
-            </button>
+        {records?.length ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-oai-gray-100 dark:border-oai-gray-800 px-4 sm:px-5 py-3 text-xs text-oai-gray-500 dark:text-oai-gray-400">
+            <span className="tabular-nums">{copy("proxy.requests.range_summary", { start: startRecord, end: endRecord, total: fullTokens.format(total) })}</span>
+            <div className="flex items-center gap-2">
+              <select
+                aria-label={copy("proxy.requests.page_size", { size: pageSize })}
+                value={pageSize}
+                disabled={loading}
+                onChange={(event) => {
+                  setPage(0);
+                  setPageSize(Number(event.currentTarget.value));
+                }}
+                className="h-8 rounded-lg border border-oai-gray-200 bg-transparent px-1.5 text-xs dark:border-oai-gray-700"
+              >
+                {[20, 50, 100, 200].map((size) => (
+                  <option key={size} value={size}>{copy("proxy.requests.page_size", { size })}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => setPage((current) => Math.max(0, current - 1))}
+                disabled={page === 0}
+                className="inline-flex h-8 items-center gap-0.5 rounded-md px-2 py-1 hover:bg-oai-gray-100 dark:hover:bg-oai-gray-800 disabled:opacity-40"
+              >
+                <ChevronLeft size={13} aria-hidden="true" /> {copy("proxy.requests.prev")}
+              </button>
+              <span className="tabular-nums">{page + 1} / {totalPages}</span>
+              <button
+                type="button"
+                onClick={() => setPage((current) => Math.min(totalPages - 1, current + 1))}
+                disabled={page >= totalPages - 1}
+                className="inline-flex h-8 items-center gap-0.5 rounded-md px-2 py-1 hover:bg-oai-gray-100 dark:hover:bg-oai-gray-800 disabled:opacity-40"
+              >
+                {copy("proxy.requests.next")} <ChevronRight size={13} aria-hidden="true" />
+              </button>
+            </div>
           </div>
         ) : null}
       </Card>
+
+      <ColumnSettingsDialog
+        open={columnDialogOpen}
+        onClose={() => setColumnDialogOpen(false)}
+        draft={draftColumns}
+        onToggle={toggleDraftColumn}
+        onSelectAll={() => setDraftColumns(allColumnKeys())}
+        onApply={applyColumns}
+      />
     </div>
   );
 }

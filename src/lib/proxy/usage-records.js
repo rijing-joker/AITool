@@ -1,7 +1,7 @@
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const { setImmediate: yieldToIO } = require("node:timers/promises");
-const { isUsageRecord } = require("./usage-record");
+const { normalizeRecord } = require("./usage-record");
 
 const RECORD_FILE = /^records-\d{4}-\d{2}-\d{2}\.jsonl$/;
 
@@ -17,8 +17,10 @@ async function boundary(handle, offset) {
 
 function parseRecord(line) {
   try {
-    const record = JSON.parse(line);
-    return isUsageRecord(record) ? record : null;
+    // Rows written before normalization are raw core payloads (snake_case
+    // tokens, unmasked api_key); normalize every row as it is parsed so the
+    // cache and every reader see canonical, secret-free rows.
+    return normalizeRecord(JSON.parse(line));
   } catch {
     return null;
   }

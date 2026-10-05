@@ -58,6 +58,28 @@ export interface ProviderSwitchProvider {
   sortIndex: number;
   createdAt: string;
   updatedAt: string;
+  /** Set when the row's base URL matches a supported plan provider (cc-switch coding_plan). */
+  quotaProvider?: string | null;
+}
+
+export interface ProviderSwitchQuotaTier {
+  id: string;
+  label: string;
+  used_percent: number;
+  reset_at: string | null;
+  limit_window_seconds?: number | null;
+}
+
+export interface ProviderSwitchQuota {
+  ok: boolean;
+  provider: string;
+  plan?: string | null;
+  status?: string | null;
+  tiers?: ProviderSwitchQuotaTier[];
+  credits?: { monthly: number; purchased: number; free: number; spent: number } | null;
+  credentialStatus?: "valid" | "expired" | "error";
+  error?: string;
+  cached?: boolean;
 }
 
 // Port of cc-switch's ProviderMeta, reduced to the keys this port consumes.
@@ -189,6 +211,15 @@ export const providerSwitchApi = {
 
   getPresets(app: ProviderSwitchApp): Promise<{ ok: true; app: string; presets: ProviderSwitchPreset[] }> {
     return get(`/api/provider-switch/presets?app=${encodeURIComponent(app)}`);
+  },
+
+  getQuota(
+    app: ProviderSwitchApp,
+    id: string,
+    opts?: { nocache?: boolean },
+  ): Promise<{ ok: true; app: string; id: string; quota: ProviderSwitchQuota }> {
+    const nocache = opts?.nocache ? "&nocache=1" : "";
+    return get(`/api/provider-switch/quota?app=${encodeURIComponent(app)}&id=${encodeURIComponent(id)}${nocache}`);
   },
 
   getEditorView(
@@ -342,5 +373,73 @@ export const mcpApi = {
 
   sync(apps?: McpAppId[]): Promise<{ ok: true; failures: string[] }> {
     return mutate("/api/provider-switch/mcp/sync", "POST", apps?.length ? { apps } : {});
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Prompts (cc-switch's prompt module)
+// ---------------------------------------------------------------------------
+
+export type PromptAppId =
+  | "claude"
+  | "codex"
+  | "gemini"
+  | "grokbuild"
+  | "opencode"
+  | "openclaw"
+  | "hermes"
+  | "pi"
+  | "mcode";
+
+export interface PromptEntry {
+  id: string;
+  name: string;
+  content: string;
+  description?: string;
+  enabled: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface PromptUpsertPayload {
+  id: string;
+  name?: string;
+  content: string;
+  description?: string;
+  enabled?: boolean;
+}
+
+export interface PromptListResult {
+  ok: true;
+  app: PromptAppId;
+  prompts: PromptEntry[];
+  targetPath: string;
+}
+
+export interface PromptMutationResult {
+  ok: true;
+  prompts: PromptEntry[];
+  targetPath: string;
+}
+
+export const promptsApi = {
+  list(app: PromptAppId): Promise<PromptListResult> {
+    return get(`/api/provider-switch/prompts?app=${encodeURIComponent(app)}`);
+  },
+
+  upsert(app: PromptAppId, prompt: PromptUpsertPayload): Promise<PromptMutationResult> {
+    return mutate("/api/provider-switch/prompts", "POST", { app, prompt });
+  },
+
+  enable(app: PromptAppId, id: string): Promise<PromptMutationResult> {
+    return mutate("/api/provider-switch/prompts/enable", "POST", { app, id });
+  },
+
+  remove(app: PromptAppId, id: string): Promise<PromptMutationResult> {
+    return mutate("/api/provider-switch/prompts/delete", "POST", { app, id });
+  },
+
+  import(app: PromptAppId): Promise<PromptMutationResult> {
+    return mutate("/api/provider-switch/prompts/import", "POST", { app });
   },
 };

@@ -3,7 +3,8 @@ const net = require("node:net");
 const path = require("node:path");
 const paths = require("./paths");
 const config = require("./config");
-const { isUsageRecord } = require("./usage-record");
+const pricing = require("./pricing");
+const { isUsageRecord, normalizeRecord } = require("./usage-record");
 
 // Usage bridge — the AiTool fusion point between the CLIProxyAPI core and the
 // TokenTracker data plane.
@@ -224,13 +225,18 @@ function createRespParser(onArray, onFrame) {
 }
 
 function handleUsagePayload(payloadText) {
-  let record;
+  let payload;
   try {
-    record = JSON.parse(payloadText);
+    payload = JSON.parse(payloadText);
   } catch {
     return;
   }
-  if (!isUsageRecord(record)) return;
+  if (!isUsageRecord(payload)) return;
+  // Canonicalize the core's raw snake_case payload once: the fusion below and
+  // the persisted record store both work on camelCase rows, and the raw
+  // api_key / response_headers never reach the disk.
+  const record = normalizeRecord(payload);
+  if (!record) return;
   const now = new Date().toISOString();
   state.recordsToday += 1;
   state.lastEventAt = now;
@@ -255,11 +261,19 @@ function handleUsagePayload(payloadText) {
   const model = String(record.response_model || record.model || record.alias || "unknown");
   const key = bucketKey(model, hourStart);
   const bucket = buckets.get(key) || newBucket(model, hourStart);
-  bucket.input_tokens += Number(tokens.inputTokens) || 0;
+  // Queue contract: input_tokens = non-cached input only. OpenAI/Gemini
+  // upstreams report input including the cache amounts — fold the fresh
+  // portion so computeRowCost does not double-bill the cached share (same
+  // executor semantics pricing.js uses for the Requests-tab estimates).
+  const executorType = typeof record.executor_type === "string" ? record.executor_type : "";
+  bucket.input_tokens += pricing.freshInputTokens(tokens, { executorType, model });
   bucket.cached_input_tokens += Number(tokens.cacheReadTokens) || 0;
   bucket.cache_creation_input_tokens += Number(tokens.cacheCreationTokens) || 0;
   bucket.output_tokens += Number(tokens.outputTokens) || 0;
-  bucket.reasoning_output_tokens += Number(tokens.reasoningTokens) || 0;
+  // Reasoning is a subset of output_tokens for Claude/OpenAI upstreams (their
+  // cost already rides in output); only Gemini-family upstreams report it
+  // separately, so only those keep the reasoning bucket non-zero.
+  bucket.reasoning_output_tokens += pricing.isReasoningSeparate(executorType, model) ? Number(tokens.reasoningTokens) || 0 : 0;
   bucket.total_tokens += Number(tokens.totalTokens) || 0;
   bucket.conversation_count += 1;
   buckets.set(key, bucket);

@@ -18,9 +18,13 @@ const zeroRequest = { timestamp, model: "unknown", tokens: { totalTokens: 0 } };
 
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "aitool-usage-test-"));
-  const previous = { usageDir: paths.usageDir, bucketsStatePath: paths.bucketsStatePath };
+  const previous = { usageDir: paths.usageDir, bucketsStatePath: paths.bucketsStatePath, pricingPath: paths.pricingPath };
   paths.usageDir = path.join(root, "usage");
   paths.bucketsStatePath = path.join(paths.usageDir, "buckets.json");
+  // Keep the pricing sync off the real HOME and off the network: no store on
+  // disk and fetch rejects, so record responses stay unannotated.
+  paths.pricingPath = path.join(paths.usageDir, "models-dev-pricing.json");
+  t.mock.method(globalThis, "fetch", async () => { throw new Error("offline"); });
   const queuePath = path.join(root, "queue.jsonl");
   t.mock.method(localApi, "resolveQueuePath", () => queuePath);
   fs.mkdirSync(paths.usageDir);
@@ -246,4 +250,38 @@ test("RESP backfill, subscribe and reconnect ignore controls but accept the next
   sockets[1].emit("data", message(zeroRequest));
   assert.equal(bridge.bridgeStatus().eventsSeenSinceConnect, 1);
   assert.equal(jsonl(f.queuePath).at(-1).conversation_count, 1);
+});
+
+test("queue fold applies executor token semantics: fresh input, reasoning only when separate", (t) => {
+  const f = fixture(t);
+  // OpenAI-family upstream: input includes the cached share, reasoning is a
+  // subset of output — the fold must not double-bill either.
+  bridge.handleUsagePayload(JSON.stringify({
+    timestamp, model: "gpt-5.2", executor_type: "OpenAIExecutor",
+    tokens: { inputTokens: 300, outputTokens: 90, reasoningTokens: 40, cacheReadTokens: 140, cacheCreationTokens: 0, totalTokens: 390 },
+  }));
+  // Claude upstream: input is already fresh; thinking rides inside output.
+  bridge.handleUsagePayload(JSON.stringify({
+    timestamp, model: "claude-sonnet-5", executor_type: "ClaudeExecutor",
+    tokens: { inputTokens: 100, outputTokens: 60, reasoningTokens: 20, cacheReadTokens: 900, cacheCreationTokens: 10, totalTokens: 1090 },
+  }));
+  // Gemini upstream: input includes cache AND thoughts are separate output.
+  bridge.handleUsagePayload(JSON.stringify({
+    timestamp, model: "gemini-3-pro", executor_type: "GeminiExecutor",
+    tokens: { inputTokens: 500, outputTokens: 100, reasoningTokens: 30, cacheReadTokens: 200, cacheCreationTokens: 0, totalTokens: 630 },
+  }));
+  const rows = jsonl(f.queuePath).filter((row) => row.source === "cliproxy");
+  const byModel = new Map(rows.map((row) => [row.model, row]));
+  assert.deepEqual(
+    { input_tokens: byModel.get("gpt-5.2").input_tokens, reasoning_output_tokens: byModel.get("gpt-5.2").reasoning_output_tokens, total_tokens: byModel.get("gpt-5.2").total_tokens },
+    { input_tokens: 160, reasoning_output_tokens: 0, total_tokens: 390 },
+  );
+  assert.deepEqual(
+    { input_tokens: byModel.get("claude-sonnet-5").input_tokens, reasoning_output_tokens: byModel.get("claude-sonnet-5").reasoning_output_tokens },
+    { input_tokens: 100, reasoning_output_tokens: 0 },
+  );
+  assert.deepEqual(
+    { input_tokens: byModel.get("gemini-3-pro").input_tokens, reasoning_output_tokens: byModel.get("gemini-3-pro").reasoning_output_tokens },
+    { input_tokens: 300, reasoning_output_tokens: 30 },
+  );
 });

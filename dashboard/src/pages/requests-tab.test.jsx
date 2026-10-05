@@ -11,7 +11,13 @@ beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn(async () => ({ json: async () => response })));
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
-async function setup() { render(<RequestsTab />); await screen.findByText("fixture-model"); }
+async function setup(overrides = {}) {
+  if (Object.keys(overrides).length > 0) {
+    vi.stubGlobal("fetch", vi.fn(async () => ({ json: async () => ({ ...response, ...overrides }) })));
+  }
+  render(<RequestsTab />);
+  await screen.findByText("fixture-model");
+}
 it("coalesces typing into one filtered request", async () => {
   await setup();
   const input = screen.getByRole("combobox", { name: "proxy.requests.filter.model" });
@@ -49,4 +55,60 @@ it("does not fetch an incomplete or reversed custom range", async () => {
   fireEvent.change(screen.getByLabelText("proxy.requests.range.end"), { target: { value: "2026-10-02T12:00" } });
   expect(screen.getByRole("alert")).toHaveTextContent("proxy.requests.range.invalid");
   expect(fetch).toHaveBeenCalledTimes(1);
+});
+it("renders the estimated cost column and stats tile from pricing", async () => {
+  await setup({
+    records: [{ ...response.records[0], costUsd: 0.0013575 }],
+    stats: { ...response.stats, total_cost_usd: 0.0025 },
+  });
+  expect(screen.getByTitle("proxy.requests.col.cost")).toBeInTheDocument();
+  expect(screen.getByText("$0.0014")).toBeInTheDocument();
+  const tile = screen.getByText("proxy.requests.cost").closest("div");
+  expect(tile).toHaveTextContent("$0.0025");
+});
+it("keeps tiny and zero costs readable in the cost column and tile", async () => {
+  await setup({
+    records: [{ ...response.records[0], costUsd: 0.0000042 }],
+    stats: { ...response.stats, total_cost_usd: 0 },
+  });
+  expect(screen.getByText("<$0.0001")).toBeInTheDocument();
+  expect(screen.getByText("$0")).toBeInTheDocument();
+});
+it("exports the loaded page as a CSV download with the injection guard", async () => {
+  // A model id that would be interpreted as a formula by spreadsheet apps
+  // must be neutralized by the upstream's `'`-prefix guard.
+  const injectionRecord = {
+    id: "inj", request_id: "inj", timestamp: "2026-10-02T01:00:00Z",
+    model: "=cmd|'!A1", tokens: { totalTokens: 5 },
+  };
+  await setup({ records: [response.records[0], injectionRecord] });
+  const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+  const createObjectURL = vi.fn(() => "blob:csv");
+  // jsdom's Blob lacks .text(); Node's can be read back.
+  const { Blob: NodeBlob } = await import("node:buffer");
+  vi.stubGlobal("Blob", NodeBlob);
+  vi.stubGlobal("URL", Object.assign(URL, { createObjectURL }));
+  fireEvent.click(screen.getByRole("button", { name: "proxy.requests.export" }));
+  expect(click).toHaveBeenCalledTimes(1);
+  expect(createObjectURL).toHaveBeenCalledTimes(1);
+  const blob = createObjectURL.mock.calls[0][0];
+  expect(blob).toBeInstanceOf(Blob);
+  // Blob.text() strips the BOM per spec, so assert on the raw bytes first.
+  const bytes = Buffer.from(await blob.arrayBuffer());
+  expect([bytes[0], bytes[1], bytes[2]]).toEqual([0xef, 0xbb, 0xbf]); // UTF-8 BOM for Excel
+  const csv = bytes.toString("utf8");
+  expect(csv).toContain('"total_tokens"');
+  expect(csv).toContain('"estimated_cost_usd"');
+  expect(csv).toContain('"fixture-model"');
+  expect(csv).toContain('"\'=cmd|\'!A1"'); // guarded, quoted, not bare `=…`
+  click.mockRestore();
+  vi.unstubAllGlobals();
+});
+it("applies column visibility from the settings dialog", async () => {
+  await setup();
+  fireEvent.click(screen.getByRole("button", { name: "proxy.requests.col_settings" }));
+  const dialog = await screen.findByRole("dialog", { name: "proxy.requests.col_settings" });
+  expect(dialog).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "shared.action.apply" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
 });

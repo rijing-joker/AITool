@@ -14,3 +14,14 @@ Object.defineProperty(globalThis, "localStorage", {
   value: storage,
   configurable: true,
 });
+
+// The requests event-log table syncs a top scrollbar via ResizeObserver,
+// which jsdom does not implement. A no-op stub keeps the effect inert.
+if (typeof globalThis.ResizeObserver !== "function") {
+  class ResizeObserverStub {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+  globalThis.ResizeObserver = ResizeObserverStub;
+}

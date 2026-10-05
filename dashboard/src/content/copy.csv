@@ -1757,6 +1757,25 @@ proxy.aliases.delete_alias,proxy,ProxyPage,ProxyPage,delete_alias,Delete alias,,
 proxy.aliases.hint,proxy,ProxyPage,ProxyPage,hint,Overlapping names across channels can become ambiguous in the merged /v1 model list — prefer unique aliases for strict pinning.,,active
 proxy.requests.response_model,proxy,ProxyPage,ProxyPage,response_model,Response model,,active
 proxy.requests.substituted_hint,proxy,ProxyPage,ProxyPage,substituted_hint,The upstream reported a different model than requested — possible silent substitution.,,active
+proxy.requests.col.key,proxy,ProxyPage,ProxyPage,requests_col_key,Key,,active
+proxy.requests.col.source,proxy,ProxyPage,ProxyPage,requests_col_source,Source,,active
+proxy.requests.col.effort,proxy,ProxyPage,ProxyPage,requests_col_effort,Effort,,active
+proxy.requests.col.request,proxy,ProxyPage,ProxyPage,requests_col_request,Request,,active
+proxy.requests.col.speed,proxy,ProxyPage,ProxyPage,requests_col_speed,Speed,,active
+proxy.requests.col.cache,proxy,ProxyPage,ProxyPage,requests_col_cache,Cache,,active
+proxy.requests.col.cacheRate,proxy,ProxyPage,ProxyPage,requests_col_cacheRate,Cache hit,,active
+proxy.requests.col.cost,proxy,ProxyPage,ProxyPage,requests_col_cost,Cost,,active
+proxy.requests.cost,proxy,ProxyPage,ProxyPage,requests_cost,Est. cost,,active
+proxy.requests.col.ttft,proxy,ProxyPage,ProxyPage,requests_col_ttft,TTFT,,active
+proxy.requests.col_settings,proxy,ProxyPage,ProxyPage,requests_col_settings,Columns,,active
+proxy.requests.col_reset,proxy,ProxyPage,ProxyPage,requests_col_reset,Reset column widths,,active
+proxy.requests.col_selected,proxy,ProxyPage,ProxyPage,requests_col_selected,"{{selected}}/{{total}} columns",,active
+proxy.requests.col_select_all,proxy,ProxyPage,ProxyPage,requests_col_selectAll,Select all,,active
+proxy.requests.export,proxy,ProxyPage,ProxyPage,requests_export,Export CSV,,active
+proxy.requests.export_hint,proxy,ProxyPage,ProxyPage,requests_exportHint,Download the current page as CSV,,active
+proxy.requests.page_size,proxy,ProxyPage,ProxyPage,requests_pageSize,"{{size}} / page",,active
+proxy.requests.range_summary,proxy,ProxyPage,ProxyPage,requests_rangeSummary,"{{start}}–{{end}} of {{total}}",,active
+proxy.requests.resize_hint,proxy,ProxyPage,ProxyPage,requests_resizeHint,Drag to resize; double-click to reset,,active
 proxy.upstream.notConfigured,proxy,ProxyPage,Upstreams,notConfigured,Not configured,,active
 proxy.upstream.compatibleName,proxy,ProxyPage,Upstreams,compatible_name,OpenAI compatible {{number}},,active
 proxy.upstream.provider.codex,proxy,ProxyPage,Upstreams,provider_codex,Codex API,,active
@@ -2226,6 +2245,30 @@ quota.reset_in,ui,QuotaWidget,QuotaWidget,reset_in,"Resets in {{time}}",,active
 quota.close,ui,QuotaWidget,QuotaWidget,close,"Close widget",,active
 quota.close_hint,ui,QuotaWidget,QuotaWidget,close_hint,"Close widget; reopen from the tray menu",,active
 nav.provider_switch,pswitch,ProviderSwitchPage,Sidebar,nav_provider_switch,Provider Configs,,active
+nav.cli_sessions,clisessions,CliSessionsPage,Sidebar,nav_cli_sessions,CLI Sessions,,active
+clisessions.title,clisessions,CliSessionsPage,CliSessionsPage,title,CLI Sessions,,active
+clisessions.subtitle,clisessions,CliSessionsPage,CliSessionsPage,subtitle,Browse the session transcripts your CLI tools recorded on this machine. Ported from cc-switch.,,active
+clisessions.search,clisessions,CliSessionsPage,CliSessionsPage,search,Search sessions,,active
+clisessions.refresh,clisessions,CliSessionsPage,CliSessionsPage,refresh,Rescan,,active
+clisessions.count,clisessions,CliSessionsPage,CliSessionsPage,count,"{{count}} sessions",,active
+clisessions.loading,clisessions,CliSessionsPage,CliSessionsPage,loading,Loading…,,active
+clisessions.empty,clisessions,CliSessionsPage,CliSessionsPage,empty,No session logs found for this app yet.,,active
+clisessions.empty_transcript,clisessions,CliSessionsPage,CliSessionsPage,empty_transcript,This session has no readable messages.,,active
+clisessions.pick_hint,clisessions,CliSessionsPage,CliSessionsPage,pick_hint,Pick a session on the left to read its transcript.,,active
+clisessions.untitled,clisessions,CliSessionsPage,CliSessionsPage,untitled,Untitled session,,active
+clisessions.no_apps,clisessions,CliSessionsPage,CliSessionsPage,no_apps,No CLI session roots found,,active
+clisessions.back,clisessions,CliSessionsPage,CliSessionsPage,back,Back to list,,active
+clisessions.time.now,clisessions,CliSessionsPage,CliSessionsPage,time_now,just now,,active
+clisessions.time.minutes,clisessions,CliSessionsPage,CliSessionsPage,time_minutes,"{{count}} min ago",,active
+clisessions.time.hours,clisessions,CliSessionsPage,CliSessionsPage,time_hours,"{{count}} h ago",,active
+clisessions.time.days,clisessions,CliSessionsPage,CliSessionsPage,time_days,"{{count}} d ago",,active
+clisessions.role.user,clisessions,CliSessionsPage,CliSessionsPage,role_user,User,,active
+clisessions.role.assistant,clisessions,CliSessionsPage,CliSessionsPage,role_assistant,Assistant,,active
+clisessions.role.tool,clisessions,CliSessionsPage,CliSessionsPage,role_tool,Tool,,active
+clisessions.role.unknown,clisessions,CliSessionsPage,CliSessionsPage,role_unknown,System,,active
+clisessions.usage.tokens,clisessions,CliSessionsPage,CliSessionsPage,usage_tokens,Tokens,,active
+clisessions.usage.duration,clisessions,CliSessionsPage,CliSessionsPage,usage_duration,Span,,active
+clisessions.usage.cost,clisessions,CliSessionsPage,CliSessionsPage,usage_cost,Est. cost,,active
 pswitch.title,pswitch,ProviderSwitchPage,ProviderSwitchPage,title,Provider Configs,,active
 pswitch.subtitle,pswitch,ProviderSwitchPage,ProviderSwitchPage,subtitle,Manage provider presets for your AI CLI tools and switch their live config files in one click. Ported from cc-switch.,,active
 pswitch.storage_path,pswitch,ProviderSwitchPage,ProviderSwitchPage,storage_path,Presets stored at {{path}},,active
@@ -2296,6 +2339,42 @@ pswitch.mcp.field_homepage,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_field
 pswitch.mcp.field_docs,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_field_docs,Docs,,active
 pswitch.mcp.field_tags,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_field_tags,Tags (comma separated),,active
 pswitch.mcp.spec_empty,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_spec_empty,No command or URL configured,,active
+pswitch.prompts.tab,pswitch,ProviderSwitchPage,ProviderSwitchPage,prompts_tab,Prompts,,active
+pswitch.prompts.title,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_title,Prompts ({{count}}),,active
+pswitch.prompts.subtitle,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_subtitle,Named global-instruction prompts per agent. Enabling one writes it over the app's instruction file; the current file content is captured first.,,active
+pswitch.prompts.import,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_import,Import from live file,,active
+pswitch.prompts.import_done,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_import_done,Imported the current instruction file,,active
+pswitch.prompts.add,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_add,Add prompt,,active
+pswitch.prompts.target,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_target,Enabling writes to {{path}},,active
+pswitch.prompts.empty_title,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_empty_title,No prompts yet,,active
+pswitch.prompts.empty_hint,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_empty_hint,"Add a prompt, or import the app's current instruction file to start editing it here.",,active
+pswitch.prompts.enabled_badge,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_enabled_badge,Active,,active
+pswitch.prompts.enable,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_enable,Enable,,active
+pswitch.prompts.none_enabled_hint,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_none_enabled_hint,No prompt is active for this app — the instruction file keeps whatever content it has now.,,active
+pswitch.prompts.preview_empty,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_preview_empty,Empty,,active
+pswitch.prompts.edit,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_edit,Edit prompt,,active
+pswitch.prompts.delete_title,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_delete_title,Delete prompt,,active
+pswitch.prompts.delete_hint,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_delete_hint,Delete {{name}}? The live instruction file is not touched.,,active
+pswitch.prompts.delete_disabled_hint,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_delete_disabled_hint,Disable this prompt first — the active prompt cannot be deleted,,active
+pswitch.prompts.toast_enabled,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_toast_enabled,Prompt enabled,,active
+pswitch.prompts.toast_deleted,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_toast_deleted,Prompt deleted,,active
+pswitch.prompts.toast_saved,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_toast_saved,Prompt saved,,active
+pswitch.prompts.toast_error,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_toast_error,Save failed,,active
+pswitch.prompts.dialog_title,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_dialog_title,Prompt,,active
+pswitch.prompts.field_name,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_field_name,Name,,active
+pswitch.prompts.field_description,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_field_description,Description,,active
+pswitch.prompts.field_content,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_field_content,Content (Markdown),,active
+pswitch.prompts.field_enabled,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_field_enabled,Enable for this app,,active
+pswitch.prompts.enabled_hint,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_enabled_hint,Enabling writes this prompt over the app's instruction file and turns off the previously active prompt; the file's content is saved as a disabled backup entry first. Saving the active prompt with this box unchecked clears the file.,,active
+pswitch.quota.loading,pswitch,ProviderSwitchPage,ProviderQuotaLine,quota_loading,"Loading quota…",,active
+pswitch.quota.left,pswitch,ProviderSwitchPage,ProviderQuotaLine,quota_left,"{{value}}% left",,active
+pswitch.quota.refresh,pswitch,ProviderSwitchPage,ProviderQuotaLine,quota_refresh,"Re-query quota",,active
+pswitch.quota.error,pswitch,ProviderSwitchPage,ProviderQuotaLine,quota_error,"Quota query failed",,active
+pswitch.quota.expired,pswitch,ProviderSwitchPage,ProviderQuotaLine,quota_expired,"Invalid API key",,active
+pswitch.quota.reset_in,pswitch,ProviderSwitchPage,ProviderQuotaLine,quota_reset_in,"Resets in {{time}}",,active
+pswitch.quota.tier.five_hour,pswitch,ProviderSwitchPage,ProviderQuotaLine,quota_tier_five_hour,"5h",,active
+pswitch.quota.tier.weekly,pswitch,ProviderSwitchPage,ProviderQuotaLine,quota_tier_weekly,"Weekly",,active
+pswitch.quota.tier.monthly,pswitch,ProviderSwitchPage,ProviderQuotaLine,quota_tier_monthly,"Monthly",,active
 pswitch.provider.dialog.add_title,pswitch,ProviderSwitchPage,ProviderSwitchPage,provider_dialog_add_title,Add provider,,active
 pswitch.provider.dialog.edit_title,pswitch,ProviderSwitchPage,ProviderSwitchPage,provider_dialog_edit_title,Edit provider,,active
 pswitch.backups.empty,pswitch,ProviderSwitchPage,ProviderSwitchPage,backups_empty,No backups yet. A backup is taken before the first managed write to each file.,,active

@@ -13,6 +13,7 @@ import {
   Activity,
   Network,
   FolderCog,
+  MessagesSquare,
   Settings as SettingsIcon,
   ChevronLeft,
   ChevronRight,
@@ -42,6 +43,7 @@ export function getNavGroups() {
       items: [
         { id: "proxy", to: "/proxy", icon: Network, label: copy("nav.proxy") },
         { id: "provider-switch", to: "/provider-switch", icon: FolderCog, label: copy("nav.provider_switch") },
+        { id: "cli-sessions", to: "/cli-sessions", icon: MessagesSquare, label: copy("nav.cli_sessions") },
       ],
     },
     {

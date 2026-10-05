@@ -65,6 +65,9 @@ const ServiceStatusPage = lazy(() => import("./pages/ServiceStatusPage.jsx"));
 const AchievementsPage = lazy(() => import("./pages/AchievementsPage.jsx"));
 const ProxyPage = lazy(() => import("./pages/ProxyPage.jsx"));
 const ProviderSwitchPage = lazy(() => import("./pages/ProviderSwitchPage.jsx"));
+const CliSessionsPage = lazy(() =>
+  import("./pages/CliSessionsPage.jsx").then((m) => ({ default: m.CliSessionsPage })),
+);
 const LandingPage = lazy(() =>
   import("./pages/LandingPage.jsx").then((m) => ({ default: m.LandingPage })),
 );
@@ -226,7 +229,8 @@ export default function App() {
   const isAchievementsPath = normalizedPath === "/achievements";
   const isProxyPath = normalizedPath === "/proxy";
   const isProviderSwitchPath = normalizedPath === "/provider-switch";
-  if (isLimitsPath || isSettingsPath || isSkillsPath || isSessionsPath || isWidgetsPath || isPetPath || isIpCheckPath || isServiceStatusPath || isAchievementsPath || isProxyPath || isProviderSwitchPath) gate = "dashboard";
+  const isCliSessionsPath = normalizedPath === "/cli-sessions";
+  if (isLimitsPath || isSettingsPath || isSkillsPath || isSessionsPath || isWidgetsPath || isPetPath || isIpCheckPath || isServiceStatusPath || isAchievementsPath || isProxyPath || isProviderSwitchPath || isCliSessionsPath) gate = "dashboard";
 
   let PageComponent = DashboardPage;
   if (profileUserId) {
@@ -255,6 +259,8 @@ export default function App() {
     PageComponent = ProxyPage;
   } else if (isProviderSwitchPath) {
     PageComponent = ProviderSwitchPage;
+  } else if (isCliSessionsPath) {
+    PageComponent = CliSessionsPage;
   }
 
   const showSidebar =
@@ -273,7 +279,8 @@ export default function App() {
       isServiceStatusPath ||
       isAchievementsPath ||
       isProxyPath ||
-      isProviderSwitchPath);
+      isProviderSwitchPath ||
+      isCliSessionsPath);
 
   // Public-host gating: on www.tokentracker.cc et al. there is no local
   // CLI :7680 to fall back to, so dashboard / settings / etc. require a

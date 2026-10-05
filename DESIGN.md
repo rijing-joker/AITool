@@ -1,6 +1,6 @@
-# TokenTracker — Design System
+# AiTool — Design System
 
-Derived from `dashboard/src/styles.css` + `dashboard/tailwind.config.cjs`. Tailwind utility classes use the `oai-*` token names.
+Derived from `dashboard/src/styles.css` + `dashboard/tailwind.config.cjs`. Tailwind utility classes use the `oai-*` token names. The language is TokenTracker's, inherited unchanged by the AiTool merge — the newer AI Proxy, Provider Configs, and CLI Sessions pages are held to the same tokens.
 
 ## Color (OKLCH, green-tinted neutrals, hue 145)
 

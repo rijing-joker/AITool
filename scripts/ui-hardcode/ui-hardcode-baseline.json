@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-05T15:33:16.283Z",
+  "generatedAt": "2026-10-05T16:11:33.169Z",
   "root": "dashboard/src",
   "rules": {
     "colors": "hex/rgb(a) literals",
@@ -7,7 +7,7 @@
   },
   "totals": {
     "colors": 412,
-    "rawText": 219
+    "rawText": 226
   },
   "files": {
     "dashboard/src/components/InsforgeUserHeaderControls.jsx": {
@@ -109,6 +109,13 @@
         "= 1).length, [merged], ); const total = BADGE_CATALOG.length; return ("
       ]
     },
+    "dashboard/src/pages/CliSessionsPage.jsx": {
+      "colors": 0,
+      "rawText": 1,
+      "rawTextTokens": [
+        "0 ? ("
+      ]
+    },
     "dashboard/src/pages/DashboardPage.jsx": {
       "colors": 1,
       "rawText": 0,
@@ -155,9 +162,10 @@
     },
     "dashboard/src/pages/ProviderSwitchPage.jsx": {
       "colors": 0,
-      "rawText": 1,
+      "rawText": 2,
       "rawTextTokens": [
-        ") : appInfo.suggestion ? ("
+        ") : appInfo.suggestion ? (",
+        "= 8 && (isExport || payloadText.trim() !== \"\"); return ("
       ]
     },
     "dashboard/src/pages/ProxyPage.jsx": {
@@ -266,6 +274,13 @@
         "WebSocket"
       ]
     },
+    "dashboard/src/pages/provider-prompts-panel.jsx": {
+      "colors": 0,
+      "rawText": 1,
+      "rawTextTokens": [
+        "item.kind === entry.kind); return ("
+      ]
+    },
     "dashboard/src/pages/provider-quota-line.jsx": {
       "colors": 0,
       "rawText": 1,
@@ -275,10 +290,12 @@
     },
     "dashboard/src/pages/requests-tab.jsx": {
       "colors": 0,
-      "rawText": 19,
+      "rawText": 23,
       "rawTextTokens": [
         ") : record.alias && record.alias !== record.model ? (",
         ") : records.length === 0 ? (",
+        ") : state?.status === \"done\" ? (",
+        ") : state?.status === \"error\" ? (",
         "); case \"cache\": return (",
         "); case \"cacheRate\": return (",
         "); case \"key\": return (",
@@ -292,7 +309,9 @@
         "0 ? (",
         "; case \"output\": return",
         "; case \"reasoning\": return",
+        "; case \"replay\": return",
         "; default: return",
+        "= 200 && (state.statusCode ?? 0)",
         "entry.level === \"exceeded\"); return ("
       ]
     },

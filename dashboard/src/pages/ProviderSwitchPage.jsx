@@ -196,6 +196,137 @@ function FailoverBar({ failover, activeApp, busy, onEdit, onSwitchTo }) {
   );
 }
 
+function downloadJsonBlob(filename, data) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// Passphrase-encrypted export/import of the provider-switch stores. The
+// passphrase lives only in this dialog; the export downloads an opaque JSON
+// blob the user keeps wherever they keep dotfiles.
+function EncryptedBackupDialog({ mode, onClose, onImported }) {
+  const [passphrase, setPassphrase] = useState("");
+  const [confirmPassphrase, setConfirmPassphrase] = useState("");
+  const [payloadText, setPayloadText] = useState("");
+  const [working, setWorking] = useState(false);
+  const [error, setError] = useState("");
+  const isExport = mode === "export";
+
+  const run = async () => {
+    if (working) return;
+    setError("");
+    if (passphrase.length < 8) {
+      setError(copy("pswitch.encrypted.short"));
+      return;
+    }
+    if (isExport && passphrase !== confirmPassphrase) {
+      setError(copy("pswitch.encrypted.mismatch"));
+      return;
+    }
+    if (isExport) {
+      setWorking(true);
+      try {
+        const res = await providerSwitchApi.exportEncryptedBackup(passphrase);
+        const stamp = new Date().toISOString().slice(0, 10);
+        downloadJsonBlob(`aitool-providers-backup-${stamp}.json`, res.payload);
+        onImported();
+      } catch (requestError) {
+        setError(requestError instanceof Error ? requestError.message : String(requestError));
+      } finally {
+        setWorking(false);
+      }
+      return;
+    }
+    let payload;
+    try {
+      payload = JSON.parse(payloadText);
+    } catch {
+      setError(copy("pswitch.encrypted.bad_file"));
+      return;
+    }
+    setWorking(true);
+    try {
+      const res = await providerSwitchApi.importEncryptedBackup(passphrase, payload);
+      showToast({ title: copy("pswitch.encrypted.imported", { count: res.restored.length }) });
+      await onImported();
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : String(requestError));
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  const canRun = !working && passphrase.length >= 8 && (isExport || payloadText.trim() !== "");
+  return (
+    <ModalFrame open onClose={onClose} label={isExport ? copy("pswitch.encrypted.export") : copy("pswitch.encrypted.import")}>
+      <div className="flex min-w-0 flex-col gap-3">
+        <h2 className="text-sm font-semibold">{isExport ? copy("pswitch.encrypted.export") : copy("pswitch.encrypted.import")}</h2>
+        <p className="text-xs text-oai-gray-500 dark:text-oai-gray-400">
+          {isExport ? copy("pswitch.encrypted.export_hint") : copy("pswitch.encrypted.import_hint")}
+        </p>
+        <label className="block space-y-1">
+          <span className="text-xs font-medium text-oai-gray-500 dark:text-oai-gray-400">{copy("pswitch.encrypted.passphrase")}</span>
+          <input
+            type="password"
+            value={passphrase}
+            onChange={(event) => setPassphrase(event.currentTarget.value)}
+            autoComplete="new-password"
+            aria-label={copy("pswitch.encrypted.passphrase")}
+            className="h-9 w-full rounded-lg border border-oai-gray-200 bg-transparent px-3 text-sm dark:border-oai-gray-700"
+          />
+        </label>
+        {isExport ? (
+          <label className="block space-y-1">
+            <span className="text-xs font-medium text-oai-gray-500 dark:text-oai-gray-400">{copy("pswitch.encrypted.confirm")}</span>
+            <input
+              type="password"
+              value={confirmPassphrase}
+              onChange={(event) => setConfirmPassphrase(event.currentTarget.value)}
+              autoComplete="new-password"
+              aria-label={copy("pswitch.encrypted.confirm")}
+              className="h-9 w-full rounded-lg border border-oai-gray-200 bg-transparent px-3 text-sm dark:border-oai-gray-700"
+            />
+          </label>
+        ) : (
+          <label className="block space-y-1">
+            <span className="text-xs font-medium text-oai-gray-500 dark:text-oai-gray-400">{copy("pswitch.encrypted.file")}</span>
+            <input
+              type="file"
+              accept="application/json,.json"
+              aria-label={copy("pswitch.encrypted.file")}
+              onChange={async (event) => {
+                const file = event.currentTarget.files?.[0];
+                if (!file) return;
+                try {
+                  setPayloadText(await file.text());
+                  setError("");
+                } catch {
+                  setError(copy("pswitch.encrypted.bad_file"));
+                }
+              }}
+              className="text-xs"
+            />
+          </label>
+        )}
+        {error ? <p className="text-xs text-red-600 dark:text-red-400">{error}</p> : null}
+        <div className="flex items-center justify-end gap-2 border-t border-oai-gray-100 pt-3 dark:border-oai-gray-800">
+          <Button variant="secondary" size="sm" disabled={working} onClick={onClose}>{copy("pswitch.action.cancel")}</Button>
+          <Button size="sm" disabled={!canRun} onClick={() => void run()}>
+            {isExport ? copy("pswitch.encrypted.export") : copy("pswitch.encrypted.import")}
+          </Button>
+        </div>
+      </div>
+    </ModalFrame>
+  );
+}
+
 function SortableProviderCard({ app, provider, isCurrent, busy, dragLabel, cooldownMs, onSwitch, onEdit, onDelete }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: provider.id,
@@ -322,6 +453,8 @@ export function ProviderSwitchPage() {
   const [failoverDialogOpen, setFailoverDialogOpen] = useState(false);
   const [failoverDraft, setFailoverDraft] = useState(null);
   const [failoverSaving, setFailoverSaving] = useState(false);
+  // encrypted backup (export downloads a blob; import restores the stores)
+  const [backupDialog, setBackupDialog] = useState(null);
 
   // backups
   const [backups, setBackups] = useState([]);
@@ -400,7 +533,25 @@ export function ProviderSwitchPage() {
     }
   }, []);
 
+  const runAutoEvaluate = useRef(false);
+  const evaluateAutoSwitch = useCallback(async (next) => {
+    if (runAutoEvaluate.current) return;
+    if (!next?.config?.enabled || !next?.config?.autoSwitch) return;
+    if (!(next.suggestions || []).length) return;
+    runAutoEvaluate.current = true;
+    try {
+      await providerSwitchApi.runFailoverEvaluation();
+      const res = await providerSwitchApi.getFailover();
+      if (!res.failover.config.autoSwitch || (res.failover.suggestions || []).length === 0) {
+        setFailover(res.failover);
+      }
+    } catch {
+      /* the suggestion banner stays; user can switch manually */
+    }
+  }, []);
+
   // Visible-polling keeps one non-overlapping loop that pauses on hidden tabs.
+  // Declared after evaluateAutoSwitch — the deps array is evaluated at render.
   const pollFailover = useVisiblePolling(
     useCallback(async (signal) => {
       try {
@@ -420,23 +571,6 @@ export function ProviderSwitchPage() {
   useEffect(() => {
     pollFailoverRef.current = pollFailover;
   }, [pollFailover]);
-
-  const runAutoEvaluate = useRef(false);
-  const evaluateAutoSwitch = useCallback(async (next) => {
-    if (runAutoEvaluate.current) return;
-    if (!next?.config?.enabled || !next?.config?.autoSwitch) return;
-    if (!(next.suggestions || []).length) return;
-    runAutoEvaluate.current = true;
-    try {
-      await providerSwitchApi.runFailoverEvaluation();
-      const res = await providerSwitchApi.getFailover();
-      if (!res.failover.config.autoSwitch || (res.failover.suggestions || []).length === 0) {
-        setFailover(res.failover);
-      }
-    } catch {
-      /* the suggestion banner stays; user can switch manually */
-    }
-  }, []);
 
   const openFailoverEdit = useCallback(() => {
     const source = failover?.config || {};
@@ -710,7 +844,17 @@ export function ProviderSwitchPage() {
       </section>
 
       <section className="mb-8">
-        <SectionTitle>{copy("pswitch.section.backups")}</SectionTitle>
+        <div className="flex items-center justify-between gap-2">
+          <SectionTitle>{copy("pswitch.section.backups")}</SectionTitle>
+          <div className="flex items-center gap-2">
+            <Button variant="secondary" size="sm" disabled={busy} onClick={() => setBackupDialog({ mode: "export" })}>
+              {copy("pswitch.encrypted.export")}
+            </Button>
+            <Button variant="secondary" size="sm" disabled={busy} onClick={() => setBackupDialog({ mode: "import" })}>
+              {copy("pswitch.encrypted.import")}
+            </Button>
+          </div>
+        </div>
         <Card>
           {backups.length === 0 ? (
             <p className="text-sm text-oai-gray-500 dark:text-oai-gray-400">{copy("pswitch.backups.empty")}</p>
@@ -745,6 +889,18 @@ export function ProviderSwitchPage() {
         </p>
       ) : null}
 
+      {backupDialog ? (
+        <EncryptedBackupDialog
+          mode={backupDialog.mode}
+          busy={busy}
+          onClose={() => setBackupDialog(null)}
+          onImported={async () => {
+            setBackupDialog(null);
+            await refreshStatus();
+            await refreshBackups(activeApp);
+          }}
+        />
+      ) : null}
       {failoverDialogOpen && failoverDraft ? (
         <FailoverEditDialog
           draft={failoverDraft}

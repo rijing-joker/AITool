@@ -207,6 +207,31 @@ export function CodexCatalogEditor({ models, onChange, fetchedModels, fetchState
               >
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
+              <details className="md:col-span-5 rounded-md border border-oai-gray-200 bg-white px-2 py-1.5 dark:border-oai-gray-800 dark:bg-oai-gray-950">
+                <summary
+                  className="flex cursor-pointer list-none items-center justify-between gap-1 text-xs text-oai-gray-600 dark:text-oai-gray-300"
+                  aria-label={copy("pswitch.catalog.col_instructions")}
+                >
+                  <span className="min-w-0 truncate">
+                    {String(row.baseInstructions || "").trim()
+                      ? copy("pswitch.catalog.instructions_set")
+                      : copy("pswitch.catalog.col_instructions")}
+                  </span>
+                  <ChevronDown className="h-3 w-3 shrink-0 text-oai-gray-400" />
+                </summary>
+                <textarea
+                  aria-label={copy("pswitch.catalog.col_instructions")}
+                  rows={5}
+                  spellCheck={false}
+                  value={String(row.baseInstructions || "")}
+                  onChange={(event) => updateRow(index, { baseInstructions: event.currentTarget.value })}
+                  placeholder={copy("pswitch.catalog.instructions_placeholder")}
+                  className="mt-2 w-full resize-y rounded-md border border-oai-gray-200 bg-oai-gray-50 p-2 font-mono text-xs leading-relaxed dark:border-oai-gray-800 dark:bg-oai-gray-900"
+                />
+                <p className="mt-1 text-[10px] text-oai-gray-400 dark:text-oai-gray-500">
+                  {copy("pswitch.catalog.instructions_hint")}
+                </p>
+              </details>
             </div>
           ))}
         </div>

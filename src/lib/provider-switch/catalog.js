@@ -267,6 +267,15 @@ function buildCodexCatalog(models, officialModels) {
       entry.default_reasoning_level = levels.includes(fallback) ? fallback : levels[levels.length - 1];
     }
     entries.push(entry);
+    // Per-model system prompt (EasyCLIProxyAPI 2b49fe6): written to
+    // base_instructions and mirrored into model_messages.instructions_template
+    // (Codex clients may prefer the template). Template rows only — official
+    // mirrors stay pure by design.
+    const baseInstructions = String((row && row.baseInstructions) || "").trim();
+    if (baseInstructions) {
+      entry.base_instructions = baseInstructions;
+      entry.model_messages = { ...(entry.model_messages || {}), instructions_template: baseInstructions };
+    }
   }
   return `${JSON.stringify({ models: entries }, null, 2)}\n`;
 }
@@ -307,6 +316,15 @@ function parseCodexCatalog(text, officialModels) {
       contextWindow:
         Number.isFinite(entry.context_window) && entry.context_window > 0 ? String(Math.floor(entry.context_window)) : "",
     };
+    const instructions =
+      typeof entry.base_instructions === "string" && entry.base_instructions.trim()
+        ? entry.base_instructions
+        : entry.model_messages && typeof entry.model_messages === "object"
+          ? entry.model_messages.instructions_template
+          : undefined;
+    if (typeof instructions === "string" && instructions.trim()) {
+      row.baseInstructions = instructions;
+    }
     const levels = Array.isArray(entry.supported_reasoning_levels)
       ? entry.supported_reasoning_levels.map((item) => (item && typeof item === "object" ? item.effort : item))
       : [];

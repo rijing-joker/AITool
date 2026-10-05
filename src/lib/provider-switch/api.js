@@ -12,6 +12,8 @@ const editor = require("./editor");
 const additive = require("./additive");
 const mcp = require("./mcp");
 const prompts = require("./prompts");
+const piPromptFiles = require("./pi-prompt-files");
+const backupExport = require("./backup-export");
 const quota = require("./quota");
 const failover = require("./failover");
 
@@ -358,6 +360,59 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
   try {
     if (p === `${prefix}/status`) {
       json(res, await buildStatus());
+      return true;
+    }
+
+    // Encrypted backup of the provider-switch SSOT stores (scrypt + AES-GCM;
+    // passphrase never persists). Restore pre-copies current files to
+    // backups/import/<stamp>/.
+    if (p === `${prefix}/backup/export` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      try {
+        json(res, { ok: true, payload: await backupExport.exportEncrypted(String(body.passphrase || "")) });
+      } catch (error) {
+        json(res, { ok: false, error: error?.message || String(error) });
+      }
+      return true;
+    }
+    if (p === `${prefix}/backup/import` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      try {
+        json(res, await backupExport.importEncrypted(String(body.passphrase || ""), body.payload));
+      } catch (error) {
+        json(res, { ok: false, error: error?.message || String(error) });
+      }
+      return true;
+    }
+
+    // pi native prompt resources (cc-switch's PiPromptFileService):
+    // SYSTEM.md override / APPEND_SYSTEM.md append, CAS-guarded by content
+    // revision. File exists = active; deleting it deactivates.
+    if (p === `${prefix}/pi-prompt-files` && method === "GET") {
+      const kind = String(url.searchParams.get("kind") || "");
+      json(res, { ok: true, file: await piPromptFiles.read(kind) });
+      return true;
+    }
+    if (p === `${prefix}/pi-prompt-files/replace` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      try {
+        json(res, { ok: true, file: await piPromptFiles.replace(String(body.kind || ""), String(body.content ?? ""), body.expectedRevision ?? null) });
+      } catch (error) {
+        json(res, { ok: false, error: error?.message || String(error) });
+      }
+      return true;
+    }
+    if (p === `${prefix}/pi-prompt-files/delete` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      try {
+        json(res, { ok: true, file: await piPromptFiles.remove(String(body.kind || ""), body.expectedRevision ?? null) });
+      } catch (error) {
+        json(res, { ok: false, error: error?.message || String(error) });
+      }
       return true;
     }
 

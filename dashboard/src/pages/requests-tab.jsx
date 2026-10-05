@@ -8,6 +8,15 @@ import { showToast } from "../ui/components/Toast";
 import { useVisiblePolling } from "../hooks/use-visible-polling";
 import { sendBudgetAlerts } from "../lib/budget-alerts";
 import { getLocalApiAuthHeaders } from "../lib/local-api-auth";
+import {
+  managementApi,
+  providerGroupsApi,
+  providerHeadersFromRecord,
+  providerLoadDefinitions,
+  providerModelType,
+  replayRecordViaCore,
+  rowFromRecord,
+} from "../lib/easy-providers";
 
 // ---------------------------------------------------------------------------
 // Requests tab (请求记录) — interaction ported from EasyCLIProxyAPI's
@@ -86,10 +95,11 @@ const EVENT_COLUMNS = [
   { key: "reasoning", labelKey: "proxy.requests.detail.reasoning", defaultWidth: 84, minWidth: 60 },
   { key: "cacheRate", labelKey: "proxy.requests.col.cacheRate", defaultWidth: 92, minWidth: 72 },
   { key: "ttft", labelKey: "proxy.requests.col.ttft", defaultWidth: 92, minWidth: 76 },
+  { key: "replay", labelKey: "proxy.requests.col.replay", defaultWidth: 96, minWidth: 76 },
 ];
 
 const DEFAULT_VISIBLE_COLUMNS = [
-  "time", "key", "source", "model", "result", "request", "latency", "speed", "total", "cache", "cost", "provider",
+  "time", "key", "source", "model", "result", "request", "latency", "speed", "total", "cache", "cost", "provider", "replay",
 ];
 
 // Defaults before the cost column joined. Seeds the migration marker so only
@@ -241,7 +251,61 @@ function MetricRow({ icon: Icon, tone, title, label, value }) {
   );
 }
 
-function EventCell({ record, column }) {
+// Per-record one-click retest: rebuilds a minimal same-protocol request and
+// sends it through the core's api-call with the record's auth index. The row
+// shows the upstream status + latency; the body excerpt rides on the title.
+function ReplayCell({ record, onReplay, state }) {
+  const eligible = Boolean((record.id ?? record.request_id)
+    && String(record.auth_index || record.authIndex || "").trim()
+    && String(record.response_model || record.model || "").trim());
+  if (!eligible) return <td className="px-2 py-2" />;
+  const running = state?.status === "running";
+  const title = running
+    ? copy("proxy.requests.replay.running")
+    : state?.status === "done"
+      ? `${copy("proxy.requests.replay.result", { status: state.statusCode ?? "?" })} ${state.bodyExcerpt || ""}`.trim()
+      : state?.status === "error"
+        ? `${copy("proxy.requests.replay.failed")}: ${state.error || ""}`
+        : copy("proxy.requests.replay.action");
+  return (
+    <td className="px-2 py-2 align-top">
+      {running ? (
+        <span className="inline-flex items-center gap-1 text-xs text-oai-gray-400" role="status">
+          <RefreshCw size={11} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
+          {copy("proxy.requests.replay.running")}
+        </span>
+      ) : state?.status === "done" ? (
+        <span
+          className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums ${
+            (state.statusCode ?? 0) >= 200 && (state.statusCode ?? 0) < 300
+              ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300"
+              : "bg-red-50 text-red-600 dark:bg-red-950/40 dark:text-red-400"
+          }`}
+          title={title}
+        >
+          {state.statusCode ?? "?"} · {(state.latencyMs / 1000).toFixed(1)}s
+        </span>
+      ) : state?.status === "error" ? (
+        <span className="inline-flex items-center rounded-full bg-red-50 px-1.5 py-0.5 text-[10px] font-medium text-red-600 dark:bg-red-950/40 dark:text-red-400" title={title}>
+          {copy("proxy.requests.replay.failed")}
+        </span>
+      ) : (
+        <button
+          type="button"
+          onClick={() => onReplay(record)}
+          title={title}
+          aria-label={copy("proxy.requests.replay.action")}
+          className="inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-[10px] font-medium text-oai-gray-400 transition-colors hover:bg-oai-gray-100 hover:text-oai-gray-600 dark:hover:bg-oai-gray-800 dark:hover:text-oai-gray-300"
+        >
+          <Zap size={10} aria-hidden="true" />
+          {copy("proxy.requests.replay.action")}
+        </button>
+      )}
+    </td>
+  );
+}
+
+function EventCell({ record, column, onReplay, replayState }) {
   const tokens = record.tokens ?? {};
   switch (column.key) {
     case "time":
@@ -389,6 +453,8 @@ function EventCell({ record, column }) {
       return <td className="px-2 py-2 align-top text-xs tabular-nums" title={`${formatCount(tokens.outputTokens)} tokens`}>{formatTokens(tokens.outputTokens)}</td>;
     case "reasoning":
       return <td className="px-2 py-2 align-top text-xs tabular-nums" title={`${formatCount(tokens.reasoningTokens)} tokens`}>{formatTokens(tokens.reasoningTokens)}</td>;
+    case "replay":
+      return <ReplayCell record={record} onReplay={onReplay} state={replayState} />;
     default:
       return <td className="px-2 py-2" />;
   }
@@ -750,6 +816,53 @@ export function RequestsTab() {
 
   const refreshRecords = useVisiblePolling(load, 10_000);
 
+  // Request replay: provider group rows (base-url / protocol lookup) are
+  // fetched fresh per retest — local requests are cheap and group configs
+  // change without this tab knowing.
+  const [replayStates, setReplayStates] = useState({});
+  const loadProviderRows = useCallback(async () => {
+    const responses = await Promise.allSettled(
+      providerLoadDefinitions.map(async (definition) => ({
+        section: definition.section,
+        records: await providerGroupsApi.get(definition.section),
+      })),
+    );
+    return responses.flatMap((result) => (result.status === "fulfilled"
+      ? result.value.records.map((record, index) => rowFromRecord(result.value.section, record, index))
+      : []));
+  }, []);
+
+  const handleReplay = useCallback(async (record) => {
+    const id = record.id ?? record.request_id;
+    if (!id || replayStates[id]?.status === "running") return;
+    setReplayStates((current) => ({ ...current, [id]: { status: "running" } }));
+    try {
+      const rows = await loadProviderRows();
+      const authIndex = String(record.auth_index || record.authIndex || "").trim();
+      const row = rows.find((candidate) => String(candidate.authIndex || "").trim() === authIndex);
+      if (!row) {
+        setReplayStates((current) => ({ ...current, [id]: { status: "error", error: copy("proxy.requests.replay.no_credential") } }));
+        return;
+      }
+      const result = await replayRecordViaCore(record, row);
+      if (!result.ok) {
+        setReplayStates((current) => ({ ...current, [id]: { status: "error", error: result.error || "failed" } }));
+        return;
+      }
+      setReplayStates((current) => ({
+        ...current,
+        [id]: {
+          status: "done",
+          statusCode: result.statusCode,
+          latencyMs: result.latencyMs,
+          bodyExcerpt: result.bodyExcerpt || "",
+        },
+      }));
+    } catch (error) {
+      setReplayStates((current) => ({ ...current, [id]: { status: "error", error: error instanceof Error ? error.message : String(error) } }));
+    }
+  }, [loadProviderRows, replayStates]);
+
   const refresh = async () => {
     if (await refreshRecords()) showToast({ title: copy("proxy.requests.refreshed"), type: "success" });
   };
@@ -1050,7 +1163,7 @@ export function RequestsTab() {
                 <tbody>
                   {records.map((record, index) => (
                     <tr key={record.id ?? record.request_id ?? `${record.timestamp}-${index}`} className="odd:bg-white even:bg-oai-gray-50/40 dark:odd:bg-transparent dark:even:bg-oai-gray-900/30">
-                      {columns.map((column) => <EventCell key={column.key} record={record} column={column} />)}
+                      {columns.map((column) => <EventCell key={column.key} record={record} column={column} onReplay={(target) => void handleReplay(target)} replayState={replayStates[record.id ?? record.request_id]} />)}
                     </tr>
                   ))}
                 </tbody>

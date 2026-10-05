@@ -4,8 +4,10 @@
 // cc-switch's providers/*.rs: claude (~/.claude/projects/**/*.jsonl), codex
 // (~/.codex/sessions + archived_sessions), gemini (~/.gemini/tmp/*/chats).
 //
-// This is a reader, not the full upstream module: no deletes, no custom
-// titles/index DBs, no structured reader UI — those can layer on later.
+// Messages carry light structure on top of the plain transcript: assistant
+// rows may include `toolCalls` [{id/name/input} shapes], tool rows carry
+// `toolResults`, and assistant rows carry per-message `usage` + `model` where
+// the source files attribute tokens per message (claude/gemini).
 //
 // HOME resolution follows the commandcode-limits convention: explicit `home`
 // or env HOME only, never os.homedir(), so tests stay isolated.
@@ -279,13 +281,39 @@ async function claudeReadMessages(filePath) {
     const message = value.message;
     if (!message) continue;
     let role = typeof message.role === "string" ? message.role : "unknown";
+    let toolCalls = null;
+    let toolResults = null;
     // Claude wraps tool_result inside user messages; reclassify as "tool".
     if (role === "user" && Array.isArray(message.content)) {
-      const allToolResults = message.content.length > 0 && message.content.every((item) => item?.type === "tool_result");
-      if (allToolResults) role = "tool";
+      const results = message.content.filter((item) => item?.type === "tool_result");
+      if (message.content.length > 0 && results.length === message.content.length) role = "tool";
+      if (results.length > 0) {
+        toolResults = results.map((item) => ({
+          toolUseId: typeof item.tool_use_id === "string" ? item.tool_use_id : null,
+          content: extractText(item.content),
+        }));
+      }
+    }
+    if (role === "assistant" && Array.isArray(message.content)) {
+      const calls = message.content.filter((item) => item?.type === "tool_use");
+      if (calls.length > 0) {
+        toolCalls = calls.map((item) => ({
+          id: typeof item.id === "string" ? item.id : null,
+          name: typeof item.name === "string" ? item.name : "unknown",
+          input: item.input ?? null,
+        }));
+      }
     }
     const content = extractText(message.content);
-    if (content.trim() !== "") messages.push({ role, content, ts: parseTimestampToMs(value.timestamp) });
+    if (content.trim() !== "" || toolCalls || toolResults) {
+      const row = { role, content, ts: parseTimestampToMs(value.timestamp) };
+      if (toolCalls) row.toolCalls = toolCalls;
+      if (toolResults) row.toolResults = toolResults;
+      // Attach the winning usage row to its message after retries resolve.
+      if (role === "assistant" && typeof message.id === "string" && message.id) row._msgId = message.id;
+      if (role === "assistant" && typeof message.model === "string" && message.model) row.model = message.model;
+      messages.push(row);
+    }
 
     if (role === "assistant" && message.usage && typeof message.usage === "object") {
       // cc-switch imports only id-carrying assistant usage rows; synthetic or
@@ -320,6 +348,19 @@ async function claudeReadMessages(filePath) {
     trackModelUsage(usage, row.model, row);
   }
   usage.totalTokens = usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheCreationTokens;
+  for (const row of messages) {
+    if (!row._msgId) continue;
+    const rowUsage = usageById.get(row._msgId);
+    delete row._msgId;
+    if (rowUsage) {
+      row.usage = {
+        inputTokens: rowUsage.inputTokens,
+        outputTokens: rowUsage.outputTokens,
+        cacheReadTokens: rowUsage.cacheReadTokens,
+        cacheCreationTokens: rowUsage.cacheCreationTokens,
+      };
+    }
+  }
   return { messages, usage: finalizeUsage(usage) };
 }
 
@@ -437,20 +478,34 @@ async function codexReadMessages(filePath) {
     if (!payload) continue;
     let role;
     let content;
+    let toolCalls = null;
+    let toolResults = null;
     if (payload.type === "message") {
       role = typeof payload.role === "string" ? payload.role : "unknown";
       content = extractText(payload.content);
     } else if (payload.type === "function_call") {
       role = "assistant";
-      content = `[Tool: ${typeof payload.name === "string" && payload.name ? payload.name : "unknown"}]`;
+      toolCalls = [{
+        callId: typeof payload.call_id === "string" ? payload.call_id : null,
+        name: typeof payload.name === "string" && payload.name ? payload.name : "unknown",
+        arguments: typeof payload.arguments === "string" ? payload.arguments : null,
+      }];
+      content = "";
     } else if (payload.type === "function_call_output") {
       role = "tool";
+      toolResults = [{
+        callId: typeof payload.call_id === "string" ? payload.call_id : null,
+        output: typeof payload.output === "string" ? payload.output : "",
+      }];
       content = typeof payload.output === "string" ? payload.output : "";
     } else {
       continue;
     }
-    if (content.trim() === "") continue;
-    messages.push({ role, content, ts: parseTimestampToMs(value.timestamp) });
+    if (content.trim() === "" && !toolCalls && !toolResults) continue;
+    const row = { role, content, ts: parseTimestampToMs(value.timestamp) };
+    if (toolCalls) row.toolCalls = toolCalls;
+    if (toolResults) row.toolResults = toolResults;
+    messages.push(row);
   }
   if (!usageSeen) return { messages, usage: null };
   trackModelUsage(usage, usage.model, {
@@ -469,6 +524,21 @@ async function codexReadMessages(filePath) {
 
 function geminiRoots(home) {
   return [path.join(home, ".gemini", "tmp")];
+}
+
+// Newer Gemini CLI writes chats as a JSONL replay log (cc-switch cddb3b6):
+// metadata checkpoint lines carry a sessionId, message lines carry an id and
+// are upserted in place by that id, {"$set":{...}} merges metadata (messages
+// replaced wholesale), {"$rewindTo":id} truncates. Resume migrates old .json
+// chats to .jsonl and leaves the stale .json behind, so .json is only listed
+// when no same-basename .jsonl exists.
+function geminiIsInjectedContext(text) {
+  const trimmed = String(text || "").trimStart();
+  return trimmed.startsWith("<session_context>")
+    || trimmed.startsWith("<hook_context>")
+    || trimmed.startsWith("<environment_context>")
+    || trimmed.startsWith("<user_instructions>")
+    || trimmed.startsWith("/");
 }
 
 async function geminiSessionFiles(home) {
@@ -496,8 +566,15 @@ async function geminiSessionFiles(home) {
     } catch {
       projectRoot = null;
     }
+    const jsonlStems = new Set();
     for (const chat of chatFiles) {
-      if (chat.isFile() && chat.name.endsWith(".json")) {
+      if (chat.isFile() && chat.name.endsWith(".jsonl")) jsonlStems.add(chat.name.slice(0, -".jsonl".length));
+    }
+    for (const chat of chatFiles) {
+      if (!chat.isFile()) continue;
+      if (chat.name.endsWith(".jsonl")) {
+        files.push({ filePath: path.join(chatsDir, chat.name), projectRoot });
+      } else if (chat.name.endsWith(".json") && !jsonlStems.has(chat.name.slice(0, -".json".length))) {
         files.push({ filePath: path.join(chatsDir, chat.name), projectRoot });
       }
     }
@@ -505,47 +582,129 @@ async function geminiSessionFiles(home) {
   return files;
 }
 
-async function geminiParseSession(filePath, projectRoot) {
+// Replays a Gemini CLI JSONL chat log into {metadata, messages}.
+function geminiParseJsonlDocument(raw) {
+  let metadata = null;
+  const messages = [];
+  const indexById = new Map();
+  const pushMessage = (msg) => {
+    if (!msg || typeof msg !== "object") return;
+    if (typeof msg.id !== "string" && typeof msg.id !== "number") return;
+    const key = String(msg.id);
+    const existingIdx = indexById.get(key);
+    if (existingIdx !== undefined) messages[existingIdx] = msg;
+    else {
+      indexById.set(key, messages.length);
+      messages.push(msg);
+    }
+  };
+  const replaceMessages = (list) => {
+    messages.length = 0;
+    indexById.clear();
+    for (const msg of Array.isArray(list) ? list : []) pushMessage(msg);
+  };
+  for (const line of String(raw ?? "").split("\n")) {
+    if (line === "") continue;
+    const value = parseJsonLine(line);
+    if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+    // Message lines (they carry an id) are checked first so a format variant
+    // that also repeats sessionId on message rows still upserts as a message.
+    if (value.id != null && value.$set === undefined && value.$rewindTo === undefined) {
+      pushMessage(value);
+      continue;
+    }
+    if (typeof value.sessionId === "string") {
+      metadata = { ...(metadata || {}), ...value };
+      if (Array.isArray(value.messages)) replaceMessages(value.messages);
+      continue;
+    }
+    if (value.$set && typeof value.$set === "object") {
+      const { messages: patched, ...rest } = value.$set;
+      metadata = { ...(metadata || {}), ...rest };
+      if (Array.isArray(patched)) replaceMessages(patched);
+      continue;
+    }
+    if (value.$rewindTo !== undefined) {
+      const idx = indexById.get(String(value.$rewindTo));
+      if (idx !== undefined) {
+        for (const dropped of messages.slice(idx + 1)) indexById.delete(String(dropped.id));
+        messages.length = idx + 1;
+      }
+      continue;
+    }
+    pushMessage(value);
+  }
+  return { metadata, messages };
+}
+
+async function geminiLoadDocument(filePath) {
+  const raw = await fsp.readFile(filePath, "utf8");
+  if (filePath.endsWith(".jsonl")) {
+    const { metadata, messages } = geminiParseJsonlDocument(raw);
+    if (!metadata || typeof metadata.sessionId !== "string") return null;
+    return { metadata, messages };
+  }
   let value;
   try {
-    value = JSON.parse(await fsp.readFile(filePath, "utf8"));
+    value = JSON.parse(raw);
   } catch {
     return null;
   }
   if (value == null || typeof value !== "object" || typeof value.sessionId !== "string") return null;
+  return { metadata: value, messages: Array.isArray(value.messages) ? value.messages : [] };
+}
 
-  const createdAt = parseTimestampToMs(value.startTime);
-  const lastActive = parseTimestampToMs(value.lastUpdated) ?? createdAt;
-  const msgs = Array.isArray(value.messages) ? value.messages : [];
-  const firstUser = msgs.find((msg) => msg?.type === "user" && typeof msg.content === "string" && msg.content.trim() !== "");
+function geminiFirstUserTitle(msgs) {
+  for (const msg of msgs) {
+    if (msg?.type !== "user") continue;
+    const content = typeof msg.content === "string" ? msg.content : "";
+    if (content.trim() === "" || geminiIsInjectedContext(content)) continue;
+    return content;
+  }
+  return null;
+}
+
+async function geminiParseSession(filePath, projectRoot) {
+  let doc;
+  try {
+    doc = await geminiLoadDocument(filePath);
+  } catch {
+    return null;
+  }
+  if (!doc) return null;
+  const { metadata, messages } = doc;
+  const createdAt = parseTimestampToMs(metadata.startTime);
+  const lastActive = parseTimestampToMs(metadata.lastUpdated) ?? createdAt;
+  const firstUser = geminiFirstUserTitle(messages);
 
   return {
     appId: "gemini",
-    sessionId: value.sessionId,
-    title: firstUser ? truncateSummary(firstUser.content, TITLE_MAX_CHARS) : null,
-    summary: firstUser ? truncateSummary(firstUser.content) : null,
+    sessionId: metadata.sessionId,
+    title: firstUser ? truncateSummary(firstUser, TITLE_MAX_CHARS) : null,
+    summary: firstUser ? truncateSummary(firstUser) : null,
     projectDir: projectRoot ?? null,
     createdAt,
     lastActiveAt: lastActive,
     sourcePath: filePath,
-    resumeCommand: `gemini --resume ${value.sessionId}`,
+    resumeCommand: `gemini --resume ${metadata.sessionId}`,
   };
 }
 
 async function geminiReadMessages(filePath) {
-  let value;
+  let doc;
   try {
-    value = JSON.parse(await fsp.readFile(filePath, "utf8"));
+    doc = await geminiLoadDocument(filePath);
   } catch (error) {
     throw new Error(`Failed to parse session JSON: ${error?.message || error}`);
   }
-  const msgs = Array.isArray(value?.messages) ? value.messages : [];
+  if (!doc) throw new Error("Failed to parse session JSON: missing sessionId");
+  const { metadata, messages: msgs } = doc;
   const messages = [];
   // Per-message `tokens` fields ({input, output, thoughts, cached}); input is
   // inclusive of cached tokens (Gemini semantics).
   const usage = emptyUsage(true);
-  const startTs = parseTimestampToMs(value?.startTime);
-  const endTs = parseTimestampToMs(value?.lastUpdated) ?? startTs;
+  const startTs = parseTimestampToMs(metadata?.startTime);
+  const endTs = parseTimestampToMs(metadata?.lastUpdated) ?? startTs;
   trackSpan(usage, startTs);
   trackSpan(usage, endTs);
   for (const msg of msgs) {
@@ -553,6 +712,7 @@ async function geminiReadMessages(filePath) {
     if (type !== "user" && type !== "gemini") continue;
     if (typeof msg.model === "string" && msg.model) usage.model = msg.model;
     const tokens = msg.tokens && typeof msg.tokens === "object" ? msg.tokens : null;
+    let rowUsage = null;
     if (tokens) {
       const row = {
         inputTokens: Number(tokens.input) || 0,
@@ -566,21 +726,33 @@ async function geminiReadMessages(filePath) {
       usage.reasoningTokens += row.reasoningTokens;
       usage.cacheReadTokens += row.cacheReadTokens;
       trackModelUsage(usage, msg.model, row);
+      rowUsage = {
+        inputTokens: row.inputTokens,
+        outputTokens: row.outputTokens,
+        reasoningTokens: row.reasoningTokens,
+        cacheReadTokens: row.cacheReadTokens,
+      };
     }
-    let content = typeof msg.content === "string"
+    const content = typeof msg.content === "string"
       ? msg.content
       : Array.isArray(msg.content)
         ? msg.content.filter((item) => item && typeof item.text === "string").map((item) => item.text).join("\n")
         : "";
+    let toolCalls = null;
     if (Array.isArray(msg.toolCalls)) {
-      for (const call of msg.toolCalls) {
-        if (typeof call?.name === "string") {
-          content = `${content}${content ? "\n" : ""}[Tool: ${call.name}]`;
-        }
+      const calls = msg.toolCalls.filter((call) => call && typeof call.name === "string");
+      if (calls.length > 0) {
+        toolCalls = calls.map((call) => ({
+          name: call.name,
+          args: call.args ?? null,
+        }));
       }
     }
-    if (content.trim() === "") continue;
-    messages.push({ role: type === "gemini" ? "assistant" : "user", content, ts: parseTimestampToMs(msg.timestamp) });
+    if (content.trim() === "" && !toolCalls) continue;
+    const row = { role: type === "gemini" ? "assistant" : "user", content, ts: parseTimestampToMs(msg.timestamp) };
+    if (toolCalls) row.toolCalls = toolCalls;
+    if (rowUsage) row.usage = rowUsage;
+    messages.push(row);
   }
   usage.totalTokens = usage.inputTokens + usage.outputTokens + usage.reasoningTokens;
   return { messages, usage: finalizeUsage(usage) };
@@ -645,7 +817,7 @@ async function readSession({ app, sourcePath, home, env = process.env } = {}) {
   if (!inside) {
     throw new Error("Session path is outside this app's session roots");
   }
-  if (app === "gemini" && path.extname(resolved) !== ".json") {
+  if (app === "gemini" && path.extname(resolved) !== ".json" && path.extname(resolved) !== ".jsonl") {
     throw new Error("Not a gemini session file");
   }
   if (app !== "gemini" && path.extname(resolved) !== ".jsonl") {

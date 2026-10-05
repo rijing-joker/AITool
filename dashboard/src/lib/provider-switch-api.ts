@@ -198,6 +198,18 @@ export interface ProviderSwitchEditorView {
   slotKey?: string;
 }
 
+export const piPromptFilesApi = {
+  get(kind: PiPromptFileKind) {
+    return providerSwitchApi.getPiPromptFile(kind);
+  },
+  replace(kind: PiPromptFileKind, content: string, expectedRevision: string | null) {
+    return providerSwitchApi.replacePiPromptFile(kind, content, expectedRevision);
+  },
+  remove(kind: PiPromptFileKind, expectedRevision: string | null) {
+    return providerSwitchApi.deletePiPromptFile(kind, expectedRevision);
+  },
+};
+
 export const providerSwitchApi = {
   getStatus(): Promise<ProviderSwitchStatus> {
     return get<ProviderSwitchStatus>("/api/provider-switch/status");
@@ -211,6 +223,30 @@ export const providerSwitchApi = {
   // auto-switch (live config writes); the open GET never switches.
   runFailoverEvaluation(): Promise<{ ok: true; failover: ProviderSwitchFailover }> {
     return mutate("/api/provider-switch/failover/evaluate", "POST", {});
+  },
+
+  getPiPromptFile(kind: PiPromptFileKind): Promise<{ ok: true; file: PiPromptFile }> {
+    return get(`/api/provider-switch/pi-prompt-files?kind=${encodeURIComponent(kind)}`);
+  },
+
+  replacePiPromptFile(
+    kind: PiPromptFileKind,
+    content: string,
+    expectedRevision: string | null,
+  ): Promise<{ ok: true; file: PiPromptFile }> {
+    return mutate("/api/provider-switch/pi-prompt-files/replace", "POST", { kind, content, expectedRevision });
+  },
+
+  deletePiPromptFile(kind: PiPromptFileKind, expectedRevision: string | null): Promise<{ ok: true; file: PiPromptFile }> {
+    return mutate("/api/provider-switch/pi-prompt-files/delete", "POST", { kind, expectedRevision });
+  },
+
+  exportEncryptedBackup(passphrase: string): Promise<{ ok: true; payload: unknown }> {
+    return mutate("/api/provider-switch/backup/export", "POST", { passphrase });
+  },
+
+  importEncryptedBackup(passphrase: string, payload: unknown): Promise<{ ok: true; restored: string[] }> {
+    return mutate("/api/provider-switch/backup/import", "POST", { passphrase, payload });
   },
 
   updateFailover(config: Partial<ProviderSwitchFailoverConfig>): Promise<{ ok: true; config: ProviderSwitchFailoverConfig }> {
@@ -355,6 +391,16 @@ export type ProviderSwitchFailover = {
   suggestions: { app: ProviderSwitchApp; from: string; to: string; id: string }[];
   cooldowns: { app: ProviderSwitchApp; id: string; until: number; reason: string; remainingMs: number }[];
   actions: { app: ProviderSwitchApp; from: string; to: string; at: number }[];
+};
+
+export type PiPromptFileKind = "system_override" | "system_append";
+
+export type PiPromptFile = {
+  kind: PiPromptFileKind;
+  path: string;
+  exists: boolean;
+  revision: string | null;
+  content: string;
 };
 
 export type McpAppId = "claude" | "codex" | "gemini" | "grokbuild" | "opencode" | "hermes" | "mcode";

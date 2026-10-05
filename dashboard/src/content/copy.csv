@@ -2426,6 +2426,25 @@ pswitch.failover.min_requests,pswitch,ProviderSwitchPage,FailoverEditDialog,fail
 pswitch.failover.rate,pswitch,ProviderSwitchPage,FailoverEditDialog,failover_rate,"Failure threshold (%)",,active
 pswitch.failover.cooldown_minutes,pswitch,ProviderSwitchPage,FailoverEditDialog,failover_cooldown_minutes,"Cooldown duration (minutes)",,active
 pswitch.failover.hint,pswitch,ProviderSwitchPage,FailoverEditDialog,failover_hint,"Evaluates proxied requests (core traffic) by API key / provider name; direct upstream connections are invisible.",,active
+pswitch.pi_files.title,pswitch,ProviderSwitchPage,PiNativePromptFiles,pi_files_title,"pi native prompt resources",,active
+pswitch.pi_files.subtitle,pswitch,ProviderSwitchPage,PiNativePromptFiles,pi_files_subtitle,"SYSTEM.md overrides pi's built-in system prompt; APPEND_SYSTEM.md appends to it. The file existing = active.",,active
+pswitch.pi_files.append_title,pswitch,ProviderSwitchPage,PiNativePromptFiles,pi_files_append_title,"APPEND_SYSTEM.md",,active
+pswitch.pi_files.append_hint,pswitch,ProviderSwitchPage,PiNativePromptFiles,pi_files_append_hint,"Appended after pi's built-in system prompt.",,active
+pswitch.pi_files.override_title,pswitch,ProviderSwitchPage,PiNativePromptFiles,pi_files_override_title,"SYSTEM.md",,active
+pswitch.pi_files.override_hint,pswitch,ProviderSwitchPage,PiNativePromptFiles,pi_files_override_hint,"Replaces pi's built-in system prompt entirely.",,active
+pswitch.pi_files.active_badge,pswitch,ProviderSwitchPage,PiNativePromptFiles,pi_files_active_badge,Active,,active
+pswitch.pi_files.off_badge,pswitch,ProviderSwitchPage,PiNativePromptFiles,pi_files_off_badge,Not configured,,active
+pswitch.pi_files.recommended_badge,pswitch,ProviderSwitchPage,PiNativePromptFiles,pi_files_recommended_badge,Recommended,,active
+pswitch.pi_files.edit,pswitch,ProviderSwitchPage,PiNativePromptFiles,pi_files_edit,Edit,,active
+pswitch.pi_files.create,pswitch,ProviderSwitchPage,PiNativePromptFiles,pi_files_create,Create,,active
+pswitch.pi_files.remove,pswitch,ProviderSwitchPage,PiNativePromptFiles,pi_files_remove,Delete file,,active
+pswitch.pi_files.remove_confirm_title,pswitch,ProviderSwitchPage,PiNativePromptFiles,pi_files_remove_confirm_title,Delete pi prompt file,,active
+pswitch.pi_files.remove_confirm_hint,pswitch,ProviderSwitchPage,PiNativePromptFiles,pi_files_remove_confirm_hint,"Delete {{file}}? pi falls back to its built-in behavior.",,active
+pswitch.pi_files.removed_toast,pswitch,ProviderSwitchPage,PiNativePromptFiles,pi_files_removed_toast,File deleted — reload pi to apply,,active
+pswitch.pi_files.saved_toast,pswitch,ProviderSwitchPage,PiNativePromptFiles,pi_files_saved_toast,File saved — reload pi to apply,,active
+pswitch.pi_files.error_toast,pswitch,ProviderSwitchPage,PiNativePromptFiles,pi_files_error_toast,pi prompt file update failed,,active
+pswitch.pi_files.override_warning,pswitch,ProviderSwitchPage,PiFileEditor,pi_files_override_warning,"SYSTEM.md replaces pi's built-in system prompt entirely — prefer APPEND_SYSTEM.md unless you know you need a full override.",,active
+pswitch.pi_files.editor_hint,pswitch,ProviderSwitchPage,PiFileEditor,pi_files_editor_hint,"Saved to ~/.pi/agent; an external edit since you opened the editor is reported instead of overwritten.",,active
 pswitch.provider.dialog.add_title,pswitch,ProviderSwitchPage,ProviderSwitchPage,provider_dialog_add_title,Add provider,,active
 pswitch.provider.dialog.edit_title,pswitch,ProviderSwitchPage,ProviderSwitchPage,provider_dialog_edit_title,Edit provider,,active
 pswitch.backups.empty,pswitch,ProviderSwitchPage,ProviderSwitchPage,backups_empty,No backups yet. A backup is taken before the first managed write to each file.,,active
@@ -2461,6 +2480,28 @@ pswitch.field.model,pswitch,ProviderSwitchPage,ProviderEditDialog,model,Model,,a
 pswitch.field.model_hint,pswitch,ProviderSwitchPage,ProviderEditDialog,model_hint,Leave empty to use the relay's default model.,,active
 pswitch.catalog.title,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_title,Model mapping,,active
 pswitch.catalog.hint,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_hint,"Rows generate the Codex model catalog file (model_catalog_json): the /model menu lists these models with their display names, context windows, and reasoning levels. Leave empty to skip the catalog.",,active
+pswitch.catalog.col_instructions,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_col_instructions,"System prompt (optional)",,active
+pswitch.catalog.instructions_set,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_instructions_set,"System prompt: set",,active
+pswitch.catalog.instructions_placeholder,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_instructions_placeholder,"You are Codex, a coding agent…",,active
+pswitch.catalog.instructions_hint,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_instructions_hint,"Written to base_instructions and mirrored into model_messages.instructions_template. Custom models only — official entries keep their built-in prompt.",,active
+proxy.requests.col.replay,proxy,ProxyPage,RequestsTab,col_replay,Retest,,active
+proxy.requests.replay.action,proxy,ProxyPage,RequestsTab,replay_action,Retest,,active
+proxy.requests.replay.running,proxy,ProxyPage,RequestsTab,replay_running,Retesting…,,active
+proxy.requests.replay.result,proxy,ProxyPage,RequestsTab,replay_result,Upstream {{status}},,active
+proxy.requests.replay.failed,proxy,ProxyPage,RequestsTab,replay_failed,Retest failed,,active
+proxy.requests.replay.no_credential,proxy,ProxyPage,RequestsTab,replay_no_credential,"Credential not found in the current config (deleted, or an OAuth account)",,active
+pswitch.encrypted.export,pswitch,ProviderSwitchPage,EncryptedBackupDialog,encrypted_export,Export encrypted,,active
+pswitch.encrypted.import,pswitch,ProviderSwitchPage,EncryptedBackupDialog,encrypted_import,Import backup,,active
+pswitch.encrypted.export_hint,pswitch,ProviderSwitchPage,EncryptedBackupDialog,encrypted_export_hint,"Providers, MCP servers and prompts in one AES-256-GCM blob (scrypt from the passphrase). The passphrase is never saved — store the file wherever you keep dotfiles.",,active
+pswitch.encrypted.import_hint,pswitch,ProviderSwitchPage,EncryptedBackupDialog,encrypted_import_hint,"Restores the stores from the backup. Current files are copied to backups/import/ first. A restart of running CLI tools may be needed.",,active
+pswitch.encrypted.passphrase,pswitch,ProviderSwitchPage,EncryptedBackupDialog,encrypted_passphrase,Passphrase (min 8 chars),,active
+pswitch.encrypted.confirm,pswitch,ProviderSwitchPage,EncryptedBackupDialog,encrypted_confirm,Confirm passphrase,,active
+pswitch.encrypted.file,pswitch,ProviderSwitchPage,EncryptedBackupDialog,encrypted_file,Backup file (.json),,active
+pswitch.encrypted.short,pswitch,ProviderSwitchPage,EncryptedBackupDialog,encrypted_short,Passphrase must be at least 8 characters,,active
+pswitch.encrypted.mismatch,pswitch,ProviderSwitchPage,EncryptedBackupDialog,encrypted_mismatch,Passphrases do not match,,active
+pswitch.encrypted.bad_file,pswitch,ProviderSwitchPage,EncryptedBackupDialog,encrypted_bad_file,Not a readable backup file,,active
+pswitch.encrypted.imported,pswitch,ProviderSwitchPage,EncryptedBackupDialog,encrypted_imported,"Restored {{count}} stores",,active
+clisessions.msg_tokens,ui,CliSessionsPage,TranscriptRow,msg_tokens,"Input {{up}} · output {{down}} tokens",,active
 pswitch.catalog.add_model,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_add_model,Add model,,active
 pswitch.catalog.col_display,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_col_display,Menu display name,,active
 pswitch.catalog.col_model,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_col_model,Requested model,,active

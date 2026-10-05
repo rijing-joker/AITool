@@ -148,7 +148,9 @@ function sanitizeMeta(value) {
   if (typeof value !== "object" || Array.isArray(value)) {
     throw new Error("meta must be an object");
   }
-  if (JSON.stringify(value).length > 8192) {
+  // codexCatalogModels rows carry per-model base_instructions (the official
+  // template alone is ~21KB), so the cap has to clear catalog-sized payloads.
+  if (JSON.stringify(value).length > 256 * 1024) {
     throw new Error("meta is too large");
   }
   return value;

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, Coins, History, RefreshCw, Search, Timer, User } from "lucide-react";
+import {
+  Wrench, ArrowLeft, Coins, History, RefreshCw, Search, Timer, User } from "lucide-react";
 import { copy } from "../lib/copy";
 import { formatCostUsd } from "../lib/cost-format";
 import { Input } from "../ui/components";
@@ -111,8 +112,20 @@ function UsageChips({ usage }) {
   );
 }
 
+function compactTokenCount(value) {
+  if (!Number.isFinite(value) || value <= 0) return null;
+  if (value >= 1000) return `${(value / 1000).toFixed(value >= 10000 ? 0 : 1)}k`;
+  return String(value);
+}
+
+// Structured transcript row: content text, collapsible tool calls with their
+// input payloads, and a per-message token chip where the source attributes
+// usage to the message (claude/gemini).
 function TranscriptRow({ message }) {
   const style = ROLE_STYLES[roleKey(message.role)];
+  const toolCalls = Array.isArray(message.toolCalls) ? message.toolCalls : [];
+  const up = compactTokenCount(message.usage?.inputTokens);
+  const down = compactTokenCount(message.usage?.outputTokens);
   return (
     <div className={`rounded-xl border border-oai-gray-100 p-3 dark:border-oai-gray-800 ${style.bubble}`}>
       <div className="flex items-center gap-2 text-xs">
@@ -123,10 +136,37 @@ function TranscriptRow({ message }) {
         {message.ts != null ? (
           <span className="tabular-nums text-oai-gray-400">{formatTime(message.ts)}</span>
         ) : null}
+        {up || down ? (
+          <span className="ml-auto shrink-0 tabular-nums text-[10px] text-oai-gray-400" title={copy("clisessions.msg_tokens", { up: message.usage?.inputTokens ?? 0, down: message.usage?.outputTokens ?? 0 })}>
+            {up ? `↑${up}` : ""}{up && down ? " " : ""}{down ? `↓${down}` : ""}
+          </span>
+        ) : null}
       </div>
-      <p className={`mt-1.5 break-words whitespace-pre-wrap text-sm leading-6 ${message.role === "tool" || message.role === "unknown" ? "font-mono text-xs leading-5" : ""}`}>
-        {message.content}
-      </p>
+      {message.content ? (
+        <p className={`mt-1.5 break-words whitespace-pre-wrap text-sm leading-6 ${message.role === "tool" || message.role === "unknown" ? "font-mono text-xs leading-5" : ""}`}>
+          {message.content}
+        </p>
+      ) : null}
+      {toolCalls.length > 0 ? (
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {toolCalls.map((call, index) => {
+            const payload = call.input ?? call.args ?? (call.arguments ? (() => { try { return JSON.parse(call.arguments); } catch { return call.arguments; } })() : null);
+            const payloadText = payload == null ? "" : typeof payload === "string" ? payload : JSON.stringify(payload, null, 2);
+            const key = call.id ?? call.callId ?? `${call.name}-${index}`;
+            return (
+              <details key={key} className="max-w-full rounded-lg border border-oai-gray-200 bg-oai-gray-50/60 px-2 py-1 dark:border-oai-gray-700 dark:bg-oai-gray-800/40">
+                <summary className="flex cursor-pointer list-none items-center gap-1 text-xs font-medium text-oai-gray-600 dark:text-oai-gray-300">
+                  <Wrench size={11} aria-hidden="true" />
+                  <span className="truncate">{call.name}</span>
+                </summary>
+                {payloadText ? (
+                  <pre className="mt-1.5 max-h-56 max-w-full overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-oai-gray-500 dark:text-oai-gray-400">{payloadText}</pre>
+                ) : null}
+              </details>
+            );
+          })}
+        </div>
+      ) : null}
     </div>
   );
 }

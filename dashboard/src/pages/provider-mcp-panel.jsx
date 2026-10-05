@@ -183,7 +183,7 @@ export function ProviderMcpPanel() {
     const list = servers || [];
     const needle = search.trim().toLowerCase();
     if (!needle) return list;
-    return list.filter((server) => searchhay(server).includes(needle));
+    return list.filter((server) => searchHay(server).includes(needle));
   }, [servers, search]);
 
   const countFor = (app) => (servers || []).filter((server) => server.apps && server.apps[app] === true).length;

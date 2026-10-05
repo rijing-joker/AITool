@@ -11,6 +11,7 @@ const catalog = require("./catalog");
 const editor = require("./editor");
 const additive = require("./additive");
 const mcp = require("./mcp");
+const prompts = require("./prompts");
 const quota = require("./quota");
 
 // Dashboard-facing REST surface for the provider-switch layer, mounted by
@@ -408,6 +409,52 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
       if (!requireMutation()) return true;
       const body = await readJsonBody(req);
       const result = await mcp.syncServers(Array.isArray(body.apps) ? body.apps : null);
+      json(res, { ok: true, ...result });
+      return true;
+    }
+
+    // Per-app prompt lists (cc-switch's prompt module): enable writes the
+    // prompt over the app's instruction file; reads backfill the enabled
+    // prompt from the live file so external edits survive. Read-only import
+    // is guarded like the other mutations because it appends to the store.
+    if (p === `${prefix}/prompts` && method === "GET") {
+      const app = url.searchParams.get("app") || "claude";
+      const result = await prompts.listPrompts(app);
+      json(res, { ok: true, app, prompts: result, targetPath: prompts.promptFilePath(app) });
+      return true;
+    }
+    if (p === `${prefix}/prompts` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      const result = await prompts.upsertPrompt(String(body.app || ""), body.prompt || body);
+      json(res, { ok: true, ...result });
+      return true;
+    }
+    if (p === `${prefix}/prompts/enable` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      const result = await prompts.enablePrompt(String(body.app || ""), String(body.id || ""));
+      json(res, { ok: true, ...result });
+      return true;
+    }
+    if (p === `${prefix}/prompts/delete` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      const result = await prompts.deletePrompt(String(body.app || ""), String(body.id || ""));
+      json(res, { ok: true, ...result });
+      return true;
+    }
+    if (p === `${prefix}/prompts/import` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      const result = await prompts.importFromFile(String(body.app || ""));
+      json(res, { ok: true, ...result });
+      return true;
+    }
+    if (p === `${prefix}/prompts/sync` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      const result = await prompts.syncPrompts(Array.isArray(body.apps) ? body.apps : null);
       json(res, { ok: true, ...result });
       return true;
     }

@@ -2339,6 +2339,33 @@ pswitch.mcp.field_homepage,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_field
 pswitch.mcp.field_docs,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_field_docs,Docs,,active
 pswitch.mcp.field_tags,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_field_tags,Tags (comma separated),,active
 pswitch.mcp.spec_empty,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_spec_empty,No command or URL configured,,active
+pswitch.prompts.tab,pswitch,ProviderSwitchPage,ProviderSwitchPage,prompts_tab,Prompts,,active
+pswitch.prompts.title,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_title,Prompts ({{count}}),,active
+pswitch.prompts.subtitle,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_subtitle,Named global-instruction prompts per agent. Enabling one writes it over the app's instruction file; the current file content is captured first.,,active
+pswitch.prompts.import,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_import,Import from live file,,active
+pswitch.prompts.import_done,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_import_done,Imported the current instruction file,,active
+pswitch.prompts.add,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_add,Add prompt,,active
+pswitch.prompts.target,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_target,Enabling writes to {{path}},,active
+pswitch.prompts.empty_title,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_empty_title,No prompts yet,,active
+pswitch.prompts.empty_hint,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_empty_hint,"Add a prompt, or import the app's current instruction file to start editing it here.",,active
+pswitch.prompts.enabled_badge,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_enabled_badge,Active,,active
+pswitch.prompts.enable,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_enable,Enable,,active
+pswitch.prompts.none_enabled_hint,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_none_enabled_hint,No prompt is active for this app — the instruction file keeps whatever content it has now.,,active
+pswitch.prompts.preview_empty,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_preview_empty,Empty,,active
+pswitch.prompts.edit,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_edit,Edit prompt,,active
+pswitch.prompts.delete_title,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_delete_title,Delete prompt,,active
+pswitch.prompts.delete_hint,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_delete_hint,Delete {{name}}? The live instruction file is not touched.,,active
+pswitch.prompts.delete_disabled_hint,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_delete_disabled_hint,Disable this prompt first — the active prompt cannot be deleted,,active
+pswitch.prompts.toast_enabled,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_toast_enabled,Prompt enabled,,active
+pswitch.prompts.toast_deleted,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_toast_deleted,Prompt deleted,,active
+pswitch.prompts.toast_saved,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_toast_saved,Prompt saved,,active
+pswitch.prompts.toast_error,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_toast_error,Save failed,,active
+pswitch.prompts.dialog_title,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_dialog_title,Prompt,,active
+pswitch.prompts.field_name,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_field_name,Name,,active
+pswitch.prompts.field_description,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_field_description,Description,,active
+pswitch.prompts.field_content,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_field_content,Content (Markdown),,active
+pswitch.prompts.field_enabled,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_field_enabled,Enable for this app,,active
+pswitch.prompts.enabled_hint,pswitch,ProviderSwitchPage,ProviderPromptsPanel,prompts_enabled_hint,Enabling writes this prompt over the app's instruction file and turns off the previously active prompt; the file's content is saved as a disabled backup entry first. Saving the active prompt with this box unchecked clears the file.,,active
 pswitch.quota.loading,pswitch,ProviderSwitchPage,ProviderQuotaLine,quota_loading,"Loading quota…",,active
 pswitch.quota.left,pswitch,ProviderSwitchPage,ProviderQuotaLine,quota_left,"{{value}}% left",,active
 pswitch.quota.refresh,pswitch,ProviderSwitchPage,ProviderQuotaLine,quota_refresh,"Re-query quota",,active

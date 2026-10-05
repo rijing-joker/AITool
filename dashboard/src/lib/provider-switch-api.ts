@@ -375,3 +375,71 @@ export const mcpApi = {
     return mutate("/api/provider-switch/mcp/sync", "POST", apps?.length ? { apps } : {});
   },
 };
+
+// ---------------------------------------------------------------------------
+// Prompts (cc-switch's prompt module)
+// ---------------------------------------------------------------------------
+
+export type PromptAppId =
+  | "claude"
+  | "codex"
+  | "gemini"
+  | "grokbuild"
+  | "opencode"
+  | "openclaw"
+  | "hermes"
+  | "pi"
+  | "mcode";
+
+export interface PromptEntry {
+  id: string;
+  name: string;
+  content: string;
+  description?: string;
+  enabled: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface PromptUpsertPayload {
+  id: string;
+  name?: string;
+  content: string;
+  description?: string;
+  enabled?: boolean;
+}
+
+export interface PromptListResult {
+  ok: true;
+  app: PromptAppId;
+  prompts: PromptEntry[];
+  targetPath: string;
+}
+
+export interface PromptMutationResult {
+  ok: true;
+  prompts: PromptEntry[];
+  targetPath: string;
+}
+
+export const promptsApi = {
+  list(app: PromptAppId): Promise<PromptListResult> {
+    return get(`/api/provider-switch/prompts?app=${encodeURIComponent(app)}`);
+  },
+
+  upsert(app: PromptAppId, prompt: PromptUpsertPayload): Promise<PromptMutationResult> {
+    return mutate("/api/provider-switch/prompts", "POST", { app, prompt });
+  },
+
+  enable(app: PromptAppId, id: string): Promise<PromptMutationResult> {
+    return mutate("/api/provider-switch/prompts/enable", "POST", { app, id });
+  },
+
+  remove(app: PromptAppId, id: string): Promise<PromptMutationResult> {
+    return mutate("/api/provider-switch/prompts/delete", "POST", { app, id });
+  },
+
+  import(app: PromptAppId): Promise<PromptMutationResult> {
+    return mutate("/api/provider-switch/prompts/import", "POST", { app });
+  },
+};

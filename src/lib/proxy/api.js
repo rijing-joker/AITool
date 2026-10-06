@@ -464,8 +464,17 @@ async function handleProxyApiRequest(req, res, url, ctx) {
     }
     if (p === "/api/proxy/pricing" && method === "GET") {
       // Read-only pricing sync state for the dashboard's cost column tooltip.
+      // include=1 also returns the per-model metadata (context window,
+      // reasoning efforts) keyed by normalized id for the codex catalog fill.
       const snapshot = await pricing.getPricingSnapshot(paths.pricingPath);
-      json(res, { ok: true, modelCount: snapshot.modelCount, fetchedAt: snapshot.fetchedAt, stale: snapshot.stale, syncing: snapshot.syncing });
+      const payload = { ok: true, modelCount: snapshot.modelCount, fetchedAt: snapshot.fetchedAt, stale: snapshot.stale, syncing: snapshot.syncing };
+      if (url.searchParams.get("include") === "1" && snapshot.models) {
+        payload.models = Object.fromEntries(Object.entries(snapshot.models).map(([id, entry]) => [
+          id,
+          { contextWindow: entry.contextWindow, maxOutputTokens: entry.maxOutputTokens, reasoningEfforts: entry.reasoningEfforts },
+        ]));
+      }
+      json(res, payload);
       return true;
     }
     if (p === "/api/proxy/usage/records") {

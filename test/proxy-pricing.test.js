@@ -23,7 +23,7 @@ function fixture(t) {
 }
 
 function writePricingStore(models, { fetchedAt = Date.now() } = {}) {
-  fs.writeFileSync(paths.pricingPath, JSON.stringify({ version: 1, fetchedAt, models }));
+  fs.writeFileSync(paths.pricingPath, JSON.stringify({ version: 2, fetchedAt, models }));
   pricing.__test.clearMemo();
 }
 
@@ -44,8 +44,8 @@ test("flattenModelsDev keeps priced text models and prefers the newest release p
   const models = pricing.flattenModelsDev({
     anthropic: {
       models: {
-        "claude-sonnet-5": { name: "Claude Sonnet 5", release_date: "2026-09-01", cost: { input: 3, output: 15, cache_read: 0.3, cache_write: 3.75 } },
-        "claude-sonnet-5[1m]": { name: "Claude Sonnet 5 (1M)", release_date: "2026-09-20", cost: { input: 6, output: 22 } },
+        "claude-sonnet-5": { name: "Claude Sonnet 5", release_date: "2026-09-01", cost: { input: 3, output: 15, cache_read: 0.3, cache_write: 3.75 }, limit: { context: 200000, output: 64000 } },
+        "claude-sonnet-5[1m]": { name: "Claude Sonnet 5 (1M)", release_date: "2026-09-20", cost: { input: 6, output: 22 }, limit: { context: 1000000, output: 64000 }, reasoning_options: [{ type: "effort", values: ["low", "Medium", "bogus"] }, { type: "other", values: ["x"] }] },
         "claude-audio-1": { name: "Claude Audio", cost: { input: 1, output: 2 }, modalities: { output: ["audio"] } },
         "claude-vision-ocr": { name: "Vision OCR", cost: { input: 1, output: 2 } },
         "claude-legacy": { name: "Legacy", status: "deprecated", cost: { input: 1, output: 2 } },
@@ -62,6 +62,14 @@ test("flattenModelsDev keeps priced text models and prefers the newest release p
   // Newest release wins on normalized-id collision (the reseller entry loses).
   assert.equal(models.get("claude-sonnet-5").input, 6);
   assert.equal(models.get("claude-sonnet-5").provider, "anthropic");
+  // Catalog-fill metadata rides along (v2 store).
+  const winner = models.get("claude-sonnet-5");
+  assert.equal(winner.contextWindow, 1000000);
+  assert.equal(winner.maxOutputTokens, 64000);
+  // Effort-type values are kept verbatim (lowercase, deduped); consumers
+  // intersect with their own level sets.
+  assert.deepEqual(winner.reasoningEfforts, ["low", "medium", "bogus"]);
+  assert.equal(models.get("claude-vision-ocr").contextWindow, undefined);
 });
 
 test("estimateCostUsd bills fresh input for Claude and cache-inclusive input for OpenAI", () => {
@@ -213,6 +221,24 @@ test("pricing meta route reports sync state without the model index", async (t) 
   assert.equal(payload.fetchedAt, fetchedAt);
   assert.equal(payload.stale, false);
   assert.equal("models" in payload, false);
+});
+
+test("pricing meta route include=1 returns the fill metadata keyed by normalized id", async (t) => {
+  fixture(t);
+  writePricingStore({
+    "claude-sonnet-5": { name: "Claude Sonnet 5", provider: "anthropic", input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75, contextWindow: 200000, maxOutputTokens: 64000, reasoningEfforts: ["low", "high"] },
+    "gpt-5.2": { name: "GPT-5.2", provider: "openai", input: 1.25, output: 10, cacheRead: 0.125, cacheWrite: 0 },
+  });
+  let payload;
+  await handleProxyApiRequest({ method: "GET" }, {
+    writeHead(status) { assert.equal(status, 200); },
+    end(body) { payload = JSON.parse(body); },
+  }, new URL("http://localhost/api/proxy/pricing?include=1"), {});
+  assert.equal(payload.ok, true);
+  assert.deepEqual(payload.models["claude-sonnet-5"], { contextWindow: 200000, maxOutputTokens: 64000, reasoningEfforts: ["low", "high"] });
+  // Pricing fields stay out of the include=1 payload.
+  assert.equal("input" in payload.models["gpt-5.2"], false);
+  assert.equal(payload.models["gpt-5.2"].contextWindow, undefined);
 });
 
 test("estimateCostUsd keys semantics on the executor type when present", () => {

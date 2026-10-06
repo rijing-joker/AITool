@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-05T16:11:33.169Z",
+  "generatedAt": "2026-10-06T04:52:01.619Z",
   "root": "dashboard/src",
   "rules": {
     "colors": "hex/rgb(a) literals",
@@ -7,7 +7,7 @@
   },
   "totals": {
     "colors": 412,
-    "rawText": 226
+    "rawText": 227
   },
   "files": {
     "dashboard/src/components/InsforgeUserHeaderControls.jsx": {
@@ -265,6 +265,13 @@
         ") : entries.length === 0 ? (",
         ": fastEnabled && !normalizedEffort ?",
         "Fast"
+      ]
+    },
+    "dashboard/src/pages/provider-codex-catalog.test.jsx": {
+      "colors": 0,
+      "rawText": 1,
+      "rawTextTokens": [
+        ", ); expect(screen.queryByText(\"pswitch.catalog.picker_title\")).toBeNull(); rerender("
       ]
     },
     "dashboard/src/pages/provider-group-keys-editor.jsx": {

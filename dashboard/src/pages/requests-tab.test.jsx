@@ -129,3 +129,24 @@ it("budget dialog accepts repeated typing without dropping the event target", as
   expect(daily).toHaveValue("12");
   fireEvent.click(screen.getByRole("button", { name: "shared.action.cancel" }));
 });
+
+it("skips the stats recompute on page changes but keeps it for polls and filters", async () => {
+  await setup();
+  const includeParam = (call) => String(call[0]).match(/includeStats=(\d)/)?.[1];
+  // First load and polls always carry stats.
+  await waitFor(() => expect(recordsCalls().length).toBeGreaterThanOrEqual(1));
+  expect(includeParam(recordsCalls()[0])).toBe("1");
+  // A page-size change loads without stats (identical aggregation).
+  await act(async () => {
+    fireEvent.change(screen.getByRole("combobox", { name: "proxy.requests.page_size", size: 50 }), { target: { value: "20" } });
+  });
+  await waitFor(() => expect(recordsCalls()).toHaveLength(recordsCalls().length));
+  const last = recordsCalls()[recordsCalls().length - 1];
+  expect(String(last[0])).toContain("pageSize=20");
+  expect(includeParam(last)).toBe("0");
+  // A filter change must refresh stats even though the page resets to 0.
+  fireEvent.change(screen.getByRole("combobox", { name: "proxy.requests.filter.model" }), { target: { value: "gpt" } });
+  await waitFor(() => expect(String(recordsCalls()[recordsCalls().length - 1][0])).toContain("model=gpt"));
+  expect(includeParam(recordsCalls()[recordsCalls().length - 1])).toBe("1");
+  expect(showToast).not.toHaveBeenCalled();
+});

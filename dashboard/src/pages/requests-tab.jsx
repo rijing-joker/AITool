@@ -764,6 +764,7 @@ export function RequestsTab() {
   const [query, setQuery] = useState({ model: "", provider: "" });
 
   const [widths, setWidths] = useState(loadColumnWidths);
+  const widthsRef = useRef(widths);
   const [visibleColumns, setVisibleColumns] = useState(loadVisibleColumns);
   const [columnDialogOpen, setColumnDialogOpen] = useState(false);
   const [draftColumns, setDraftColumns] = useState(visibleColumns);
@@ -783,14 +784,28 @@ export function RequestsTab() {
   const clearFilters = () => { setModel(""); setProvider(""); setQuery({ model: "", provider: "" }); setResult("all"); setRange("24h"); setPage(0); };
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
+  // Page/pageSize-only loads skip the stats recompute: the filtered
+  // aggregation is independent of the slice (easy ffdc53c "refresh filter
+  // options only on range change", adapted — stats ride the records
+  // response here). Filter-scope changes and polls (neither scope nor slice
+  // changed) always recompute. A filter change that also resets the page
+  // still recomputes because the scope differs.
+  const lastLoadedRef = useRef(null);
+
   const load = useCallback(async (signal) => {
     if (invalidRange || searchPending) { setLoading(false); return false; }
+    const scopeKey = JSON.stringify([result, query.model, query.provider, range, customStart, customEnd]);
+    const previous = lastLoadedRef.current;
+    const scopeChanged = !previous || previous.scopeKey !== scopeKey;
+    const sliceChanged = previous && (previous.page !== page || previous.pageSize !== pageSize);
+    const includeStats = scopeChanged || !sliceChanged ? "1" : "0";
+    lastLoadedRef.current = { scopeKey, page, pageSize };
     setLoading(true);
     try {
       const params = new URLSearchParams({
         page: String(page),
         pageSize: String(pageSize),
-        includeStats: "1",
+        includeStats,
         result,
         ...(query.model ? { model: query.model } : {}),
         ...(query.provider ? { provider: query.provider } : {}),
@@ -802,7 +817,7 @@ export function RequestsTab() {
       if (!data?.ok) throw new Error(data?.error || `HTTP records`);
       setRecords(data.records);
       setTotal(data.total);
-      setStats(data.stats ?? null);
+      if (data.stats) setStats(data.stats);
       setError(null);
       return true;
     } catch (e) {
@@ -868,6 +883,7 @@ export function RequestsTab() {
   };
 
   const persistWidths = (next) => {
+    widthsRef.current = next;
     setWidths(next);
     try { localStorage.setItem(WIDTHS_STORAGE_KEY, JSON.stringify(next)); } catch {}
   };
@@ -881,14 +897,14 @@ export function RequestsTab() {
   const resetSingleColumn = (key) => {
     const column = EVENT_COLUMNS.find((entry) => entry.key === key);
     if (!column) return;
-    persistWidths((current) => ({ ...current, [key]: column.defaultWidth }));
+    persistWidths({ ...widthsRef.current, [key]: column.defaultWidth });
   };
 
   const handleResizeKeyDown = (key, event) => {
     const column = EVENT_COLUMNS.find((entry) => entry.key === key);
     if (!column) return;
     const step = event.shiftKey ? 25 : 10;
-    const current = widths[key] ?? column.defaultWidth;
+    const current = widthsRef.current[key] ?? column.defaultWidth;
     const next = event.key === "Home"
       ? column.defaultWidth
       : event.key === "ArrowLeft"
@@ -898,7 +914,7 @@ export function RequestsTab() {
           : null;
     if (next === null) return;
     event.preventDefault();
-    persistWidths({ ...widths, [key]: next });
+    persistWidths({ ...widthsRef.current, [key]: next });
   };
 
   const handleResizeStart = (key, event) => {
@@ -907,26 +923,51 @@ export function RequestsTab() {
     const column = EVENT_COLUMNS.find((entry) => entry.key === key);
     const minWidth = column?.minWidth ?? 50;
     const startX = event.clientX;
-    const startWidth = widths[key] ?? column?.defaultWidth ?? 100;
+    const startWidth = widthsRef.current[key] ?? column?.defaultWidth ?? 100;
+    // Paint straight into the table DOM and commit state once on release —
+    // a setState per pointermove re-renders the whole table per frame
+    // (easy ffdc53c).
+    const table = event.currentTarget.closest("table");
+    const colElement = table?.querySelector(`col[data-column="${key}"]`) ?? null;
+    const header = event.currentTarget.closest("th");
     setResizingCol(key);
     document.body.classList.add("table-col-resizing");
     let currentWidth = startWidth;
+    let frame = 0;
+
+    const paintWidth = (nextWidth) => {
+      widthsRef.current = { ...widthsRef.current, [key]: nextWidth };
+      if (colElement) colElement.style.width = `${nextWidth}px`;
+      if (header) header.style.width = `${nextWidth}px`;
+      if (table) {
+        const total = columns.reduce((sum, entry) => sum + (widthsRef.current[entry.key] ?? entry.defaultWidth), 0);
+        table.style.width = `${total}px`;
+      }
+    };
 
     const onPointerMove = (moveEvent) => {
       currentWidth = Math.min(MAX_COLUMN_WIDTH, Math.max(minWidth, Math.round(startWidth + moveEvent.clientX - startX)));
-      setWidths((prev) => ({ ...prev, [key]: currentWidth }));
+      if (frame) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        paintWidth(currentWidth);
+      });
     };
     const cleanup = () => {
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", onPointerUp);
       window.removeEventListener("pointercancel", onPointerUp);
+      if (frame) window.cancelAnimationFrame(frame);
       document.body.classList.remove("table-col-resizing");
       resizeCleanupRef.current = null;
     };
     const onPointerUp = () => {
+      paintWidth(currentWidth);
       cleanup();
       setResizingCol(null);
-      persistWidths({ ...widths, [key]: currentWidth });
+      const next = widthsRef.current;
+      setWidths(next);
+      try { localStorage.setItem(WIDTHS_STORAGE_KEY, JSON.stringify(next)); } catch {}
     };
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", onPointerUp);
@@ -936,7 +977,7 @@ export function RequestsTab() {
 
   const columns = EVENT_COLUMNS.filter((column) => visibleColumns.includes(column.key));
   const widthsCustomized = EVENT_COLUMNS.some((column) => widths[column.key] !== column.defaultWidth);
-  const tableWidth = columns.reduce((sum, column) => sum + (widths[column.key] ?? column.defaultWidth), 0);
+  const tableWidth = columns.reduce((sum, column) => sum + (widthsRef.current[column.key] ?? widths[column.key] ?? column.defaultWidth), 0);
   const startRecord = total > 0 ? page * pageSize + 1 : 0;
   const endRecord = Math.min((page + 1) * pageSize, total);
 
@@ -1132,14 +1173,14 @@ export function RequestsTab() {
             <div ref={tableWrapRef} className="overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" tabIndex={0} role="region" aria-label={copy("proxy.requests.subtitle", { total: fullTokens.format(total) })}>
               <table className="border-separate border-spacing-0 text-sm" style={{ width: `${tableWidth}px` }}>
                 <colgroup>
-                  {columns.map((column) => <col key={column.key} style={{ width: `${widths[column.key] ?? column.defaultWidth}px` }} />)}
+                  {columns.map((column) => <col key={column.key} data-column={column.key} style={{ width: `${widthsRef.current[column.key] ?? widths[column.key] ?? column.defaultWidth}px` }} />)}
                 </colgroup>
                 <thead>
                   <tr>
                     {columns.map((column) => {
                       const label = copy(column.labelKey);
                       return (
-                        <th key={column.key} className="relative border-b border-oai-gray-200 bg-oai-gray-50/60 px-2 py-2.5 text-left text-xs font-semibold text-oai-gray-500 dark:border-oai-gray-800 dark:bg-oai-gray-800/40 dark:text-oai-gray-400" style={{ width: `${widths[column.key] ?? column.defaultWidth}px` }}>
+                        <th key={column.key} className="relative border-b border-oai-gray-200 bg-oai-gray-50/60 px-2 py-2.5 text-left text-xs font-semibold text-oai-gray-500 dark:border-oai-gray-800 dark:bg-oai-gray-800/40 dark:text-oai-gray-400" style={{ width: `${widthsRef.current[column.key] ?? widths[column.key] ?? column.defaultWidth}px` }}>
                           <span className="block truncate" title={label}>{label}</span>
                           <div
                             role="separator"
@@ -1148,7 +1189,7 @@ export function RequestsTab() {
                             aria-orientation="vertical"
                             aria-valuemin={column.minWidth}
                             aria-valuemax={MAX_COLUMN_WIDTH}
-                            aria-valuenow={widths[column.key] ?? column.defaultWidth}
+                            aria-valuenow={widthsRef.current[column.key] ?? widths[column.key] ?? column.defaultWidth}
                             onPointerDown={(event) => handleResizeStart(column.key, event)}
                             onDoubleClick={() => resetSingleColumn(column.key)}
                             onKeyDown={(event) => handleResizeKeyDown(column.key, event)}

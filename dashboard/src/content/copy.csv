@@ -2502,7 +2502,14 @@ pswitch.encrypted.mismatch,pswitch,ProviderSwitchPage,EncryptedBackupDialog,encr
 pswitch.encrypted.bad_file,pswitch,ProviderSwitchPage,EncryptedBackupDialog,encrypted_bad_file,Not a readable backup file,,active
 pswitch.encrypted.imported,pswitch,ProviderSwitchPage,EncryptedBackupDialog,encrypted_imported,"Restored {{count}} stores",,active
 clisessions.msg_tokens,ui,CliSessionsPage,TranscriptRow,msg_tokens,"Input {{up}} · output {{down}} tokens",,active
-pswitch.catalog.add_model,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_add_model,Add model,,active
+pswitch.catalog.add_model,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_add_model,Add manually,,active
+pswitch.catalog.picker_title,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_picker_title,Available models ({{count}}),,active
+pswitch.catalog.picker_search,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_picker_search,Search models…,,active
+pswitch.catalog.picker_empty,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_picker_empty,No matching models.,,active
+pswitch.catalog.picker_added,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_picker_added,Already added,,active
+pswitch.catalog.picker_add_selected,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_picker_add_selected,Add selected ({{count}}),,active
+pswitch.catalog.filled,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_filled,"Filled in {{model}}'s context window and reasoning levels from models.dev — please review",,active
+pswitch.catalog.filled_many,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_filled_many,Filled in context windows and reasoning levels for {{count}} models from models.dev — please review,,active
 pswitch.catalog.col_display,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_col_display,Menu display name,,active
 pswitch.catalog.col_model,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_col_model,Requested model,,active
 pswitch.catalog.col_context,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_col_context,Context window,,active

@@ -20,7 +20,9 @@ const path = require("node:path");
 const MODELS_DEV_API_URL = "https://models.dev/api.json";
 const PRICING_TTL_MS = 24 * 60 * 60 * 1000;
 const PRICING_FETCH_TIMEOUT_MS = 15_000;
-const STORE_VERSION = 1;
+// v2 adds contextWindow / maxOutputTokens / reasoningEfforts per model (used
+// by the provider-switch codex catalog fill); old v1 files re-sync on demand.
+const STORE_VERSION = 2;
 
 const NON_TEXT_MODEL_MARKERS = [
   "audio",
@@ -39,6 +41,25 @@ const NON_TEXT_OUTPUT_MODALITIES = new Set(["audio", "image", "video"]);
 function clampPrice(value) {
   if (!Number.isFinite(value) || value < 0 || value >= 1e12) return 0;
   return value;
+}
+
+/** Positive integer (numbers or numeric strings); undefined otherwise. */
+function positiveInt(value) {
+  const parsed = typeof value === "string" && value.trim() ? Number(value) : value;
+  return typeof parsed === "number" && Number.isFinite(parsed) && parsed > 0
+    ? Math.trunc(parsed)
+    : undefined;
+}
+
+/** Effort-type reasoning option values from models.dev reasoning_options. */
+function reasoningEffortValues(options) {
+  if (!Array.isArray(options)) return undefined;
+  const values = options
+    .filter((option) => option?.type === "effort" && Array.isArray(option.values))
+    .flatMap((option) => option.values)
+    .filter((value) => typeof value === "string" && value.trim())
+    .map((value) => value.trim().toLowerCase());
+  return values.length > 0 ? [...new Set(values)] : undefined;
 }
 
 /** Strip vendor/ prefix, :variant suffix, [1m] markers; `@` → `-`; lowercase. */
@@ -93,6 +114,9 @@ function flattenModelsDev(data) {
         output,
         cacheRead: clampPrice(typeof cost?.cache_read === "number" ? cost.cache_read : 0),
         cacheWrite: clampPrice(typeof cost?.cache_write === "number" ? cost.cache_write : 0),
+        contextWindow: positiveInt(model.limit?.context),
+        maxOutputTokens: positiveInt(model.limit?.output),
+        reasoningEfforts: reasoningEffortValues(model.reasoning_options),
       });
     }
   }
@@ -107,6 +131,9 @@ function flattenModelsDev(data) {
         output: entry.output,
         cacheRead: entry.cacheRead,
         cacheWrite: entry.cacheWrite,
+        contextWindow: entry.contextWindow,
+        maxOutputTokens: entry.maxOutputTokens,
+        reasoningEfforts: entry.reasoningEfforts,
       });
     }
   }

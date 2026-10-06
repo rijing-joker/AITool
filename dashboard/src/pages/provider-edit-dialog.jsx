@@ -581,6 +581,9 @@ export function ProviderEditDialog({
   const [speedTestOpen, setSpeedTestOpen] = useState(false);
   const [fetchedModels, setFetchedModels] = useState(null);
   const [fetchState, setFetchState] = useState("idle");
+  // models.dev per-model metadata (normalized id → context window / reasoning
+  // efforts) for the codex catalog fill; {} means tried-and-unavailable.
+  const [modelMetadata, setModelMetadata] = useState(null);
   const [pendingIssues, setPendingIssues] = useState(null);
   // cc-switch's editor view: the full post-switch config the dialog opened
   // with (save base for the three-way split), the row fields that do not
@@ -884,6 +887,19 @@ export function ProviderEditDialog({
   };
 
   // --- model list fetching (cc-switch's fetchModelsForConfig) ---
+  const modelMetadataRequestedRef = useRef(false);
+  const ensureModelMetadata = useCallback(() => {
+    // StrictMode replays state updaters — side effects live outside setState.
+    if (modelMetadataRequestedRef.current) return;
+    modelMetadataRequestedRef.current = true;
+    fetch("/api/proxy/pricing?include=1", { cache: "no-store" })
+      .then((response) => response.json())
+      .then((data) => {
+        setModelMetadata(data?.ok && data.models && typeof data.models === "object" ? data.models : {});
+      })
+      .catch(() => setModelMetadata({}));
+  }, []);
+
   const fetchModels = useCallback(async () => {
     if (fetchState === "loading") return;
     setFetchState("loading");
@@ -896,6 +912,7 @@ export function ProviderEditDialog({
       });
       setFetchedModels(res.models);
       setFetchState("done");
+      void ensureModelMetadata();
       if (res.models.length > 0) {
         showToast({ title: copy("pswitch.models.fetch_success", { count: res.models.length }) });
       } else {
@@ -909,7 +926,7 @@ export function ProviderEditDialog({
         }),
       });
     }
-  }, [currentApiKey, currentEndpoint, fetchState, meta.isFullUrl, selectedPreset]);
+  }, [currentApiKey, currentEndpoint, ensureModelMetadata, fetchState, meta.isFullUrl, selectedPreset]);
 
   // --- claude model roles helpers ---
   const oneMOn = (role) => String(getPath(draft, role.modelPath) ?? "").endsWith("[1m]");
@@ -1887,6 +1904,7 @@ export function ProviderEditDialog({
                     fetchState={fetchState}
                     onFetch={() => void fetchModels()}
                     defaultModel={String(getPath(draft, DEFAULT_MODEL_PATH.codex) ?? "")}
+                    modelMetadata={modelMetadata}
                     onAddToMapping={() =>
                       setMeta((current) => {
                         const list = Array.isArray(current.codexCatalogModels) ? current.codexCatalogModels : [];

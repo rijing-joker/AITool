@@ -157,6 +157,54 @@ test("provider-switch claude projection: residue of prev provider removed only w
   assert.equal(withUserKey.env.ANTHROPIC_AUTH_TOKEN, "sk-x");
 });
 
+test("provider-switch claude projection: gateway auto-mode compat key reaches settings.json", async () => {
+  const targets = require("../src/lib/provider-switch/targets");
+
+  // Claude Code 2.1.281 auto mode classifier only works on official
+  // endpoints; gateway providers carry CLAUDE_CODE_AUTO_MODE_SERVER=0 and it
+  // must reach the projected settings.json (cc-switch cf567ca).
+  const gateway = {
+    settingsConfig: {
+      env: {
+        ANTHROPIC_BASE_URL: "https://gw.example",
+        ANTHROPIC_AUTH_TOKEN: "sk-gw",
+        CLAUDE_CODE_AUTO_MODE_SERVER: "0",
+      },
+    },
+  };
+  const kimi = {
+    settingsConfig: { env: { ANTHROPIC_BASE_URL: "https://kimi.example", ANTHROPIC_AUTH_TOKEN: "sk-kimi" } },
+  };
+
+  const switched = targets.projectClaude({
+    prev: kimi,
+    target: gateway,
+    live: {
+      env: {
+        ANTHROPIC_BASE_URL: "https://kimi.example",
+        ANTHROPIC_AUTH_TOKEN: "sk-kimi",
+      },
+    },
+  });
+  assert.equal(switched.env.CLAUDE_CODE_AUTO_MODE_SERVER, "0");
+  assert.equal(switched.env.ANTHROPIC_BASE_URL, "https://gw.example");
+
+  // Switching back to a row without it removes the untouched value.
+  const back = targets.projectClaude({
+    prev: gateway,
+    target: { settingsConfig: { env: { ANTHROPIC_AUTH_TOKEN: "sk-official" } } },
+    live: {
+      env: {
+        ANTHROPIC_BASE_URL: "https://gw.example",
+        ANTHROPIC_AUTH_TOKEN: "sk-gw",
+        CLAUDE_CODE_AUTO_MODE_SERVER: "0",
+      },
+    },
+  });
+  assert.equal(back.env.CLAUDE_CODE_AUTO_MODE_SERVER, undefined);
+  assert.equal(back.env.ANTHROPIC_AUTH_TOKEN, "sk-official");
+});
+
 // ---------------------------------------------------------------------------
 // Codex projection (TOML + auth stash decision)
 // ---------------------------------------------------------------------------
@@ -1170,11 +1218,12 @@ test("provider-switch providers carry icon/iconColor/meta and sanitize them", as
   assert.equal(created.body.provider.iconColor, "indigo");
   assert.equal(created.body.provider.meta.customUserAgent, "claude-cli/2.0");
 
-  // oversized meta rejected
+  // oversized meta rejected (limit raised to 256 KiB in the P2 round —
+  // official template base_instructions alone are ~21 KiB)
   const bad = await call(handler, {
     method: "PUT",
     url: `${prefix}/providers/${created.body.provider.id}`,
-    body: JSON.stringify({ app: "claude", meta: { blob: "x".repeat(9000) } }),
+    body: JSON.stringify({ app: "claude", meta: { blob: "x".repeat(300 * 1024) } }),
   });
   assert.equal(bad.status, 400);
 

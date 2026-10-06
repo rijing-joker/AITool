@@ -48,6 +48,15 @@ function formatDuration(ms) {
   return `${minutes}m${Math.round(seconds % 60)}s`;
 }
 
+// easy c24bb15: tint a duration green below 15s, amber below 30s, red beyond —
+// slow upstreams surface at a glance without reading the numbers.
+function durationTone(ms) {
+  if (ms == null || !Number.isFinite(ms) || ms < 0) return "";
+  if (ms >= 30_000) return "text-red-600 dark:text-red-400";
+  if (ms >= 15_000) return "text-amber-600 dark:text-amber-400";
+  return "text-emerald-600 dark:text-emerald-400";
+}
+
 function formatSpeed(outputTokens, latencyMs) {
   if (!Number.isFinite(outputTokens) || !Number.isFinite(latencyMs) || outputTokens <= 0 || latencyMs <= 0) return "—";
   const speed = outputTokens / (latencyMs / 1000);
@@ -116,6 +125,37 @@ const VISIBLE_STORAGE_KEY = "aitool.usage-events-visible-cols.v1";
 // cost) start visible once without re-appearing after the user hides them.
 const MIGRATED_DEFAULTS_STORAGE_KEY = "aitool.usage-events-migrated-defaults.v1";
 const MAX_COLUMN_WIDTH = 800;
+
+// Display density (easy 1d64a45): a fixed row height turns the log into a
+// uniform grid for scanning; off keeps rows auto-sized around their content.
+const ROW_HEIGHT_ENABLED_STORAGE_KEY = "aitool.usage-events-row-height-enabled.v1";
+const ROW_HEIGHT_STORAGE_KEY = "aitool.usage-events-row-height.v1";
+const DEFAULT_ROW_HEIGHT = 68;
+const MIN_ROW_HEIGHT = 48;
+const MAX_ROW_HEIGHT = 140;
+
+const PAGE_SIZE_STORAGE_KEY = "aitool.usage-events-page-size.v1";
+const PAGE_SIZES = [20, 50, 100, 200];
+
+const clampRowHeight = (value) => Math.min(MAX_ROW_HEIGHT, Math.max(MIN_ROW_HEIGHT, Math.round(value)));
+
+function loadRowHeightEnabled() {
+  try { return localStorage.getItem(ROW_HEIGHT_ENABLED_STORAGE_KEY) === "true"; } catch { return false; }
+}
+
+function loadRowHeight() {
+  try {
+    const value = Number(localStorage.getItem(ROW_HEIGHT_STORAGE_KEY));
+    return Number.isFinite(value) && value > 0 ? clampRowHeight(value) : DEFAULT_ROW_HEIGHT;
+  } catch { return DEFAULT_ROW_HEIGHT; }
+}
+
+function loadPageSize() {
+  try {
+    const value = Number(localStorage.getItem(PAGE_SIZE_STORAGE_KEY));
+    return PAGE_SIZES.includes(value) ? value : 50;
+  } catch { return 50; }
+}
 
 const allColumnKeys = () => EVENT_COLUMNS.map((column) => column.key);
 
@@ -388,18 +428,24 @@ function EventCell({ record, column, onReplay, replayState }) {
         </td>
       );
     }
-    case "latency":
+    case "latency": {
+      const latencyTone = durationTone(record.latencyMs);
+      const ttftTone = durationTone(record.ttftMs);
       return (
         <td className="px-2 py-2 align-top" title={`${record.latencyMs ?? 0} ms`}>
-          <span className="block whitespace-nowrap text-xs font-medium tabular-nums">{formatDuration(record.latencyMs)}</span>
-          <span className="block whitespace-nowrap text-[10px] tabular-nums text-oai-gray-500 dark:text-oai-gray-400" title={record.ttftMs != null ? `${record.ttftMs} ms` : undefined}>
+          <span className={`block whitespace-nowrap text-xs font-medium tabular-nums ${latencyTone}`}>{formatDuration(record.latencyMs)}</span>
+          <span
+            className={`block whitespace-nowrap text-[10px] tabular-nums ${ttftTone || "text-oai-gray-500 dark:text-oai-gray-400"}`}
+            title={record.ttftMs != null ? `${record.ttftMs} ms` : undefined}
+          >
             TTFT {record.ttftMs == null ? "—" : formatDuration(record.ttftMs)}
           </span>
         </td>
       );
+    }
     case "ttft":
       return (
-        <td className="px-2 py-2 align-top text-xs tabular-nums" title={record.ttftMs != null ? `${record.ttftMs} ms` : undefined}>
+        <td className={`px-2 py-2 align-top text-xs tabular-nums ${durationTone(record.ttftMs)}`} title={record.ttftMs != null ? `${record.ttftMs} ms` : undefined}>
           {record.ttftMs == null ? "—" : formatDuration(record.ttftMs)}
         </td>
       );
@@ -465,7 +511,7 @@ function EventCell({ record, column, onReplay, replayState }) {
 // Column settings dialog
 // ---------------------------------------------------------------------------
 
-function ColumnSettingsDialog({ open, onClose, draft, onToggle, onSelectAll, onApply }) {
+function ColumnSettingsDialog({ open, onClose, draft, onToggle, onSelectAll, onApply, draftRowHeightEnabled, onRowHeightToggle, draftRowHeight, onRowHeightChange }) {
   return (
     <ModalFrame open={open} onClose={onClose} label={copy("proxy.requests.col_settings")}>
       <div className="flex items-center justify-between border-b border-oai-gray-100 px-5 py-3.5 dark:border-oai-gray-800">
@@ -490,6 +536,38 @@ function ColumnSettingsDialog({ open, onClose, draft, onToggle, onSelectAll, onA
             </label>
           );
         })}
+      </div>
+      <div className="border-t border-oai-gray-100 px-5 py-4 dark:border-oai-gray-800">
+        <div className="flex items-center justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-sm font-medium">{copy("proxy.requests.row_height.title")}</p>
+            <p className="mt-0.5 text-xs text-oai-gray-500 dark:text-oai-gray-400">{copy("proxy.requests.row_height.description")}</p>
+          </div>
+          <label className="flex shrink-0 items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={draftRowHeightEnabled}
+              onChange={() => onRowHeightToggle()}
+              aria-label={copy("proxy.requests.row_height.title")}
+              className="h-4 w-4 accent-oai-brand-600"
+            />
+            {copy(draftRowHeightEnabled ? "proxy.requests.row_height.on" : "proxy.requests.row_height.off")}
+          </label>
+        </div>
+        <div className="mt-3 flex items-center gap-3">
+          <input
+            type="range"
+            min={MIN_ROW_HEIGHT}
+            max={MAX_ROW_HEIGHT}
+            step={1}
+            value={draftRowHeight}
+            disabled={!draftRowHeightEnabled}
+            onChange={(event) => onRowHeightChange(Number(event.currentTarget.value))}
+            aria-label={copy("proxy.requests.row_height.slider")}
+            className="h-1.5 min-w-0 flex-1 accent-oai-brand-600 disabled:opacity-40"
+          />
+          <output className="w-12 shrink-0 text-right text-xs tabular-nums">{draftRowHeight}px</output>
+        </div>
       </div>
       <div className="flex items-center justify-between gap-2 border-t border-oai-gray-100 px-5 py-3 text-xs text-oai-gray-500 dark:border-oai-gray-800 dark:text-oai-gray-400">
         <span>{copy("proxy.requests.col_selected", { selected: draft.length, total: EVENT_COLUMNS.length })}</span>
@@ -753,7 +831,7 @@ export function RequestsTab() {
   const [stats, setStats] = useState(null);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
-  const [pageSize, setPageSize] = useState(50);
+  const [pageSize, setPageSize] = useState(loadPageSize);
   const [range, setRange] = useState("24h");
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
@@ -769,6 +847,10 @@ export function RequestsTab() {
   const [visibleColumns, setVisibleColumns] = useState(loadVisibleColumns);
   const [columnDialogOpen, setColumnDialogOpen] = useState(false);
   const [draftColumns, setDraftColumns] = useState(visibleColumns);
+  const [rowHeightEnabled, setRowHeightEnabled] = useState(loadRowHeightEnabled);
+  const [rowHeight, setRowHeight] = useState(loadRowHeight);
+  const [draftRowHeightEnabled, setDraftRowHeightEnabled] = useState(rowHeightEnabled);
+  const [draftRowHeight, setDraftRowHeight] = useState(rowHeight);
   const [resizingCol, setResizingCol] = useState(null);
   const tableWrapRef = useRef(null);
   const resizeCleanupRef = useRef(null);
@@ -986,7 +1068,18 @@ export function RequestsTab() {
     const next = draftColumns.length > 0 ? draftColumns : allColumnKeys();
     setVisibleColumns(next);
     try { localStorage.setItem(VISIBLE_STORAGE_KEY, JSON.stringify(next)); } catch {}
+    setRowHeightEnabled(draftRowHeightEnabled);
+    setRowHeight(draftRowHeight);
+    try {
+      localStorage.setItem(ROW_HEIGHT_ENABLED_STORAGE_KEY, String(draftRowHeightEnabled));
+      localStorage.setItem(ROW_HEIGHT_STORAGE_KEY, String(draftRowHeight));
+    } catch {}
     setColumnDialogOpen(false);
+  };
+
+  const changePageSize = (size) => {
+    setPageSize(size);
+    try { localStorage.setItem(PAGE_SIZE_STORAGE_KEY, String(size)); } catch {}
   };
 
   const toggleDraftColumn = (key) => {
@@ -1082,7 +1175,7 @@ export function RequestsTab() {
           {filtered ? <button type="button" className="min-h-10 px-2 font-medium text-oai-brand-600 dark:text-oai-brand-400 sm:min-h-0" onClick={clearFilters}>{copy("proxy.requests.clear_filters")}</button> : null}
           <button
             type="button"
-            onClick={() => { setDraftColumns(visibleColumns); setColumnDialogOpen(true); }}
+            onClick={() => { setDraftColumns(visibleColumns); setDraftRowHeightEnabled(rowHeightEnabled); setDraftRowHeight(rowHeight); setColumnDialogOpen(true); }}
             title={copy("proxy.requests.col_settings")}
             aria-label={copy("proxy.requests.col_settings")}
             className="inline-flex h-10 sm:h-8 items-center gap-1.5 rounded-lg border border-oai-gray-200 px-2.5 font-medium hover:bg-oai-gray-50 dark:border-oai-gray-700 dark:hover:bg-oai-gray-800"
@@ -1174,7 +1267,13 @@ export function RequestsTab() {
         ) : (
           <>
             <div ref={tableWrapRef} className="overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" tabIndex={0} role="region" aria-label={copy("proxy.requests.subtitle", { total: fullTokens.format(total) })}>
-              <table className="border-separate border-spacing-0 text-sm" style={{ width: `${tableWidth}px` }}>
+              <table
+                className={`border-separate border-spacing-0 text-sm ${rowHeightEnabled ? "[&_td]:h-[var(--usage-row-height,68px)]" : ""}`}
+                style={{
+                  width: `${tableWidth}px`,
+                  ...(rowHeightEnabled ? { "--usage-row-height": `${rowHeight}px` } : {}),
+                }}
+              >
                 <colgroup>
                   {columns.map((column) => <col key={column.key} data-column={column.key} style={{ width: `${widthsRef.current[column.key] ?? widths[column.key] ?? column.defaultWidth}px` }} />)}
                 </colgroup>
@@ -1226,7 +1325,7 @@ export function RequestsTab() {
                 disabled={loading}
                 onChange={(event) => {
                   setPage(0);
-                  setPageSize(Number(event.currentTarget.value));
+                  changePageSize(Number(event.currentTarget.value));
                 }}
                 className="h-8 rounded-lg border border-oai-gray-200 bg-transparent px-1.5 text-xs dark:border-oai-gray-700"
               >
@@ -1263,6 +1362,10 @@ export function RequestsTab() {
         onToggle={toggleDraftColumn}
         onSelectAll={() => setDraftColumns(allColumnKeys())}
         onApply={applyColumns}
+        draftRowHeightEnabled={draftRowHeightEnabled}
+        onRowHeightToggle={() => setDraftRowHeightEnabled((current) => !current)}
+        draftRowHeight={draftRowHeight}
+        onRowHeightChange={setDraftRowHeight}
       />
     </div>
   );

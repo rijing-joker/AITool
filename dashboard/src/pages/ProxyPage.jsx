@@ -96,14 +96,23 @@ function formatLatency(ms) {
   return `${Math.round(ms)} ms`;
 }
 
-function MetricTile({ label, value, hint }) {
+function MetricTile({ label, value, hint, tone }) {
   return (
     <Card className="!p-3 sm:!p-4">
       <p className="text-xs font-semibold tracking-wide text-oai-gray-500 dark:text-oai-gray-400">{label}</p>
-      <p className="mt-1.5 text-2xl font-semibold tabular-nums tracking-tight">{value}</p>
+      <p className={`mt-1.5 text-2xl font-semibold tabular-nums tracking-tight ${tone ?? ""}`}>{value}</p>
       {hint ? <p className="mt-1 text-xs text-oai-gray-400 dark:text-oai-gray-500">{hint}</p> : null}
     </Card>
   );
+}
+
+// easy 5183cf2: tint the success rate by band so degradation reads at a glance
+// without comparing against a threshold the user has to remember.
+export function successRateTone(rate) {
+  if (rate == null || !Number.isFinite(rate)) return "";
+  if (rate >= 95) return "text-emerald-600 dark:text-emerald-400";
+  if (rate >= 80) return "text-amber-600 dark:text-amber-400";
+  return "text-red-600 dark:text-red-400";
 }
 
 function CopyButton({ text }) {
@@ -269,6 +278,7 @@ function OverviewTab({ status, statusError, onRefresh, onInstallCore, onSelectTa
         <MetricTile
           label={copy("proxy.metric.success_rate")}
           value={overview?.success_rate != null ? `${overview.success_rate}%` : "—"}
+          tone={successRateTone(overview?.success_rate)}
         />
         <MetricTile label={copy("proxy.metric.rpm")} value={overview ? overview.rpm.toFixed(1) : "—"} />
         <MetricTile label={copy("proxy.metric.tpm")} value={formatTokens(overview?.tpm)} />

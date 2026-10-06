@@ -1804,6 +1804,11 @@ proxy.requests.export_hint,proxy,ProxyPage,ProxyPage,requests_exportHint,Downloa
 proxy.requests.page_size,proxy,ProxyPage,ProxyPage,requests_pageSize,"{{size}} / page",,active
 proxy.requests.range_summary,proxy,ProxyPage,ProxyPage,requests_rangeSummary,"{{start}}–{{end}} of {{total}}",,active
 proxy.requests.resize_hint,proxy,ProxyPage,ProxyPage,requests_resizeHint,Drag to resize; double-click to reset,,active
+proxy.requests.row_height.title,proxy,ProxyPage,ProxyPage,requests_rowHeight_title,Fixed row height,,active
+proxy.requests.row_height.description,proxy,ProxyPage,ProxyPage,requests_rowHeight_description,Give every request row the same height so long logs scan faster,,active
+proxy.requests.row_height.on,proxy,ProxyPage,ProxyPage,requests_rowHeight_on,On,,active
+proxy.requests.row_height.off,proxy,ProxyPage,ProxyPage,requests_rowHeight_off,Off,,active
+proxy.requests.row_height.slider,proxy,ProxyPage,ProxyPage,requests_rowHeight_slider,Row height in pixels,,active
 proxy.upstream.notConfigured,proxy,ProxyPage,Upstreams,notConfigured,Not configured,,active
 proxy.upstream.compatibleName,proxy,ProxyPage,Upstreams,compatible_name,OpenAI compatible {{number}},,active
 proxy.upstream.provider.codex,proxy,ProxyPage,Upstreams,provider_codex,Codex API,,active

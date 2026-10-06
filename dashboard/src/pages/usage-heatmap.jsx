@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import { copy } from "../lib/copy";
 import { Card } from "../ui/components";
 import { formatCostUsd } from "../lib/cost-format";
@@ -67,7 +67,9 @@ export function UsageHeatmap() {
   const [days, setDays] = useState(null);
   const [metric, setMetric] = useState("tokens");
 
-  const load = async (signal) => {
+  // useVisiblePolling keys its effect on this callback: an inline function
+  // would restart the loop (and refetch) on every render.
+  const load = useCallback(async (signal) => {
     try {
       const data = await fetch("/api/proxy/usage/heatmap", { cache: "no-store", signal }).then((response) => response.json());
       if (signal.aborted) return;
@@ -75,12 +77,6 @@ export function UsageHeatmap() {
     } catch {
       if (!signal?.aborted) setDays((current) => current ?? []);
     }
-  };
-
-  useEffect(() => {
-    const controller = new AbortController();
-    void load(controller.signal);
-    return () => controller.abort();
   }, []);
   useVisiblePolling(load, 60_000);
 

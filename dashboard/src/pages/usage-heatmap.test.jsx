@@ -3,7 +3,16 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { UsageHeatmap } from "./usage-heatmap";
 vi.mock("../lib/copy", () => ({ copy: (key, params) => (params ? `${key}:${JSON.stringify(params)}` : key) }));
-vi.mock("../hooks/use-visible-polling", () => ({ useVisiblePolling: () => () => {} }));
+vi.mock("../hooks/use-visible-polling", async () => {
+  const { useEffect } = await import("react");
+  return {
+    // Mirror the real hook: the effect is keyed on the callback identity and
+    // fires it immediately, so an unstable callback would loop forever here.
+    useVisiblePolling: (refresh, intervalMs) => {
+      useEffect(() => { void refresh(new AbortController().signal); }, [refresh, intervalMs]);
+    },
+  };
+});
 
 const days = [
   { date: "2026-10-01", requests: 4, tokens: 1200, costUsd: 0.02 },

@@ -285,3 +285,31 @@ test("queue fold applies executor token semantics: fresh input, reasoning only w
     { input_tokens: 300, reasoning_output_tokens: 30 },
   );
 });
+
+test("queue fold files an aliased cachedTokens share under cached_input_tokens, not input", (t) => {
+  const f = fixture(t);
+  // The core aliases cache reads into `cachedTokens` on some upstreams, leaving
+  // cacheReadTokens at 0. Billing that share as input charges the full input
+  // rate (2.7x on real pricing) while the Requests tab prices it as a read.
+  bridge.handleUsagePayload(JSON.stringify({
+    timestamp, model: "gpt-5.2", executor_type: "OpenAIExecutor",
+    tokens: { inputTokens: 1000, outputTokens: 100, cachedTokens: 900, cacheReadTokens: 0, cacheCreationTokens: 0, totalTokens: 1100 },
+  }));
+  // A Claude row aliases cache *creation* there, so cachedTokens is not a read
+  // and input stays whole.
+  bridge.handleUsagePayload(JSON.stringify({
+    timestamp, model: "claude-sonnet-5", executor_type: "ClaudeExecutor",
+    tokens: { inputTokens: 1000, outputTokens: 100, cachedTokens: 900, cacheReadTokens: 0, cacheCreationTokens: 50, totalTokens: 1150 },
+  }));
+  const byModel = new Map(jsonl(f.queuePath).filter((row) => row.source === "cliproxy").map((row) => [row.model, row]));
+  const gpt = byModel.get("gpt-5.2");
+  assert.deepEqual(
+    { input_tokens: gpt.input_tokens, cached_input_tokens: gpt.cached_input_tokens, cache_creation_input_tokens: gpt.cache_creation_input_tokens },
+    { input_tokens: 100, cached_input_tokens: 900, cache_creation_input_tokens: 0 },
+  );
+  const claude = byModel.get("claude-sonnet-5");
+  assert.deepEqual(
+    { input_tokens: claude.input_tokens, cached_input_tokens: claude.cached_input_tokens, cache_creation_input_tokens: claude.cache_creation_input_tokens },
+    { input_tokens: 1000, cached_input_tokens: 0, cache_creation_input_tokens: 50 },
+  );
+});

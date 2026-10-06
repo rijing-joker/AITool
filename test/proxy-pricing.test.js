@@ -255,6 +255,42 @@ test("estimateCostUsd falls back to cachedTokens for inclusive rows without cach
   assert.equal(claude, (1000 * 3 + 100 * 15 + 50 * 3.75) / 1e6);
 });
 
+// The queue fold (usage-bridge) and the Requests-tab estimate must resolve the
+// cachedTokens alias identically, or the same request shows two different
+// costs: the Tokens page would bill the aliased cache share at the full input
+// rate while the Requests tab prices it at the cache-read rate.
+test("cacheReadTokensFor resolves the cachedTokens alias for inclusive families only", () => {
+  const aliased = { inputTokens: 1000, outputTokens: 100, cachedTokens: 900, cacheReadTokens: 0 };
+  assert.equal(pricing.cacheReadTokensFor(aliased, { executorType: "OpenAIExecutor" }), 900);
+  assert.equal(pricing.freshInputTokens(aliased, { executorType: "OpenAIExecutor" }), 100);
+  // Claude rows alias cache *creation* into cachedTokens, so it is not a read
+  // and must not be subtracted from input either.
+  assert.equal(pricing.cacheReadTokensFor(aliased, { executorType: "ClaudeExecutor" }), 0);
+  assert.equal(pricing.freshInputTokens(aliased, { executorType: "ClaudeExecutor" }), 1000);
+  // An explicit cacheReadTokens always wins over the alias.
+  const explicit = { inputTokens: 300, cachedTokens: 999, cacheReadTokens: 140 };
+  assert.equal(pricing.cacheReadTokensFor(explicit, { executorType: "OpenAIExecutor" }), 140);
+  assert.equal(pricing.freshInputTokens(explicit, { executorType: "OpenAIExecutor" }), 160);
+});
+
+test("the queue fold and estimateCostUsd bill an aliased cachedTokens row identically", () => {
+  const tokens = { inputTokens: 1000, outputTokens: 100, reasoningTokens: 0, cachedTokens: 900, cacheReadTokens: 0, cacheCreationTokens: 0 };
+  const semantics = { executorType: "OpenAIExecutor", model: "gpt-5.2" };
+  const price = MODELS["gpt-5.2"];
+  // Rebuild the queue row usage-bridge writes, then price it the way
+  // computeRowCost does on the Tokens page.
+  const queueCost = (
+    pricing.freshInputTokens(tokens, semantics) * price.input
+    + tokens.outputTokens * price.output
+    + pricing.cacheReadTokensFor(tokens, semantics) * price.cacheRead
+    + tokens.cacheCreationTokens * price.cacheWrite
+  ) / 1e6;
+  assert.equal(queueCost, pricing.estimateCostUsd(MODELS, "gpt-5.2", tokens, semantics));
+  // Guard the regression directly: filing the aliased share under input would
+  // bill 1000 input tokens instead of 100 + 900 cache reads.
+  assert.notEqual(queueCost, (1000 * price.input + 100 * price.output) / 1e6);
+});
+
 test("pricing lookup strips date suffixes from snapshot model ids", () => {
   const models = { "claude-sonnet-4-5": { name: "Claude Sonnet 4.5", provider: "anthropic", input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 } };
   assert.equal(pricing.findPricing(models, "claude-sonnet-4-5-20250929"), models["claude-sonnet-4-5"]);

@@ -274,12 +274,29 @@ function isReasoningSeparate(executorType, model) {
   return /^gemini/i.test(String(model ?? ""));
 }
 
+/**
+ * Cache-read tokens for a normalized row. Core rows alias cache reads into
+ * `cachedTokens` for the inclusive (OpenAI/Gemini) families, so fall back to
+ * it only there — on a Claude row `cachedTokens` can carry cache *creation*
+ * instead, and billing it at the read rate would be wrong.
+ *
+ * Both the queue fold and the cost estimate must resolve this the same way:
+ * the fold subtracts this amount from input and files it under
+ * `cached_input_tokens`, and `computeRowCost` on the Tokens page then bills
+ * the same split the Requests tab shows.
+ */
+function cacheReadTokensFor(tokens, { executorType, model, inputInclusive } = {}) {
+  const inclusive = typeof inputInclusive === "boolean" ? inputInclusive : isInputInclusive(executorType, model);
+  return tokenNumber(tokens?.cacheReadTokens) || (inclusive ? tokenNumber(tokens?.cachedTokens) : 0);
+}
+
 /** Fresh (billable) input for a normalized token row. */
 function freshInputTokens(tokens, { executorType, model, inputInclusive } = {}) {
   const inclusive = typeof inputInclusive === "boolean" ? inputInclusive : isInputInclusive(executorType, model);
   const input = tokenNumber(tokens?.inputTokens);
   if (!inclusive) return input;
-  return Math.max(0, input - tokenNumber(tokens?.cacheReadTokens) - tokenNumber(tokens?.cacheCreationTokens));
+  const cacheRead = cacheReadTokensFor(tokens, { executorType, model, inputInclusive: inclusive });
+  return Math.max(0, input - cacheRead - tokenNumber(tokens?.cacheCreationTokens));
 }
 
 // ---------------------------------------------------------------------------
@@ -328,8 +345,8 @@ function estimateCostUsd(models, model, tokens, { inputInclusive, executorType }
   const outputTokens = tokenNumber(tokens?.outputTokens);
   const reasoningTokens = tokenNumber(tokens?.reasoningTokens);
   // Core rows alias cache reads into cachedTokens for the inclusive families;
-  // fall back to it only there (for Claude it can alias cache creation).
-  const cacheReadTokens = tokenNumber(tokens?.cacheReadTokens) || (inclusive ? tokenNumber(tokens?.cachedTokens) : 0);
+  // resolved by cacheReadTokensFor so the queue fold bills the same split.
+  const cacheReadTokens = cacheReadTokensFor(tokens, { executorType, model, inputInclusive: inclusive });
   const cacheCreationTokens = tokenNumber(tokens?.cacheCreationTokens);
   if (inputTokens + outputTokens + reasoningTokens + cacheReadTokens + cacheCreationTokens === 0) return null;
   const billableInput = inclusive
@@ -356,6 +373,7 @@ module.exports = {
   refreshPricingSnapshot,
   isInputInclusive,
   isReasoningSeparate,
+  cacheReadTokensFor,
   freshInputTokens,
   pricingLookupCandidates,
   findPricing,

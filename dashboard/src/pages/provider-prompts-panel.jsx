@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { FileText, Import, Pencil, Plus, Trash2 } from "lucide-react";
 import { copy } from "../lib/copy";
-import { promptsApi } from "../lib/provider-switch-api";
+import { piPromptFilesApi, promptsApi } from "../lib/provider-switch-api";
 import { Button, Card, ConfirmModal } from "../ui/components";
 import { ModalFrame } from "../ui/components/ModalFrame";
 import { showToast } from "../ui/components/Toast";
@@ -153,6 +153,8 @@ export function ProviderPromptsPanel() {
         ) : null}
         {loadError ? <p className="mt-2 text-xs text-red-600 dark:text-red-400">{loadError}</p> : null}
       </Card>
+
+      {app === "pi" ? <PiNativePromptFiles /> : null}
 
       {prompts !== null && prompts.length === 0 ? (
         <Card>
@@ -329,6 +331,190 @@ function PromptDialog({ open, app, editing, busy, onClose, onSaved }) {
         <div className="flex items-center justify-end gap-2 border-t border-oai-gray-100 pt-3 dark:border-oai-gray-800">
           <Button variant="secondary" size="sm" disabled={busy || saving} onClick={onClose}>{copy("pswitch.action.cancel")}</Button>
           <Button size="sm" disabled={!canSave} onClick={() => void save()}>{copy("pswitch.action.save")}</Button>
+        </div>
+      </div>
+    </ModalFrame>
+  );
+}
+
+const PI_FILES = [
+  { kind: "system_append", titleKey: "pswitch.pi_files.append_title", hintKey: "pswitch.pi_files.append_hint", recommended: true },
+  { kind: "system_override", titleKey: "pswitch.pi_files.override_title", hintKey: "pswitch.pi_files.override_hint", recommended: false },
+];
+
+// pi native prompt resources (cc-switch's PiSystemPromptFiles): SYSTEM.md /
+// APPEND_SYSTEM.md live next to AGENTS.md; the file existing = active,
+// deleting it = off. Saves are CAS-guarded by the content revision so an
+// external edit is reported instead of clobbered.
+function PiNativePromptFiles() {
+  const [files, setFiles] = useState(null);
+  const [loadError, setLoadError] = useState("");
+  const [editingKind, setEditingKind] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+
+  const load = useCallback(async () => {
+    try {
+      const results = await Promise.all(PI_FILES.map(async (entry) => {
+        const res = await piPromptFilesApi.get(entry.kind);
+        return res.file;
+      }));
+      setFiles(results);
+      setLoadError("");
+    } catch (error) {
+      setFiles(null);
+      setLoadError(error instanceof Error ? error.message : String(error));
+    }
+  }, []);
+
+  useEffect(() => { void load(); }, [load]);
+
+  return (
+    <Card>
+      <p className="text-sm font-semibold">{copy("pswitch.pi_files.title")}</p>
+      <p className="mt-1 text-xs text-oai-gray-500 dark:text-oai-gray-400">{copy("pswitch.pi_files.subtitle")}</p>
+      {loadError ? <p className="mt-2 text-xs text-red-600 dark:text-red-400">{loadError}</p> : null}
+      <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+        {PI_FILES.map((entry) => {
+          const file = (files || []).find((item) => item.kind === entry.kind);
+          return (
+            <div
+              key={entry.kind}
+              className={`rounded-xl border px-3 py-2.5 ${file?.exists
+                ? "border-oai-brand-500/60 bg-oai-brand-50/40 dark:border-oai-brand-500/40 dark:bg-oai-brand-950/20"
+                : "border-oai-gray-200 dark:border-oai-gray-800"}`}
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <strong className="min-w-0 truncate text-sm font-medium text-oai-black dark:text-white">
+                  {copy(entry.titleKey)}
+                </strong>
+                {file?.exists ? (
+                  <span className="shrink-0 rounded-full bg-oai-brand-100 px-2 py-0.5 text-xs font-medium text-oai-brand-700 dark:bg-oai-brand-950 dark:text-oai-brand-300">
+                    {copy("pswitch.pi_files.active_badge")}
+                  </span>
+                ) : (
+                  <span className="shrink-0 rounded-full bg-oai-gray-100 px-2 py-0.5 text-xs text-oai-gray-500 dark:bg-oai-gray-800 dark:text-oai-gray-400">
+                    {copy("pswitch.pi_files.off_badge")}
+                  </span>
+                )}
+                {entry.recommended ? (
+                  <span className="shrink-0 rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
+                    {copy("pswitch.pi_files.recommended_badge")}
+                  </span>
+                ) : null}
+              </div>
+              <p className="mt-1 text-xs text-oai-gray-500 dark:text-oai-gray-400">{copy(entry.hintKey)}</p>
+              <div className="mt-2 flex items-center gap-1.5">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={!file}
+                  onClick={() => setEditingKind(entry.kind)}
+                >
+                  {file?.exists ? copy("pswitch.pi_files.edit") : copy("pswitch.pi_files.create")}
+                </Button>
+                {file?.exists ? (
+                  <Button variant="ghost" size="sm" onClick={() => setDeleteTarget(file)}>
+                    {copy("pswitch.pi_files.remove")}
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {editingKind ? (
+        <PiFileEditor
+          kind={editingKind}
+          file={(files || []).find((item) => item.kind === editingKind)}
+          onClose={() => setEditingKind(null)}
+          onSaved={() => { setEditingKind(null); void load(); }}
+        />
+      ) : null}
+      <ConfirmModal
+        open={deleteTarget !== null}
+        title={copy("pswitch.pi_files.remove_confirm_title")}
+        description={copy("pswitch.pi_files.remove_confirm_hint", { file: deleteTarget ? deleteTarget.path.split("/").pop() : "" })}
+        confirmLabel={copy("pswitch.pi_files.remove")}
+        cancelLabel={copy("pswitch.action.cancel")}
+        destructive
+        onConfirm={async () => {
+          if (!deleteTarget) return;
+          try {
+            await piPromptFilesApi.remove(deleteTarget.kind, deleteTarget.revision);
+            showToast({ title: copy("pswitch.pi_files.removed_toast") });
+          } catch (error) {
+            showToast({ title: `${copy("pswitch.pi_files.error_toast")} — ${error instanceof Error ? error.message : String(error)}` });
+          }
+          setDeleteTarget(null);
+          void load();
+        }}
+        onCancel={() => setDeleteTarget(null)}
+      />
+    </Card>
+  );
+}
+
+function PiFileEditor({ kind, file, onClose, onSaved }) {
+  const meta = PI_FILES.find((entry) => entry.kind === kind);
+  const [content, setContent] = useState(file?.content || "");
+  const [loaded, setLoaded] = useState(Boolean(file));
+  const [revision, setRevision] = useState(file?.revision ?? null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let disposed = false;
+    if (!file) {
+      piPromptFilesApi.get(kind).then((res) => {
+        if (disposed) return;
+        setContent(res.file.content || "");
+        setRevision(res.file.revision);
+        setLoaded(true);
+      }).catch(() => { if (!disposed) setLoaded(true); });
+    }
+    return () => { disposed = true; };
+  }, [kind, file]);
+
+  const save = async () => {
+    if (saving || !content.trim()) return;
+    setSaving(true);
+    setError("");
+    try {
+      await piPromptFilesApi.replace(kind, content, revision);
+      showToast({ title: copy("pswitch.pi_files.saved_toast") });
+      onSaved();
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : String(requestError));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <ModalFrame open onClose={onClose} label={copy(meta?.titleKey || "pswitch.pi_files.title")}>
+      <div className="flex min-w-0 flex-col gap-3">
+        <h2 className="text-sm font-semibold">{copy(meta?.titleKey || "pswitch.pi_files.title")}</h2>
+        {!meta?.recommended ? (
+          <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+            {copy("pswitch.pi_files.override_warning")}
+          </p>
+        ) : null}
+        <textarea
+          aria-label={copy(meta?.titleKey || "pswitch.pi_files.title")}
+          rows={14}
+          spellCheck={false}
+          value={content}
+          onChange={(event) => setContent(event.currentTarget.value)}
+          disabled={!loaded}
+          className="w-full resize-y rounded-lg border border-oai-gray-200 dark:border-oai-gray-700 bg-oai-gray-50 dark:bg-oai-gray-950 p-3 font-mono text-xs leading-relaxed focus:outline-none focus:ring-2 focus:ring-oai-brand-500"
+        />
+        {error ? <p className="text-xs text-red-600 dark:text-red-400">{error}</p> : null}
+        <p className="text-xs text-oai-gray-400 dark:text-oai-gray-500">{copy("pswitch.pi_files.editor_hint")}</p>
+        <div className="flex items-center justify-end gap-2 border-t border-oai-gray-100 pt-3 dark:border-oai-gray-800">
+          <Button variant="secondary" size="sm" disabled={saving} onClick={onClose}>{copy("pswitch.action.cancel")}</Button>
+          <Button size="sm" disabled={saving || !loaded || !content.trim()} onClick={() => void save()}>
+            {copy("pswitch.action.save")}
+          </Button>
         </div>
       </div>
     </ModalFrame>

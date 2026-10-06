@@ -51,6 +51,9 @@ const CLAUDE_EXCLUSIVE_ENV = [
   "CLAUDE_CODE_ALWAYS_ENABLE_EFFORT",
   "CLAUDE_CODE_EXTRA_BODY",
   "CLAUDE_CODE_ENABLE_FINE_GRAINED_TOOL_STREAMING",
+  // Claude Code 2.1.281 auto-mode classifier only works on official
+  // endpoints; gateway sessions need this at 0 or they get blocked.
+  "CLAUDE_CODE_AUTO_MODE_SERVER",
   // Window values dictated by the upstream model.
   "CLAUDE_CODE_MAX_CONTEXT_TOKENS",
   "CLAUDE_CODE_AUTO_COMPACT_WINDOW",

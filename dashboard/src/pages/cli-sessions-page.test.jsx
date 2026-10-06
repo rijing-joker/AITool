@@ -84,3 +84,51 @@ it("shows the empty state when the app has no sessions", async () => {
   expect(screen.getByRole("status")).toHaveTextContent("clisessions.count");
   vi.unstubAllGlobals();
 });
+
+it("renders thinking rows, auto-opens search hits inside collapsed blocks, and exports markdown", async () => {
+  const messages = [
+    { role: "assistant", content: "Working.", thinking: "secret-needle in reasoning", ts: 1_700_000_000_000 },
+    { role: "assistant", content: "", ts: 1_700_000_000_001, toolCalls: [{ id: "t1", name: "Read", input: { path: "needle-file.js" } }] },
+  ];
+  vi.stubGlobal("fetch", vi.fn(async (url) => {
+    const path = String(url);
+    if (path === "/api/cli-sessions") return { json: async () => ({ ok: true, apps: [{ id: "claude", available: true }] }) };
+    if (path.startsWith("/api/cli-sessions/list")) return { json: async () => ({ ok: true, app: "claude", sessions: [session] }) };
+    if (path.startsWith("/api/cli-sessions/read")) return { json: async () => ({ ok: true, app: "claude", messages, usage: null }) };
+    throw new Error(`unexpected fetch: ${path}`);
+  }));
+
+  const urls = [];
+  vi.stubGlobal("URL", { ...URL, createObjectURL: (blob) => { urls.push(blob); return "blob:x"; }, revokeObjectURL: () => {} });
+  const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+
+  render(<CliSessionsPage />);
+  await screen.findByText("Fix the login bug");
+  fireEvent.click(screen.getByText("Fix the login bug"));
+  // Thinking row renders as a collapsed block with its label.
+  const thinking = await screen.findByText("clisessions.thinking");
+  expect(thinking.closest("details").open).toBe(false);
+
+  // Searching for a term that only appears inside the collapsed blocks opens them.
+  const search = screen.getByLabelText("clisessions.search");
+  fireEvent.change(search, { target: { value: "needle" } });
+  await waitFor(() => {
+    const details = screen.getByText("clisessions.thinking").closest("details");
+    expect(details.open).toBe(true);
+  });
+  expect(screen.getAllByText(/needle/).length).toBeGreaterThanOrEqual(2);
+  // The tool call whose payload contains the hit is open too (its summary
+  // "Read" sits inside the same row as the highlighted payload).
+  const toolDetails = screen.getByText("Read").closest("details");
+  expect(toolDetails.open).toBe(true);
+  expect(toolDetails.querySelector("mark")).not.toBeNull();
+
+  // Export produces a text/markdown blob with role sections.
+  fireEvent.click(screen.getByLabelText("clisessions.export"));
+  await waitFor(() => expect(urls.length).toBe(1));
+  expect(urls[0].type).toBe("text/markdown;charset=utf-8");
+  // jsdom Blob lacks .text() — size > 0 is the content smoke check here.
+  expect(urls[0].size).toBeGreaterThan(0);
+  clickSpy.mockRestore();
+  vi.unstubAllGlobals();
+});

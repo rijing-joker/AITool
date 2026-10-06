@@ -1,11 +1,23 @@
 import React, { useCallback, useEffect, useId, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, Brain, ChevronLeft, ChevronRight, Columns3, Database, Download, RefreshCw, RotateCcw, TriangleAlert, Zap } from "lucide-react";
+import { ArrowDown, ArrowUp, Brain, ChevronLeft, ChevronRight, Columns3, Database, Download, RefreshCw, RotateCcw, Settings2, TriangleAlert, Zap } from "lucide-react";
 import { copy } from "../lib/copy";
 import { formatCostUsd } from "../lib/cost-format";
 import { Card } from "../ui/components";
+import { UsageHeatmap } from "./usage-heatmap";
 import { ModalFrame } from "../ui/components/ModalFrame";
 import { showToast } from "../ui/components/Toast";
 import { useVisiblePolling } from "../hooks/use-visible-polling";
+import { sendBudgetAlerts } from "../lib/budget-alerts";
+import { getLocalApiAuthHeaders } from "../lib/local-api-auth";
+import {
+  managementApi,
+  providerGroupsApi,
+  providerHeadersFromRecord,
+  providerLoadDefinitions,
+  providerModelType,
+  replayRecordViaCore,
+  rowFromRecord,
+} from "../lib/easy-providers";
 
 // ---------------------------------------------------------------------------
 // Requests tab (请求记录) — interaction ported from EasyCLIProxyAPI's
@@ -84,10 +96,11 @@ const EVENT_COLUMNS = [
   { key: "reasoning", labelKey: "proxy.requests.detail.reasoning", defaultWidth: 84, minWidth: 60 },
   { key: "cacheRate", labelKey: "proxy.requests.col.cacheRate", defaultWidth: 92, minWidth: 72 },
   { key: "ttft", labelKey: "proxy.requests.col.ttft", defaultWidth: 92, minWidth: 76 },
+  { key: "replay", labelKey: "proxy.requests.col.replay", defaultWidth: 96, minWidth: 76 },
 ];
 
 const DEFAULT_VISIBLE_COLUMNS = [
-  "time", "key", "source", "model", "result", "request", "latency", "speed", "total", "cache", "cost", "provider",
+  "time", "key", "source", "model", "result", "request", "latency", "speed", "total", "cache", "cost", "provider", "replay",
 ];
 
 // Defaults before the cost column joined. Seeds the migration marker so only
@@ -239,7 +252,61 @@ function MetricRow({ icon: Icon, tone, title, label, value }) {
   );
 }
 
-function EventCell({ record, column }) {
+// Per-record one-click retest: rebuilds a minimal same-protocol request and
+// sends it through the core's api-call with the record's auth index. The row
+// shows the upstream status + latency; the body excerpt rides on the title.
+function ReplayCell({ record, onReplay, state }) {
+  const eligible = Boolean((record.id ?? record.request_id)
+    && String(record.auth_index || record.authIndex || "").trim()
+    && String(record.response_model || record.model || "").trim());
+  if (!eligible) return <td className="px-2 py-2" />;
+  const running = state?.status === "running";
+  const title = running
+    ? copy("proxy.requests.replay.running")
+    : state?.status === "done"
+      ? `${copy("proxy.requests.replay.result", { status: state.statusCode ?? "?" })} ${state.bodyExcerpt || ""}`.trim()
+      : state?.status === "error"
+        ? `${copy("proxy.requests.replay.failed")}: ${state.error || ""}`
+        : copy("proxy.requests.replay.action");
+  return (
+    <td className="px-2 py-2 align-top">
+      {running ? (
+        <span className="inline-flex items-center gap-1 text-xs text-oai-gray-400" role="status">
+          <RefreshCw size={11} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
+          {copy("proxy.requests.replay.running")}
+        </span>
+      ) : state?.status === "done" ? (
+        <span
+          className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums ${
+            (state.statusCode ?? 0) >= 200 && (state.statusCode ?? 0) < 300
+              ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300"
+              : "bg-red-50 text-red-600 dark:bg-red-950/40 dark:text-red-400"
+          }`}
+          title={title}
+        >
+          {state.statusCode ?? "?"} · {(state.latencyMs / 1000).toFixed(1)}s
+        </span>
+      ) : state?.status === "error" ? (
+        <span className="inline-flex items-center rounded-full bg-red-50 px-1.5 py-0.5 text-[10px] font-medium text-red-600 dark:bg-red-950/40 dark:text-red-400" title={title}>
+          {copy("proxy.requests.replay.failed")}
+        </span>
+      ) : (
+        <button
+          type="button"
+          onClick={() => onReplay(record)}
+          title={title}
+          aria-label={copy("proxy.requests.replay.action")}
+          className="inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-[10px] font-medium text-oai-gray-400 transition-colors hover:bg-oai-gray-100 hover:text-oai-gray-600 dark:hover:bg-oai-gray-800 dark:hover:text-oai-gray-300"
+        >
+          <Zap size={10} aria-hidden="true" />
+          {copy("proxy.requests.replay.action")}
+        </button>
+      )}
+    </td>
+  );
+}
+
+function EventCell({ record, column, onReplay, replayState }) {
   const tokens = record.tokens ?? {};
   switch (column.key) {
     case "time":
@@ -387,6 +454,8 @@ function EventCell({ record, column }) {
       return <td className="px-2 py-2 align-top text-xs tabular-nums" title={`${formatCount(tokens.outputTokens)} tokens`}>{formatTokens(tokens.outputTokens)}</td>;
     case "reasoning":
       return <td className="px-2 py-2 align-top text-xs tabular-nums" title={`${formatCount(tokens.reasoningTokens)} tokens`}>{formatTokens(tokens.reasoningTokens)}</td>;
+    case "replay":
+      return <ReplayCell record={record} onReplay={onReplay} state={replayState} />;
     default:
       return <td className="px-2 py-2" />;
   }
@@ -498,6 +567,187 @@ function exportCsv(records, page) {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+function BudgetEditDialog({ draft, setDraft, saving, onClose, onSave }) {
+  // Read currentTarget synchronously — React nulls it before a setState
+  // updater runs, and StrictMode replays updaters.
+  const field = (key) => ({
+    value: draft[key],
+    onChange: (event) => {
+      const { value } = event.currentTarget;
+      setDraft((current) => ({ ...current, [key]: value }));
+    },
+    inputMode: "decimal",
+    "aria-label": copy(`budget.edit.${key === "daily" ? "daily" : key === "monthly" ? "monthly" : "threshold"}`),
+    className: "h-10 w-32 rounded-lg border border-oai-gray-200 bg-transparent px-2 text-sm tabular-nums dark:border-oai-gray-700",
+  });
+  return (
+    <ModalFrame open onClose={onClose} label={copy("budget.edit.title")}>
+      <div className="flex items-center justify-between border-b border-oai-gray-100 px-5 py-3.5 dark:border-oai-gray-800">
+        <h2 className="text-sm font-semibold">{copy("budget.edit.title")}</h2>
+        <button type="button" onClick={onClose} aria-label={copy("proxy.upstream.common.close")} className="rounded-lg p-1.5 text-oai-gray-500 hover:bg-oai-gray-100 dark:hover:bg-oai-gray-800">
+          <span aria-hidden="true" className="text-base leading-none">×</span>
+        </button>
+      </div>
+      <div className="space-y-3 px-5 py-4 text-sm">
+        <label className="flex min-h-8 items-center gap-2">
+          <input
+            type="checkbox"
+            checked={draft.enabled}
+            onChange={(event) => {
+              const { checked } = event.currentTarget;
+              setDraft((current) => ({ ...current, enabled: checked }));
+            }}
+            className="h-4 w-4 accent-oai-brand-600"
+          />
+          {copy("budget.edit.enable")}
+        </label>
+        <div className="flex items-center justify-between gap-4">
+          <span>{copy("budget.edit.daily")}</span>
+          <input {...field("daily")} />
+        </div>
+        <div className="flex items-center justify-between gap-4">
+          <span>{copy("budget.edit.monthly")}</span>
+          <input {...field("monthly")} />
+        </div>
+        <div className="flex items-center justify-between gap-4">
+          <span>{copy("budget.edit.threshold")}</span>
+          <input {...field("threshold")} />
+        </div>
+        <p className="text-xs text-oai-gray-400 dark:text-oai-gray-500">{copy("budget.edit.hint")}</p>
+      </div>
+      <div className="flex justify-end gap-2 border-t border-oai-gray-100 px-5 py-3 dark:border-oai-gray-800">
+        <button type="button" onClick={onClose} className="min-h-10 rounded-lg border border-oai-gray-200 px-3 font-medium hover:bg-oai-gray-50 sm:min-h-0 dark:border-oai-gray-700 dark:hover:bg-oai-gray-800">{copy("shared.action.cancel")}</button>
+        <button type="button" onClick={onSave} disabled={saving} className="min-h-10 rounded-lg bg-oai-black px-3 font-medium text-white hover:bg-oai-gray-800 disabled:opacity-50 sm:min-h-0 dark:bg-white dark:text-oai-black dark:hover:bg-oai-gray-200">{copy("shared.action.save")}</button>
+      </div>
+    </ModalFrame>
+  );
+}
+
+// Budget + burn-rate strip: polls /api/proxy/budget (60s), surfaces threshold
+// alerts as a banner and native/web notifications, and edits the budget
+// settings persisted in the proxy settings.json.
+function BudgetBar() {
+  const [budget, setBudget] = useState(null);
+  const [pricingAvailable, setPricingAvailable] = useState(true);
+  const [editOpen, setEditOpen] = useState(false);
+  const [draft, setDraft] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async (signal) => {
+    try {
+      const data = await fetch("/api/proxy/budget", { cache: "no-store", signal }).then((response) => response.json());
+      if (signal.aborted) return true;
+      if (data?.ok) {
+        setBudget(data.budget);
+        setPricingAvailable(data.pricingAvailable !== false);
+        sendBudgetAlerts(data.budget);
+      }
+    } catch { /* offline or server restarting; the poll retries */ }
+    return true;
+  }, []);
+  const refreshBudget = useVisiblePolling(load, 60_000);
+
+  const openEdit = () => {
+    const source = budget?.budgets ?? {};
+    setDraft({
+      enabled: source.enabled === true,
+      daily: source.dailyLimitUsd ? String(source.dailyLimitUsd) : "",
+      monthly: source.monthlyLimitUsd ? String(source.monthlyLimitUsd) : "",
+      threshold: String(source.alertThresholdPct || 80),
+    });
+    setEditOpen(true);
+  };
+
+  const save = async () => {
+    if (!draft || saving) return;
+    setSaving(true);
+    try {
+      const headers = await getLocalApiAuthHeaders();
+      const response = await fetch("/api/proxy/budget", {
+        method: "PUT",
+        headers: { ...headers, "content-type": "application/json" },
+        body: JSON.stringify({
+          budgets: {
+            enabled: draft.enabled,
+            dailyLimitUsd: Number(draft.daily) || 0,
+            monthlyLimitUsd: Number(draft.monthly) || 0,
+            alertThresholdPct: Number(draft.threshold) || 80,
+          },
+        }),
+      });
+      const data = await response.json().catch(() => null);
+      if (!data?.ok) throw new Error(data?.error || `HTTP ${response.status}`);
+      showToast({ title: copy("budget.saved"), type: "success" });
+      setEditOpen(false);
+      refreshBudget();
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      showToast({ title: `${copy("budget.save_failed")}: ${detail}`, type: "error" });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const config = budget?.budgets ?? null;
+  const windows = config?.enabled && budget
+    ? [budget.daily && { which: "daily", ...budget.daily }, budget.monthly && { which: "monthly", ...budget.monthly }].filter(Boolean)
+    : [];
+  const alerted = windows.filter((entry) => entry.level === "warning" || entry.level === "exceeded");
+  const exceeded = alerted.some((entry) => entry.level === "exceeded");
+
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-oai-gray-500 dark:text-oai-gray-400">
+          {config?.enabled && budget ? (
+            <>
+              <span className="tabular-nums">{copy("budget.banner.today", { value: formatCostUsd(budget.todayUsd) ?? "$0" })}</span>
+              <span className="tabular-nums">{copy("budget.banner.month", { value: formatCostUsd(budget.monthUsd) ?? "$0" })}</span>
+              <span
+                className="tabular-nums"
+                title={copy("budget.banner.burn_hint", { value: formatCostUsd(budget.burn?.projectedTodayUsd) ?? "—" })}
+              >
+                {copy("budget.banner.burn", { value: formatCostUsd(budget.burn?.lastHourUsd) ?? "$0" })}
+              </span>
+              {!pricingAvailable ? <span>{copy("budget.banner.pricing_missing")}</span> : null}
+            </>
+          ) : null}
+        </div>
+        <button
+          type="button"
+          onClick={openEdit}
+          disabled={budget === null}
+          title={copy("budget.edit.title")}
+          aria-label={copy("budget.edit.title")}
+          className="inline-flex h-10 sm:h-8 items-center gap-1.5 rounded-lg border border-oai-gray-200 px-2.5 font-medium hover:bg-oai-gray-50 disabled:opacity-50 dark:border-oai-gray-700 dark:hover:bg-oai-gray-800"
+        >
+          <Settings2 size={13} aria-hidden="true" />
+          <span className="hidden sm:inline">{copy("budget.edit.title")}</span>
+        </button>
+      </div>
+      {alerted.length > 0 ? (
+        <div
+          role="alert"
+          className={`flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg px-3 py-2 text-xs font-medium ${
+            exceeded
+              ? "bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300"
+              : "bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300"
+          }`}
+        >
+          {alerted.map((entry) => (
+            <span key={entry.which} className="tabular-nums">
+              {copy(`budget.banner.${entry.which}_${entry.level === "exceeded" ? "exceeded" : "warning"}`, { pct: entry.pct })}
+            </span>
+          ))}
+        </div>
+      ) : null}
+      {editOpen && draft ? (
+        <BudgetEditDialog draft={draft} setDraft={setDraft} saving={saving} onClose={() => setEditOpen(false)} onSave={save} />
+      ) : null}
+    </div>
+  );
+}
+
 export function RequestsTab() {
   const [records, setRecords] = useState(null);
   const [stats, setStats] = useState(null);
@@ -515,6 +765,7 @@ export function RequestsTab() {
   const [query, setQuery] = useState({ model: "", provider: "" });
 
   const [widths, setWidths] = useState(loadColumnWidths);
+  const widthsRef = useRef(widths);
   const [visibleColumns, setVisibleColumns] = useState(loadVisibleColumns);
   const [columnDialogOpen, setColumnDialogOpen] = useState(false);
   const [draftColumns, setDraftColumns] = useState(visibleColumns);
@@ -534,14 +785,28 @@ export function RequestsTab() {
   const clearFilters = () => { setModel(""); setProvider(""); setQuery({ model: "", provider: "" }); setResult("all"); setRange("24h"); setPage(0); };
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
+  // Page/pageSize-only loads skip the stats recompute: the filtered
+  // aggregation is independent of the slice (easy ffdc53c "refresh filter
+  // options only on range change", adapted — stats ride the records
+  // response here). Filter-scope changes and polls (neither scope nor slice
+  // changed) always recompute. A filter change that also resets the page
+  // still recomputes because the scope differs.
+  const lastLoadedRef = useRef(null);
+
   const load = useCallback(async (signal) => {
     if (invalidRange || searchPending) { setLoading(false); return false; }
+    const scopeKey = JSON.stringify([result, query.model, query.provider, range, customStart, customEnd]);
+    const previous = lastLoadedRef.current;
+    const scopeChanged = !previous || previous.scopeKey !== scopeKey;
+    const sliceChanged = previous && (previous.page !== page || previous.pageSize !== pageSize);
+    const includeStats = scopeChanged || !sliceChanged ? "1" : "0";
+    lastLoadedRef.current = { scopeKey, page, pageSize };
     setLoading(true);
     try {
       const params = new URLSearchParams({
         page: String(page),
         pageSize: String(pageSize),
-        includeStats: "1",
+        includeStats,
         result,
         ...(query.model ? { model: query.model } : {}),
         ...(query.provider ? { provider: query.provider } : {}),
@@ -553,7 +818,7 @@ export function RequestsTab() {
       if (!data?.ok) throw new Error(data?.error || `HTTP records`);
       setRecords(data.records);
       setTotal(data.total);
-      setStats(data.stats ?? null);
+      if (data.stats) setStats(data.stats);
       setError(null);
       return true;
     } catch (e) {
@@ -567,11 +832,59 @@ export function RequestsTab() {
 
   const refreshRecords = useVisiblePolling(load, 10_000);
 
+  // Request replay: provider group rows (base-url / protocol lookup) are
+  // fetched fresh per retest — local requests are cheap and group configs
+  // change without this tab knowing.
+  const [replayStates, setReplayStates] = useState({});
+  const loadProviderRows = useCallback(async () => {
+    const responses = await Promise.allSettled(
+      providerLoadDefinitions.map(async (definition) => ({
+        section: definition.section,
+        records: await providerGroupsApi.get(definition.section),
+      })),
+    );
+    return responses.flatMap((result) => (result.status === "fulfilled"
+      ? result.value.records.map((record, index) => rowFromRecord(result.value.section, record, index))
+      : []));
+  }, []);
+
+  const handleReplay = useCallback(async (record) => {
+    const id = record.id ?? record.request_id;
+    if (!id || replayStates[id]?.status === "running") return;
+    setReplayStates((current) => ({ ...current, [id]: { status: "running" } }));
+    try {
+      const rows = await loadProviderRows();
+      const authIndex = String(record.auth_index || record.authIndex || "").trim();
+      const row = rows.find((candidate) => String(candidate.authIndex || "").trim() === authIndex);
+      if (!row) {
+        setReplayStates((current) => ({ ...current, [id]: { status: "error", error: copy("proxy.requests.replay.no_credential") } }));
+        return;
+      }
+      const result = await replayRecordViaCore(record, row);
+      if (!result.ok) {
+        setReplayStates((current) => ({ ...current, [id]: { status: "error", error: result.error || "failed" } }));
+        return;
+      }
+      setReplayStates((current) => ({
+        ...current,
+        [id]: {
+          status: "done",
+          statusCode: result.statusCode,
+          latencyMs: result.latencyMs,
+          bodyExcerpt: result.bodyExcerpt || "",
+        },
+      }));
+    } catch (error) {
+      setReplayStates((current) => ({ ...current, [id]: { status: "error", error: error instanceof Error ? error.message : String(error) } }));
+    }
+  }, [loadProviderRows, replayStates]);
+
   const refresh = async () => {
     if (await refreshRecords()) showToast({ title: copy("proxy.requests.refreshed"), type: "success" });
   };
 
   const persistWidths = (next) => {
+    widthsRef.current = next;
     setWidths(next);
     try { localStorage.setItem(WIDTHS_STORAGE_KEY, JSON.stringify(next)); } catch {}
   };
@@ -585,14 +898,14 @@ export function RequestsTab() {
   const resetSingleColumn = (key) => {
     const column = EVENT_COLUMNS.find((entry) => entry.key === key);
     if (!column) return;
-    persistWidths((current) => ({ ...current, [key]: column.defaultWidth }));
+    persistWidths({ ...widthsRef.current, [key]: column.defaultWidth });
   };
 
   const handleResizeKeyDown = (key, event) => {
     const column = EVENT_COLUMNS.find((entry) => entry.key === key);
     if (!column) return;
     const step = event.shiftKey ? 25 : 10;
-    const current = widths[key] ?? column.defaultWidth;
+    const current = widthsRef.current[key] ?? column.defaultWidth;
     const next = event.key === "Home"
       ? column.defaultWidth
       : event.key === "ArrowLeft"
@@ -602,7 +915,7 @@ export function RequestsTab() {
           : null;
     if (next === null) return;
     event.preventDefault();
-    persistWidths({ ...widths, [key]: next });
+    persistWidths({ ...widthsRef.current, [key]: next });
   };
 
   const handleResizeStart = (key, event) => {
@@ -611,26 +924,51 @@ export function RequestsTab() {
     const column = EVENT_COLUMNS.find((entry) => entry.key === key);
     const minWidth = column?.minWidth ?? 50;
     const startX = event.clientX;
-    const startWidth = widths[key] ?? column?.defaultWidth ?? 100;
+    const startWidth = widthsRef.current[key] ?? column?.defaultWidth ?? 100;
+    // Paint straight into the table DOM and commit state once on release —
+    // a setState per pointermove re-renders the whole table per frame
+    // (easy ffdc53c).
+    const table = event.currentTarget.closest("table");
+    const colElement = table?.querySelector(`col[data-column="${key}"]`) ?? null;
+    const header = event.currentTarget.closest("th");
     setResizingCol(key);
     document.body.classList.add("table-col-resizing");
     let currentWidth = startWidth;
+    let frame = 0;
+
+    const paintWidth = (nextWidth) => {
+      widthsRef.current = { ...widthsRef.current, [key]: nextWidth };
+      if (colElement) colElement.style.width = `${nextWidth}px`;
+      if (header) header.style.width = `${nextWidth}px`;
+      if (table) {
+        const total = columns.reduce((sum, entry) => sum + (widthsRef.current[entry.key] ?? entry.defaultWidth), 0);
+        table.style.width = `${total}px`;
+      }
+    };
 
     const onPointerMove = (moveEvent) => {
       currentWidth = Math.min(MAX_COLUMN_WIDTH, Math.max(minWidth, Math.round(startWidth + moveEvent.clientX - startX)));
-      setWidths((prev) => ({ ...prev, [key]: currentWidth }));
+      if (frame) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        paintWidth(currentWidth);
+      });
     };
     const cleanup = () => {
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", onPointerUp);
       window.removeEventListener("pointercancel", onPointerUp);
+      if (frame) window.cancelAnimationFrame(frame);
       document.body.classList.remove("table-col-resizing");
       resizeCleanupRef.current = null;
     };
     const onPointerUp = () => {
+      paintWidth(currentWidth);
       cleanup();
       setResizingCol(null);
-      persistWidths({ ...widths, [key]: currentWidth });
+      const next = widthsRef.current;
+      setWidths(next);
+      try { localStorage.setItem(WIDTHS_STORAGE_KEY, JSON.stringify(next)); } catch {}
     };
     window.addEventListener("pointermove", onPointerMove);
     window.addEventListener("pointerup", onPointerUp);
@@ -640,7 +978,7 @@ export function RequestsTab() {
 
   const columns = EVENT_COLUMNS.filter((column) => visibleColumns.includes(column.key));
   const widthsCustomized = EVENT_COLUMNS.some((column) => widths[column.key] !== column.defaultWidth);
-  const tableWidth = columns.reduce((sum, column) => sum + (widths[column.key] ?? column.defaultWidth), 0);
+  const tableWidth = columns.reduce((sum, column) => sum + (widthsRef.current[column.key] ?? widths[column.key] ?? column.defaultWidth), 0);
   const startRecord = total > 0 ? page * pageSize + 1 : 0;
   const endRecord = Math.min((page + 1) * pageSize, total);
 
@@ -805,6 +1143,7 @@ export function RequestsTab() {
       ) : null}
 
       {invalidRange ? <p role="alert" className="text-sm text-amber-700 dark:text-amber-300">{copy("proxy.requests.range.invalid")}</p> : null}
+      <BudgetBar />
       {stats ? (
         <div className="grid grid-cols-3 gap-2 lg:grid-cols-6">
           <StatTile label={copy("proxy.metric.requests")} value={fullTokens.format(stats.total_requests)} />
@@ -822,6 +1161,8 @@ export function RequestsTab() {
         </div>
       ) : null}
 
+      <UsageHeatmap />
+
       <Card className="overflow-hidden" bodyClassName="!p-0">
         {records === null ? (
           <div className="px-5 py-8 text-center text-sm text-oai-gray-400">{error || (invalidRange ? copy("proxy.requests.range.invalid") : copy("proxy.loading"))}</div>
@@ -835,14 +1176,14 @@ export function RequestsTab() {
             <div ref={tableWrapRef} className="overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" tabIndex={0} role="region" aria-label={copy("proxy.requests.subtitle", { total: fullTokens.format(total) })}>
               <table className="border-separate border-spacing-0 text-sm" style={{ width: `${tableWidth}px` }}>
                 <colgroup>
-                  {columns.map((column) => <col key={column.key} style={{ width: `${widths[column.key] ?? column.defaultWidth}px` }} />)}
+                  {columns.map((column) => <col key={column.key} data-column={column.key} style={{ width: `${widthsRef.current[column.key] ?? widths[column.key] ?? column.defaultWidth}px` }} />)}
                 </colgroup>
                 <thead>
                   <tr>
                     {columns.map((column) => {
                       const label = copy(column.labelKey);
                       return (
-                        <th key={column.key} className="relative border-b border-oai-gray-200 bg-oai-gray-50/60 px-2 py-2.5 text-left text-xs font-semibold text-oai-gray-500 dark:border-oai-gray-800 dark:bg-oai-gray-800/40 dark:text-oai-gray-400" style={{ width: `${widths[column.key] ?? column.defaultWidth}px` }}>
+                        <th key={column.key} className="relative border-b border-oai-gray-200 bg-oai-gray-50/60 px-2 py-2.5 text-left text-xs font-semibold text-oai-gray-500 dark:border-oai-gray-800 dark:bg-oai-gray-800/40 dark:text-oai-gray-400" style={{ width: `${widthsRef.current[column.key] ?? widths[column.key] ?? column.defaultWidth}px` }}>
                           <span className="block truncate" title={label}>{label}</span>
                           <div
                             role="separator"
@@ -851,7 +1192,7 @@ export function RequestsTab() {
                             aria-orientation="vertical"
                             aria-valuemin={column.minWidth}
                             aria-valuemax={MAX_COLUMN_WIDTH}
-                            aria-valuenow={widths[column.key] ?? column.defaultWidth}
+                            aria-valuenow={widthsRef.current[column.key] ?? widths[column.key] ?? column.defaultWidth}
                             onPointerDown={(event) => handleResizeStart(column.key, event)}
                             onDoubleClick={() => resetSingleColumn(column.key)}
                             onKeyDown={(event) => handleResizeKeyDown(column.key, event)}
@@ -866,7 +1207,7 @@ export function RequestsTab() {
                 <tbody>
                   {records.map((record, index) => (
                     <tr key={record.id ?? record.request_id ?? `${record.timestamp}-${index}`} className="odd:bg-white even:bg-oai-gray-50/40 dark:odd:bg-transparent dark:even:bg-oai-gray-900/30">
-                      {columns.map((column) => <EventCell key={column.key} record={record} column={column} />)}
+                      {columns.map((column) => <EventCell key={column.key} record={record} column={column} onReplay={(target) => void handleReplay(target)} replayState={replayStates[record.id ?? record.request_id]} />)}
                     </tr>
                   ))}
                 </tbody>

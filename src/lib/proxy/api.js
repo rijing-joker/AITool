@@ -138,6 +138,8 @@ function computeOverview(rows) {
 // ---------------------------------------------------------------------------
 
 const providerHealth = require("./provider-health");
+const balance = require("./balance");
+const budget = require("./budget");
 
 const REMARK_SECTIONS = new Set(["gemini-api-key", "codex-api-key", "claude-api-key", "openai-compatibility"]);
 
@@ -462,8 +464,17 @@ async function handleProxyApiRequest(req, res, url, ctx) {
     }
     if (p === "/api/proxy/pricing" && method === "GET") {
       // Read-only pricing sync state for the dashboard's cost column tooltip.
+      // include=1 also returns the per-model metadata (context window,
+      // reasoning efforts) keyed by normalized id for the codex catalog fill.
       const snapshot = await pricing.getPricingSnapshot(paths.pricingPath);
-      json(res, { ok: true, modelCount: snapshot.modelCount, fetchedAt: snapshot.fetchedAt, stale: snapshot.stale, syncing: snapshot.syncing });
+      const payload = { ok: true, modelCount: snapshot.modelCount, fetchedAt: snapshot.fetchedAt, stale: snapshot.stale, syncing: snapshot.syncing };
+      if (url.searchParams.get("include") === "1" && snapshot.models) {
+        payload.models = Object.fromEntries(Object.entries(snapshot.models).map(([id, entry]) => [
+          id,
+          { contextWindow: entry.contextWindow, maxOutputTokens: entry.maxOutputTokens, reasoningEfforts: entry.reasoningEfforts },
+        ]));
+      }
+      json(res, payload);
       return true;
     }
     if (p === "/api/proxy/usage/records") {
@@ -569,6 +580,41 @@ async function handleProxyApiRequest(req, res, url, ctx) {
       });
       return true;
     }
+    if (p === "/api/proxy/usage/heatmap") {
+      // Per-day totals for the 53-week usage heatmap (cc-switch cf2e6a7's
+      // surviving "All" range). Days are server-local (same convention as
+      // the TT base's aggregateByDay); cost follows the records route.
+      const rows = await recordStore.readRecords(paths.usageDir);
+      const byDay = new Map();
+      const dayKeyOf = (ts) => {
+        const date = new Date(ts);
+        return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+      };
+      for (const row of rows) {
+        const ts = recordTimestamp(row);
+        if (!Number.isFinite(ts)) continue;
+        const key = dayKeyOf(ts);
+        let entry = byDay.get(key);
+        if (!entry) {
+          entry = { date: key, requests: 0, tokens: 0, costUsd: 0 };
+          byDay.set(key, entry);
+        }
+        entry.requests += 1;
+        entry.tokens += Number(row?.tokens?.totalTokens) || 0;
+      }
+      const pricingSnapshot = await pricing.getPricingSnapshot(paths.pricingPath);
+      if (pricingSnapshot.models) {
+        for (const row of rows) {
+          if (row.failed || row.canceled) continue;
+          const ts = recordTimestamp(row);
+          if (!Number.isFinite(ts)) continue;
+          const cost = pricing.estimateCostUsd(pricingSnapshot.models, String(row.response_model || row.model || ""), row.tokens, { executorType: row.executor_type });
+          if (cost != null) byDay.get(dayKeyOf(ts)).costUsd += cost;
+        }
+      }
+      json(res, { ok: true, days: Array.from(byDay.values()).sort((a, b) => a.date.localeCompare(b.date)) });
+      return true;
+    }
 
     // --- management pass-through + provider remarks + health probes ---
     // The dashboard's port of EasyCLIProxyAPI's managementApi needs the core's
@@ -635,6 +681,43 @@ async function handleProxyApiRequest(req, res, url, ctx) {
       } catch (error) {
         json(res, { ok: false, error: error?.message || String(error) });
       }
+      return true;
+    }
+
+    if (p === "/api/proxy/balance-check" && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      json(res, await balance.checkBalance({
+        baseUrl: body.baseUrl,
+        apiKey: body.apiKey,
+        timeoutMs: body.timeoutMs,
+      }));
+      return true;
+    }
+
+    // --- budgets (AiTool-side settings, monitored over proxy records) ---
+    if (p === "/api/proxy/budget" && method === "PUT") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      const settings = config.readSettings();
+      settings.budgets = budget.normalizeBudgets(body.budgets || body);
+      config.writeSettings(settings);
+      json(res, { ok: true });
+      return true;
+    }
+    if (p === "/api/proxy/budget") {
+      const budgets = budget.normalizeBudgets(config.readSettings().budgets);
+      const rows = await recordStore.readRecords(paths.usageDir);
+      const pricingSnapshot = await pricing.getPricingSnapshot(paths.pricingPath);
+      const pricingModels = pricingSnapshot.models;
+      const costOf = pricingModels
+        ? (row) => pricing.estimateCostUsd(pricingModels, String(row.response_model || row.model || ""), row.tokens, { executorType: row.executor_type })
+        : () => null;
+      json(res, {
+        ok: true,
+        budget: budget.computeBudgetStatus({ budgets, rows, costOf }),
+        pricingAvailable: Boolean(pricingModels),
+      });
       return true;
     }
 

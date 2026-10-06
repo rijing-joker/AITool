@@ -120,10 +120,12 @@ test("codex sessions: session_meta + response_item payloads scan and read", asyn
   const { messages } = await sessions.readSession({ app: "codex", sourcePath: filePath, home: tmpHome });
   assert.deepEqual(messages.map((msg) => [msg.role, msg.content]), [
     ["user", "fix the parser"],
-    ["assistant", "[Tool: shell]"],
+    ["assistant", ""],
     ["tool", "ok"],
     ["assistant", "done"],
   ]);
+  assert.deepEqual(messages[1].toolCalls, [{ callId: null, name: "shell", arguments: null }]);
+  assert.deepEqual(messages[2].toolResults, [{ callId: null, output: "ok" }]);
 });
 
 test("gemini sessions: tmp/<project>/chats scans .json and maps toolCalls", async () => {
@@ -152,8 +154,9 @@ test("gemini sessions: tmp/<project>/chats scans .json and maps toolCalls", asyn
   const { messages } = await sessions.readSession({ app: "gemini", sourcePath: filePath, home: tmpHome });
   assert.deepEqual(messages.map((msg) => [msg.role, msg.content]), [
     ["user", "hi gemini"],
-    ["assistant", "hello\n[Tool: read_file]"],
+    ["assistant", "hello"],
   ]);
+  assert.deepEqual(messages[1].toolCalls, [{ name: "read_file", args: null }]);
 });
 
 test("sessions sort newest first and app availability is reported", async () => {
@@ -176,6 +179,52 @@ test("sessions sort newest first and app availability is reported", async () => 
     { id: "codex", available: false },
     { id: "gemini", available: false },
   ]);
+});
+
+test("thinking blocks: claude thinking items, codex reasoning items, gemini thought parts", async () => {
+  // claude — thinking items join the row's thinking field, not the content.
+  const claudePath = writeClaudeSession(tmpHome, "thinking-claude", [
+    JSON.stringify({ sessionId: "thinking-claude", cwd: "/tmp/project", timestamp: "2026-10-01T10:00:00Z" }),
+    JSON.stringify({ message: { role: "assistant", content: [
+      { type: "thinking", thinking: "I should check the parser first." },
+      { type: "text", text: "On it." },
+    ] }, timestamp: "2026-10-01T10:00:01Z" }),
+  ]);
+  const claude = await sessions.readSession({ app: "claude", sourcePath: claudePath, home: tmpHome });
+  assert.equal(claude.messages.length, 1);
+  assert.equal(claude.messages[0].content, "On it.");
+  assert.equal(claude.messages[0].thinking, "I should check the parser first.");
+
+  // codex — reasoning response items become standalone thinking rows.
+  const codexRoot = path.join(tmpHome, ".codex", "sessions", "2026", "10", "01");
+  fs.mkdirSync(codexRoot, { recursive: true });
+  const codexPath = path.join(codexRoot, "rollout-2026-10-01T10-00-00-think.jsonl");
+  fs.writeFileSync(codexPath, [
+    JSON.stringify({ timestamp: "2026-10-01T10:00:00Z", type: "session_meta", payload: { id: "codex-think", cwd: "/tmp/cx" } }),
+    JSON.stringify({ timestamp: "2026-10-01T10:00:01Z", type: "response_item", payload: { type: "reasoning", summary: [{ type: "summary_text", text: "Plan: patch the lexer." }] } }),
+    JSON.stringify({ timestamp: "2026-10-01T10:00:02Z", type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "text", text: "done" }] } }),
+  ].join("\n") + "\n");
+  const codex = await sessions.readSession({ app: "codex", sourcePath: codexPath, home: tmpHome });
+  assert.deepEqual(codex.messages.map((msg) => [msg.role, msg.content, msg.thinking ?? null]), [
+    ["assistant", "", "Plan: patch the lexer."],
+    ["assistant", "done", null],
+  ]);
+
+  // gemini — thought:true parts split out of the content array.
+  const geminiRoot = path.join(tmpHome, ".gemini", "tmp", "proj", "chats");
+  fs.mkdirSync(geminiRoot, { recursive: true });
+  const geminiPath = path.join(geminiRoot, "chat-think.jsonl");
+  fs.writeFileSync(geminiPath, [
+    JSON.stringify({ sessionId: "gemini-think", startTime: "2026-10-01T10:00:00Z", lastUpdated: "2026-10-01T10:01:00Z" }),
+    JSON.stringify({ id: "g1", type: "gemini", content: [
+      { text: "Let me think.", thought: true },
+      { text: "Here is the answer." },
+    ], timestamp: "2026-10-01T10:00:30Z" }),
+  ].join("\n") + "\n");
+  const gemini = await sessions.readSession({ app: "gemini", sourcePath: geminiPath, home: tmpHome });
+  assert.equal(gemini.messages.length, 1);
+  assert.equal(gemini.messages[0].content, "Here is the answer.");
+  assert.equal(gemini.messages[0].thinking, "Let me think.");
 });
 
 test("readSession refuses paths outside the app roots and unsupported apps", async () => {
@@ -300,4 +349,99 @@ test("a retried claude row with a stop_reason beats a larger streaming snapshot 
   const noId = await sessions.readSession({ app: "claude", sourcePath: noIdPath, home: tmpHome });
   assert.equal(noId.usage.totalTokens, 0);
   assert.deepEqual(noId.usage.perModel, []);
+});
+
+test("gemini JSONL chats: replay upserts, $set, rewindTo, and stale .json dedupe", async () => {
+  const chats = path.join(tmpHome, ".gemini", "tmp", "hash2", "chats");
+  fs.mkdirSync(chats, { recursive: true });
+  const filePath = path.join(chats, "session-2026-10-02.jsonl");
+  const lines = [
+    JSON.stringify({ sessionId: "gem-2", startTime: "2026-10-02T09:00:00Z", lastUpdated: "2026-10-02T09:01:00Z" }),
+    JSON.stringify({ id: "m1", type: "user", content: "<session_context>injected</session_context>", timestamp: "2026-10-02T09:00:00Z" }),
+    JSON.stringify({ id: "m2", type: "user", content: "/help", timestamp: "2026-10-02T09:00:01Z" }),
+    JSON.stringify({ id: "m3", type: "user", content: "real prompt", timestamp: "2026-10-02T09:00:02Z" }),
+    JSON.stringify({ id: "m4", type: "gemini", content: "draft", tokens: { input: 10, output: 5, thoughts: 0, cached: 2 }, model: "gemini-x", timestamp: "2026-10-02T09:00:30Z" }),
+    JSON.stringify({ id: "m4", type: "gemini", content: "final answer", tokens: { input: 12, output: 9, thoughts: 3, cached: 2 }, model: "gemini-x", timestamp: "2026-10-02T09:00:40Z" }),
+    JSON.stringify({ $set: { lastUpdated: "2026-10-02T09:05:00Z" } }),
+  ].join("\n") + "\n";
+  fs.writeFileSync(filePath, lines);
+  // stale pre-migration .json with the same stem must not double-list
+  fs.writeFileSync(path.join(chats, "session-2026-10-02.json"), JSON.stringify({ sessionId: "gem-2", messages: [] }));
+
+  const list = await sessions.listSessions({ app: "gemini", home: tmpHome });
+  const entry = list.find((session) => session.sessionId === "gem-2");
+  assert.ok(entry, "jsonl session is listed");
+  assert.equal(entry.title, "real prompt", "injected context and slash commands are skipped for the title");
+  assert.equal(entry.lastActiveAt, Date.parse("2026-10-02T09:05:00Z"), "$set merges metadata");
+
+  const { messages, usage } = await sessions.readSession({ app: "gemini", sourcePath: filePath, home: tmpHome });
+  assert.equal(messages.filter((msg) => msg.role === "assistant").length, 1, "same-id upsert overwrites in place");
+  const assistant = messages.find((msg) => msg.role === "assistant");
+  assert.equal(assistant.content, "final answer");
+  assert.deepEqual(assistant.usage, { inputTokens: 12, outputTokens: 9, reasoningTokens: 3, cacheReadTokens: 2 });
+  assert.equal(usage.inputTokens, 12, "tokens counted once after the upsert");
+  assert.equal(usage.model, "gemini-x");
+});
+
+test("gemini JSONL rewindTo truncates the message list", async () => {
+  const chats = path.join(tmpHome, ".gemini", "tmp", "hash3", "chats");
+  fs.mkdirSync(chats, { recursive: true });
+  const filePath = path.join(chats, "session-r.jsonl");
+  fs.writeFileSync(filePath, [
+    JSON.stringify({ sessionId: "gem-r", startTime: "2026-10-02T10:00:00Z" }),
+    JSON.stringify({ id: "a", type: "user", content: "first" }),
+    JSON.stringify({ id: "b", type: "gemini", content: "reply" }),
+    JSON.stringify({ id: "c", type: "user", content: "second" }),
+    JSON.stringify({ $rewindTo: "a" }),
+  ].join("\n") + "\n");
+  const { messages } = await sessions.readSession({ app: "gemini", sourcePath: filePath, home: tmpHome });
+  assert.deepEqual(messages.map((msg) => msg.content), ["first"]);
+});
+
+test("claude transcripts carry structured tool calls/results and per-message usage", async () => {
+  const root = path.join(tmpHome, ".claude", "projects", "-p-structured");
+  fs.mkdirSync(root, { recursive: true });
+  const filePath = path.join(root, "s-structured.jsonl");
+  fs.writeFileSync(filePath, [
+    JSON.stringify({ type: "user", message: { role: "user", content: "list files" }, timestamp: "2026-10-03T10:00:00Z" }),
+    JSON.stringify({
+      type: "assistant",
+      message: {
+        id: "msg_1", role: "assistant", model: "claude-x",
+        content: [
+          { type: "text", text: "checking" },
+          { type: "tool_use", id: "tu_1", name: "Bash", input: { command: "ls" } },
+        ],
+        usage: { input_tokens: 10, output_tokens: 4 },
+      },
+      timestamp: "2026-10-03T10:00:05Z",
+    }),
+    JSON.stringify({
+      type: "assistant",
+      message: {
+        id: "msg_1", role: "assistant", model: "claude-x",
+        content: [{ type: "text", text: "checking" }],
+        usage: { input_tokens: 10, output_tokens: 6 },
+      },
+      timestamp: "2026-10-03T10:00:06Z",
+    }),
+    JSON.stringify({
+      type: "user",
+      message: { role: "user", content: [{ type: "tool_result", tool_use_id: "tu_1", content: "file.txt" }] },
+      timestamp: "2026-10-03T10:00:07Z",
+    }),
+  ].join("\n") + "\n");
+
+  const { messages, usage } = await sessions.readSession({ app: "claude", sourcePath: filePath, home: tmpHome });
+  const assistant = messages.find((msg) => msg.role === "assistant");
+  assert.deepEqual(assistant.toolCalls, [{ id: "tu_1", name: "Bash", input: { command: "ls" } }]);
+  // flattened text keeps the inline [Tool:] marker for plain-text rendering
+  assert.equal(assistant.content, "checking\n[Tool: Bash]");
+  // retry rule picks the stop-reason-less row with the larger output… here
+  // the later row (6) wins; it must ride on the visible message row too.
+  assert.deepEqual(assistant.usage, { inputTokens: 10, outputTokens: 6, cacheReadTokens: 0, cacheCreationTokens: 0 });
+  assert.equal(assistant.model, "claude-x");
+  const tool = messages.find((msg) => msg.role === "tool");
+  assert.deepEqual(tool.toolResults, [{ toolUseId: "tu_1", content: "file.txt" }]);
+  assert.equal(usage.outputTokens, 6);
 });

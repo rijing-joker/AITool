@@ -30,6 +30,7 @@ import {
   Sparkles,
   SquareTerminal,
   Trash2,
+  Wallet,
   Waves,
   X,
   Zap,
@@ -42,6 +43,7 @@ import {
   applyProviderRemarkIdentity,
   buildProviderGroupRecord,
   buildProviderRecord,
+  checkProviderBalance,
   checkProviderModelHealth,
   checkProviderModelsHealth,
   createProviderDraft,
@@ -63,6 +65,7 @@ import {
   normalizeBaseUrl,
   normalizeProviderProxyUrl,
   parseProviderApiKeys,
+  primaryProviderHealthCredential,
   parseProviderHeaders,
   PROVIDER_HEALTH_TIMEOUT_MS,
   providerCategoryMatchesRecord,
@@ -272,6 +275,9 @@ export function UpstreamsTab() {
   const [dialogDraft, setDialogDraft] = useState(emptyProviderDraft);
   const [apiAccessRemarks, setApiAccessRemarks] = useState({});
   const [healthDialogRow, setHealthDialogRow] = useState(null);
+  const [batchResults, setBatchResults] = useState({});
+  const [batchProgress, setBatchProgress] = useState(null);
+  const batchControllerRef = useRef(null);
   const [dragOverId, setDragOverId] = useState(null);
   const [pendingDelete, setPendingDelete] = useState(null);
   const activeDefinition = definitionFor(activeCategory);
@@ -312,6 +318,80 @@ export function UpstreamsTab() {
   useEffect(() => {
     void loadProviders();
   }, [loadProviders]);
+
+  useEffect(() => () => batchControllerRef.current?.abort(), []);
+
+  const allRows = useMemo(
+    () =>
+      Object.entries(records).flatMap(([section, items]) =>
+        items.map((record, index) => rowFromRecord(section, record, index))),
+    [records],
+  );
+
+  const runBatchHealth = useCallback(async () => {
+    if (batchProgress?.running || allRows.length === 0) return;
+    const controller = new AbortController();
+    batchControllerRef.current = controller;
+    setBatchResults({});
+    setBatchProgress({ running: true, checked: 0, total: allRows.length });
+    let checked = 0;
+    let nextIndex = 0;
+    const worker = async () => {
+      while (nextIndex < allRows.length && !controller.signal.aborted) {
+        const row = allRows[nextIndex];
+        nextIndex += 1;
+        const identity = providerHealthIdentity(row);
+        const model = row.models.find((option) => option.name?.trim())?.name ?? "";
+        const key = primaryProviderHealthCredential(row.apiKeys);
+        if (!key || !model) {
+          setBatchResults((current) => ({
+            ...current,
+            [identity]: { status: "skipped", error: !key ? "no-key" : "no-model" },
+          }));
+        } else {
+          setBatchResults((current) => ({ ...current, [identity]: { status: "checking" } }));
+          const result = await checkProviderModelHealth({
+            provider: providerModelType(row.section, row.record),
+            baseUrl: row.baseUrl,
+            apiKeys: row.apiKeys,
+            authIndex: row.authIndex,
+            customHeaders: providerHeadersFromRecord(row.record),
+            timeoutMs: PROVIDER_HEALTH_TIMEOUT_MS,
+          }, model);
+          if (controller.signal.aborted) return;
+          let balance = null;
+          if (result.success && !controller.signal.aborted && row.section === "openai-compatibility") {
+            balance = await checkProviderBalance(row.baseUrl, key);
+          }
+          if (controller.signal.aborted) return;
+          setBatchResults((current) => ({
+            ...current,
+            [identity]: {
+              status: result.success ? "healthy" : "failed",
+              ...(result.firstTokenLatencyMs || result.responseLatencyMs
+                ? { latencyMs: result.firstTokenLatencyMs ?? result.responseLatencyMs }
+                : {}),
+              error: result.error || "",
+              ...(balance?.ok
+                ? { balance: { remainingUsd: balance.remainingUsd ?? null, totalUsd: balance.totalUsd ?? null } }
+                : {}),
+            },
+          }));
+        }
+        checked += 1;
+        if (!controller.signal.aborted) {
+          setBatchProgress((current) => (current ? { ...current, checked } : current));
+        }
+      }
+    };
+    try {
+      await Promise.all(Array.from({ length: Math.min(4, allRows.length) }, () => worker()));
+    } finally {
+      if (!controller.signal.aborted) {
+        setBatchProgress((current) => (current ? { ...current, running: false } : current));
+      }
+    }
+  }, [allRows, batchProgress?.running]);
 
   useEffect(() => {
     const providerRows = Object.entries(records)
@@ -698,6 +778,19 @@ export function UpstreamsTab() {
               <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
               {copy("proxy.upstream.common.refresh")}
             </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => void runBatchHealth()}
+              disabled={loading || busy || Boolean(batchProgress?.running)}
+            >
+              {batchProgress?.running
+                ? <LoaderCircle className="h-4 w-4 animate-spin motion-reduce:animate-none" />
+                : <Zap className="h-4 w-4" />}
+              {batchProgress?.running
+                ? copy("proxy.upstream.batch.progress", { checked: batchProgress.checked, total: batchProgress.total })
+                : copy("proxy.upstream.batch.action")}
+            </Button>
             <Button size="sm" onClick={openCreate} disabled={loading || busy}>
               <Plus className="h-4 w-4" />
               {copy("proxy.upstream.add")}
@@ -794,6 +887,53 @@ export function UpstreamsTab() {
                           ) : null}
                           {row.models.length > 0 ? (
                             <span className="shrink-0">{copy("proxy.upstream.models.summary", { count: row.models.length })}</span>
+                          ) : null}
+                          {(() => {
+                            const result = batchResults[providerHealthIdentity(row)];
+                            if (!result || result.status === "checking") return null;
+                            if (result.status === "skipped") {
+                              return (
+                                <span
+                                  className="shrink-0 rounded-full bg-oai-gray-100 px-2 py-0.5 text-xs text-oai-gray-400 dark:bg-oai-gray-800 dark:text-oai-gray-500"
+                                  title={result.error === "no-key"
+                                    ? copy("proxy.upstream.batch.skip_no_key")
+                                    : copy("proxy.upstream.batch.skip_no_model")}
+                                >
+                                  {copy("proxy.upstream.batch.skipped")}
+                                </span>
+                              );
+                            }
+                            const healthy = result.status === "healthy";
+                            return (
+                              <span
+                                className={`shrink-0 rounded-full px-2 py-0.5 text-xs tabular-nums ${
+                                  healthy
+                                    ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300"
+                                    : "bg-red-50 text-red-600 dark:bg-red-950/40 dark:text-red-400"
+                                }`}
+                                title={result.error || undefined}
+                              >
+                                {healthy && result.latencyMs
+                                  ? copy("proxy.upstream.batch.healthy", { latency: result.latencyMs })
+                                  : healthy
+                                    ? copy("proxy.upstream.batch.healthy_short")
+                                    : copy("proxy.upstream.batch.failed")}
+                              </span>
+                            );
+                          })()}
+                          {batchResults[providerHealthIdentity(row)]?.balance ? (
+                            <span
+                              className="inline-flex shrink-0 items-center gap-1 rounded-full bg-oai-brand-50 px-2 py-0.5 text-xs tabular-nums text-oai-brand-700 dark:bg-oai-brand-950/40 dark:text-oai-brand-300"
+                              title={copy("proxy.upstream.balance.hint", {
+                                remaining: batchResults[providerHealthIdentity(row)].balance.remainingUsd ?? "?",
+                                total: batchResults[providerHealthIdentity(row)].balance.totalUsd ?? "?",
+                              })}
+                            >
+                              <Wallet className="h-3 w-3" aria-hidden="true" />
+                              {copy("proxy.upstream.balance.chip", {
+                                value: batchResults[providerHealthIdentity(row)].balance.remainingUsd ?? "?",
+                              })}
+                            </span>
                           ) : null}
                         </div>
                       </div>

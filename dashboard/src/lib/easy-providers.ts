@@ -928,6 +928,105 @@ export async function checkProviderModelHealth(
   };
 }
 
+export type RecordReplayResult = {
+  ok: boolean;
+  statusCode?: number;
+  latencyMs: number;
+  bodyExcerpt?: string;
+  error?: string;
+};
+
+export type RecordReplaySource = {
+  auth_index?: string;
+  authIndex?: string;
+  response_model?: string;
+  model?: string;
+};
+
+// One-click retest of a historical request record: rebuild a minimal request
+// with the same protocol/model and send it through the core's api-call with
+// the record's auth index ($TOKEN$ resolves to that credential inside the
+// core). Returns the upstream status + a body excerpt for inline display.
+export async function replayRecordViaCore(
+  record: RecordReplaySource,
+  row: ProviderRow,
+  timeoutMs = 30_000,
+): Promise<RecordReplayResult> {
+  const authIndex = String(record.auth_index ?? record.authIndex ?? "").trim();
+  if (!authIndex) return { ok: false, latencyMs: 0, error: "missing-auth-index" };
+  const model = String(record.response_model || record.model || "").trim();
+  if (!model) return { ok: false, latencyMs: 0, error: "missing-model" };
+  const providerType = providerModelType(row.section, row.record);
+  const probe = buildProviderHealthProbe(
+    providerType,
+    row.baseUrl,
+    model,
+    "",
+    authIndex,
+    providerHeadersFromRecord(row.record),
+  );
+  if (!Object.values(probe.header).some((value) => value.includes("$TOKEN$"))) {
+    return { ok: false, latencyMs: 0, error: "missing-direct-key" };
+  }
+  const started = Date.now();
+  try {
+    const payload = await managementApi.post<{ status_code?: number; body?: string }>(
+      "/api-call",
+      {
+        authIndex,
+        method: "POST",
+        url: probe.url,
+        header: probe.header,
+        data: probe.data,
+      } as ManagementJson,
+      { timeoutMs },
+    );
+    const latencyMs = Date.now() - started;
+    const statusCode = Number(payload?.status_code);
+    const body = typeof payload?.body === "string" ? payload.body : "";
+    return {
+      ok: true,
+      ...(Number.isFinite(statusCode) ? { statusCode } : {}),
+      latencyMs,
+      ...(body ? { bodyExcerpt: body.slice(0, 400) } : {}),
+    };
+  } catch (error) {
+    return { ok: false, latencyMs: Date.now() - started, error: errorMessage(error) };
+  }
+}
+
+export type ProviderBalanceResult = {
+  ok: boolean;
+  totalUsd?: number;
+  usedUsd?: number;
+  remainingUsd?: number;
+  endpoint?: string;
+  error?: string;
+};
+
+// Best-effort balance query against the one-api/new-api style billing
+// endpoints; unsupported upstreams return ok:false and the UI hides the chip.
+export async function checkProviderBalance(
+  baseUrl: string,
+  apiKey: string,
+  timeoutMs = 10_000,
+): Promise<ProviderBalanceResult> {
+  if (!apiKey.trim()) return { ok: false, error: "missing-direct-key" };
+  try {
+    const headers = await getLocalApiAuthHeaders();
+    const response = await fetch("/api/proxy/balance-check", {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({ baseUrl, apiKey: apiKey.trim(), timeoutMs }),
+    });
+    const payload = (await response.json().catch(() => null)) as ProviderBalanceResult | null;
+    if (!payload?.ok) return { ok: false, error: payload?.error || `HTTP ${response.status}` };
+    return payload;
+  } catch (error) {
+    return { ok: false, error: errorMessage(error) };
+  }
+}
+
 export async function runProviderModelHealthChecks(
   models: ModelOption[],
   checkModel: (model: ModelOption, index: number) => Promise<ProviderModelHealthResult>,

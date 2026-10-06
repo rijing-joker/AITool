@@ -35,6 +35,9 @@ const SOURCE_IDENTICAL_KEY_ALLOWLIST = [
   /^provider[.]display[.](?:omp|omo|minimax_code|command_code|deepseek_harness|cline|trae)$/,
   /^limits[.]label[.](?:cursor_api|zcode_glm52|zcode_glm5t|claude_opus|codex_spark_[57][hd]|gemini_(?:pro|flash|lite)|antigravity_)/,
   /^skills[.]mode[.]skillssh$/,
+  // File names and Codex's official prompt text must stay verbatim.
+  /^pswitch[.]pi_files[.](?:append|override)_title$/,
+  /^pswitch[.]catalog[.]instructions_placeholder$/,
   /^skills[.]repo[.]placeholder$/,
   /^ipcheck[.]props[.]asn$/,
   /^ipcheck[.]security[.](?:vpn|tor)$/,

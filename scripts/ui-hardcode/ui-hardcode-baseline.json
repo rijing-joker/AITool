@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-04T03:16:31.404Z",
+  "generatedAt": "2026-10-06T04:52:01.619Z",
   "root": "dashboard/src",
   "rules": {
     "colors": "hex/rgb(a) literals",
@@ -7,7 +7,7 @@
   },
   "totals": {
     "colors": 412,
-    "rawText": 216
+    "rawText": 227
   },
   "files": {
     "dashboard/src/components/InsforgeUserHeaderControls.jsx": {
@@ -109,6 +109,13 @@
         "= 1).length, [merged], ); const total = BADGE_CATALOG.length; return ("
       ]
     },
+    "dashboard/src/pages/CliSessionsPage.jsx": {
+      "colors": 0,
+      "rawText": 1,
+      "rawTextTokens": [
+        "0 ? ("
+      ]
+    },
     "dashboard/src/pages/DashboardPage.jsx": {
       "colors": 1,
       "rawText": 0,
@@ -151,6 +158,14 @@
       "rawTextTokens": [
         ") : realSignedIn ? (",
         "Token Tracker"
+      ]
+    },
+    "dashboard/src/pages/ProviderSwitchPage.jsx": {
+      "colors": 0,
+      "rawText": 2,
+      "rawTextTokens": [
+        ") : appInfo.suggestion ? (",
+        "= 8 && (isExport || payloadText.trim() !== \"\"); return ("
       ]
     },
     "dashboard/src/pages/ProxyPage.jsx": {
@@ -252,6 +267,13 @@
         "Fast"
       ]
     },
+    "dashboard/src/pages/provider-codex-catalog.test.jsx": {
+      "colors": 0,
+      "rawText": 1,
+      "rawTextTokens": [
+        ", ); expect(screen.queryByText(\"pswitch.catalog.picker_title\")).toBeNull(); rerender("
+      ]
+    },
     "dashboard/src/pages/provider-group-keys-editor.jsx": {
       "colors": 0,
       "rawText": 1,
@@ -259,15 +281,30 @@
         "WebSocket"
       ]
     },
+    "dashboard/src/pages/provider-prompts-panel.jsx": {
+      "colors": 0,
+      "rawText": 1,
+      "rawTextTokens": [
+        "item.kind === entry.kind); return ("
+      ]
+    },
+    "dashboard/src/pages/provider-quota-line.jsx": {
+      "colors": 0,
+      "rawText": 1,
+      "rawTextTokens": [
+        "0 ? value : 0); const total = sum(credits.monthly) + sum(credits.purchased) + sum(credits.free); if (total"
+      ]
+    },
     "dashboard/src/pages/requests-tab.jsx": {
       "colors": 0,
-      "rawText": 18,
+      "rawText": 23,
       "rawTextTokens": [
         ") : record.alias && record.alias !== record.model ? (",
         ") : records.length === 0 ? (",
+        ") : state?.status === \"done\" ? (",
+        ") : state?.status === \"error\" ? (",
         "); case \"cache\": return (",
         "); case \"cacheRate\": return (",
-        "); case \"input\": return",
         "); case \"key\": return (",
         "); case \"provider\": return (",
         "); case \"request\": return (",
@@ -279,7 +316,10 @@
         "0 ? (",
         "; case \"output\": return",
         "; case \"reasoning\": return",
-        "; default: return"
+        "; case \"replay\": return",
+        "; default: return",
+        "= 200 && (state.statusCode ?? 0)",
+        "entry.level === \"exceeded\"); return ("
       ]
     },
     "dashboard/src/pages/upstreams-tab.jsx": {

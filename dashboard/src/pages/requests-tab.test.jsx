@@ -11,6 +11,11 @@ beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn(async () => ({ json: async () => response })));
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+// BudgetBar polls /api/proxy/budget on its own schedule — count records
+// requests specifically so assertions stay independent of that poll.
+function recordsCalls() {
+  return fetch.mock.calls.filter(([url]) => String(url).includes("usage/records"));
+}
 async function setup(overrides = {}) {
   if (Object.keys(overrides).length > 0) {
     vi.stubGlobal("fetch", vi.fn(async () => ({ json: async () => ({ ...response, ...overrides }) })));
@@ -22,8 +27,8 @@ it("coalesces typing into one filtered request", async () => {
   await setup();
   const input = screen.getByRole("combobox", { name: "proxy.requests.filter.model" });
   for (const value of ["g", "gp", "gpt"]) fireEvent.change(input, { target: { value } });
-  await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
-  expect(fetch.mock.calls[1][0]).toContain("model=gpt");
+  await waitFor(() => expect(recordsCalls()).toHaveLength(2));
+  expect(recordsCalls()[1][0]).toContain("model=gpt");
 });
 it("feeds filter suggestions from the response stats", async () => {
   await setup();
@@ -35,7 +40,7 @@ it("only reports refresh success after the request completes", async () => {
   let resolve;
   fetch.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
   fireEvent.click(screen.getByRole("button", { name: "proxy.upstream.common.refresh" }));
-  await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(recordsCalls()).toHaveLength(2));
   expect(showToast).not.toHaveBeenCalled();
   await act(async () => resolve({ json: async () => response }));
   expect(showToast).toHaveBeenCalledWith({ title: "proxy.requests.refreshed", type: "success" });
@@ -54,7 +59,7 @@ it("does not fetch an incomplete or reversed custom range", async () => {
   fireEvent.change(screen.getByLabelText("proxy.requests.range.start"), { target: { value: "2026-10-03T12:00" } });
   fireEvent.change(screen.getByLabelText("proxy.requests.range.end"), { target: { value: "2026-10-02T12:00" } });
   expect(screen.getByRole("alert")).toHaveTextContent("proxy.requests.range.invalid");
-  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(recordsCalls()).toHaveLength(1);
 });
 it("renders the estimated cost column and stats tile from pricing", async () => {
   await setup({
@@ -111,4 +116,37 @@ it("applies column visibility from the settings dialog", async () => {
   expect(dialog).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "shared.action.apply" }));
   await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+});
+
+it("budget dialog accepts repeated typing without dropping the event target", async () => {
+  await setup();
+  fireEvent.click(screen.getByRole("button", { name: "budget.edit.title" }));
+  const daily = await screen.findByLabelText("budget.edit.daily");
+  // Two characters in separate events: the second onChange used to crash on a
+  // nulled event.currentTarget inside the state updater.
+  fireEvent.change(daily, { target: { value: "1" } });
+  fireEvent.change(daily, { target: { value: "12" } });
+  expect(daily).toHaveValue("12");
+  fireEvent.click(screen.getByRole("button", { name: "shared.action.cancel" }));
+});
+
+it("skips the stats recompute on page changes but keeps it for polls and filters", async () => {
+  await setup();
+  const includeParam = (call) => String(call[0]).match(/includeStats=(\d)/)?.[1];
+  // First load and polls always carry stats.
+  await waitFor(() => expect(recordsCalls().length).toBeGreaterThanOrEqual(1));
+  expect(includeParam(recordsCalls()[0])).toBe("1");
+  // A page-size change loads without stats (identical aggregation).
+  await act(async () => {
+    fireEvent.change(screen.getByRole("combobox", { name: "proxy.requests.page_size", size: 50 }), { target: { value: "20" } });
+  });
+  await waitFor(() => expect(recordsCalls()).toHaveLength(recordsCalls().length));
+  const last = recordsCalls()[recordsCalls().length - 1];
+  expect(String(last[0])).toContain("pageSize=20");
+  expect(includeParam(last)).toBe("0");
+  // A filter change must refresh stats even though the page resets to 0.
+  fireEvent.change(screen.getByRole("combobox", { name: "proxy.requests.filter.model" }), { target: { value: "gpt" } });
+  await waitFor(() => expect(String(recordsCalls()[recordsCalls().length - 1][0])).toContain("model=gpt"));
+  expect(includeParam(recordsCalls()[recordsCalls().length - 1])).toBe("1");
+  expect(showToast).not.toHaveBeenCalled();
 });

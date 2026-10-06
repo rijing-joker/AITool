@@ -181,6 +181,52 @@ test("sessions sort newest first and app availability is reported", async () => 
   ]);
 });
 
+test("thinking blocks: claude thinking items, codex reasoning items, gemini thought parts", async () => {
+  // claude — thinking items join the row's thinking field, not the content.
+  const claudePath = writeClaudeSession(tmpHome, "thinking-claude", [
+    JSON.stringify({ sessionId: "thinking-claude", cwd: "/tmp/project", timestamp: "2026-10-01T10:00:00Z" }),
+    JSON.stringify({ message: { role: "assistant", content: [
+      { type: "thinking", thinking: "I should check the parser first." },
+      { type: "text", text: "On it." },
+    ] }, timestamp: "2026-10-01T10:00:01Z" }),
+  ]);
+  const claude = await sessions.readSession({ app: "claude", sourcePath: claudePath, home: tmpHome });
+  assert.equal(claude.messages.length, 1);
+  assert.equal(claude.messages[0].content, "On it.");
+  assert.equal(claude.messages[0].thinking, "I should check the parser first.");
+
+  // codex — reasoning response items become standalone thinking rows.
+  const codexRoot = path.join(tmpHome, ".codex", "sessions", "2026", "10", "01");
+  fs.mkdirSync(codexRoot, { recursive: true });
+  const codexPath = path.join(codexRoot, "rollout-2026-10-01T10-00-00-think.jsonl");
+  fs.writeFileSync(codexPath, [
+    JSON.stringify({ timestamp: "2026-10-01T10:00:00Z", type: "session_meta", payload: { id: "codex-think", cwd: "/tmp/cx" } }),
+    JSON.stringify({ timestamp: "2026-10-01T10:00:01Z", type: "response_item", payload: { type: "reasoning", summary: [{ type: "summary_text", text: "Plan: patch the lexer." }] } }),
+    JSON.stringify({ timestamp: "2026-10-01T10:00:02Z", type: "response_item", payload: { type: "message", role: "assistant", content: [{ type: "text", text: "done" }] } }),
+  ].join("\n") + "\n");
+  const codex = await sessions.readSession({ app: "codex", sourcePath: codexPath, home: tmpHome });
+  assert.deepEqual(codex.messages.map((msg) => [msg.role, msg.content, msg.thinking ?? null]), [
+    ["assistant", "", "Plan: patch the lexer."],
+    ["assistant", "done", null],
+  ]);
+
+  // gemini — thought:true parts split out of the content array.
+  const geminiRoot = path.join(tmpHome, ".gemini", "tmp", "proj", "chats");
+  fs.mkdirSync(geminiRoot, { recursive: true });
+  const geminiPath = path.join(geminiRoot, "chat-think.jsonl");
+  fs.writeFileSync(geminiPath, [
+    JSON.stringify({ sessionId: "gemini-think", startTime: "2026-10-01T10:00:00Z", lastUpdated: "2026-10-01T10:01:00Z" }),
+    JSON.stringify({ id: "g1", type: "gemini", content: [
+      { text: "Let me think.", thought: true },
+      { text: "Here is the answer." },
+    ], timestamp: "2026-10-01T10:00:30Z" }),
+  ].join("\n") + "\n");
+  const gemini = await sessions.readSession({ app: "gemini", sourcePath: geminiPath, home: tmpHome });
+  assert.equal(gemini.messages.length, 1);
+  assert.equal(gemini.messages[0].content, "Here is the answer.");
+  assert.equal(gemini.messages[0].thinking, "Let me think.");
+});
+
 test("readSession refuses paths outside the app roots and unsupported apps", async () => {
   await assert.rejects(
     () => sessions.readSession({ app: "claude", sourcePath: path.join(tmpHome, ".claude", "settings.json"), home: tmpHome }),

@@ -3,6 +3,7 @@ import { ArrowDown, ArrowUp, Brain, ChevronLeft, ChevronRight, Columns3, Databas
 import { copy } from "../lib/copy";
 import { formatCostUsd } from "../lib/cost-format";
 import { Card } from "../ui/components";
+import { UsageHeatmap } from "./usage-heatmap";
 import { ModalFrame } from "../ui/components/ModalFrame";
 import { showToast } from "../ui/components/Toast";
 import { useVisiblePolling } from "../hooks/use-visible-polling";
@@ -1159,6 +1160,8 @@ export function RequestsTab() {
           />
         </div>
       ) : null}
+
+      <UsageHeatmap />
 
       <Card className="overflow-hidden" bodyClassName="!p-0">
         {records === null ? (

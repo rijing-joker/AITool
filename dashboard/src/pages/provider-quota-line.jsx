@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useState } from "react";
-import { RefreshCw } from "lucide-react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { Check, RefreshCw, X } from "lucide-react";
 import { copy } from "../lib/copy";
 import { providerSwitchApi } from "../lib/provider-switch-api";
 
@@ -7,6 +7,12 @@ import { providerSwitchApi } from "../lib/provider-switch-api";
 // is LEFT per window, quiet gray while healthy, bold under 10%, red when used
 // up; a click re-queries through the server's cache. Only providers whose
 // base URL matches a supported plan provider (row.quotaProvider) render.
+
+// Click-refresh feedback (cc-switch a7d3825): a request often settles in well
+// under a second, so the icon spins for at least MIN_REFRESH_SPIN_MS and then
+// shows a check or a cross for REFRESH_RESULT_MS before going back to idle.
+const MIN_REFRESH_SPIN_MS = 600;
+const REFRESH_RESULT_MS = 1000;
 
 const TIER_LABEL_KEYS = {
   five_hour: "pswitch.quota.tier.five_hour",
@@ -35,11 +41,30 @@ function creditsRemaining(credits) {
   return Math.round(total * 10) / 10;
 }
 
+// Precomputed so the JSX text scan never sees a bare ternary chain in braces.
+function RefreshIcon({ phase, busy }) {
+  if (phase === "ok") { return <Check size={12} aria-hidden="true" className="text-emerald-600 dark:text-emerald-400" />; }
+  if (phase === "failed") { return <X size={12} aria-hidden="true" className="text-red-500" />; }
+  return (
+    <RefreshCw
+      size={11}
+      aria-hidden="true"
+      className={phase === "spinning" || busy ? "animate-spin motion-reduce:animate-none" : ""}
+    />
+  );
+}
+
 export function ProviderQuotaLine({ app, provider }) {
   const [quota, setQuota] = useState(null);
   const [loading, setLoading] = useState(false);
+  // idle | spinning | ok | failed — driven by explicit click-refreshes only;
+  // background/mount loads keep the plain dim behavior.
+  const [refreshPhase, setRefreshPhase] = useState("idle");
   const [now, setNow] = useState(() => Date.now());
+  const refreshTimerRef = useRef(null);
   const providerId = provider.id;
+
+  useEffect(() => () => clearTimeout(refreshTimerRef.current), []);
 
   const load = useCallback(async (nocache = false) => {
     setLoading(true);
@@ -47,12 +72,33 @@ export function ProviderQuotaLine({ app, provider }) {
       const response = await providerSwitchApi.getQuota(app, providerId, { nocache });
       setQuota(response.quota ?? null);
       setNow(Date.now());
+      return response.quota?.ok === true;
     } catch {
       setQuota({ ok: false, provider: "", error: "network" });
+      return false;
     } finally {
       setLoading(false);
     }
   }, [app, providerId]);
+
+  const refreshPhaseRef = useRef("idle");
+  const refreshClicked = useCallback(async () => {
+    // Phase machine lives on a ref: StrictMode replays state updaters, so the
+    // click handler itself must stay free of setState-updater side effects.
+    if (refreshPhaseRef.current === "spinning") return;
+    refreshPhaseRef.current = "spinning";
+    setRefreshPhase("spinning");
+    const startedAt = Date.now();
+    const ok = await load(true);
+    refreshTimerRef.current = setTimeout(() => {
+      refreshPhaseRef.current = ok ? "ok" : "failed";
+      setRefreshPhase(ok ? "ok" : "failed");
+      refreshTimerRef.current = setTimeout(() => {
+        refreshPhaseRef.current = "idle";
+        setRefreshPhase("idle");
+      }, REFRESH_RESULT_MS);
+    }, Math.max(0, MIN_REFRESH_SPIN_MS - (Date.now() - startedAt)));
+  }, [load]);
 
   useEffect(() => {
     if (provider.quotaProvider) void load();
@@ -86,10 +132,17 @@ export function ProviderQuotaLine({ app, provider }) {
     content = (
       <button
         type="button"
-        onClick={() => void load(true)}
-        className="min-h-6 font-medium text-red-600 dark:text-red-400"
+        onClick={() => void refreshClicked()}
+        aria-disabled={refreshPhase === "spinning"}
+        className="min-h-6 inline-flex items-center gap-1 font-medium text-red-600 dark:text-red-400 disabled:opacity-40"
         title={quota.error || undefined}
       >
+        <RefreshCw
+          size={11}
+          aria-hidden="true"
+          className={refreshPhase === "failed" ? "hidden" : refreshPhase === "spinning" ? "animate-spin motion-reduce:animate-none" : ""}
+        />
+        {refreshPhase === "failed" ? <X size={11} aria-hidden="true" /> : null}
         {quota.credentialStatus === "expired"
           ? copy("pswitch.quota.expired")
           : copy("pswitch.quota.error")}
@@ -134,13 +187,13 @@ export function ProviderQuotaLine({ app, provider }) {
         ) : null}
         <button
           type="button"
-          onClick={() => void load(true)}
-          disabled={loading}
+          onClick={() => void refreshClicked()}
+          aria-disabled={refreshPhase === "spinning"}
           aria-label={copy("pswitch.quota.refresh")}
           title={copy("pswitch.quota.refresh")}
-          className="inline-flex h-6 w-6 items-center justify-center rounded-md text-oai-gray-400 hover:bg-oai-gray-100 hover:text-oai-gray-600 disabled:opacity-40 dark:hover:bg-oai-gray-800"
+          className="inline-flex h-6 w-6 items-center justify-center rounded-md text-oai-gray-400 hover:bg-oai-gray-100 hover:text-oai-gray-600 aria-disabled:opacity-40 dark:hover:bg-oai-gray-800"
         >
-          <RefreshCw size={11} aria-hidden="true" className={loading ? "animate-spin motion-reduce:animate-none" : ""} />
+          <RefreshIcon phase={refreshPhase} busy={loading} />
         </button>
       </>
     );

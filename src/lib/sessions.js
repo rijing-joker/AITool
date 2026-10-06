@@ -88,6 +88,16 @@ function extractTextFromItem(item) {
   return "";
 }
 
+// Thinking rows render as a collapsed block in the reader; cap the captured
+// text so a runaway reasoning stream cannot bloat the API response.
+const THINKING_MAX_CHARS = 32 * 1024;
+
+function capThinking(text) {
+  const trimmed = String(text ?? "").trim();
+  if (trimmed === "") return null;
+  return trimmed.length > THINKING_MAX_CHARS ? `${trimmed.slice(0, THINKING_MAX_CHARS)}\n…` : trimmed;
+}
+
 async function readHeadTailLines(filePath, headN = HEAD_LINES, tailN = TAIL_LINES) {
   const raw = await fsp.readFile(filePath, "utf8");
   const lines = raw.split("\n").filter((line) => line !== "");
@@ -304,9 +314,16 @@ async function claudeReadMessages(filePath) {
         }));
       }
     }
+    const thinking = role === "assistant" && Array.isArray(message.content)
+      ? capThinking(message.content
+          .filter((item) => item?.type === "thinking" && typeof item.thinking === "string")
+          .map((item) => item.thinking)
+          .join("\n"))
+      : null;
     const content = extractText(message.content);
-    if (content.trim() !== "" || toolCalls || toolResults) {
+    if (content.trim() !== "" || thinking || toolCalls || toolResults) {
       const row = { role, content, ts: parseTimestampToMs(value.timestamp) };
+      if (thinking) row.thinking = thinking;
       if (toolCalls) row.toolCalls = toolCalls;
       if (toolResults) row.toolResults = toolResults;
       // Attach the winning usage row to its message after retries resolve.
@@ -498,6 +515,15 @@ async function codexReadMessages(filePath) {
         output: typeof payload.output === "string" ? payload.output : "",
       }];
       content = typeof payload.output === "string" ? payload.output : "";
+    } else if (payload.type === "reasoning") {
+      // Reasoning summaries render as their own collapsed thinking row.
+      const summary = Array.isArray(payload.summary)
+        ? payload.summary.filter((item) => typeof item?.text === "string").map((item) => item.text).join("\n")
+        : "";
+      const thinking = capThinking(summary);
+      if (!thinking) continue;
+      messages.push({ role: "assistant", content: "", thinking, ts: parseTimestampToMs(value.timestamp) });
+      continue;
     } else {
       continue;
     }
@@ -733,10 +759,16 @@ async function geminiReadMessages(filePath) {
         cacheReadTokens: row.cacheReadTokens,
       };
     }
+    const thinking = Array.isArray(msg.content)
+      ? capThinking(msg.content
+          .filter((item) => item?.thought === true && typeof item.text === "string")
+          .map((item) => item.text)
+          .join("\n"))
+      : null;
     const content = typeof msg.content === "string"
       ? msg.content
       : Array.isArray(msg.content)
-        ? msg.content.filter((item) => item && typeof item.text === "string").map((item) => item.text).join("\n")
+        ? msg.content.filter((item) => item && item.thought !== true && typeof item.text === "string").map((item) => item.text).join("\n")
         : "";
     let toolCalls = null;
     if (Array.isArray(msg.toolCalls)) {
@@ -748,8 +780,9 @@ async function geminiReadMessages(filePath) {
         }));
       }
     }
-    if (content.trim() === "" && !toolCalls) continue;
+    if (content.trim() === "" && !thinking && !toolCalls) continue;
     const row = { role: type === "gemini" ? "assistant" : "user", content, ts: parseTimestampToMs(msg.timestamp) };
+    if (thinking) row.thinking = thinking;
     if (toolCalls) row.toolCalls = toolCalls;
     if (rowUsage) row.usage = rowUsage;
     messages.push(row);

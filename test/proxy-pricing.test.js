@@ -223,6 +223,35 @@ test("pricing meta route reports sync state without the model index", async (t) 
   assert.equal("models" in payload, false);
 });
 
+test("heatmap endpoint aggregates per-day tokens, requests and cost", async (t) => {
+  fixture(t);
+  writePricingStore({
+    "claude-sonnet-5": { name: "Claude Sonnet 5", provider: "anthropic", input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
+  });
+  // Two days, one failed row (still counted in requests, not in cost),
+  // one row without a timestamp (dropped entirely).
+  const rows = [
+    { id: "a", timestamp: "2026-10-05T10:00:00Z", model: "claude-sonnet-5", tokens: { totalTokens: 100 }, failed: false },
+    { id: "b", timestamp: "2026-10-05T11:00:00Z", model: "claude-sonnet-5", tokens: { totalTokens: 50 }, failed: true },
+    { id: "c", timestamp: "2026-10-06T10:00:00Z", model: "claude-sonnet-5", tokens: { inputTokens: 10, outputTokens: 20, totalTokens: 30 }, failed: false },
+    { id: "d", model: "claude-sonnet-5", tokens: { totalTokens: 999 } },
+  ];
+  fs.writeFileSync(paths.usageDir + "/records-2026-10-06.jsonl", rows.map((row) => JSON.stringify(row)).join("\n") + "\n");
+  let payload;
+  await handleProxyApiRequest({ method: "GET" }, {
+    writeHead(status) { assert.equal(status, 200); },
+    end(body) { payload = JSON.parse(body); },
+  }, new URL("http://localhost/api/proxy/usage/heatmap"), {});
+  assert.equal(payload.ok, true);
+  assert.deepEqual(payload.days.map((day) => [day.date, day.requests, day.tokens]), [
+    ["2026-10-05", 2, 150],
+    ["2026-10-06", 1, 30],
+  ]);
+  // Cost only on the successful rows: day2 = (10*3 + 20*15)/1e6.
+  assert.equal(payload.days[0].costUsd, 0);
+  assert.ok(Math.abs(payload.days[1].costUsd - 0.00033) < 1e-9);
+});
+
 test("pricing meta route include=1 returns the fill metadata keyed by normalized id", async (t) => {
   fixture(t);
   writePricingStore({

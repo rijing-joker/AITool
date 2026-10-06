@@ -37,7 +37,7 @@ import { PageTabs } from "../ui/components/PageTabs";
 import { UnsavedChangesGuard } from "../ui/components/UnsavedChangesGuard";
 import { ModalFrame } from "../ui/components/ModalFrame";
 import { useVisiblePolling } from "../hooks/use-visible-polling";
-import { PresetIcon, presetAvatarClass, ProviderEditDialog } from "./provider-edit-dialog";
+import { PresetIcon, providerTileClass, ProviderEditDialog } from "./provider-edit-dialog";
 import { ProviderMcpPanel } from "./provider-mcp-panel";
 import { ProviderPromptsPanel } from "./provider-prompts-panel";
 import { ProviderQuotaLine } from "./provider-quota-line";
@@ -362,9 +362,9 @@ function SortableProviderCard({ app, provider, isCurrent, busy, dragLabel, coold
           <GripVertical className="h-4 w-4" />
         </button>
         <span
-          className={`mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${presetAvatarClass(provider.avatarColor)}`}
+          className={`relative mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg ${providerTileClass(provider.avatarColor)}`}
         >
-          <PresetIcon icon={provider.avatarIcon} color={provider.avatarColor} className="h-4 w-4" />
+          <PresetIcon icon={provider.avatarIcon} color={provider.avatarColor} className="h-5 w-5" />
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">

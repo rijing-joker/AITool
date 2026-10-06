@@ -580,6 +580,41 @@ async function handleProxyApiRequest(req, res, url, ctx) {
       });
       return true;
     }
+    if (p === "/api/proxy/usage/heatmap") {
+      // Per-day totals for the 53-week usage heatmap (cc-switch cf2e6a7's
+      // surviving "All" range). Days are server-local (same convention as
+      // the TT base's aggregateByDay); cost follows the records route.
+      const rows = await recordStore.readRecords(paths.usageDir);
+      const byDay = new Map();
+      const dayKeyOf = (ts) => {
+        const date = new Date(ts);
+        return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+      };
+      for (const row of rows) {
+        const ts = recordTimestamp(row);
+        if (!Number.isFinite(ts)) continue;
+        const key = dayKeyOf(ts);
+        let entry = byDay.get(key);
+        if (!entry) {
+          entry = { date: key, requests: 0, tokens: 0, costUsd: 0 };
+          byDay.set(key, entry);
+        }
+        entry.requests += 1;
+        entry.tokens += Number(row?.tokens?.totalTokens) || 0;
+      }
+      const pricingSnapshot = await pricing.getPricingSnapshot(paths.pricingPath);
+      if (pricingSnapshot.models) {
+        for (const row of rows) {
+          if (row.failed || row.canceled) continue;
+          const ts = recordTimestamp(row);
+          if (!Number.isFinite(ts)) continue;
+          const cost = pricing.estimateCostUsd(pricingSnapshot.models, String(row.response_model || row.model || ""), row.tokens, { executorType: row.executor_type });
+          if (cost != null) byDay.get(dayKeyOf(ts)).costUsd += cost;
+        }
+      }
+      json(res, { ok: true, days: Array.from(byDay.values()).sort((a, b) => a.date.localeCompare(b.date)) });
+      return true;
+    }
 
     // --- management pass-through + provider remarks + health probes ---
     // The dashboard's port of EasyCLIProxyAPI's managementApi needs the core's

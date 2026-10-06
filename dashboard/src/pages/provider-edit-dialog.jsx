@@ -108,21 +108,24 @@ function stringifyAdditive(app, value) {
 // When editing the currently-active provider the initial values are read back
 // from the live config files (read_live_provider_settings).
 
-const AVATAR_COLORS = {
-  orange: "bg-orange-100 text-orange-600 dark:bg-orange-500/15 dark:text-orange-400",
-  blue: "bg-blue-100 text-blue-600 dark:bg-blue-500/15 dark:text-blue-400",
-  green: "bg-emerald-100 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400",
-  sky: "bg-sky-100 text-sky-600 dark:bg-sky-500/15 dark:text-sky-400",
-  violet: "bg-violet-100 text-violet-600 dark:bg-violet-500/15 dark:text-violet-400",
-  indigo: "bg-indigo-100 text-indigo-600 dark:bg-indigo-500/15 dark:text-indigo-400",
-  rose: "bg-rose-100 text-rose-600 dark:bg-rose-500/15 dark:text-rose-400",
-  amber: "bg-amber-100 text-amber-600 dark:bg-amber-500/15 dark:text-amber-400",
-  teal: "bg-teal-100 text-teal-600 dark:bg-teal-500/15 dark:text-teal-400",
-  gray: "bg-oai-gray-100 text-oai-gray-600 dark:bg-oai-gray-800 dark:text-oai-gray-300",
+// Tile-style avatar (cc-switch f5db60d/c2269df): a solid color fill with a
+// white glyph carries more visual weight than a pastel chip, and the inset
+// ring keeps solid tiles readable on white cards and in dark mode.
+const AVATAR_TILE_COLORS = {
+  orange: "bg-orange-500 dark:bg-orange-500/90",
+  blue: "bg-blue-500 dark:bg-blue-500/90",
+  green: "bg-emerald-500 dark:bg-emerald-500/90",
+  sky: "bg-sky-500 dark:bg-sky-500/90",
+  violet: "bg-violet-500 dark:bg-violet-500/90",
+  indigo: "bg-indigo-500 dark:bg-indigo-500/90",
+  rose: "bg-rose-500 dark:bg-rose-500/90",
+  amber: "bg-amber-500 dark:bg-amber-500/90",
+  teal: "bg-teal-500 dark:bg-teal-500/90",
+  gray: "bg-oai-gray-500 dark:bg-oai-gray-600",
 };
 
-export function presetAvatarClass(color) {
-  return AVATAR_COLORS[color] || AVATAR_COLORS.gray;
+export function providerTileClass(color) {
+  return `${AVATAR_TILE_COLORS[color] || AVATAR_TILE_COLORS.gray} text-white after:pointer-events-none after:absolute after:inset-0 after:rounded-[inherit] after:ring-1 after:ring-inset after:ring-black/10 dark:after:ring-white/10`;
 }
 
 export function PresetIcon({ icon, color, className = "h-4 w-4" }) {
@@ -1432,6 +1435,7 @@ export function ProviderEditDialog({
 
   return (
     <ModalFrame open={open} onClose={requestClose} busy={busy || saving}
+      className="max-w-[1008px]"
       label={isEdit ? copy("pswitch.provider.dialog.edit_title") : copy("pswitch.provider.dialog.add_title")}>
         <div className="flex shrink-0 items-start justify-between gap-3 border-b border-oai-gray-100 px-5 py-4 dark:border-oai-gray-800">
           <div className="min-w-0">
@@ -1505,7 +1509,7 @@ export function ProviderEditDialog({
                       }`}
                     >
                       <span
-                        className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${presetAvatarClass(preset.color)}`}
+                        className={`relative mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-lg ${providerTileClass(preset.color)}`}
                       >
                         <PresetIcon icon={preset.icon} color={preset.color} />
                       </span>
@@ -1984,7 +1988,7 @@ export function ProviderEditDialog({
                 {avatarIconName ? (
                   <PresetIcon icon={avatarIconName} color={iconColor} className="h-6 w-6" />
                 ) : (
-                  <span className={`text-xl font-semibold ${presetAvatarClass(iconColor)}`}>
+                  <span className={`relative flex h-9 w-9 items-center justify-center overflow-hidden rounded-lg text-lg font-semibold ${providerTileClass(iconColor)}`}>
                     {name.trim() ? name.trim().charAt(0).toUpperCase() : "P"}
                   </span>
                 )}

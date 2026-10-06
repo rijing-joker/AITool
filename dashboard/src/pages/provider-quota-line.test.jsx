@@ -1,6 +1,7 @@
 import React from "react";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import "@testing-library/jest-dom";
 import { providerSwitchApi } from "../lib/provider-switch-api";
 import { ProviderQuotaLine } from "./provider-quota-line";
 
@@ -59,4 +60,33 @@ it("shows the error state with a retry", async () => {
   providerSwitchApi.getQuota.mockResolvedValue({ quota: { ok: false, credentialStatus: "expired", error: "x" } });
   render(<ProviderQuotaLine app="claude" provider={provider} />);
   expect(await screen.findByText(/pswitch\.quota\.expired/)).toBeTruthy();
+});
+
+const refreshButton = (container) => container.querySelector('button[aria-label^="pswitch.quota.refresh"]');
+
+it("click refresh spins at least 600ms, then shows a check and clears it", async () => {
+  let resolveQuota;
+  providerSwitchApi.getQuota.mockImplementation(() => new Promise((resolve) => { resolveQuota = resolve; }));
+  const { container } = render(<ProviderQuotaLine app="claude" provider={provider} />);
+  await act(async () => { resolveQuota({ quota: { ok: true, tiers: [{ id: "monthly", used_percent: 20 }] } }); });
+  await screen.findByText(/pswitch\.quota\.left/);
+
+  // Second query hangs until released: the icon spins (min 600ms), then a
+  // check shows for ~1s, then the button goes back to the plain refresh icon.
+  providerSwitchApi.getQuota.mockImplementation(() => new Promise((resolve) => { resolveQuota = resolve; }));
+  fireEvent.click(refreshButton(container));
+  await waitFor(() => expect(container.querySelector(".lucide-refresh-cw")).toHaveClass("animate-spin"));
+  await act(async () => { resolveQuota({ quota: { ok: true, tiers: [{ id: "monthly", used_percent: 20 }] } }); });
+  await waitFor(() => expect(container.querySelector(".lucide-check")).toBeInTheDocument(), { timeout: 2500 });
+  await waitFor(() => expect(container.querySelector(".lucide-check")).toBeNull(), { timeout: 2500 });
+});
+
+it("shows a cross when the clicked refresh fails again", async () => {
+  providerSwitchApi.getQuota.mockResolvedValue({ quota: { ok: true, tiers: [{ id: "monthly", used_percent: 20 }] } });
+  const { container } = render(<ProviderQuotaLine app="claude" provider={provider} />);
+  await screen.findByText(/pswitch\.quota\.left/);
+
+  providerSwitchApi.getQuota.mockRejectedValue(new Error("down"));
+  fireEvent.click(refreshButton(container));
+  await waitFor(() => expect(container.querySelector(".lucide-x")).toBeInTheDocument(), { timeout: 2500 });
 });

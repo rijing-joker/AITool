@@ -66,6 +66,7 @@ type CodexUsageLimits = {
   readonly spark_primary_window?: CodexLimitWindow | null;
   readonly spark_secondary_window?: CodexLimitWindow | null;
   readonly reset_credits?: CodexResetCredits | null;
+  readonly credits_balance?: number | null;
 };
 
 interface UsageLimitsData {

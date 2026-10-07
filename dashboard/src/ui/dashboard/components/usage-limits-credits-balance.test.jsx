@@ -40,8 +40,9 @@ describe("buildCreditsBalanceLine", () => {
   });
 
   it("renders sub-dollar balances as <$1", () => {
-    // 10 credits × $0.04 = $0.40 → rounds below the $1 floor.
-    expect(buildCreditsBalanceLine(10)).toMatchObject({ usd: "<$1" });
+    for (const credits of [10, 12.5, 20, 24.99]) {
+      expect(buildCreditsBalanceLine(credits)).toMatchObject({ usd: "<$1" });
+    }
     // 25 credits × $0.04 = $1.00 → exactly one dollar.
     expect(buildCreditsBalanceLine(25)).toMatchObject({ usd: "$1" });
   });

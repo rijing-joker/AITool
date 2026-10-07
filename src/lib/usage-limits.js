@@ -2517,7 +2517,9 @@ function normalizeCodexCachedLimits(
     stale: true,
     cached_at: raw.cached_at,
   };
-  return hasCodexWindow(cached) ? cached : null;
+  // Prepaid credits are independent of plan windows; their fallback is bounded
+  // by cached_at even when no window exists or every window has reset.
+  return hasCodexWindow(cached) || cached.credits_balance !== null ? cached : null;
 }
 
 function readCodexLimitsCache({ home, nowMs = Date.now(), maxAgeMs = CODEX_LIMITS_CACHE_MAX_AGE_MS } = {}) {
@@ -2531,7 +2533,9 @@ function readCodexLimitsCache({ home, nowMs = Date.now(), maxAgeMs = CODEX_LIMIT
 }
 
 function writeCodexLimitsCache(limits, { home, nowMs = Date.now() } = {}) {
-  if (!limits?.configured || limits.error || !hasCodexWindow(limits)) return;
+  if (!limits?.configured || limits.error) return;
+  // Persist confirmed empty reads too: otherwise a spent balance can reappear
+  // from an older snapshot on the next network failure.
   const cachePath = resolveCodexLimitsCachePath({ home });
   const payload = {
     codex: {
@@ -4131,7 +4135,7 @@ async function fetchUsageLimitsUncached({
       stale: false,
       cached_at: new Date(nowMs).toISOString(),
     };
-    writeCodexLimitsCache(codex, { home, nowMs });
+    if (codexLiveUsageSucceeded) writeCodexLimitsCache(codex, { home, nowMs });
   } else if (codexRefreshRequiresReauth) {
     // Refresh token is dead — the user must re-run `codex` to log in again. Surface a
     // specific, actionable message rather than the generic "Fetch failed", but only

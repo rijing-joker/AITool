@@ -106,6 +106,9 @@ it("completes a partial name with the keyboard and closes on Escape", async () =
   expect(screen.getByRole("listbox", { name: NAME_LABEL })).toBeDefined();
   fireEvent.keyDown(inputs[0], { key: "Escape" });
   expect(screen.queryByRole("listbox", { name: NAME_LABEL })).toBeNull();
+  // The first Escape belongs to the suggestions; the form must survive it.
+  expect(screen.getByRole("dialog")).toBeDefined();
+  expect(inputs[0].isConnected).toBe(true);
 });
 
 it("lets Enter fall through when the typed name is the exact top match", async () => {

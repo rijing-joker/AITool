@@ -1194,6 +1194,10 @@ export function ModelNameInput({ value, onChange, options, disabled, inputClass,
               pick(matches[Math.min(highlight, matches.length - 1)].name);
             }
           } else if (event.key === "Escape") {
+            // The list is open here, so this Escape is meant for the
+            // suggestions only — base-ui's document-level keydown would
+            // otherwise dismiss the whole dialog and discard the draft.
+            event.stopPropagation();
             setOpen(false);
           }
         }}

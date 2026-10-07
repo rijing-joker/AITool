@@ -571,5 +571,6 @@
   "settings.section.labs": "Labs",
   "limits.alert.blocked": "Benachrichtigungen sind aus – in den Systemeinstellungen erlauben",
   "settings.limits.showSubscriptions": "Abos in Limits anzeigen",
-  "settings.limits.showSubscriptionsHint": "Zeige manuell eingetragene Abo-Verlängerungen zusammen mit den Limits an."
+  "settings.limits.showSubscriptionsHint": "Zeige manuell eingetragene Abo-Verlängerungen zusammen mit den Limits an.",
+  "limits.codex_credits_balance.line": "Codex-Credits-Guthaben: {{count}} · ca. {{usd}}"
 }

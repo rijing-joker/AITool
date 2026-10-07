@@ -164,6 +164,69 @@ const CLAUDE_COMMANDCODE = {
   ],
 };
 
+// MoArk (模力方舟) aggregator — cc-switch d4a2410. Claude Code rides the
+// Anthropic-native entry; all four role slots pin deepseek-v4-flash-0731.
+const CLAUDE_MOARK = {
+  id: "claude_moark",
+  name: "MoArk",
+  group: "community",
+  icon: "layers",
+  color: "blue",
+  websiteUrl: "https://moark.com",
+  endpointCandidates: ["https://moark.com/anthropic"],
+  settingsConfig: {
+    env: {
+      ANTHROPIC_BASE_URL: "https://moark.com/anthropic",
+      ANTHROPIC_AUTH_TOKEN: "",
+      ANTHROPIC_MODEL: "deepseek-v4-flash-0731",
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: "deepseek-v4-flash-0731",
+      ANTHROPIC_DEFAULT_SONNET_MODEL: "deepseek-v4-flash-0731",
+      ANTHROPIC_DEFAULT_OPUS_MODEL: "deepseek-v4-flash-0731",
+    },
+  },
+  formFields: [
+    {
+      id: "api_key",
+      path: "env.ANTHROPIC_AUTH_TOKEN",
+      labelKey: "pswitch.field.api_key",
+      placeholder: "sk-…",
+      secret: true,
+    },
+  ],
+};
+
+// OpenCode Zen pay-as-you-go gateway — cc-switch 8569ddd. The endpoint only
+// reads x-api-key (Bearer gets "Missing API key"), so the key lands in
+// ANTHROPIC_API_KEY, not ANTHROPIC_AUTH_TOKEN.
+const CLAUDE_ZEN = {
+  id: "claude_opencode_zen",
+  name: "OpenCode Zen",
+  group: "community",
+  icon: "cloud",
+  color: "gray",
+  websiteUrl: "https://opencode.ai/zen",
+  endpointCandidates: ["https://opencode.ai/zen"],
+  settingsConfig: {
+    env: {
+      ANTHROPIC_BASE_URL: "https://opencode.ai/zen",
+      ANTHROPIC_API_KEY: "",
+      ANTHROPIC_MODEL: "claude-sonnet-5-5",
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: "claude-haiku-4-5",
+      ANTHROPIC_DEFAULT_SONNET_MODEL: "claude-sonnet-5-5",
+      ANTHROPIC_DEFAULT_OPUS_MODEL: "claude-opus-5-5",
+    },
+  },
+  formFields: [
+    {
+      id: "api_key",
+      path: "env.ANTHROPIC_API_KEY",
+      labelKey: "pswitch.field.api_key",
+      placeholder: "sk-…",
+      secret: true,
+    },
+  ],
+};
+
 const CLAUDE_CUSTOM = {
   id: "claude_custom",
   name: "Custom Relay",
@@ -261,6 +324,104 @@ const CODEX_CUSTOM = {
       path: "config.model",
       labelKey: "pswitch.field.default_model",
       placeholder: "",
+      hintKey: "pswitch.field.default_model_hint",
+    },
+  ],
+};
+
+// Slot stays `custom` — the Codex projection pipeline hardcodes it (see the
+// commandcode lesson); the relay name lives inside the table.
+const CODEX_MOARK = {
+  id: "codex_moark",
+  name: "MoArk",
+  group: "community",
+  icon: "layers",
+  color: "blue",
+  websiteUrl: "https://moark.com",
+  endpointCandidates: ["https://moark.com/v1"],
+  settingsConfig: {
+    auth: { OPENAI_API_KEY: "" },
+    config: {
+      model: "deepseek-v4-flash-0731",
+      model_provider: "custom",
+      model_reasoning_effort: "high",
+      model_providers: {
+        custom: {
+          name: "moark",
+          base_url: "https://moark.com/v1",
+          wire_api: "responses",
+        },
+      },
+    },
+  },
+  formFields: [
+    {
+      id: "api_key",
+      path: "auth.OPENAI_API_KEY",
+      labelKey: "pswitch.field.api_key",
+      placeholderKey: "pswitch.field.codex_key_placeholder",
+      secret: true,
+    },
+    {
+      id: "base_url",
+      path: "config.model_providers.custom.base_url",
+      labelKey: "pswitch.field.base_url",
+      placeholder: "https://moark.com/v1",
+    },
+    {
+      id: "model",
+      path: "config.model",
+      labelKey: "pswitch.field.default_model",
+      placeholder: "deepseek-v4-flash-0731",
+      hintKey: "pswitch.field.default_model_hint",
+    },
+  ],
+};
+
+// Zen's /v1/responses plane; gpt-6-sol because Zen 403s gpt-5.6-sol
+// (cc-switch 8569ddd, verified with a real key 2026-10-06).
+const CODEX_ZEN = {
+  id: "codex_opencode_zen",
+  name: "OpenCode Zen",
+  group: "community",
+  icon: "cloud",
+  color: "gray",
+  websiteUrl: "https://opencode.ai/zen",
+  endpointCandidates: ["https://opencode.ai/zen/v1"],
+  settingsConfig: {
+    auth: { OPENAI_API_KEY: "" },
+    config: {
+      model: "gpt-6-sol",
+      model_provider: "custom",
+      model_reasoning_effort: "high",
+      model_providers: {
+        custom: {
+          name: "opencode_zen",
+          base_url: "https://opencode.ai/zen/v1",
+          wire_api: "responses",
+        },
+      },
+    },
+  },
+  formFields: [
+    {
+      id: "api_key",
+      path: "auth.OPENAI_API_KEY",
+      labelKey: "pswitch.field.api_key",
+      placeholderKey: "pswitch.field.codex_key_placeholder",
+      secret: true,
+    },
+    {
+      id: "base_url",
+      path: "config.model_providers.custom.base_url",
+      labelKey: "pswitch.field.base_url",
+      placeholder: "https://opencode.ai/zen/v1",
+    },
+    {
+      id: "model",
+      path: "config.model",
+      labelKey: "pswitch.field.default_model",
+      placeholder: "gpt-6-sol",
       hintKey: "pswitch.field.default_model_hint",
     },
   ],
@@ -423,6 +584,41 @@ const OPENCODE_MODELSCOPE = {
   ],
 };
 
+// MoArk on OpenCode — explicit limit.context per cc-switch d4a2410: OpenCode
+// gates auto-compaction on it and treats a missing value as 0.
+const OPENCODE_MOARK = {
+  id: "opencode_moark",
+  name: "MoArk",
+  group: "community",
+  icon: "layers",
+  color: "blue",
+  websiteUrl: "https://moark.com",
+  endpointCandidates: ["https://api.moark.com/v1"],
+  settingsConfig: {
+    slotKey: "moark",
+    modelId: "moark/deepseek-v4-flash-0731",
+    provider: {
+      npm: "@ai-sdk/openai-compatible",
+      name: "MoArk",
+      options: {
+        baseURL: "https://api.moark.com/v1",
+        apiKey: "",
+      },
+      models: {
+        "deepseek-v4-flash-0731": { name: "DeepSeek V4 Flash", reasoning: true, limit: { context: 1000000, output: 384000 } },
+        "DeepSeek-V4-Pro": { name: "DeepSeek V4 Pro", reasoning: true, limit: { context: 1000000, output: 384000 } },
+        "GLM-5.3": { name: "GLM-5.3", reasoning: true, limit: { context: 1048576, output: 131072 } },
+        "Kimi-K2.7-Code": { name: "Kimi K2.7 Code", reasoning: true, limit: { context: 262144, output: 262144 } },
+        "qwen3-coder-plus": { name: "Qwen3 Coder Plus", limit: { context: 1000000, output: 65536 } },
+      },
+    },
+  },
+  formFields: [
+    { id: "api_key", path: "provider.$slot.options.apiKey", labelKey: "pswitch.field.api_key", placeholder: "sk-…", secret: true },
+    { id: "base_url", path: "provider.$slot.options.baseURL", labelKey: "pswitch.field.base_url", placeholder: "https://api.moark.com/v1" },
+  ],
+};
+
 const OPENCODE_CUSTOM = {
   id: "opencode_custom",
   name: "Custom Relay",
@@ -504,6 +700,36 @@ const OPENCLAW_DEEPSEEK = {
   formFields: [
     { id: "api_key", path: "models.providers.$slot.apiKey", labelKey: "pswitch.field.api_key", placeholder: "sk-…", secret: true },
     { id: "base_url", path: "models.providers.$slot.baseUrl", labelKey: "pswitch.field.base_url", placeholder: "https://api.deepseek.com/v1" },
+  ],
+};
+
+const OPENCLAW_MOARK = {
+  id: "openclaw_moark",
+  name: "MoArk",
+  group: "community",
+  icon: "layers",
+  color: "blue",
+  websiteUrl: "https://moark.com",
+  endpointCandidates: ["https://api.moark.com/v1"],
+  settingsConfig: {
+    slotKey: "moark",
+    modelId: "moark/deepseek-v4-flash-0731",
+    provider: {
+      baseUrl: "https://api.moark.com/v1",
+      apiKey: "",
+      api: "openai-completions",
+      models: [
+        { id: "deepseek-v4-flash-0731", name: "DeepSeek V4 Flash", reasoning: true, contextWindow: 1000000, maxTokens: 384000 },
+        { id: "DeepSeek-V4-Pro", name: "DeepSeek V4 Pro", reasoning: true, contextWindow: 1000000, maxTokens: 384000 },
+        { id: "GLM-5.3", name: "GLM-5.3", reasoning: true, contextWindow: 1048576, maxTokens: 131072 },
+        { id: "Kimi-K2.7-Code", name: "Kimi K2.7 Code", reasoning: true, contextWindow: 262144, maxTokens: 262144 },
+        { id: "qwen3-coder-plus", name: "Qwen3 Coder Plus", contextWindow: 1000000, maxTokens: 65536 },
+      ],
+    },
+  },
+  formFields: [
+    { id: "api_key", path: "models.providers.$slot.apiKey", labelKey: "pswitch.field.api_key", placeholder: "sk-…", secret: true },
+    { id: "base_url", path: "models.providers.$slot.baseUrl", labelKey: "pswitch.field.base_url", placeholder: "https://api.moark.com/v1" },
   ],
 };
 
@@ -805,6 +1031,36 @@ const PI_MODELSCOPE = {
   formFields: PI_FORM_FIELDS,
 };
 
+// MoArk on Pi — aggregator gateway, so thinking tiers stay upstream-native
+// (cc-switch leaves them {} for the same reason).
+const PI_MOARK = {
+  id: "pi_moark",
+  name: "MoArk",
+  group: "community",
+  icon: "layers",
+  color: "blue",
+  websiteUrl: "https://moark.com",
+  endpointCandidates: ["https://api.moark.com/v1"],
+  settingsConfig: {
+    slotKey: "moark",
+    modelId: "deepseek-v4-flash-0731",
+    provider: {
+      name: "MoArk",
+      baseUrl: "https://api.moark.com/v1",
+      api: "openai-completions",
+      apiKey: "",
+      models: [
+        { id: "deepseek-v4-flash-0731", name: "DeepSeek V4 Flash", reasoning: true },
+        { id: "DeepSeek-V4-Pro", name: "DeepSeek V4 Pro", reasoning: true },
+        { id: "GLM-5.3", name: "GLM-5.3", reasoning: true },
+        { id: "Kimi-K2.7-Code", name: "Kimi K2.7 Code", reasoning: true },
+        { id: "qwen3-coder-plus", name: "Qwen3 Coder Plus" },
+      ],
+    },
+  },
+  formFields: PI_FORM_FIELDS,
+};
+
 const PI_CUSTOM = {
   id: "pi_custom",
   name: "Custom Relay",
@@ -940,14 +1196,14 @@ const CODEX_COMMANDCODE = {
 };
 
 const PRESETS = {
-  claude: [CLAUDE_OFFICIAL, CLAUDE_KIMI, CLAUDE_DEEPSEEK, CLAUDE_MODELSCOPE, CLAUDE_COMMANDCODE, CLAUDE_CUSTOM],
-  codex: [CODEX_OFFICIAL, CODEX_COMMANDCODE, CODEX_CUSTOM],
+  claude: [CLAUDE_OFFICIAL, CLAUDE_KIMI, CLAUDE_DEEPSEEK, CLAUDE_MODELSCOPE, CLAUDE_COMMANDCODE, CLAUDE_MOARK, CLAUDE_ZEN, CLAUDE_CUSTOM],
+  codex: [CODEX_OFFICIAL, CODEX_COMMANDCODE, CODEX_MOARK, CODEX_ZEN, CODEX_CUSTOM],
   gemini: [GEMINI_OFFICIAL, GEMINI_CUSTOM],
-  opencode: [OPENCODE_KIMI, OPENCODE_DEEPSEEK, OPENCODE_MODELSCOPE, OPENCODE_CUSTOM],
-  openclaw: [OPENCLAW_KIMI, OPENCLAW_DEEPSEEK, OPENCLAW_CUSTOM],
+  opencode: [OPENCODE_KIMI, OPENCODE_DEEPSEEK, OPENCODE_MODELSCOPE, OPENCODE_MOARK, OPENCODE_CUSTOM],
+  openclaw: [OPENCLAW_KIMI, OPENCLAW_DEEPSEEK, OPENCLAW_MOARK, OPENCLAW_CUSTOM],
   mcode: [MCODE_MINIMAX, MCODE_CUSTOM],
   hermes: [HERMES_NOUS, HERMES_KIMI, HERMES_DEEPSEEK, HERMES_MODELSCOPE, HERMES_CUSTOM],
-  pi: [PI_KIMI, PI_DEEPSEEK, PI_MODELSCOPE, PI_CUSTOM],
+  pi: [PI_KIMI, PI_DEEPSEEK, PI_MODELSCOPE, PI_MOARK, PI_CUSTOM],
   grokbuild: [GROKBUILD_XAI, GROKBUILD_OPENROUTER, GROKBUILD_CUSTOM],
 };
 

@@ -1713,3 +1713,24 @@ test("provider-switch codex catalog: pure mirrors collapse on import, edited clo
   assert.equal(editedRows[0].model, "gpt-6-sol");
   assert.equal(editedRows[0].displayName, "My Relay Name");
 });
+
+// Guard for the porting rule learned from the codex_commandcode fix (0a0b709):
+// the Codex projection pipeline hardcodes the `custom` slot, so EVERY codex
+// preset must point model_provider at `custom` and own that table — a preset
+// copied verbatim from cc-switch with an arbitrary slot would switch in a
+// dangling pointer and delete the previous provider's working table.
+const { listPresets } = require("../src/lib/provider-switch/presets");
+
+test("every codex preset uses the custom model_providers slot", () => {
+  for (const preset of listPresets("codex")) {
+    if (preset.group === "official") continue;
+    const config = preset.settingsConfig?.config || {};
+    assert.equal(config.model_provider, "custom", `${preset.id} model_provider`);
+    const tables = config.model_providers || {};
+    assert.deepEqual(
+      Object.keys(tables),
+      ["custom"],
+      `${preset.id} must own exactly the custom table`,
+    );
+  }
+});

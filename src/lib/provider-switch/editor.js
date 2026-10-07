@@ -85,7 +85,11 @@ function claudeStoreIntoRow(storedRow, projection) {
 // Port of cc-switch's plan_save for Claude: split the edited full config
 // against the view base. `removedFromLive` are from-live exclusive fields the
 // user deleted — they become live deletions instead of row keys.
-function claudePlanSave(storedRow, edited, base) {
+// `draft` is the row fragment the editor view was opened with (cc-switch's
+// EditorSave.draft): on add there is no stored row yet, so the draft is the
+// only way to tell preset/draft-carried exclusive keys (they belong to the
+// new row) apart from keys the view carried from live (they stay live-owned).
+function claudePlanSave(storedRow, edited, base, draft) {
   const shape = (doc) => isPlainObject(doc) && (!("env" in doc) || doc.env === null || doc.env === undefined || isPlainObject(doc.env));
   if (!shape(edited) || !shape(base)) {
     throw new Error("Claude configuration and its env must be JSON objects");
@@ -94,11 +98,15 @@ function claudePlanSave(storedRow, edited, base) {
   const storedEnv = isPlainObject(stored.env) ? stored.env : {};
   const baseEnv = isPlainObject(base.env) ? base.env : {};
   const editedEnv = isPlainObject(edited.env) ? edited.env : {};
+  const draftEnv = isPlainObject(draft?.env) ? draft.env : {};
 
   // Exclusive fields the view carried from live (not the row): untouched
   // ones stay live-owned (not absorbed into the row), deleted ones are
   // removed from live, edited ones are absorbed into the row.
-  const fromLive = Object.keys(baseEnv).filter((key) => floor.CLAUDE_EXCLUSIVE_ENV.includes(key) && !(key in storedEnv));
+  const fromLive = Object.keys(baseEnv).filter((key) =>
+    floor.CLAUDE_EXCLUSIVE_ENV.includes(key)
+    && !(key in storedEnv)
+    && !(key in draftEnv));
   const projection = claudeProjectionOf(edited);
   for (const key of fromLive) {
     if (key in editedEnv && stableEqual(baseEnv[key], editedEnv[key])) delete projection.exclusive[key];
@@ -531,8 +539,8 @@ async function buildEditorView(app, { settingsConfig, id, category } = {}) {
 // edits) against the base it was opened with. Returns the provider row
 // content and the global-settings changes for the live files. `slotKey` is
 // the additive editor-view echo (which container entry the row owns).
-function planSave(app, storedRow, edited, base, slotKey) {
-  if (app === "claude") return claudePlanSave(storedRow, edited, base);
+function planSave(app, storedRow, edited, base, slotKey, draft) {
+  if (app === "claude") return claudePlanSave(storedRow, edited, base, draft);
   if (app === "codex") return codexPlanSave(storedRow, edited, base);
   if (app === "gemini") return geminiPlanSave(storedRow, edited, base);
   if (additive.isAdditiveApp(app)) return additive.planSaveAdditive(app, { settingsConfig: storedRow }, edited, base, slotKey);

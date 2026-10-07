@@ -266,7 +266,18 @@ async function saveProvider({ app, id, body }) {
 
   const policy = CONFLICT_POLICIES.includes(body.editor.onConflict) ? body.editor.onConflict : "refuse";
   const existing = id ? await store.getProvider(app, id) : null;
-  const plan = editor.planSave(app, existing ? existing.settingsConfig : null, body.settingsConfig, editorInput.base, editorInput.slotKey);
+  const plan = editor.planSave(
+    app,
+    existing ? existing.settingsConfig : null,
+    body.settingsConfig,
+    editorInput.base,
+    editorInput.slotKey,
+    // Claude: the draft distinguishes draft-carried exclusive keys (row-owned
+    // on add) from live-owned ones — cc-switch's EditorSave.draft.
+    app === "claude" && editorInput.draft && typeof editorInput.draft === "object"
+      ? editorInput.draft
+      : undefined,
+  );
 
   const state = await store.listProviders(app);
   const isCurrent = !!id && state.current === id;

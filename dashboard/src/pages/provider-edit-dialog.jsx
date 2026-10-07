@@ -11,6 +11,7 @@ import { EndpointSpeedTestDialog } from "./provider-speed-test";
 import { ProviderIconPicker, iconComponentFor } from "./provider-icon-picker";
 import { CodexCatalogEditor } from "./provider-codex-catalog";
 import { ModelDropdown, ModelInputAction } from "./provider-model-dropdown";
+import { withClaudeGatewayDefaults } from "./provider-claude-gateway-defaults";
 
 // Additive apps (cc-switch's additive mode, backed by
 // src/lib/provider-switch/additive.js): the provider owns one keyed entry in
@@ -602,6 +603,10 @@ export function ProviderEditDialog({
   const [conflictKeys, setConflictKeys] = useState(null);
   const [conflictPolicy, setConflictPolicy] = useState(null);
   const viewRequestRef = useRef(0);
+  // The row fragment the editor view was opened with (cc-switch's
+  // EditorSave.draft): lets the save split tell preset/draft-carried
+  // exclusive keys apart from live-owned ones when the row is brand new.
+  const viewDraftRef = useRef(null);
 
   const [initialSnapshot, setInitialSnapshot] = useState(null);
   const [discardOpen, setDiscardOpen] = useState(false);
@@ -677,8 +682,16 @@ export function ProviderEditDialog({
       const token = viewRequestRef.current + 1;
       viewRequestRef.current = token;
       setLoading(true);
+      // New Claude providers start with the gateway default (auto mode's
+      // server check is official-only) — cc-switch's editor overlay applies
+      // the same default to preset and plain-custom drafts alike.
+      const isAdd = !editing;
+      const viewConfig = app === "claude" && isAdd
+        ? withClaudeGatewayDefaults(settingsConfig ?? {}, opts?.category)
+        : settingsConfig ?? {};
+      viewDraftRef.current = viewConfig;
       providerSwitchApi
-        .getEditorView(app, settingsConfig ?? {}, opts)
+        .getEditorView(app, viewConfig, opts)
         .then((view) => {
           if (viewRequestRef.current !== token) return;
           const full = viewToConfig(app, view);
@@ -709,7 +722,12 @@ export function ProviderEditDialog({
             setEditorBase(JSON.parse(JSON.stringify(doc)));
             setEditorSlotKey(slotKey);
           } else {
-            if (initial) setInitialSnapshot(JSON.stringify({ ...initial, draft: settingsConfig ?? {} }));
+            // Claude: keep the (default-carrying) fragment the view was
+            // opened with, so a save without a live file still stores the
+            // gateway default.
+            const fallbackDraft = app === "claude" ? viewConfig : settingsConfig ?? {};
+            if (initial) setInitialSnapshot(JSON.stringify({ ...initial, draft: fallbackDraft }));
+            if (app === "claude") setDraft(fallbackDraft);
             setEditorBase(null);
             setEditorSlotKey("");
           }
@@ -722,7 +740,7 @@ export function ProviderEditDialog({
           if (viewRequestRef.current === token) setLoading(false);
         });
     },
-    [app],
+    [app, editing],
   );
 
   const applyPreset = useCallback((preset) => {
@@ -1335,6 +1353,11 @@ export function ProviderEditDialog({
       if (editorBase) {
         payload.editor = {
           base: editorBase,
+          // The row fragment the view was opened with — lets the backend keep
+          // draft-carried exclusive keys (gateway defaults, presets) in the
+          // new row instead of treating them as live-owned. Add mode only:
+          // edits resolve against the stored row, like cc-switch.
+          ...(app === "claude" && !isEdit && viewDraftRef.current ? { draft: viewDraftRef.current } : {}),
           ...(isAdditiveApp(app) && editorSlotKey ? { slotKey: editorSlotKey } : {}),
           ...(policyOverride || conflictPolicy ? { onConflict: policyOverride || conflictPolicy } : {}),
         };

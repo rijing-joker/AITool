@@ -574,5 +574,6 @@
   "settings.section.labs": "Labs",
   "limits.alert.blocked": "알림이 꺼져 있음 — 시스템 설정에서 허용하세요",
   "settings.limits.showSubscriptions": "구독을 한도에 표시",
-  "settings.limits.showSubscriptionsHint": "수동으로 등록한 구독 갱신 바를 한도와 함께 표시합니다."
+  "settings.limits.showSubscriptionsHint": "수동으로 등록한 구독 갱신 바를 한도와 함께 표시합니다.",
+  "limits.codex_credits_balance.line": "Codex Credits 잔액: {{count}} · 약 {{usd}}"
 }

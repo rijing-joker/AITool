@@ -12,6 +12,7 @@ import {
 import { computePace, resetToMs, resolveWindowSeconds } from "../../../lib/limit-pace.js";
 import { ProviderIcon } from "./ProviderIcon.jsx";
 import { buildResetBankRows } from "./usage-limits-reset-bank.js";
+import { buildCreditsBalanceLine } from "./usage-limits-credits-balance.js";
 import { PROVIDER_LIMIT_SPECS } from "./usage-limits-provider-specs.js";
 import { HoverTooltip } from "../../components/HoverTooltip.jsx";
 import { cycleView, countdownText, remainingLabel } from "../../../lib/subscription-display.js";
@@ -572,7 +573,17 @@ function renderProviderExtra(kind, data) {
     // Credit amounts show on hover (LimitBar's title) instead of an
     // always-visible line, matching the compact menu-bar popover.
     const resetModel = buildResetBankRows(data.reset_credits);
-    return resetModel ? <ResetBankSection model={resetModel} /> : null;
+    // Prepaid Codex Credits balance (wham/usage's credits block). Credits are
+    // only spent once the plan limits run out, so the line shows whenever the
+    // account reports one — after the reset rows, mirroring cc-switch's order.
+    const creditsLine = buildCreditsBalanceLine(data.credits_balance);
+    if (!resetModel && !creditsLine) return null;
+    return (
+      <>
+        {resetModel ? <ResetBankSection model={resetModel} /> : null}
+        {creditsLine ? <StatusLine>{creditsLine.text}</StatusLine> : null}
+      </>
+    );
   }
   if (kind === "kimi_parallel" && data.parallel_limit) {
     return <StatusLine>{copy("limits.label.kimi_parallel", { count: data.parallel_limit })}</StatusLine>;

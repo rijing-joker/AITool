@@ -515,6 +515,24 @@ function normalizeCodexResetCredit(row, nowMs) {
   return { credit, expiresAtMs };
 }
 
+// wham/usage's `credits` block ({has_credits, unlimited, balance}) carries the
+// prepaid Codex Credits balance — balance arrives as a string ("62500") but a
+// number is accepted too (aligned with cc-switch's parse_codex_credits_balance
+// and CodexBar). Unlimited, missing, malformed or zero balances mean "nothing
+// to show" and must never fail the usage read itself.
+function normalizeCodexCreditsBalance(credits) {
+  if (!credits || typeof credits !== "object" || Array.isArray(credits)) return null;
+  if (credits.has_credits !== true) return null;
+  if (credits.unlimited === true) return null;
+  const balance = typeof credits.balance === "number"
+    ? credits.balance
+    : typeof credits.balance === "string"
+      ? Number(credits.balance.trim())
+      : NaN;
+  if (!Number.isFinite(balance) || balance <= 0) return null;
+  return balance;
+}
+
 function normalizeCodexResetCredits(resetCredits, nowMs = Date.now()) {
   if (!resetCredits || typeof resetCredits !== "object" || Array.isArray(resetCredits)) return null;
 
@@ -620,6 +638,7 @@ async function fetchCodexUsageLimits(
       spark_primary_window: null,
       spark_secondary_window: null,
       reset_credits: null,
+      credits_balance: null,
     };
   }
   const body = usage.body;
@@ -645,6 +664,7 @@ async function fetchCodexUsageLimits(
     credit_window: normalizeCodexCreditWindow(body.spend_control?.individual_limit),
     ...normalizeCodexSparkRateWindows(body.additional_rate_limits),
     reset_credits: resetCredits,
+    credits_balance: normalizeCodexCreditsBalance(body.credits),
   };
 }
 
@@ -2490,6 +2510,10 @@ function normalizeCodexCachedLimits(
     spark_primary_window: isCodexCacheWindowUsable(raw?.spark_primary_window, { nowMs }) ? raw.spark_primary_window : null,
     spark_secondary_window: isCodexCacheWindowUsable(raw?.spark_secondary_window, { nowMs }) ? raw.spark_secondary_window : null,
     reset_credits: raw?.reset_credits ?? null,
+    // The cache stores the already-normalized positive number, not the wham block.
+    credits_balance: Number.isFinite(raw?.credits_balance) && raw.credits_balance > 0
+      ? raw.credits_balance
+      : null,
     stale: true,
     cached_at: raw.cached_at,
   };
@@ -2518,6 +2542,9 @@ function writeCodexLimitsCache(limits, { home, nowMs = Date.now() } = {}) {
       spark_primary_window: limits.spark_primary_window || null,
       spark_secondary_window: limits.spark_secondary_window || null,
       reset_credits: limits.reset_credits || null,
+      credits_balance: Number.isFinite(limits.credits_balance) && limits.credits_balance > 0
+        ? limits.credits_balance
+        : null,
       cached_at: new Date(nowMs).toISOString(),
     },
   };
@@ -4097,6 +4124,7 @@ async function fetchUsageLimitsUncached({
       spark_primary_window: codexResult.value.spark_primary_window,
       spark_secondary_window: codexResult.value.spark_secondary_window,
       reset_credits: codexResult.value.reset_credits,
+      credits_balance: codexResult.value.credits_balance,
       // Live read is current as of now; the stale fallback path below serves the
       // disk cache with `stale: true`. Always emitting both lets the client show a
       // data-age label uniformly (see the Claude live-success block).

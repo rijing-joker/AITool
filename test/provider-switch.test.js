@@ -894,6 +894,93 @@ test("provider-switch editor save: floor keys go to the row, other edits go to l
   assert.deepEqual(liveAfter.hooks, { SessionStart: "echo edited" });
 });
 
+test("provider-switch editor add: draft-carried exclusive keys land in the new row, live-owned ones stay out", async () => {
+  const { handleProviderSwitchApiRequest } = require("../src/lib/provider-switch/api");
+  const handler = handleProviderSwitchApiRequest;
+  const prefix = "/api/provider-switch";
+
+  // A live file the user owns, carrying an exclusive key of its own (written
+  // by Claude Code or hand-edited — not by any provider row).
+  const claudeDir = path.join(tmpHome, ".claude");
+  fs.mkdirSync(claudeDir, { recursive: true });
+  fs.writeFileSync(path.join(claudeDir, "settings.json"), JSON.stringify({
+    env: {
+      CLAUDE_CODE_DISABLE_THINKING: "1",
+      MY_OWN_VAR: "keep-me",
+    },
+  }));
+
+  // The add dialog opens on a draft fragment with the gateway default
+  // (cc-switch's withClaudeGatewayDefaults) plus the provider's floor keys.
+  const draft = { env: { ANTHROPIC_BASE_URL: "https://gw.example.com", ANTHROPIC_AUTH_TOKEN: "sk-gw", CLAUDE_CODE_AUTO_MODE_SERVER: "0" } };
+  const view = await call(handler, {
+    method: "POST",
+    url: `${prefix}/editor-view`,
+    body: JSON.stringify({ app: "claude", settingsConfig: draft }),
+  });
+  assert.equal(view.status, 200);
+  // The view shows the whole post-switch config: the draft's keys plus the
+  // live-owned ones.
+  assert.equal(view.body.settings.env.CLAUDE_CODE_AUTO_MODE_SERVER, "0");
+  assert.equal(view.body.settings.env.CLAUDE_CODE_DISABLE_THINKING, "1");
+  assert.equal(view.body.settings.env.MY_OWN_VAR, "keep-me");
+
+  const saved = await call(handler, {
+    method: "POST",
+    url: `${prefix}/providers`,
+    body: JSON.stringify({
+      app: "claude",
+      name: "Gateway",
+      category: "custom",
+      settingsConfig: view.body.settings,
+      editor: { base: view.body.settings, draft },
+    }),
+  });
+  assert.equal(saved.status, 200);
+
+  // The gateway default travels with the row; the live-owned exclusive key
+  // does not get captured.
+  const state = await call(handler, { url: `${prefix}/providers?app=claude` });
+  const row = state.body.providers.find((p) => p.name === "Gateway");
+  assert.equal(row.settingsConfig.env.CLAUDE_CODE_AUTO_MODE_SERVER, "0");
+  assert.equal(row.settingsConfig.env.ANTHROPIC_BASE_URL, "https://gw.example.com");
+  assert.equal(row.settingsConfig.env.CLAUDE_CODE_DISABLE_THINKING, undefined);
+
+  // Switching to the row writes the default and keeps the user's own key.
+  await call(handler, { method: "POST", url: `${prefix}/switch`, body: JSON.stringify({ app: "claude", id: row.id }) });
+  const live = JSON.parse(fs.readFileSync(path.join(tmpHome, ".claude", "settings.json"), "utf8"));
+  assert.equal(live.env.CLAUDE_CODE_AUTO_MODE_SERVER, "0");
+  assert.equal(live.env.CLAUDE_CODE_DISABLE_THINKING, "1");
+  assert.equal(live.env.MY_OWN_VAR, "keep-me");
+
+  // Legacy payloads without a draft keep the old semantics: an untouched
+  // exclusive key in the view stays live-owned and out of the row.
+  const legacyView = await call(handler, {
+    method: "POST",
+    url: `${prefix}/editor-view`,
+    body: JSON.stringify({
+      app: "claude",
+      settingsConfig: { env: { ANTHROPIC_BASE_URL: "https://plain.example.com", CLAUDE_CODE_AUTO_MODE_SERVER: "0" } },
+    }),
+  });
+  const legacy = await call(handler, {
+    method: "POST",
+    url: `${prefix}/providers`,
+    body: JSON.stringify({
+      app: "claude",
+      name: "Plain",
+      category: "custom",
+      settingsConfig: legacyView.body.settings,
+      editor: { base: legacyView.body.settings },
+    }),
+  });
+  assert.equal(legacy.status, 200);
+  const stateAfter = await call(handler, { url: `${prefix}/providers?app=claude` });
+  const plain = stateAfter.body.providers.find((p) => p.name === "Plain");
+  assert.equal(plain.settingsConfig.env.CLAUDE_CODE_AUTO_MODE_SERVER, undefined);
+  assert.equal(plain.settingsConfig.env.ANTHROPIC_BASE_URL, "https://plain.example.com");
+});
+
 test("provider-switch editor save: three-way conflict refuse / keepTheirs / keepMine", async () => {
   const { handleProviderSwitchApiRequest } = require("../src/lib/provider-switch/api");
   const handler = handleProviderSwitchApiRequest;

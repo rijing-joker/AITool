@@ -574,5 +574,6 @@
   "settings.section.labs": "Labs",
   "limits.alert.blocked": "通知がオフです — システム設定で許可してください",
   "settings.limits.showSubscriptions": "サブスクを制限表示に表示",
-  "settings.limits.showSubscriptionsHint": "手動登録した更新日バーを制限と一緒に表示します。"
+  "settings.limits.showSubscriptionsHint": "手動登録した更新日バーを制限と一緒に表示します。",
+  "limits.codex_credits_balance.line": "Codex Credits 残高：{{count}} · 約 {{usd}}"
 }

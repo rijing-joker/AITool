@@ -769,6 +769,7 @@ limits.codex_credits.detail,ui,LimitsPage,UsageLimitsPanel,codex_credits_detail,
 limits.codex_reset_bank.title,ui,LimitsPage,UsageLimitsPanel,codex_reset_bank_title,"Resets",,active
 limits.codex_reset_bank.row_label,ui,LimitsPage,UsageLimitsPanel,codex_reset_bank_row_label,"Reset {{index}}",,active
 limits.codex_reset_bank.count_only,ui,LimitsPage,UsageLimitsPanel,codex_reset_bank_count_only,"Reset Bank: {{count}} available · expiry unavailable",,active
+limits.codex_credits_balance.line,ui,LimitsPage,UsageLimitsPanel,codex_credits_balance_line,"Codex Credits balance: {{count}} · ≈{{usd}}",,active
 limits.label.gemini_pro,ui,LimitsPage,UsageLimitsPanel,gemini_pro,"Pro",,active
 limits.label.gemini_flash,ui,LimitsPage,UsageLimitsPanel,gemini_flash,"Flash",,active
 limits.label.gemini_lite,ui,LimitsPage,UsageLimitsPanel,gemini_lite,"Lite",,active

@@ -150,3 +150,89 @@ it("skips the stats recompute on page changes but keeps it for polls and filters
   expect(includeParam(recordsCalls()[recordsCalls().length - 1])).toBe("1");
   expect(showToast).not.toHaveBeenCalled();
 });
+
+const ROW_HEIGHT_ENABLED_KEY = "aitool.usage-events-row-height-enabled.v1";
+const ROW_HEIGHT_KEY = "aitool.usage-events-row-height.v1";
+const PAGE_SIZE_KEY = "aitool.usage-events-page-size.v1";
+
+function clearDisplayPrefs() {
+  localStorage.removeItem(ROW_HEIGHT_ENABLED_KEY);
+  localStorage.removeItem(ROW_HEIGHT_KEY);
+  localStorage.removeItem(PAGE_SIZE_KEY);
+}
+
+async function openColumnSettings() {
+  fireEvent.click(screen.getByRole("button", { name: "proxy.requests.col_settings" }));
+  return screen.findByRole("dialog", { name: "proxy.requests.col_settings" });
+}
+
+it("applies a fixed row height from the settings dialog and persists it", async () => {
+  clearDisplayPrefs();
+  await setup();
+  await openColumnSettings();
+  const slider = screen.getByLabelText("proxy.requests.row_height.slider");
+  expect(slider).toBeDisabled();
+  fireEvent.click(screen.getByRole("checkbox", { name: "proxy.requests.row_height.title" }));
+  expect(slider).toBeEnabled();
+  fireEvent.change(slider, { target: { value: "90" } });
+  expect(screen.getByText("90px")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "shared.action.apply" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(localStorage.getItem(ROW_HEIGHT_ENABLED_KEY)).toBe("true");
+  expect(localStorage.getItem(ROW_HEIGHT_KEY)).toBe("90");
+  expect(document.querySelector("table").style.getPropertyValue("--usage-row-height")).toBe("90px");
+  clearDisplayPrefs();
+});
+
+it("discards the row-height draft on cancel", async () => {
+  clearDisplayPrefs();
+  await setup();
+  await openColumnSettings();
+  fireEvent.click(screen.getByRole("checkbox", { name: "proxy.requests.row_height.title" }));
+  fireEvent.change(screen.getByLabelText("proxy.requests.row_height.slider"), { target: { value: "100" } });
+  fireEvent.click(screen.getByRole("button", { name: "shared.action.cancel" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(localStorage.getItem(ROW_HEIGHT_ENABLED_KEY)).toBeNull();
+  expect(localStorage.getItem(ROW_HEIGHT_KEY)).toBeNull();
+  expect(document.querySelector("table").style.getPropertyValue("--usage-row-height")).toBe("");
+  clearDisplayPrefs();
+});
+
+it("restores the saved row height on mount and clamps bad values", async () => {
+  localStorage.setItem(ROW_HEIGHT_ENABLED_KEY, "true");
+  localStorage.setItem(ROW_HEIGHT_KEY, "9999");
+  await setup();
+  expect(document.querySelector("table").style.getPropertyValue("--usage-row-height")).toBe("140px");
+  await openColumnSettings();
+  expect(screen.getByRole("checkbox", { name: "proxy.requests.row_height.title" })).toBeChecked();
+  expect(screen.getByLabelText("proxy.requests.row_height.slider")).toHaveValue("140");
+  clearDisplayPrefs();
+});
+
+it("remembers the chosen page size across mounts", async () => {
+  clearDisplayPrefs();
+  await setup();
+  fireEvent.change(screen.getByRole("combobox", { name: "proxy.requests.page_size" }), { target: { value: "100" } });
+  await waitFor(() => { expect(String(recordsCalls().at(-1)[0])).toContain("pageSize=100"); });
+  expect(localStorage.getItem(PAGE_SIZE_KEY)).toBe("100");
+  cleanup();
+  render(<RequestsTab />);
+  await screen.findByText("fixture-model");
+  expect(String(recordsCalls().at(-1)[0])).toContain("pageSize=100");
+  clearDisplayPrefs();
+});
+
+it.each([
+  [40_000, "text-red-600"],
+  [16_000, "text-amber-600"],
+  [5_000, "text-emerald-600"],
+])("tints latency cells by duration thresholds (%i ms)", async (latencyMs, tone) => {
+  await setup({
+    records: [{ ...response.records[0], latencyMs, ttftMs: Math.round(latencyMs / 4) }],
+  });
+  const cell = screen.getByTitle(`${latencyMs} ms`);
+  expect(cell.querySelector("span")).toHaveClass(tone);
+  // The TTFT sub-line rides in the same cell with its own band — a quarter of
+  // the elapsed time always lands in the green band here.
+  expect(cell.querySelector("span[title]")).toHaveClass("text-emerald-600");
+});

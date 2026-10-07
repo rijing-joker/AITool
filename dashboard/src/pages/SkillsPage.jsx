@@ -328,6 +328,28 @@ function SkillRow({ skill, targets, selected, onSelect, selectable, checked, onT
   );
 }
 
+// Tri-state select-all for the installed list (cc-switch a776a3b): checked =
+// every selectable shown row is picked, indeterminate = some, unchecked = none.
+// Out-of-filter selections are preserved by the handler.
+function SelectAllCheckbox({ selectableIds, selectedIds, onToggleSelectAll }) {
+  const selectedCount = selectableIds.reduce((n, id) => n + (selectedIds.has(id) ? 1 : 0), 0);
+  const allSelected = selectableIds.length > 0 && selectedCount === selectableIds.length;
+  const indeterminate = selectedCount > 0 && !allSelected;
+  return (
+    <input
+      type="checkbox"
+      checked={allSelected}
+      ref={(el) => {
+        if (el) el.indeterminate = indeterminate;
+      }}
+      disabled={selectableIds.length === 0}
+      onChange={(event) => onToggleSelectAll?.(selectableIds, event.target.checked)}
+      aria-label={copy("skills.select.select_all_aria")}
+      className="h-4 w-4 rounded border-oai-gray-300 text-oai-black focus:ring-oai-gray-400 dark:border-oai-gray-600 dark:bg-oai-gray-900 dark:text-white"
+    />
+  );
+}
+
 function FilterToolbar({
   agentFilter,
   agentOptions,
@@ -339,9 +361,11 @@ function FilterToolbar({
   searchQuery,
   onSearchQuery,
   searchPlaceholder,
+  selectAll,
 }) {
   return (
     <div className="mb-2 flex flex-wrap items-center gap-2 pt-1 text-xs text-oai-gray-600 dark:text-oai-gray-300">
+      {selectAll ? <SelectAllCheckbox {...selectAll} /> : null}
       <Select.Root value={agentFilter} onValueChange={onAgentFilter}>
         <Select.Trigger
           aria-label={copy("skills.filter.agent_label")}
@@ -449,7 +473,7 @@ function FilterToolbar({
 
 // Batch toolbar — appears only when a selection exists. Capability-gated: the
 // bulk-sync popover and remove button act on every selected skill at once.
-function BatchToolbar({ count, targets, busy, onBulkSync, onBulkRemove, onClear }) {
+function BatchToolbar({ count, targets, busy, onBulkSync, onBulkRemove, onClear, selectAll }) {
   const manageableTargets = targets.filter(isManageableTarget);
   return (
     <div
@@ -457,6 +481,7 @@ function BatchToolbar({ count, targets, busy, onBulkSync, onBulkRemove, onClear 
       aria-label={copy("skills.select.toolbar_aria")}
       className="mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-oai-gray-200 bg-oai-gray-50 px-3 py-2 dark:border-oai-gray-800 dark:bg-oai-gray-900/50"
     >
+      {selectAll ? <SelectAllCheckbox {...selectAll} /> : null}
       <span className="text-xs font-medium text-oai-gray-700 dark:text-oai-gray-200" aria-live="polite">
         {copy("skills.select.count", { count })}
       </span>
@@ -527,6 +552,7 @@ function MySkillsView({
   updates,
   selectedIds,
   onToggleSelect,
+  onToggleSelectAll,
   onClearSelection,
   onBulkSync,
   onBulkRemove,
@@ -534,6 +560,12 @@ function MySkillsView({
   onUpdateAll,
 }) {
   const selectionCount = selectedIds.size;
+  // The select-all box acts on selectable rows among the ones currently shown.
+  const selectableIds = useMemo(
+    () => items.filter((skill) => !skill.readOnly && !skill.remote).map((skill) => skillIdentity(skill)),
+    [items],
+  );
+  const selectAll = { selectableIds, selectedIds, onToggleSelectAll };
   return (
     <div>
       {selectionCount > 0 ? (
@@ -544,6 +576,7 @@ function MySkillsView({
           onBulkSync={onBulkSync}
           onBulkRemove={onBulkRemove}
           onClear={onClearSelection}
+          selectAll={selectAll}
         />
       ) : (
         <div className="flex flex-wrap items-start justify-between gap-2">
@@ -558,6 +591,7 @@ function MySkillsView({
             searchQuery={searchQuery}
             onSearchQuery={onSearchQuery}
             searchPlaceholder={searchPlaceholder}
+            selectAll={selectAll}
           />
           {updateCount ? (
             <Button
@@ -1201,6 +1235,33 @@ export function SkillsPage() {
     });
   }, []);
 
+  // Select-all acts on the rows the current search/filter shows (cc-switch
+  // a776a3b semantics): out-of-filter selections are untouched.
+  const handleToggleSelectAll = useCallback((ids, checked) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) {
+        if (checked) next.add(id);
+        else next.delete(id);
+      }
+      return next;
+    });
+  }, []);
+
+  // Drop selections whose rows no longer exist (removed, refreshed, or
+  // replaced by a cloud-inventory merge) so the select-all state stays honest.
+  const installedIdentities = useMemo(
+    () => new Set((installedData.skills || []).map((skill) => skillIdentity(skill))),
+    [installedData.skills],
+  );
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      const stale = [...prev].filter((id) => !installedIdentities.has(id));
+      return stale.length ? new Set([...prev].filter((id) => installedIdentities.has(id))) : prev;
+    });
+  }, [installedIdentities]);
+
+
   const targetLabelFor = (targetId) =>
     (installedData.targets || []).find((t) => t.id === targetId)?.label || targetId;
 
@@ -1505,6 +1566,7 @@ export function SkillsPage() {
         updates={updates}
         selectedIds={selectedIds}
         onToggleSelect={handleToggleSelect}
+        onToggleSelectAll={handleToggleSelectAll}
         onClearSelection={clearSelection}
         onBulkSync={handleBulkSync}
         onBulkRemove={handleBulkRemove}

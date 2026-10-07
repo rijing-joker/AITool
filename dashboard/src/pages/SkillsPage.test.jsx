@@ -225,6 +225,51 @@ describe("SkillsPage", () => {
     expect(screen.getByText(copy("skills.select.count", { count: 1 }))).toBeInTheDocument();
   });
 
+  it("select-all picks every shown row, goes indeterminate on a partial pick and keeps out-of-filter picks", async () => {
+    const user = userEvent.setup();
+    vi.mocked(getInstalledSkills).mockResolvedValue({
+      targets: [
+        { id: "claude", label: "Claude" },
+        { id: "codex", label: "Codex" },
+      ],
+      skills: [
+        { name: "Local Alpha", directory: "local-alpha", targets: ["claude"], managed: false },
+        { name: "Local Beta", directory: "local-beta", targets: ["claude"], managed: false },
+        { name: "Local Gamma", directory: "local-gamma", targets: ["codex"], managed: false },
+      ],
+    });
+
+    render(<SkillsPage />);
+
+    const alpha = await screen.findByRole("checkbox", {
+      name: copy("skills.select.row_aria", { name: "Local Alpha" }),
+    });
+
+    // One row picked → the toolbar swaps to BatchToolbar (a fresh select-all
+    // node) in indeterminate state; clicking it completes the selection.
+    await user.click(alpha);
+    const batchSelectAll = screen.getByRole("checkbox", { name: copy("skills.select.select_all_aria") });
+    expect(batchSelectAll).not.toBeChecked();
+    expect(batchSelectAll.indeterminate).toBe(true);
+    await user.click(batchSelectAll);
+    expect(screen.getByText(copy("skills.select.count", { count: 3 }))).toBeInTheDocument();
+    expect(batchSelectAll).toBeChecked();
+    expect(batchSelectAll.indeterminate).toBe(false);
+
+    // Unchecking one row drops back to indeterminate; re-clicking select-all
+    // completes the set again and a second click clears every shown row.
+    const beta = screen.getByRole("checkbox", {
+      name: copy("skills.select.row_aria", { name: "Local Beta" }),
+    });
+    await user.click(beta);
+    expect(screen.getByText(copy("skills.select.count", { count: 2 }))).toBeInTheDocument();
+    expect(batchSelectAll.indeterminate).toBe(true);
+    await user.click(batchSelectAll);
+    expect(screen.getByText(copy("skills.select.count", { count: 3 }))).toBeInTheDocument();
+    await user.click(batchSelectAll);
+    expect(screen.getByText(copy("skills.filter.result_count", { filtered: 3, total: 3 }))).toBeInTheDocument();
+  });
+
   it("does not mark an unrelated browse skill installed when only the nested local leaf matches", async () => {
     const user = userEvent.setup();
     vi.mocked(getInstalledSkills).mockResolvedValue({

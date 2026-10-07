@@ -659,6 +659,7 @@
   "skills.dot.orphan_aria": "{{agent}}：連結已失效。點選可重新同步。",
   "skills.update.badge": "可更新",
   "skills.select.row_aria": "選取 {{name}}",
+  "skills.select.select_all_aria": "全選當前顯示",
   "skills.select.toolbar_aria": "批次操作",
   "skills.select.count": "已選取 {{count}} 項",
   "skills.select.bulk_sync": "同步到",

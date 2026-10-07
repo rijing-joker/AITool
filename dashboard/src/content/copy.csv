@@ -1203,6 +1203,7 @@ skills.dot.off_aria,ui,SkillsPage,AgentDots,dot_off_aria,"{{agent}}: not synced.
 skills.dot.orphan_aria,ui,SkillsPage,AgentDots,dot_orphan_aria,"{{agent}}: link broken. Click to re-sync.",,active
 skills.update.badge,ui,SkillsPage,InstalledSkillRow,update_badge,"Update",,active
 skills.select.row_aria,ui,SkillsPage,InstalledSkillRow,select_row_aria,"Select {{name}}",,active
+skills.select.select_all_aria,ui,SkillsPage,UnifiedToolbar,select_all_aria,"Select all shown",,active
 skills.select.toolbar_aria,ui,SkillsPage,BatchToolbar,select_toolbar_aria,"Bulk actions",,active
 skills.select.count,ui,SkillsPage,BatchToolbar,select_count,"{{count}} selected",,active
 skills.select.bulk_sync,ui,SkillsPage,BatchToolbar,select_bulk_sync,"Sync to",,active

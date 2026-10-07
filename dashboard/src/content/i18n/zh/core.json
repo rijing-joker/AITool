@@ -727,6 +727,7 @@
   "skills.dot.orphan_aria": "{{agent}}：链接已失效。点击可重新同步。",
   "skills.update.badge": "可更新",
   "skills.select.row_aria": "选择 {{name}}",
+  "skills.select.select_all_aria": "全选当前显示",
   "skills.select.toolbar_aria": "批量操作",
   "skills.select.count": "已选择 {{count}} 项",
   "skills.select.bulk_sync": "同步到",

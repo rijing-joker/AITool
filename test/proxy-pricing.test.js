@@ -6,6 +6,7 @@ const { test } = require("node:test");
 const paths = require("../src/lib/proxy/paths");
 const { handleProxyApiRequest } = require("../src/lib/proxy/api");
 const pricing = require("../src/lib/proxy/pricing");
+const config = require("../src/lib/proxy/config");
 
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "aitool-pricing-test-"));
@@ -225,6 +226,7 @@ test("pricing meta route reports sync state without the model index", async (t) 
 
 test("heatmap endpoint aggregates per-day tokens, requests and cost", async (t) => {
   fixture(t);
+  t.mock.method(Date, "now", () => new Date(2026, 9, 7, 12).getTime());
   writePricingStore({
     "claude-sonnet-5": { name: "Claude Sonnet 5", provider: "anthropic", input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
   });
@@ -250,6 +252,42 @@ test("heatmap endpoint aggregates per-day tokens, requests and cost", async (t) 
   // Cost only on the successful rows: day2 = (10*3 + 20*15)/1e6.
   assert.equal(payload.days[0].costUsd, 0);
   assert.ok(Math.abs(payload.days[1].costUsd - 0.00033) < 1e-9);
+});
+
+test("budget and heatmap include their full windows beyond the latest 14 daily files", async (t) => {
+  fixture(t);
+  const now = new Date(2026, 9, 30, 12).getTime();
+  t.mock.method(Date, "now", () => now);
+  t.mock.method(config, "readSettings", () => ({ budgets: { enabled: true, monthlyLimitUsd: 25, dailyLimitUsd: 5 } }));
+  writePricingStore({ "gpt-fixture": { input: 1, output: 0, cacheRead: 0, cacheWrite: 0 } });
+  const append = (timestamp, receipt = timestamp) => {
+    const row = { timestamp: timestamp.toISOString(), model: "gpt-fixture", tokens: { inputTokens: 1e6, totalTokens: 1e6 } };
+    fs.appendFileSync(path.join(paths.usageDir, `records-${receipt.toISOString().slice(0, 10)}.jsonl`), JSON.stringify(row) + "\n");
+  };
+  for (let day = 1; day <= 30; day += 1) append(new Date(2026, 9, day, 10));
+  const heatmapStart = new Date(2026, 9, 26 - 52 * 7);
+  append(heatmapStart);
+  append(new Date(2026, 8, 30, 10)); // Previous month, still inside the heatmap.
+  append(new Date(2025, 0, 1, 10)); // Outside both windows.
+  append(new Date(2025, 0, 1, 10), new Date(now)); // Backdated event in a recent file.
+  async function read(endpoint) {
+    let payload;
+    await handleProxyApiRequest({ method: "GET" }, {
+      writeHead(status) { assert.equal(status, 200); },
+      end(body) { payload = JSON.parse(body); },
+    }, new URL(`http://localhost/api/proxy/${endpoint}`), {});
+    return payload;
+  }
+  const [budget, heatmap, recent] = await Promise.all([
+    read("budget"), read("usage/heatmap"), read("usage/records"),
+  ]);
+  assert.equal(budget.budget.monthUsd, 30);
+  assert.equal(budget.budget.todayUsd, 1);
+  assert.equal(budget.budget.monthly.level, "exceeded");
+  assert.equal(heatmap.days.length, 32);
+  assert.equal(heatmap.days[0].date, "2025-10-27");
+  assert.equal(heatmap.days.reduce((sum, day) => sum + day.costUsd, 0), 32);
+  assert.equal(recent.total, 15, "the request list still reads 14 daily files, including the late event");
 });
 
 test("pricing meta route include=1 returns the fill metadata keyed by normalized id", async (t) => {

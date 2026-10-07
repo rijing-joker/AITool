@@ -29,6 +29,19 @@ function writeClaudeSession(home, id, lines) {
   return path.join(projectDir, `${id}.jsonl`);
 }
 
+test("Windows USERPROFILE supports session discovery and reading without HOME", async () => {
+  const sourcePath = writeClaudeSession(tmpHome, "windows", [
+    JSON.stringify({ sessionId: "windows", type: "user", message: { role: "user", content: "hello" } }),
+  ]);
+  const env = { USERPROFILE: tmpHome };
+  assert.equal(sessions.listSessionApps({ env }).find((app) => app.id === "claude").available, true);
+  assert.equal((await sessions.listSessions({ app: "claude", env }))[0].sourcePath, sourcePath);
+  assert.equal((await sessions.readSession({ app: "claude", sourcePath, env })).messages[0].content, "hello");
+  assert.deepEqual(await sessions.listSessions({ app: "claude", env: {} }), []);
+  assert.deepEqual(await sessions.listSessions({ app: "claude", env: { ...env, HOME: path.join(tmpHome, "empty") } }), []);
+  assert.equal((await sessions.listSessions({ app: "claude", home: tmpHome, env: { HOME: "/missing", USERPROFILE: "/missing" } })).length, 1);
+});
+
 test("claude sessions: scan derives title, project, timestamps and resume command", async () => {
   const filePath = writeClaudeSession(tmpHome, "session-abc", [
     JSON.stringify({ type: "file-history-snapshot", messageId: "m1", snapshot: {} }),
@@ -316,6 +329,51 @@ test("sessions without usage data return null usage", async () => {
   assert.equal(usage.totalTokens, 0);
   assert.equal(usage.model, null);
   assert.equal(usage.durationMs, 1000);
+});
+
+test("codex attributes cumulative deltas to each model without billing duplicate snapshots", async () => {
+  const root = path.join(tmpHome, ".codex", "sessions");
+  fs.mkdirSync(root, { recursive: true });
+  const sourcePath = path.join(root, "mixed.jsonl");
+  const first = { input_tokens: 100, cached_input_tokens: 40, output_tokens: 50, reasoning_output_tokens: 20, total_tokens: 150 };
+  const second = { input_tokens: 300, cached_input_tokens: 140, output_tokens: 90, reasoning_output_tokens: 40, total_tokens: 390 };
+  const count = (total) => ({ type: "event_msg", payload: { type: "token_count", info: { total_token_usage: total } } });
+  fs.writeFileSync(sourcePath, [
+    { type: "turn_context", payload: { model: "gpt-a" } }, count(first),
+    { type: "turn_context", payload: { model: "gpt-b" } }, count(first), count(second),
+    { type: "turn_context", payload: { model: "gpt-a" } }, count(second),
+  ].map(JSON.stringify).join("\n") + "\n");
+  const { usage } = await sessions.readSession({ app: "codex", sourcePath, home: tmpHome });
+  assert.equal(usage.totalTokens, 390);
+  assert.deepEqual(usage.perModel, [
+    { model: "gpt-b", inputTokens: 200, cacheReadTokens: 100, outputTokens: 40, reasoningTokens: 20, cacheCreationTokens: 0 },
+    { model: "gpt-a", inputTokens: 100, cacheReadTokens: 40, outputTokens: 50, reasoningTokens: 20, cacheCreationTokens: 0 },
+  ]);
+  const { estimateCostUsd } = require("../src/lib/proxy/pricing");
+  const prices = { "gpt-a": { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 0 }, "gpt-b": { input: 3, output: 6, cacheRead: 0.3, cacheWrite: 0 } };
+  const cost = usage.perModel.reduce((sum, entry) => sum + estimateCostUsd(prices, entry.model, entry, { inputInclusive: usage.inputInclusive }), 0);
+  assert.ok(Math.abs(cost - (60 + 50 * 2 + 40 * 0.1 + 100 * 3 + 40 * 6 + 100 * 0.3) / 1e6) < 1e-12);
+});
+
+test("codex resets and cache-read aliases keep session totals aligned with the model breakdown", async () => {
+  const root = path.join(tmpHome, ".codex", "sessions");
+  fs.mkdirSync(root, { recursive: true });
+  const sourcePath = path.join(root, "reset.jsonl");
+  const first = { input_tokens: 100, cache_read_input_tokens: 40, output_tokens: 50 };
+  const reset = { input_tokens: 20, cache_read_input_tokens: 5, output_tokens: 10 };
+  fs.writeFileSync(sourcePath, [
+    { type: "turn_context", payload: { model: "gpt-a" } },
+    { type: "event_msg", payload: { type: "token_count", info: { total_token_usage: first, last_token_usage: first } } },
+    { type: "turn_context", payload: { model: "gpt-b" } },
+    { type: "event_msg", payload: { type: "token_count", info: { total_token_usage: reset, last_token_usage: reset } } },
+    { type: "event_msg", payload: { type: "token_count", info: { total_token_usage: reset, last_token_usage: reset } } },
+  ].map(JSON.stringify).join("\n") + "\n");
+  const { usage } = await sessions.readSession({ app: "codex", sourcePath, home: tmpHome });
+  assert.equal(usage.totalTokens, 180);
+  assert.equal(usage.cacheReadTokens, 45);
+  for (const field of ["inputTokens", "outputTokens", "cacheReadTokens"]) {
+    assert.equal(usage[field], usage.perModel.reduce((sum, entry) => sum + entry[field], 0));
+  }
 });
 
 test("claude session usage keeps a per-model breakdown for mixed-model sessions", async () => {

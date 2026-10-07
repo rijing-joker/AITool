@@ -9,8 +9,8 @@
 // `toolResults`, and assistant rows carry per-message `usage` + `model` where
 // the source files attribute tokens per message (claude/gemini).
 //
-// HOME resolution follows the commandcode-limits convention: explicit `home`
-// or env HOME only, never os.homedir(), so tests stay isolated.
+// Resolve explicit `home`, then HOME / Windows USERPROFILE. An injected
+// environment never falls through to the real user's home, keeping tests isolated.
 //
 // `readSession` takes a sourcePath from the client, so every path is clamped
 // to the app's own roots before being touched (no arbitrary file reads).
@@ -18,6 +18,7 @@
 const fs = require("node:fs");
 const fsp = require("node:fs/promises");
 const path = require("node:path");
+const { createUsageDeltaState, consumeUsageDelta } = require("./codex-token-usage");
 
 const TITLE_MAX_CHARS = 80;
 const SUMMARY_MAX_CHARS = 160;
@@ -31,8 +32,10 @@ function isNonEmptyString(value) {
 
 function resolveHome({ home, env = process.env } = {}) {
   if (isNonEmptyString(home)) return home.trim();
-  const envHome = env && typeof env === "object" ? env.HOME : null;
-  if (isNonEmptyString(envHome)) return envHome.trim();
+  for (const key of ["HOME", "USERPROFILE"]) {
+    const envHome = env && typeof env === "object" ? env[key] : null;
+    if (isNonEmptyString(envHome)) return envHome.trim();
+  }
   return null;
 }
 
@@ -462,9 +465,15 @@ async function codexParseSession(filePath) {
 async function codexReadMessages(filePath) {
   const raw = await fsp.readFile(filePath, "utf8");
   const messages = [];
-  // token_count events carry cumulative totals; the last one is the session
-  // total. Input is inclusive of cached tokens (OpenAI semantics).
+  // Attribute cumulative increments to the model active for each event.
+  // Input includes cache reads; reasoning is already included in output.
   const usage = emptyUsage(true);
+  const usageState = createUsageDeltaState();
+  const snapshot = (value) => value && typeof value === "object" && !Array.isArray(value) ? {
+    ...value,
+    cached_input_tokens: value.cached_input_tokens ?? value.cache_read_input_tokens,
+    total_tokens: value.total_tokens ?? ((Number(value.input_tokens) || 0) + (Number(value.output_tokens) || 0)),
+  } : null;
   let usageSeen = false;
   for (const line of raw.split("\n")) {
     if (line === "") continue;
@@ -480,13 +489,18 @@ async function codexReadMessages(filePath) {
       // and the token_count info block — the last one seen wins.
       if (typeof info?.model === "string" && info.model) usage.model = info.model;
       else if (typeof info?.model_name === "string" && info.model_name) usage.model = info.model_name;
-      const total = info?.total_token_usage;
-      if (total && typeof total === "object") {
-        usage.inputTokens = Number(total.input_tokens) || 0;
-        usage.outputTokens = Number(total.output_tokens) || 0;
-        usage.reasoningTokens = Number(total.reasoning_output_tokens) || 0;
-        usage.cacheReadTokens = Number(total.cached_input_tokens ?? total.cache_read_input_tokens) || 0;
-        usage.totalTokens = Number(total.total_tokens) || (usage.inputTokens + usage.outputTokens);
+      const delta = consumeUsageDelta(usageState, snapshot(info?.last_token_usage), snapshot(info?.total_token_usage));
+      if (delta) {
+        const row = {
+          inputTokens: delta.input_tokens,
+          outputTokens: delta.output_tokens,
+          reasoningTokens: delta.reasoning_output_tokens,
+          cacheReadTokens: delta.cached_input_tokens,
+          cacheCreationTokens: 0,
+        };
+        trackModelUsage(usage, usage.model, row);
+        for (const [key, count] of Object.entries(row)) usage[key] += count;
+        usage.totalTokens += delta.total_tokens;
         usageSeen = true;
       }
     }
@@ -534,13 +548,6 @@ async function codexReadMessages(filePath) {
     messages.push(row);
   }
   if (!usageSeen) return { messages, usage: null };
-  trackModelUsage(usage, usage.model, {
-    inputTokens: usage.inputTokens,
-    outputTokens: usage.outputTokens,
-    reasoningTokens: usage.reasoningTokens,
-    cacheReadTokens: usage.cacheReadTokens,
-    cacheCreationTokens: 0,
-  });
   return { messages, usage: finalizeUsage(usage) };
 }
 

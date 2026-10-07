@@ -114,3 +114,24 @@ test("concurrent reads of different directories never share another directory's 
   const results = await Promise.all(fixtures.map(({ dir }) => store.readRecords(dir)));
   assert.deepEqual(results.map((rows) => rows[0].id), ["0", "1", "2"]);
 });
+
+test("time-window reads include older files without changing concurrent recent reads", async (t) => {
+  const { dir, store } = fixture(t);
+  for (let day = 1; day <= 30; day += 1) {
+    const date = `2026-10-${String(day).padStart(2, "0")}`;
+    fs.writeFileSync(path.join(dir, `records-${date}.jsonl`), line(date, `${date}T12:00:00Z`));
+  }
+  // Local midnight in UTC+8 falls in the previous UTC receipt file.
+  const since = Date.parse("2026-10-02T00:00:00+08:00");
+  const [recent, month, week] = await Promise.all([
+    store.readRecords(dir),
+    store.readRecords(dir, { since }),
+    store.readRecords(dir, { since: Date.parse("2026-10-24T00:00:00Z") }),
+  ]);
+  assert.equal(recent.length, 14);
+  assert.equal(month.length, 30);
+  assert.equal(month.at(-1).id, "2026-10-01");
+  assert.equal(week.length, 7);
+  assert.equal(week.at(-1).id, "2026-10-24");
+  assert.equal((await store.readRecords(dir)).length, 14);
+});

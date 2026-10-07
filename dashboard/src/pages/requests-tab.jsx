@@ -11,6 +11,8 @@ import { sendBudgetAlerts } from "../lib/budget-alerts";
 import { getLocalApiAuthHeaders } from "../lib/local-api-auth";
 import {
   managementApi,
+  effectiveProviderKey,
+  providerGroupKeys,
   providerGroupsApi,
   providerHeadersFromRecord,
   providerLoadDefinitions,
@@ -926,7 +928,13 @@ export function RequestsTab() {
       })),
     );
     return responses.flatMap((result) => (result.status === "fulfilled"
-      ? result.value.records.map((record, index) => rowFromRecord(result.value.section, record, index))
+      ? result.value.records.flatMap((record, index) => {
+          const keys = providerGroupKeys(record);
+          const records = Array.isArray(record.keys)
+            ? keys.map((key) => effectiveProviderKey(record, key))
+            : [record];
+          return records.map((entry) => rowFromRecord(result.value.section, entry, index));
+        })
       : []));
   }, []);
 

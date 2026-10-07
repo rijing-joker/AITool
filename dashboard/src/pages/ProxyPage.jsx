@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { copy } from "../lib/copy";
+import { formatAggregateSpeed } from "../lib/usage-speed";
 import { proxyApi } from "../lib/proxy-api";
 import { useVisiblePolling } from "../hooks/use-visible-polling";
 import { PageHeader } from "../ui/components/PageHeader";
@@ -325,16 +326,38 @@ function OverviewTab({ status, statusError, onRefresh, onInstallCore, onSelectTa
             {copy("proxy.metric.by_model")}
           </p>
           {overview?.models.length ? (
-            <ul className="mt-3 divide-y divide-oai-gray-100 dark:divide-oai-gray-800">
-              {overview.models.slice(0, 8).map((model) => (
-                <li key={model.model} className="flex items-center justify-between gap-3 py-2 text-sm">
-                  <span className="truncate font-mono text-xs">{model.model}</span>
-                  <span className="shrink-0 tabular-nums text-oai-gray-500 dark:text-oai-gray-400">
-                    {formatTokens(model.total_tokens)} · {model.requests}
-                  </span>
-                </li>
-              ))}
-            </ul>
+            <table className="mt-3 w-full text-left text-xs">
+              <thead>
+                <tr className="text-oai-gray-500 dark:text-oai-gray-400">
+                  <th className="py-1 font-semibold">{copy("proxy.requests.model")}</th>
+                  <th className="py-1 text-right font-semibold">{copy("proxy.requests.tokens")}</th>
+                  <th className="py-1 text-right font-semibold">{copy("proxy.metric.requests")}</th>
+                  <th className="py-1 text-right font-semibold">{copy("proxy.metric.success_rate")}</th>
+                  <th className="py-1 text-right font-semibold" title={copy("proxy.metric.speed_hint")}>{copy("proxy.metric.speed")}</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-oai-gray-100 dark:divide-oai-gray-800">
+                {overview.models.slice(0, 8).map((model) => {
+                  const speed = formatAggregateSpeed(model);
+                  const hasCache = model.cache_read_tokens > 0 || model.cache_creation_tokens > 0;
+                  const cacheTitle = hasCache
+                    ? `${copy("proxy.metric.cache_read")}: ${formatTokens(model.cache_read_tokens)}\n${copy("proxy.metric.cache_creation")}: ${formatTokens(model.cache_creation_tokens)}`
+                    : undefined;
+                  const rateTone = model.success_rate == null
+                    ? "text-oai-gray-400"
+                    : successRateTone(model.success_rate);
+                  return (
+                    <tr key={model.model} className="text-oai-gray-700 dark:text-oai-gray-300">
+                      <td className="max-w-0 truncate py-1.5 font-mono text-xs" title={model.model}>{model.model}</td>
+                      <td className="py-1.5 text-right tabular-nums text-oai-gray-500 dark:text-oai-gray-400" title={cacheTitle}>{formatTokens(model.total_tokens)}</td>
+                      <td className="py-1.5 text-right tabular-nums text-oai-gray-500 dark:text-oai-gray-400">{model.requests}</td>
+                      <td className={`py-1.5 text-right tabular-nums ${rateTone}`}>{model.success_rate == null ? "—" : `${model.success_rate}%`}</td>
+                      <td className="py-1.5 text-right tabular-nums text-oai-gray-500 dark:text-oai-gray-400">{speed ?? "—"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           ) : (
             <p className="mt-3 text-sm text-oai-gray-400">{copy("proxy.empty.no_usage")}</p>
           )}

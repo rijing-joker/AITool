@@ -285,3 +285,38 @@ test("queue fold applies executor token semantics: fresh input, reasoning only w
     { input_tokens: 300, reasoning_output_tokens: 30 },
   );
 });
+
+test("overview model stats carry success rate, speed and cache tokens per model", async (t) => {
+  const f = fixture(t);
+  writeHistory(f, [
+    control,
+    { timestamp, model: "model-a", latencyMs: 3000, ttftMs: 400, tokens: { inputTokens: 100, outputTokens: 300, totalTokens: 400, cacheReadTokens: 50, cacheCreationTokens: 20 } },
+    { timestamp, model: "model-a", latencyMs: 2000, tokens: { inputTokens: 10, outputTokens: 250, totalTokens: 260 } },
+    { timestamp, model: "model-a", latencyMs: 500, failed: true, failure_status: 500, tokens: { totalTokens: 0 } },
+    { timestamp, model: "model-a", latencyMs: 300, ttftMs: 200, tokens: { inputTokens: 5, outputTokens: 20, totalTokens: 25 } },
+    { timestamp, model: "model-b", latencyMs: 800, failed: true, failure_status: 502, tokens: { totalTokens: 0 } },
+  ]);
+  let result;
+  await handleProxyApiRequest({ method: "GET" }, {
+    writeHead(status) { assert.equal(status, 200); },
+    end(body) { result = JSON.parse(body); },
+  }, new URL("http://localhost/api/proxy/usage/overview"), {});
+  const models = result.overview.models;
+  const a = models.find((m) => m.model === "model-a");
+  const b = models.find((m) => m.model === "model-b");
+  assert.equal(a.requests, 4);
+  assert.equal(a.success_count, 3);
+  assert.equal(a.success_rate, 75);
+  assert.equal(a.total_tokens, 400 + 260 + 25);
+  assert.equal(a.cache_read_tokens, 50);
+  assert.equal(a.cache_creation_tokens, 20);
+  assert.equal(a.speed_output_tokens, 300);
+  assert.equal(a.speed_generation_ms, 2600);
+  assert.equal(a.est_speed_output_tokens, 250);
+  assert.equal(a.est_speed_duration_ms, 2000);
+  // A model whose every request failed still appears, at 0%.
+  assert.equal(b.requests, 1);
+  assert.equal(b.success_rate, 0);
+  assert.equal(b.total_tokens, 0);
+  assert.equal(b.speed_output_tokens, 0);
+});

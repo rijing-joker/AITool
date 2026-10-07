@@ -1714,6 +1714,10 @@ proxy.metric.avg_latency,proxy,ProxyPage,ProxyPage,avg_latency,Avg latency,,acti
 proxy.metric.timeline_24h,proxy,ProxyPage,ProxyPage,timeline_24h,Token volume — trailing 24h,,active
 proxy.metric.by_model,proxy,ProxyPage,ProxyPage,by_model,By model,,active
 proxy.metric.by_provider,proxy,ProxyPage,ProxyPage,by_provider,By provider,,active
+proxy.metric.speed,proxy,ProxyPage,ProxyPage,speed,Speed,,active
+proxy.metric.speed_hint,proxy,ProxyPage,ProxyPage,speed_hint,"Output ÷ generation time (after the first token); ≈ estimates from total duration",,active
+proxy.metric.cache_read,proxy,ProxyPage,ProxyPage,cache_read,Cache read,,active
+proxy.metric.cache_creation,proxy,ProxyPage,ProxyPage,cache_creation,Cache write,,active
 proxy.tokens_short,proxy,ProxyPage,ProxyPage,tokens_short,tokens,,active
 proxy.requests_short,proxy,ProxyPage,ProxyPage,requests_short,requests,,active
 proxy.empty.no_usage,proxy,ProxyPage,ProxyPage,no_usage,No usage recorded yet.,,active

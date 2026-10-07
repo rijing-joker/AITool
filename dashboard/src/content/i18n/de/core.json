@@ -101,6 +101,7 @@
   "limits.copilot.otelHint.body": "Limit-Informationen werden über das GitHub OAuth-Token gelesen. Um die Token-Nutzung pro Token aufzuzeichnen, aktiviere den OpenTelemetry-Export von Copilot und füge Folgendes zu deiner Shell-Konfigurationsdatei (~/.zshrc oder ~/.bashrc) hinzu:",
   "limits.copilot.otelHint.copy": "Kopieren",
   "limits.copilot.otelHint.copied": "Kopiert",
+  "limits.codex_credits_balance.line": "Codex-Credits-Guthaben: {{count}} · ca. {{usd}}",
   "limits.panel.title": "Nutzungslimits",
   "limits.panel.mode_separator": " · ",
   "limits.label.cursor_plan": "Plan",
@@ -465,6 +466,11 @@
   "dashboard.island.settings_link": "In den Einstellungen ansehen",
   "dashboard.island.enabled_toast": "Dynamic Island ist aktiv — wirf einen Blick auf die Notch",
   "dashboard.island.dismiss_aria": "Dynamic-Island-Hinweis schließen",
+  "dashboard.linux_pet.title": "Lerne dein Desktop-Haustier kennen",
+  "dashboard.linux_pet.hint": "Ein kleiner Begleiter auf deinem Desktop – fahre darüber für heutige Tokens, Ausgaben und Limits, und zieh ihn, wohin du willst.",
+  "dashboard.linux_pet.show": "Haustier anzeigen",
+  "dashboard.linux_pet.settings_link": "Haustier-Einstellungen",
+  "dashboard.linux_pet.dismiss_aria": "Desktop-Haustier-Hinweis schließen",
   "settings.labs.qpd.aria": "PR-Kosten-Effizienz-Analyse umschalten",
   "settings.labs.qpd.hint": "Analysiert durchschnittliche Lieferkosten und effektive Tokens pro Modell aus gemergten PRs und KI-zugeordneten Commits.",
   "settings.labs.qpd.label": "PR-Kosten-Effizienz analysieren",
@@ -572,5 +578,8 @@
   "limits.alert.blocked": "Benachrichtigungen sind aus – in den Systemeinstellungen erlauben",
   "settings.limits.showSubscriptions": "Abos in Limits anzeigen",
   "settings.limits.showSubscriptionsHint": "Zeige manuell eingetragene Abo-Verlängerungen zusammen mit den Limits an.",
-  "limits.codex_credits_balance.line": "Codex-Credits-Guthaben: {{count}} · ca. {{usd}}"
+  "settings.appearance.token_grouping.label": "Zahlengruppierung",
+  "settings.appearance.token_grouping.hint": "Genaue Zahlen verwenden 3- oder chinesische 4-Ziffer-Gruppen. Tooltips folgen dieser Einstellung.",
+  "settings.appearance.token_grouping.thousand": "3er",
+  "settings.appearance.token_grouping.wan": "4er"
 }

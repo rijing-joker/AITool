@@ -1115,6 +1115,135 @@ function UpstreamModelSelectionPanel({ models, selected, loading, onMove }) {
   );
 }
 
+// easy 36b98d2: the model-name field suggests the fetched upstream catalog and
+// filters as you type (exact name, then display name, prefix, substring), while
+// free text stays valid for upstreams the catalog does not know. Candidates are
+// the discovered models only — the rows being edited feed back into themselves
+// otherwise, so a custom name would always suggest itself.
+export function ModelNameInput({ value, onChange, options, disabled, inputClass, placeholder }) {
+  const [open, setOpen] = useState(false);
+  const [highlight, setHighlight] = useState(0);
+  const rootRef = useRef(null);
+  const query = value.trim().toLowerCase();
+
+  const matches = useMemo(() => {
+    const scored = [];
+    options.forEach((option, index) => {
+      const name = option.name.toLowerCase();
+      const extra = String(option.displayName ?? option.alias ?? "").toLowerCase();
+      let score;
+      if (!query) score = 10;
+      else if (name === query) score = 0;
+      else if (extra === query) score = 1;
+      else if (name.startsWith(query)) score = 2;
+      else if (extra.startsWith(query)) score = 3;
+      else if (name.includes(query)) score = 4;
+      else if (extra.includes(query)) score = 5;
+      else return;
+      scored.push({ option, index, score });
+    });
+    scored.sort((left, right) =>
+      left.score - right.score
+      || left.option.name.localeCompare(right.option.name, undefined, { sensitivity: "base" })
+      || left.index - right.index);
+    return scored.map((item) => item.option);
+  }, [options, query]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocMouseDown = (event) => {
+      if (rootRef.current && !rootRef.current.contains(event.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDocMouseDown);
+    return () => document.removeEventListener("mousedown", onDocMouseDown);
+  }, [open]);
+
+  useEffect(() => { setHighlight(0); }, [query]);
+
+  const pick = (name) => {
+    onChange(name);
+    setOpen(false);
+  };
+
+  const listOpen = open && matches.length !== 0;
+  return (
+    <div className="relative min-w-0 flex-1" ref={rootRef}>
+      <input
+        value={value}
+        onChange={(event) => {
+          onChange(event.currentTarget.value);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setOpen(false)}
+        onKeyDown={(event) => {
+          if (!listOpen) return;
+          if (event.key === "ArrowDown") {
+            event.preventDefault();
+            setHighlight((current) => Math.min(current + 1, matches.length - 1));
+          } else if (event.key === "ArrowUp") {
+            event.preventDefault();
+            setHighlight((current) => Math.max(current - 1, 0));
+          } else if (event.key === "Enter") {
+            // Enter accepts the highlighted suggestion, but when the typed
+            // name is already the exact top match it must fall through so the
+            // form still submits.
+            const top = matches[0];
+            if (!(highlight === 0 && top && top.name.toLowerCase() === query)) {
+              event.preventDefault();
+              pick(matches[Math.min(highlight, matches.length - 1)].name);
+            }
+          } else if (event.key === "Escape") {
+            setOpen(false);
+          }
+        }}
+        placeholder={placeholder}
+        aria-label={placeholder}
+        role="combobox"
+        aria-expanded={listOpen}
+        disabled={disabled}
+        autoComplete="off"
+        spellCheck={false}
+        className={`${inputClass} font-mono`}
+      />
+      {listOpen ? (
+        <ul
+          role="listbox"
+          aria-label={placeholder}
+          className="absolute inset-x-0 top-full z-30 mt-1 max-h-56 overflow-y-auto rounded-lg border border-oai-gray-200 bg-white py-1 shadow-xl dark:border-oai-gray-800 dark:bg-oai-gray-900"
+        >
+          {matches.map((option, position) => (
+            <li key={option.name}>
+              <button
+                type="button"
+                role="option"
+                aria-selected={highlight === position}
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  pick(option.name);
+                }}
+                onMouseEnter={() => setHighlight(position)}
+                className={`block w-full px-3 py-1.5 text-left transition-colors ${
+                  highlight === position
+                    ? "bg-oai-brand-50 dark:bg-oai-brand-950/40"
+                    : "hover:bg-oai-gray-100 dark:hover:bg-oai-gray-800"
+                }`}
+              >
+                <span className="block truncate font-mono text-xs text-oai-gray-700 dark:text-oai-gray-200">{option.name}</span>
+                {option.displayName || option.alias ? (
+                  <span className="block truncate text-[10px] text-oai-gray-400" title={option.displayName || option.alias}>
+                    {option.displayName || option.alias}
+                  </span>
+                ) : null}
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
 function UpstreamFormDialog({
   activeCategory,
   editingRow,
@@ -1602,13 +1731,13 @@ function UpstreamFormDialog({
               <div className="mt-2 flex flex-col gap-2">
                 {draft.models.map((model, index) => (
                   <div className="flex items-center gap-2" key={index}>
-                    <input
+                    <ModelNameInput
                       value={model.name}
-                      onChange={(event) => updateModel(index, { name: event.currentTarget.value })}
-                      placeholder={copy("proxy.upstream.models.namePlaceholder")}
-                      aria-label={copy("proxy.upstream.models.namePlaceholder")}
+                      onChange={(name) => updateModel(index, { name })}
+                      options={discoveredModels}
                       disabled={busy}
-                      className={`${inputClass} font-mono`}
+                      inputClass={inputClass}
+                      placeholder={copy("proxy.upstream.models.namePlaceholder")}
                     />
                     <input
                       value={model.alias ?? ""}
@@ -1616,7 +1745,7 @@ function UpstreamFormDialog({
                       placeholder={copy("proxy.upstream.models.aliasPlaceholder")}
                       aria-label={copy("proxy.upstream.models.aliasPlaceholder")}
                       disabled={busy}
-                      className={`${inputClass} font-mono`}
+                      className={`${inputClass} min-w-0 flex-1 font-mono`}
                     />
                     <button
                       type="button"

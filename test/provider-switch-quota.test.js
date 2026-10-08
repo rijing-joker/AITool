@@ -154,6 +154,31 @@ test("Command Code presets are registered for claude and codex", () => {
   assert.equal(codex.settingsConfig.config.model_providers.custom.wire_api, "responses");
 });
 
+test("Claude quota queries accept either supported credential field", async () => {
+  for (const env of [
+    { ANTHROPIC_API_KEY: "sk-api-key" },
+    { ANTHROPIC_AUTH_TOKEN: "", ANTHROPIC_API_KEY: "sk-api-key" },
+    { ANTHROPIC_AUTH_TOKEN: "sk-auth-token", ANTHROPIC_API_KEY: "sk-api-key" },
+  ]) {
+    const calls = [];
+    const fetchFixture = stubFetch(FIXTURE);
+    const result = await quota.queryProviderQuota({
+      app: "claude",
+      provider: { id: "key-fields", settingsConfig: { env: { ANTHROPIC_BASE_URL: CLAUDE_ROW.settingsConfig.env.ANTHROPIC_BASE_URL, ...env } } },
+      bypassCache: true,
+      fetchImpl: async (url, options) => {
+        calls.push(options.headers);
+        return fetchFixture(url, options);
+      },
+    });
+    assert.equal(result.ok, true);
+    assert.ok(calls.length > 0);
+    for (const headers of calls) {
+      assert.equal(headers.Authorization, `Bearer ${env.ANTHROPIC_AUTH_TOKEN || env.ANTHROPIC_API_KEY}`);
+    }
+  }
+});
+
 test("credentials resolve per app and base URLs detect the Command Code provider", () => {
   const claude = quota.resolveProviderCredential("claude", CLAUDE_ROW);
   assert.deepEqual(claude, { baseUrl: "https://api.commandcode.ai/provider", apiKey: "sk-relay-key" });

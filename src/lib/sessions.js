@@ -589,13 +589,15 @@ async function geminiSessionFiles(home) {
     const chatsDir = path.join(projectPath, "chats");
     let chatFiles;
     try {
-      chatFiles = await fsp.readdir(chatsDir, { withFileTypes: true });
+      const realChatsDir = await resolveSessionPath(chatsDir, geminiRoots(home));
+      chatFiles = await fsp.readdir(realChatsDir, { withFileTypes: true });
     } catch {
       continue;
     }
     let projectRoot = null;
     try {
-      projectRoot = (await fsp.readFile(path.join(projectPath, ".project_root"), "utf8")).trim() || null;
+      const marker = await resolveSessionPath(path.join(projectPath, ".project_root"), geminiRoots(home));
+      projectRoot = (await fsp.readFile(marker, "utf8")).trim() || null;
     } catch {
       projectRoot = null;
     }
@@ -846,6 +848,20 @@ function pathIsInsideRoot(sourcePath, root) {
   return relative !== "" && !relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative);
 }
 
+async function resolveSessionPath(sourcePath, roots) {
+  // Require both the client path and its actual target to belong to the same
+  // app root. Resolve the root too so a user-relocated session directory works.
+  const matchingRoots = roots.filter((root) => pathIsInsideRoot(sourcePath, root));
+  if (matchingRoots.length) {
+    const realPath = await fsp.realpath(sourcePath);
+    for (const root of matchingRoots) {
+      const realRoot = await fsp.realpath(root);
+      if (pathIsInsideRoot(realPath, realRoot)) return realPath;
+    }
+  }
+  throw new Error("Session path is outside this app's session roots");
+}
+
 async function readSession({ app, sourcePath, home, env = process.env } = {}) {
   if (!SESSION_APPS.includes(app)) throw new Error(`Unsupported app: ${app}`);
   const resolvedHome = resolveHome({ home, env });
@@ -853,24 +869,21 @@ async function readSession({ app, sourcePath, home, env = process.env } = {}) {
     throw new Error("Session path is required");
   }
   const resolved = path.resolve(sourcePath);
-  const inside = rootsForApp(app, resolvedHome).some((root) => pathIsInsideRoot(resolved, root));
-  if (!inside) {
-    throw new Error("Session path is outside this app's session roots");
-  }
-  if (app === "gemini" && path.extname(resolved) !== ".json" && path.extname(resolved) !== ".jsonl") {
+  const realPath = await resolveSessionPath(resolved, rootsForApp(app, resolvedHome));
+  if (app === "gemini" && path.extname(realPath) !== ".json" && path.extname(realPath) !== ".jsonl") {
     throw new Error("Not a gemini session file");
   }
-  if (app !== "gemini" && path.extname(resolved) !== ".jsonl") {
+  if (app !== "gemini" && path.extname(realPath) !== ".jsonl") {
     throw new Error("Not a session transcript file");
   }
-  if (app === "claude" && isClaudeAgentSession(path.basename(resolved))) {
+  if (app === "claude" && (isClaudeAgentSession(path.basename(resolved)) || isClaudeAgentSession(path.basename(realPath)))) {
     throw new Error("Not a claude session file");
   }
   const transcript = app === "claude"
-    ? await claudeReadMessages(resolved)
+    ? await claudeReadMessages(realPath)
     : app === "codex"
-      ? await codexReadMessages(resolved)
-      : await geminiReadMessages(resolved);
+      ? await codexReadMessages(realPath)
+      : await geminiReadMessages(realPath);
   return { sourcePath: resolved, messages: transcript.messages, usage: transcript.usage };
 }
 

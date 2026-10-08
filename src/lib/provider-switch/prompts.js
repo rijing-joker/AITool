@@ -114,9 +114,9 @@ async function readStore() {
 
 async function mutateStore(update) {
   await ensureDir(path.dirname(paths.promptsStorePath()));
-  return updateJsonLocked(paths.promptsStorePath(), (current) => {
+  return updateJsonLocked(paths.promptsStorePath(), async (current) => {
     const store = normalizeStore(current);
-    const next = update(store);
+    const next = await update(store);
     return next === undefined ? undefined : normalizeStore(next);
   });
 }
@@ -149,29 +149,20 @@ function validateContent(app, content) {
 // Live instruction file
 // ---------------------------------------------------------------------------
 
-// Reads the app's live instruction file for a backfill, or null when it does
-// not exist / cannot be read (cc-switch's enable_prompt degrades the same
-// way; the pre-write backup is the safety net). An oversized file is
-// rethrown — its content must not be silently overwritten with prompt
-// content we were never able to read.
+// Missing files need no capture. Any other read failure must stop a write:
+// we cannot preserve or roll back content we were unable to read.
 async function readLiveFile(filePath) {
   let stat;
   try {
     stat = await fsp.stat(filePath);
-  } catch {
-    return null;
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw error;
   }
   if (stat.size > MAX_PROMPT_FILE_BYTES) {
     throw new Error(`Prompt file exceeds 1 MiB, refusing to read: ${filePath}`);
   }
   return fsp.readFile(filePath, "utf8");
-}
-
-async function readLiveForBackfill(filePath) {
-  return readLiveFile(filePath).catch((error) => {
-    if (error && /exceeds 1 MiB/.test(error.message)) throw error;
-    return null;
-  });
 }
 
 async function writeLiveFile(app, filePath, content) {
@@ -216,9 +207,8 @@ function buildLiveBackfill(store, app, liveContent) {
   };
 }
 
-// Apply a backfill plan inside a store mutation; the live file is written by
-// the caller afterwards, so a failed file write leaves the capture recorded —
-// re-running the operation restores it into the flow instead of losing it.
+// Apply a backfill plan inside the store lock. Activation persists this
+// capture before replacing the live file.
 function applyBackfill(store, app, plan, nowIso) {
   if (!plan) return;
   if (plan.kind === "refresh") {
@@ -243,6 +233,47 @@ function withUniqueId(prompts, record) {
   return { ...record, id: `${record.id}-${index}` };
 }
 
+// Keep capture, file projection and activation under the store lock. A failed
+// file write leaves the old enabled entry in place; a failed store commit
+// restores the previous file before a list can backfill the wrong template.
+// `update` edits the store and returns the desired live content, or undefined
+// for a store-only edit.
+async function mutatePrompt(app, update, { captureLive = false } = {}) {
+  const storePath = paths.promptsStorePath();
+  const filePath = promptFilePath(app);
+  await updateJsonLocked(storePath, async (current) => {
+    const store = normalizeStore(current);
+    let live = captureLive ? await readLiveFile(filePath) : null;
+    const backfill = captureLive && live !== null && live.trim() !== ""
+      ? buildLiveBackfill(store, app, live)
+      : null;
+    applyBackfill(store, app, backfill, new Date().toISOString());
+    const captured = JSON.stringify(store, null, 2) + "\n";
+    const content = update(store);
+    if (content === undefined) return store;
+    if (!captureLive) live = await readLiveFile(filePath);
+    if (live === null && content === "") return store;
+
+    // Persist the old file's content before replacing it, without activating
+    // the target yet. This capture remains useful even if projection fails.
+    if (backfill) await writeFileAtomic(storePath, captured, { mode: 0o600 });
+    await writeLiveFile(app, filePath, content);
+    try {
+      await writeFileAtomic(storePath, JSON.stringify(store, null, 2) + "\n", { mode: 0o600 });
+    } catch (error) {
+      try {
+        if (live === null) await fsp.rm(filePath);
+        else await writeFileAtomic(filePath, live);
+      } catch (rollbackError) {
+        throw new AggregateError([error, rollbackError], `Prompt save failed and the live file could not be restored: ${error.message}; ${rollbackError.message}`);
+      }
+      throw error;
+    }
+    // Already committed while holding the lock; do not write a second time.
+    return undefined;
+  });
+}
+
 // List one app's prompts, first refreshing the enabled prompt's content from
 // the live file so externally-edited instruction files show up (cc-switch
 // get_prompts). The refresh is best-effort: a read or store failure returns
@@ -254,14 +285,14 @@ async function listPrompts(app) {
   const enabled = store.apps[app].find((prompt) => prompt.enabled);
   if (!enabled) return store.apps[app];
   try {
-    const live = await readLiveFile(promptFilePath(app));
-    if (live === null || live.trim() === "" || live === enabled.content) return store.apps[app];
-    const next = await mutateStore((current) => {
-      const prompt = current.apps[app]?.find((entry) => entry.id === enabled.id);
-      if (prompt) {
-        prompt.content = live;
-        prompt.updatedAt = new Date().toISOString();
-      }
+    const next = await mutateStore(async (current) => {
+      // Re-read both owner and file under the same lock as activation.
+      const prompt = current.apps[app].find((entry) => entry.enabled);
+      if (!prompt) return undefined;
+      const live = await readLiveFile(promptFilePath(app));
+      if (live === null || live.trim() === "" || live === prompt.content) return undefined;
+      prompt.content = live;
+      prompt.updatedAt = new Date().toISOString();
       return current;
     });
     return next.apps[app];
@@ -285,21 +316,14 @@ async function upsertPrompt(app, input) {
   // Enabling from the upsert path overwrites the live file too, so the same
   // capture-first rule as enablePrompt applies (cc-switch's UI splits this
   // into create + enable; our dialog does it in one call).
-  const live = enabled ? await readLiveForBackfill(filePath) : null;
-  const liveContent = live !== null && live.trim() !== "" ? live : null;
   const nowIso = new Date().toISOString();
-  let clearLive = false;
-  await mutateStore((store) => {
-    const prompts = store.apps[app];
-    if (liveContent !== null) {
-      applyBackfill(store, app, buildLiveBackfill(store, app, liveContent), nowIso);
-    }
+  await mutatePrompt(app, (store) => {
     const current = store.apps[app];
     const index = current.findIndex((prompt) => prompt.id === id);
     const previous = index === -1 ? null : current[index];
     // Only clearing the LAST enabled prompt may blank the live file; fresh,
     // imported or already-disabled entries must never touch user content.
-    clearLive = !enabled
+    const clearLive = !enabled
       && previous !== null
       && previous.enabled
       && !current.some((prompt) => prompt.id !== id && prompt.enabled);
@@ -320,19 +344,8 @@ async function upsertPrompt(app, input) {
     if (enabled) {
       for (const prompt of current) prompt.enabled = prompt.id === id;
     }
-    return store;
-  });
-  if (enabled) {
-    await writeLiveFile(app, filePath, content);
-  } else if (clearLive) {
-    let fileExists = true;
-    try {
-      await fsp.access(filePath);
-    } catch {
-      fileExists = false; // File vanished meanwhile — nothing to clear.
-    }
-    if (fileExists) await writeLiveFile(app, filePath, "");
-  }
+    return enabled ? content : clearLive ? "" : undefined;
+  }, { captureLive: enabled });
   return { prompts: await listPrompts(app), targetPath: filePath };
 }
 
@@ -340,24 +353,16 @@ async function enablePrompt(app, id) {
   requireApp(app);
   const cleanId = sanitizeId(id);
   const filePath = promptFilePath(app);
-  const live = await readLiveForBackfill(filePath);
-  const liveContent = live !== null && live.trim() !== "" ? live : null;
   const nowIso = new Date().toISOString();
 
-  let target = null;
-  await mutateStore((store) => {
-    if (liveContent !== null) {
-      applyBackfill(store, app, buildLiveBackfill(store, app, liveContent), nowIso);
-    }
+  await mutatePrompt(app, (store) => {
     const found = store.apps[app].find((prompt) => prompt.id === cleanId);
     if (!found) throw new Error(`Prompt not found: ${cleanId}`);
     validateContent(app, found.content);
     for (const prompt of store.apps[app]) prompt.enabled = prompt.id === cleanId;
-    target = { ...found, enabled: true, updatedAt: nowIso };
-    return store;
-  });
-
-  await writeLiveFile(app, filePath, target.content);
+    found.updatedAt = nowIso;
+    return found.content;
+  }, { captureLive: true });
   return { prompts: await listPrompts(app), targetPath: filePath };
 }
 
@@ -406,17 +411,19 @@ async function importFromFile(app) {
 // owned. Used to repair drift after external rewrites.
 async function projectPromptsToApp(app) {
   requireApp(app);
-  const store = await readStore();
-  const enabled = store.apps[app].filter((prompt) => prompt.enabled);
-  if (enabled.length === 0) return { projected: false, warning: null };
-  // Same rule as cc-switch's sync_to_live: the cap is re-checked at
-  // projection so an entry that pre-dates a tightened limit cannot bypass it.
-  validateContent(app, enabled[0].content);
-  await writeLiveFile(app, promptFilePath(app), enabled[0].content);
-  const warning = enabled.length > 1
-    ? `多个 Prompt 同时启用，已按稳定顺序投影第一个: ${enabled.map((prompt) => prompt.id).join(", ")}`
-    : null;
-  return { projected: true, warning };
+  let result = { projected: false, warning: null };
+  await mutateStore(async (store) => {
+    const enabled = store.apps[app].filter((prompt) => prompt.enabled);
+    if (enabled.length === 0) return;
+    // Re-check the cap and keep projection serialized with activation/listing.
+    validateContent(app, enabled[0].content);
+    await writeLiveFile(app, promptFilePath(app), enabled[0].content);
+    const warning = enabled.length > 1
+      ? `多个 Prompt 同时启用，已按稳定顺序投影第一个: ${enabled.map((prompt) => prompt.id).join(", ")}`
+      : null;
+    result = { projected: true, warning };
+  });
+  return result;
 }
 
 async function syncPrompts(apps) {

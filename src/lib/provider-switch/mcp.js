@@ -382,6 +382,9 @@ function specToTomlEntries(spec, { codexStyle }) {
   const skipped = new Set(type === "stdio"
     ? ["type", "command", "args", "env", "cwd", "url", "headers", "http_headers", "env_http_headers", "http_headers_helper", "bearer_token_env_var", "oauth_resource"]
     : ["type", "url", "headers", "http_headers", "command", "args", "env", "env_vars", "cwd"]);
+  // The per-app toggle owns activation, including for previously imported
+  // specs that still contain enabled:false.
+  skipped.add("enabled");
   const entries = {};
   if (type === "stdio") {
     entries.command = String(spec.command || "");
@@ -440,7 +443,7 @@ function tomlEntryToSpec(entry, { codexStyle }) {
     ? ["type", "command", "args", "cwd", "env"]
     : ["type", "url", codexStyle ? "http_headers" : "headers", "headers"];
   for (const [key, value] of Object.entries(entry)) {
-    if (core.includes(key)) continue;
+    if (key === "enabled" || core.includes(key)) continue;
     if (typeof value === "string" || typeof value === "boolean" || typeof value === "number") {
       spec[key] = value;
     } else if (Array.isArray(value)) {
@@ -712,7 +715,7 @@ async function importFromApp(app) {
     }
     const map = jsonMapGet(doc, "mcp_servers");
     if (!map) return { changed: 0, skipped: [] };
-    entries = Object.entries(map).map(([id, value]) => ({ id, value, enabled: true }));
+    entries = Object.entries(map).map(([id, value]) => ({ id, value, enabled: value?.enabled !== false }));
   }
 
   let changed = 0;

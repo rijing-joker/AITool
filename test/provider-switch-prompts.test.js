@@ -7,6 +7,7 @@
 
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
+const fsp = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const { Readable } = require("node:stream");
@@ -162,6 +163,104 @@ test("prompts: enabling refreshes the currently-enabled prompt with live content
   assert.equal(a.enabled, false);
   assert.equal(a.content, "first (hand edited)", "the live edit should have been backfilled into the previously-enabled prompt");
   assert.equal(b.enabled, true);
+});
+
+for (const operation of ["enable", "upsert-enable", "disable"]) {
+  test(`prompts: failed ${operation} preserves the live file and saved templates`, async (t) => {
+    await prompts().upsertPrompt("claude", { id: "a", content: "first", enabled: true });
+    await prompts().upsertPrompt("claude", { id: "b", content: "second", enabled: false });
+    const filePath = prompts().promptFilePath("claude");
+    fs.writeFileSync(filePath, "first (hand edited)");
+    const rename = fsp.rename;
+    const failure = t.mock.method(fsp, "rename", async (from, to) => {
+      if (to === filePath) throw Object.assign(new Error("write denied"), { code: "EACCES" });
+      return rename(from, to);
+    });
+
+    const run = () => operation === "enable"
+      ? prompts().enablePrompt("claude", "b")
+      : prompts().upsertPrompt("claude", {
+        id: operation === "disable" ? "a" : "b",
+        content: operation === "disable" ? "first" : "second edited",
+        enabled: operation !== "disable",
+      });
+    await assert.rejects(run, /write denied/);
+    failure.mock.restore();
+    const list = await prompts().listPrompts("claude");
+    assert.equal(fs.readFileSync(filePath, "utf8"), "first (hand edited)");
+    assert.equal(list.find((p) => p.id === "a").enabled, true);
+    assert.equal(list.find((p) => p.id === "a").content, "first (hand edited)");
+    assert.equal(list.find((p) => p.id === "b").enabled, false);
+    assert.equal(list.find((p) => p.id === "b").content, "second");
+
+    await run();
+    assert.equal(fs.readFileSync(filePath, "utf8"), operation === "disable" ? "" : operation === "enable" ? "second" : "second edited");
+  });
+}
+
+for (const hasLiveFile of [true, false]) {
+  test(`prompts: a failed store commit restores ${hasLiveFile ? "the previous file" : "an absent file"}`, async (t) => {
+    if (hasLiveFile) await prompts().upsertPrompt("claude", { id: "a", content: "first", enabled: true });
+    await prompts().upsertPrompt("claude", { id: "b", content: "second", enabled: false });
+    const filePath = prompts().promptFilePath("claude");
+    const storePath = homePath(".aitool", "provider-switch", "prompts.json");
+    const rename = fsp.rename;
+    const failure = t.mock.method(fsp, "rename", async (from, to) => {
+      if (to === storePath) throw Object.assign(new Error("store commit denied"), { code: "EACCES" });
+      return rename(from, to);
+    });
+
+    await assert.rejects(() => prompts().enablePrompt("claude", "b"), /store commit denied/);
+    failure.mock.restore();
+    assert.equal(fs.existsSync(filePath), hasLiveFile);
+    if (hasLiveFile) assert.equal(fs.readFileSync(filePath, "utf8"), "first");
+    const list = await prompts().listPrompts("claude");
+    assert.equal(list.find((p) => p.id === "b").content, "second");
+    assert.equal(list.find((p) => p.id === "b").enabled, false);
+    if (hasLiveFile) assert.equal(list.find((p) => p.id === "a").enabled, true);
+  });
+}
+
+test("prompts: listing during activation cannot backfill the wrong template", async (t) => {
+  await prompts().upsertPrompt("claude", { id: "a", content: "first", enabled: true });
+  await prompts().upsertPrompt("claude", { id: "b", content: "second", enabled: false });
+  const filePath = prompts().promptFilePath("claude");
+  const storePath = homePath(".aitool", "provider-switch", "prompts.json");
+  let reachedWrite;
+  const writing = new Promise((resolve) => { reachedWrite = resolve; });
+  let releaseWrite;
+  const release = new Promise((resolve) => { releaseWrite = resolve; });
+  let reachedRead;
+  const reading = new Promise((resolve) => { reachedRead = resolve; });
+  const rename = fsp.rename;
+  const readFile = fsp.readFile;
+  t.mock.method(fsp, "rename", async (from, to) => {
+    if (to === filePath) {
+      reachedWrite();
+      await release;
+    }
+    return rename(from, to);
+  });
+  const activation = prompts().enablePrompt("claude", "b");
+  await writing;
+  t.mock.method(fsp, "readFile", async (...args) => {
+    const value = await readFile(...args);
+    if (args[0] === storePath) reachedRead();
+    return value;
+  });
+  const listing = prompts().listPrompts("claude");
+  try {
+    await reading;
+  } finally {
+    releaseWrite();
+  }
+  await Promise.all([activation, listing]);
+  const list = await prompts().listPrompts("claude");
+  assert.equal(list.find((p) => p.id === "a").content, "first");
+  assert.equal(list.find((p) => p.id === "a").enabled, false);
+  assert.equal(list.find((p) => p.id === "b").content, "second");
+  assert.equal(list.find((p) => p.id === "b").enabled, true);
+  assert.equal(fs.readFileSync(filePath, "utf8"), "second");
 });
 
 test("prompts: listing backfills external edits into the enabled prompt", async () => {

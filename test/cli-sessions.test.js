@@ -266,6 +266,54 @@ test("readSession refuses paths outside the app roots and unsupported apps", asy
   );
 });
 
+for (const [app, rootParts, extension] of [
+  ["claude", [".claude", "projects"], ".jsonl"],
+  ["codex", [".codex", "sessions"], ".jsonl"],
+  ["codex", [".codex", "archived_sessions"], ".jsonl"],
+  ["gemini", [".gemini", "tmp"], ".json"],
+]) {
+  test(`readSession rejects file and directory symlinks escaping ${rootParts.join("/")}`, async () => {
+    const root = path.join(tmpHome, ...rootParts);
+    fs.mkdirSync(root, { recursive: true });
+    const outsideDir = `${root}-outside`;
+    fs.mkdirSync(outsideDir);
+    const outside = path.join(outsideDir, `session${extension}`);
+    fs.writeFileSync(outside, "{}");
+    const fileLink = path.join(root, `linked${extension}`);
+    const dirLink = path.join(root, "linked-dir");
+    fs.symlinkSync(outside, fileLink, "file");
+    fs.symlinkSync(outsideDir, dirLink, "junction");
+    for (const sourcePath of [fileLink, path.join(dirLink, `session${extension}`)]) {
+      await assert.rejects(() => sessions.readSession({ app, sourcePath, home: tmpHome }), /outside this app's session roots/);
+    }
+  });
+}
+
+test("readSession accepts symlinks inside the root and a relocated session root", async () => {
+  const source = writeClaudeSession(tmpHome, "original", [
+    JSON.stringify({ type: "user", message: { role: "user", content: "hello" } }),
+  ]);
+  const link = path.join(path.dirname(source), "alias.jsonl");
+  fs.symlinkSync(source, link, "file");
+  assert.equal((await sessions.readSession({ app: "claude", sourcePath: link, home: tmpHome })).messages[0].content, "hello");
+
+  const root = path.join(tmpHome, ".claude", "projects");
+  const moved = path.join(tmpHome, "relocated-projects");
+  fs.renameSync(root, moved);
+  fs.symlinkSync(moved, root, "junction");
+  assert.equal((await sessions.readSession({ app: "claude", sourcePath: source, home: tmpHome })).messages[0].content, "hello");
+});
+
+test("Gemini listing ignores a chats directory linked outside its session root", async () => {
+  const project = path.join(tmpHome, ".gemini", "tmp", "project");
+  fs.mkdirSync(project, { recursive: true });
+  const outside = path.join(tmpHome, "external-chats");
+  fs.mkdirSync(outside);
+  fs.writeFileSync(path.join(outside, "session.json"), JSON.stringify({ sessionId: "external", messages: [{ type: "user", content: "outside" }] }));
+  fs.symlinkSync(outside, path.join(project, "chats"), "junction");
+  assert.deepEqual(await sessions.listSessions({ app: "gemini", home: tmpHome }), []);
+});
+
 test("session usage: claude dedupes retries, codex takes the last cumulative count, gemini sums", async () => {
   // Claude: two writes of the same assistant message id keep the larger
   // output; usage fields are independent of input (fresh-input semantics).

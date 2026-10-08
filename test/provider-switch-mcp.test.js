@@ -413,6 +413,39 @@ test("mcp: import from claude and codex live configs merges into the SSOT", asyn
   assert.ok(res.body.skipped.some((line) => line.includes("claude/broken")));
 });
 
+for (const [app, dir] of [["codex", ".codex"], ["grokbuild", ".grok"]]) {
+  test(`mcp: imported disabled ${app} servers can be toggled on`, async () => {
+    const configPath = homePath(dir, "config.toml");
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    fs.writeFileSync(configPath, '[mcp_servers.fetch]\ncommand = "fetch"\nenabled = false\ntool_timeout_sec = 42\n');
+    const mcp = require("../src/lib/provider-switch/mcp");
+    const imported = await mcp.importFromApps([app]);
+    assert.deepEqual(imported.skipped, []);
+    assert.equal(imported.servers[0].apps[app], false);
+    assert.equal(imported.servers[0].server.enabled, undefined);
+    assert.equal(imported.servers[0].server.tool_timeout_sec, 42);
+
+    await mcp.toggleServerApp("fetch", app, true);
+    let live = tomlParse(fs.readFileSync(configPath, "utf8"));
+    assert.equal(live.mcp_servers.fetch.command, "fetch");
+    assert.notEqual(live.mcp_servers.fetch.enabled, false);
+    await mcp.toggleServerApp("fetch", app, false);
+    live = tomlParse(fs.readFileSync(configPath, "utf8"));
+    assert.equal(live.mcp_servers?.fetch, undefined);
+
+    // Old imports kept enabled:false in the shared spec; their toggles must
+    // work too, without requiring users to delete and import the row again.
+    const storePath = homePath(".aitool", "provider-switch", "mcp-servers.json");
+    const saved = JSON.parse(fs.readFileSync(storePath, "utf8"));
+    saved.servers[0].server.enabled = false;
+    fs.writeFileSync(storePath, JSON.stringify(saved));
+    await mcp.toggleServerApp("fetch", app, true);
+    live = tomlParse(fs.readFileSync(configPath, "utf8"));
+    assert.notEqual(live.mcp_servers.fetch.enabled, false);
+    assert.equal(live.mcp_servers.fetch.tool_timeout_sec, 42);
+  });
+}
+
 test("mcp: import from opencode converts local/remote back to stdio/sse", async () => {
   fs.mkdirSync(homePath(".config", "opencode"), { recursive: true });
   fs.writeFileSync(homePath(".config", "opencode", "opencode.json"), JSON.stringify({

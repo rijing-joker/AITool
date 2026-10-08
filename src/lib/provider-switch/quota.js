@@ -79,7 +79,8 @@ function resolveProviderCredential(app, provider) {
     const env = settings.env ?? {};
     return {
       baseUrl: String(env.ANTHROPIC_BASE_URL ?? "").trim(),
-      apiKey: String(env.ANTHROPIC_AUTH_TOKEN ?? "").trim(),
+      apiKey: String(env.ANTHROPIC_AUTH_TOKEN ?? "").trim()
+        || String(env.ANTHROPIC_API_KEY ?? "").trim(),
     };
   }
   if (app === "codex") {

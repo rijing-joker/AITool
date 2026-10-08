@@ -75,8 +75,10 @@ const LEFT_CARD_ORDER_DEFAULTS = [
   "sessionInsights",
   "installCopy",
   "islandOnboarding",
+  "linuxPetCard",
   "macAppBanner",
   "widgetOnboarding",
+  "linuxTopBarCard",
 ];
 const RIGHT_CARD_ORDER_DEFAULTS = ["usageOverview", "dataDetails"];
 

@@ -96,7 +96,7 @@ const EVENT_COLUMNS = [
   { key: "effort", labelKey: "proxy.requests.col.effort", defaultWidth: 78, minWidth: 64 },
   { key: "result", labelKey: "proxy.requests.status", defaultWidth: 96, minWidth: 72 },
   { key: "request", labelKey: "proxy.requests.col.request", defaultWidth: 112, minWidth: 88 },
-  { key: "latency", labelKey: "proxy.requests.latency", defaultWidth: 116, minWidth: 96 },
+  { key: "latency", labelKey: "proxy.requests.latency", defaultWidth: 116, minWidth: 96, align: "center" },
   { key: "speed", labelKey: "proxy.requests.col.speed", defaultWidth: 88, minWidth: 72 },
   { key: "total", labelKey: "proxy.requests.tokens", defaultWidth: 148, minWidth: 116 },
   { key: "cache", labelKey: "proxy.requests.col.cache", defaultWidth: 132, minWidth: 100 },
@@ -106,7 +106,7 @@ const EVENT_COLUMNS = [
   { key: "output", labelKey: "proxy.requests.detail.output", defaultWidth: 84, minWidth: 60 },
   { key: "reasoning", labelKey: "proxy.requests.detail.reasoning", defaultWidth: 84, minWidth: 60 },
   { key: "cacheRate", labelKey: "proxy.requests.col.cacheRate", defaultWidth: 92, minWidth: 72 },
-  { key: "ttft", labelKey: "proxy.requests.col.ttft", defaultWidth: 92, minWidth: 76 },
+  { key: "ttft", labelKey: "proxy.requests.col.ttft", defaultWidth: 92, minWidth: 76, align: "center" },
   { key: "replay", labelKey: "proxy.requests.col.replay", defaultWidth: 96, minWidth: 76 },
 ];
 
@@ -348,14 +348,16 @@ function ReplayCell({ record, onReplay, state }) {
   );
 }
 
-function EventCell({ record, column, onReplay, replayState }) {
+function EventCell({ record, column, onReplay, replayState, showDate }) {
   const tokens = record.tokens ?? {};
   switch (column.key) {
     case "time":
       return (
         <td className="px-2 py-2 align-top" title={record.timestamp || undefined}>
           <span className="block whitespace-nowrap font-medium tabular-nums">{formatClock(record.timestamp)}</span>
-          <span className="block whitespace-nowrap text-[10px] tabular-nums text-oai-gray-500 dark:text-oai-gray-400">{formatDay(record.timestamp)}</span>
+          {showDate === false ? null : (
+            <span className="block whitespace-nowrap text-[10px] tabular-nums text-oai-gray-500 dark:text-oai-gray-400">{formatDay(record.timestamp)}</span>
+          )}
         </td>
       );
     case "key":
@@ -434,8 +436,8 @@ function EventCell({ record, column, onReplay, replayState }) {
       const latencyTone = durationTone(record.latencyMs);
       const ttftTone = durationTone(record.ttftMs);
       return (
-        <td className="px-2 py-2 align-top" title={`${record.latencyMs ?? 0} ms`}>
-          <span className={`block whitespace-nowrap text-xs font-medium tabular-nums ${latencyTone}`}>{formatDuration(record.latencyMs)}</span>
+        <td className={`px-2 py-2 align-top ${column.align === "center" ? "text-center" : ""}`} title={`${record.latencyMs ?? 0} ms`}>
+          <span className={`inline-block whitespace-nowrap text-xs font-medium tabular-nums ${latencyTone}`}>{formatDuration(record.latencyMs)}</span>
           <span
             className={`block whitespace-nowrap text-[10px] tabular-nums ${ttftTone || "text-oai-gray-500 dark:text-oai-gray-400"}`}
             title={record.ttftMs != null ? `${record.ttftMs} ms` : undefined}
@@ -447,7 +449,7 @@ function EventCell({ record, column, onReplay, replayState }) {
     }
     case "ttft":
       return (
-        <td className={`px-2 py-2 align-top text-xs tabular-nums ${durationTone(record.ttftMs)}`} title={record.ttftMs != null ? `${record.ttftMs} ms` : undefined}>
+        <td className={`px-2 py-2 align-top text-xs tabular-nums ${column.align === "center" ? "text-center" : ""} ${durationTone(record.ttftMs)}`} title={record.ttftMs != null ? `${record.ttftMs} ms` : undefined}>
           {record.ttftMs == null ? "—" : formatDuration(record.ttftMs)}
         </td>
       );
@@ -1179,40 +1181,7 @@ export function RequestsTab() {
       <datalist id={`${listId}-providers`}>{(stats?.providers ?? []).map((item) => <option key={item.provider} value={item.provider} />)}</datalist>
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-oai-gray-500 dark:text-oai-gray-400">
         <span role="status">{loading || searchPending ? copy("proxy.loading") : copy("proxy.requests.count", { count: fullTokens.format(total) })}</span>
-        <span className="flex items-center gap-1.5">
-          {filtered ? <button type="button" className="min-h-10 px-2 font-medium text-oai-brand-600 dark:text-oai-brand-400 sm:min-h-0" onClick={clearFilters}>{copy("proxy.requests.clear_filters")}</button> : null}
-          <button
-            type="button"
-            onClick={() => { setDraftColumns(visibleColumns); setDraftRowHeightEnabled(rowHeightEnabled); setDraftRowHeight(rowHeight); setColumnDialogOpen(true); }}
-            title={copy("proxy.requests.col_settings")}
-            aria-label={copy("proxy.requests.col_settings")}
-            className="inline-flex h-10 sm:h-8 items-center gap-1.5 rounded-lg border border-oai-gray-200 px-2.5 font-medium hover:bg-oai-gray-50 dark:border-oai-gray-700 dark:hover:bg-oai-gray-800"
-          >
-            <Columns3 size={13} aria-hidden="true" />
-            <span className="hidden sm:inline">{copy("proxy.requests.col_settings")}</span>
-          </button>
-          {widthsCustomized ? (
-            <button
-              type="button"
-              onClick={resetAllWidths}
-              title={copy("proxy.requests.col_reset")}
-              aria-label={copy("proxy.requests.col_reset")}
-              className="inline-flex h-10 sm:h-8 w-10 sm:w-8 items-center justify-center rounded-lg border border-oai-gray-200 text-oai-gray-500 hover:bg-oai-gray-50 dark:border-oai-gray-700 dark:hover:bg-oai-gray-800"
-            >
-              <RotateCcw size={13} aria-hidden="true" />
-            </button>
-          ) : null}
-          <button
-            type="button"
-            disabled={loading || !records?.length}
-            onClick={() => exportCsv(records ?? [], page)}
-            title={copy("proxy.requests.export_hint")}
-            className="inline-flex h-10 sm:h-8 items-center gap-1.5 rounded-lg border border-oai-gray-200 px-2.5 font-medium hover:bg-oai-gray-50 disabled:opacity-40 dark:border-oai-gray-700 dark:hover:bg-oai-gray-800"
-          >
-            <Download size={13} aria-hidden="true" />
-            <span className="hidden sm:inline">{copy("proxy.requests.export")}</span>
-          </button>
-        </span>
+        {filtered ? <button type="button" className="min-h-10 px-2 font-medium text-oai-brand-600 dark:text-oai-brand-400 sm:min-h-0" onClick={clearFilters}>{copy("proxy.requests.clear_filters")}</button> : null}
       </div>
       {range === "custom" ? (
         <div className="flex flex-wrap items-center gap-2 text-sm">
@@ -1290,7 +1259,7 @@ export function RequestsTab() {
                     {columns.map((column) => {
                       const label = copy(column.labelKey);
                       return (
-                        <th key={column.key} className="relative border-b border-oai-gray-200 bg-oai-gray-50/60 px-2 py-2.5 text-left text-xs font-semibold text-oai-gray-500 dark:border-oai-gray-800 dark:bg-oai-gray-800/40 dark:text-oai-gray-400" style={{ width: `${widthsRef.current[column.key] ?? widths[column.key] ?? column.defaultWidth}px` }}>
+                        <th key={column.key} className={`relative border-b border-oai-gray-200 bg-oai-gray-50/60 px-2 py-2.5 ${column.align === "center" ? "text-center" : "text-left"} text-xs font-semibold text-oai-gray-500 dark:border-oai-gray-800 dark:bg-oai-gray-800/40 dark:text-oai-gray-400`} style={{ width: `${widthsRef.current[column.key] ?? widths[column.key] ?? column.defaultWidth}px` }}>
                           <span className="block truncate" title={label}>{label}</span>
                           <div
                             role="separator"
@@ -1312,55 +1281,92 @@ export function RequestsTab() {
                   </tr>
                 </thead>
                 <tbody>
-                  {records.map((record, index) => (
-                    <tr key={record.id ?? record.request_id ?? `${record.timestamp}-${index}`} className="odd:bg-white even:bg-oai-gray-50/40 dark:odd:bg-transparent dark:even:bg-oai-gray-900/30">
-                      {columns.map((column) => <EventCell key={column.key} record={record} column={column} onReplay={(target) => void handleReplay(target)} replayState={replayStates[record.id ?? record.request_id]} />)}
-                    </tr>
-                  ))}
+                  {records.map((record, index) => {
+                    const previousRecord = records[index - 1];
+                    const showDate = index === 0 || !previousRecord || formatDay(previousRecord.timestamp) !== formatDay(record.timestamp);
+                    return (
+                      <tr key={record.id ?? record.request_id ?? `${record.timestamp}-${index}`} className="odd:bg-white even:bg-oai-gray-50/40 dark:odd:bg-transparent dark:even:bg-oai-gray-900/30">
+                        {columns.map((column) => <EventCell key={column.key} record={record} column={column} onReplay={(target) => void handleReplay(target)} replayState={replayStates[record.id ?? record.request_id]} showDate={showDate} />)}
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
             <TableTopScrollbar tableWrapRef={tableWrapRef} />
           </>
         )}
-        {records?.length ? (
-          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-oai-gray-100 dark:border-oai-gray-800 px-4 sm:px-5 py-3 text-xs text-oai-gray-500 dark:text-oai-gray-400">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-oai-gray-100 dark:border-oai-gray-800 px-4 sm:px-5 py-3 text-xs text-oai-gray-500 dark:text-oai-gray-400">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
             <span className="tabular-nums">{copy("proxy.requests.range_summary", { start: startRecord, end: endRecord, total: fullTokens.format(total) })}</span>
-            <div className="flex items-center gap-2">
-              <select
-                aria-label={copy("proxy.requests.page_size", { size: pageSize })}
-                value={pageSize}
-                disabled={loading}
-                onChange={(event) => {
-                  setPage(0);
-                  changePageSize(Number(event.currentTarget.value));
-                }}
-                className="h-8 rounded-lg border border-oai-gray-200 bg-transparent px-1.5 text-xs dark:border-oai-gray-700"
-              >
-                {[20, 50, 100, 200].map((size) => (
-                  <option key={size} value={size}>{copy("proxy.requests.page_size", { size })}</option>
-                ))}
-              </select>
+            <span className="flex items-center gap-1.5">
               <button
                 type="button"
-                onClick={() => setPage((current) => Math.max(0, current - 1))}
-                disabled={page === 0}
-                className="inline-flex h-8 items-center gap-0.5 rounded-md px-2 py-1 hover:bg-oai-gray-100 dark:hover:bg-oai-gray-800 disabled:opacity-40"
+                onClick={() => { setDraftColumns(visibleColumns); setDraftRowHeightEnabled(rowHeightEnabled); setDraftRowHeight(rowHeight); setColumnDialogOpen(true); }}
+                title={copy("proxy.requests.col_settings")}
+                aria-label={copy("proxy.requests.col_settings")}
+                className="inline-flex h-10 sm:h-8 items-center gap-1.5 rounded-lg border border-oai-gray-200 px-2.5 font-medium hover:bg-oai-gray-50 dark:border-oai-gray-700 dark:hover:bg-oai-gray-800"
               >
-                <ChevronLeft size={13} aria-hidden="true" /> {copy("proxy.requests.prev")}
+                <Columns3 size={13} aria-hidden="true" />
+                <span className="hidden sm:inline">{copy("proxy.requests.col_settings")}</span>
               </button>
-              <span className="tabular-nums">{page + 1} / {totalPages}</span>
+              {widthsCustomized ? (
+                <button
+                  type="button"
+                  onClick={resetAllWidths}
+                  title={copy("proxy.requests.col_reset")}
+                  aria-label={copy("proxy.requests.col_reset")}
+                  className="inline-flex h-10 sm:h-8 w-10 sm:w-8 items-center justify-center rounded-lg border border-oai-gray-200 text-oai-gray-500 hover:bg-oai-gray-50 dark:border-oai-gray-700 dark:hover:bg-oai-gray-800"
+                >
+                  <RotateCcw size={13} aria-hidden="true" />
+                </button>
+              ) : null}
               <button
                 type="button"
-                onClick={() => setPage((current) => Math.min(totalPages - 1, current + 1))}
-                disabled={page >= totalPages - 1}
-                className="inline-flex h-8 items-center gap-0.5 rounded-md px-2 py-1 hover:bg-oai-gray-100 dark:hover:bg-oai-gray-800 disabled:opacity-40"
+                disabled={loading || !records?.length}
+                onClick={() => exportCsv(records ?? [], page)}
+                title={copy("proxy.requests.export_hint")}
+                className="inline-flex h-10 sm:h-8 items-center gap-1.5 rounded-lg border border-oai-gray-200 px-2.5 font-medium hover:bg-oai-gray-50 disabled:opacity-40 dark:border-oai-gray-700 dark:hover:bg-oai-gray-800"
               >
-                {copy("proxy.requests.next")} <ChevronRight size={13} aria-hidden="true" />
+                <Download size={13} aria-hidden="true" />
+                <span className="hidden sm:inline">{copy("proxy.requests.export")}</span>
               </button>
-            </div>
+            </span>
           </div>
-        ) : null}
+          <div className="flex items-center gap-2">
+            <select
+              aria-label={copy("proxy.requests.page_size", { size: pageSize })}
+              value={pageSize}
+              disabled={loading}
+              onChange={(event) => {
+                setPage(0);
+                changePageSize(Number(event.currentTarget.value));
+              }}
+              className="h-8 rounded-lg border border-oai-gray-200 bg-transparent px-1.5 text-xs dark:border-oai-gray-700"
+            >
+              {[20, 50, 100, 200].map((size) => (
+                <option key={size} value={size}>{copy("proxy.requests.page_size", { size })}</option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={() => setPage((current) => Math.max(0, current - 1))}
+              disabled={page === 0}
+              className="inline-flex h-8 items-center gap-0.5 rounded-md px-2 py-1 hover:bg-oai-gray-100 dark:hover:bg-oai-gray-800 disabled:opacity-40"
+            >
+              <ChevronLeft size={13} aria-hidden="true" /> {copy("proxy.requests.prev")}
+            </button>
+            <span className="tabular-nums">{page + 1} / {totalPages}</span>
+            <button
+              type="button"
+              onClick={() => setPage((current) => Math.min(totalPages - 1, current + 1))}
+              disabled={page >= totalPages - 1}
+              className="inline-flex h-8 items-center gap-0.5 rounded-md px-2 py-1 hover:bg-oai-gray-100 dark:hover:bg-oai-gray-800 disabled:opacity-40"
+            >
+              {copy("proxy.requests.next")} <ChevronRight size={13} aria-hidden="true" />
+            </button>
+          </div>
+        </div>
       </Card>
 
       <ColumnSettingsDialog

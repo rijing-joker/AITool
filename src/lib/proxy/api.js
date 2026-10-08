@@ -55,6 +55,56 @@ function recordTimestamp(record) {
   return recordTimestamps.get(record);
 }
 
+// Per-model speed eligibility mirrors cc-switch's usage_stats (c615c3e):
+// exact speed needs first-token timing (≥ 100 output tokens and ≥ 100 ms of
+// generation after the first token); rows without TTFT can only be estimated
+// from total duration, and there the thresholds are higher (≥ 200 tokens,
+// ≥ 1 s) because the first-token wait dominates short requests.
+const SPEED_MIN_OUTPUT_TOKENS = 100;
+const SPEED_MIN_GENERATION_MS = 100;
+const SPEED_ESTIMATE_MIN_OUTPUT_TOKENS = 200;
+const SPEED_ESTIMATE_MIN_DURATION_MS = 1000;
+
+function speedEligible(row) {
+  const output = Number(row?.tokens?.outputTokens) || 0;
+  const latency = Number(row.latencyMs);
+  const ttft = Number(row.ttftMs);
+  return row.ttftMs != null && Number.isFinite(ttft) && Number.isFinite(latency)
+    && output >= SPEED_MIN_OUTPUT_TOKENS
+    && latency - ttft >= SPEED_MIN_GENERATION_MS;
+}
+
+function speedEstimateEligible(row) {
+  const output = Number(row?.tokens?.outputTokens) || 0;
+  const latency = Number(row.latencyMs);
+  return row.ttftMs == null && Number.isFinite(latency)
+    && output >= SPEED_ESTIMATE_MIN_OUTPUT_TOKENS
+    && latency >= SPEED_ESTIMATE_MIN_DURATION_MS;
+}
+
+function modelEntryOf(byModel, row) {
+  const model = String(row.response_model || row.model || "unknown");
+  let entry = byModel.get(model);
+  if (!entry) {
+    entry = {
+      model,
+      requests: 0,
+      success_count: 0,
+      input_tokens: 0,
+      output_tokens: 0,
+      total_tokens: 0,
+      cache_read_tokens: 0,
+      cache_creation_tokens: 0,
+      speed_output_tokens: 0,
+      speed_generation_ms: 0,
+      est_speed_output_tokens: 0,
+      est_speed_duration_ms: 0,
+    };
+    byModel.set(model, entry);
+  }
+  return entry;
+}
+
 function computeOverview(rows) {
   const now = Date.now();
   // Disjoint result buckets — canceled rows carry failed=true.
@@ -65,15 +115,34 @@ function computeOverview(rows) {
 
   const byModel = new Map();
   const byProvider = new Map();
-  for (const row of success) {
-    const model = String(row.response_model || row.model || "unknown");
-    const modelEntry = byModel.get(model) || { model, requests: 0, input_tokens: 0, output_tokens: 0, total_tokens: 0 };
+  // Model stats count every request toward requests/success_rate (cc-switch
+  // rollup semantics — a model whose requests all fail still shows 0%),
+  // while tokens, cache and speed ride the success bucket so the rows sum
+  // to the headline totals above.
+  for (const row of rows) {
+    const modelEntry = modelEntryOf(byModel, row);
     modelEntry.requests += 1;
+    if (row.canceled || row.failed) continue;
+    modelEntry.success_count += 1;
     modelEntry.input_tokens += Number(row?.tokens?.inputTokens) || 0;
     modelEntry.output_tokens += Number(row?.tokens?.outputTokens) || 0;
     modelEntry.total_tokens += Number(row?.tokens?.totalTokens) || 0;
-    byModel.set(model, modelEntry);
-
+    modelEntry.cache_read_tokens += Number(row?.tokens?.cacheReadTokens) || 0;
+    modelEntry.cache_creation_tokens += Number(row?.tokens?.cacheCreationTokens) || 0;
+    if (speedEligible(row)) {
+      modelEntry.speed_output_tokens += Number(row?.tokens?.outputTokens) || 0;
+      modelEntry.speed_generation_ms += Number(row.latencyMs) - Number(row.ttftMs);
+    } else if (speedEstimateEligible(row)) {
+      modelEntry.est_speed_output_tokens += Number(row?.tokens?.outputTokens) || 0;
+      modelEntry.est_speed_duration_ms += Number(row.latencyMs);
+    }
+  }
+  for (const modelEntry of byModel.values()) {
+    modelEntry.success_rate = modelEntry.requests
+      ? Number(((modelEntry.success_count / modelEntry.requests) * 100).toFixed(2))
+      : null;
+  }
+  for (const row of success) {
     const provider = String(row.provider || "unknown");
     const providerEntry = byProvider.get(provider) || { provider, requests: 0, total_tokens: 0, failures: 0 };
     providerEntry.requests += 1;

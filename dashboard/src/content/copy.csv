@@ -177,6 +177,11 @@ dashboard.projects.detail.source_conv,ui,DataDetails,ProjectDetailModal,source_c
 dashboard.widgets.title,dashboard,DashboardPage,WidgetOnboardingCard,title,"Desktop Widgets",,active
 dashboard.widgets.hint,dashboard,DashboardPage,WidgetOnboardingCard,hint,"Right-click your desktop → Edit Widgets → search ""TokenTracker""",,active
 dashboard.widgets.dismiss_aria,dashboard,DashboardPage,WidgetOnboardingCard,dismiss_aria,"Dismiss widget intro",,active
+dashboard.linux_topbar.title,dashboard,DashboardPage,LinuxTopBarCard,title,"Track usage in your top bar",,active
+dashboard.linux_topbar.hint,dashboard,DashboardPage,LinuxTopBarCard,hint,"On GNOME, the TokenTracker extension puts today's tokens and spend next to Clawd in the top bar, with a dropdown for limits and trends.",,active
+dashboard.linux_topbar.setup,dashboard,DashboardPage,LinuxTopBarCard,setup,"Set up",,active
+dashboard.linux_topbar.dismiss_aria,dashboard,DashboardPage,LinuxTopBarCard,dismiss_aria,"Dismiss top bar tip",,active
+dashboard.linux_topbar.preview_readout,dashboard,DashboardPage,LinuxTopBarCard,preview_readout,"8.2M · $12.40",Illustrative figures,active
 widgets.page.title,dashboard,WidgetsPage,WidgetsPage,title,"Menu Bar & Widgets",,active
 widgets.cta.open_gallery,dashboard,WidgetsPage,WidgetsPage,cta_open_gallery,"Open Widget Gallery",,active
 widgets.cta.download,dashboard,WidgetsPage,WidgetsPage,cta_download,"Download Mac App",,active
@@ -471,6 +476,11 @@ dashboard.island.enable,ui,DashboardPage,IslandOnboardingCard,island_enable,"Tur
 dashboard.island.settings_link,ui,DashboardPage,IslandOnboardingCard,island_settings,"View in Settings",,active
 dashboard.island.enabled_toast,ui,DashboardPage,IslandOnboardingCard,island_toast,"Dynamic Island is on — look up at the notch",,active
 dashboard.island.dismiss_aria,ui,DashboardPage,IslandOnboardingCard,island_dismiss,"Dismiss Dynamic Island tip",,active
+dashboard.linux_pet.title,ui,DashboardPage,LinuxPetCard,linux_pet_title,"Meet your desktop pet",,active
+dashboard.linux_pet.hint,ui,DashboardPage,LinuxPetCard,linux_pet_hint,"A small companion on your desktop — hover it for today's tokens, spend and limits, and drag it anywhere.",,active
+dashboard.linux_pet.show,ui,DashboardPage,LinuxPetCard,linux_pet_show,"Show pet",,active
+dashboard.linux_pet.settings_link,ui,DashboardPage,LinuxPetCard,linux_pet_settings,"Pet settings",,active
+dashboard.linux_pet.dismiss_aria,ui,DashboardPage,LinuxPetCard,linux_pet_dismiss,"Dismiss desktop pet tip",,active
 settings.labs.qpd.label,ui,SettingsPage,LabsSection,qpd_label,"Analyze PR cost-efficiency",,active
 settings.labs.qpd.hint,ui,SettingsPage,LabsSection,qpd_hint,"Analyze average delivery costs and effective Tokens per model from merged PRs and AI-attributed commits.",,active
 settings.labs.qpd.aria,ui,SettingsPage,LabsSection,qpd_aria,"Toggle PR cost-efficiency analysis",,active
@@ -509,6 +519,10 @@ settings.appearance.token_unit.label,ui,SettingsPage,SettingsPage,token_unit_lab
 settings.appearance.token_unit.hint,ui,SettingsPage,SettingsPage,token_unit_hint,"Compact numbers use K/M/B or Wan/Yi units. Full numbers ignore units.",,active
 settings.appearance.token_unit.english,ui,SettingsPage,SettingsPage,token_unit_english,"K/M/B",,active
 settings.appearance.token_unit.chinese,ui,SettingsPage,SettingsPage,token_unit_chinese,"Wan/Yi",,active
+settings.appearance.token_grouping.label,ui,SettingsPage,SettingsPage,token_grouping_label,"Number grouping",,active
+settings.appearance.token_grouping.hint,ui,SettingsPage,SettingsPage,token_grouping_hint,"Exact numbers use 3-digit or Chinese 4-digit grouping. Compact tooltips follow this setting.",,active
+settings.appearance.token_grouping.thousand,ui,SettingsPage,SettingsPage,token_grouping_thousand,"3-digit",,active
+settings.appearance.token_grouping.wan,ui,SettingsPage,SettingsPage,token_grouping_wan,"4-digit",,active
 settings.appearance.currency.opt.usd,ui,SettingsPage,SettingsPage,currency_opt_usd,"USD ($)",,active
 settings.appearance.currency.opt.eur,ui,SettingsPage,SettingsPage,currency_opt_eur,"EUR (€)",,active
 settings.appearance.currency.opt.gbp,ui,SettingsPage,SettingsPage,currency_opt_gbp,"GBP (£)",,active
@@ -1700,6 +1714,10 @@ proxy.metric.avg_latency,proxy,ProxyPage,ProxyPage,avg_latency,Avg latency,,acti
 proxy.metric.timeline_24h,proxy,ProxyPage,ProxyPage,timeline_24h,Token volume — trailing 24h,,active
 proxy.metric.by_model,proxy,ProxyPage,ProxyPage,by_model,By model,,active
 proxy.metric.by_provider,proxy,ProxyPage,ProxyPage,by_provider,By provider,,active
+proxy.metric.speed,proxy,ProxyPage,ProxyPage,speed,Speed,,active
+proxy.metric.speed_hint,proxy,ProxyPage,ProxyPage,speed_hint,"Output ÷ generation time (after the first token); ≈ estimates from total duration",,active
+proxy.metric.cache_read,proxy,ProxyPage,ProxyPage,cache_read,Cache read,,active
+proxy.metric.cache_creation,proxy,ProxyPage,ProxyPage,cache_creation,Cache write,,active
 proxy.tokens_short,proxy,ProxyPage,ProxyPage,tokens_short,tokens,,active
 proxy.requests_short,proxy,ProxyPage,ProxyPage,requests_short,requests,,active
 proxy.empty.no_usage,proxy,ProxyPage,ProxyPage,no_usage,No usage recorded yet.,,active
@@ -2730,3 +2748,5 @@ pswitch.provider.appearance,pswitch,Shared,Shared,appearance,Notes and appearanc
 pswitch.preset.change,pswitch,Shared,Shared,change,Change preset,,active
 pswitch.provider.save_effect,pswitch,Shared,Shared,save_effect,Saves this preset. Changes to shared settings also update the live configuration.,,active
 pswitch.provider.save_effect_active,pswitch,Shared,Shared,save_effect_active,Saving also applies changes to the configuration currently in use.,,active
+
+trend.monitor.pin_hint,dashboard,DashboardPage,TrendMonitor,hint,"Click a bar to pin and scroll details",,active

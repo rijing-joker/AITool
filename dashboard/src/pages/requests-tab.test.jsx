@@ -269,3 +269,46 @@ it.each([
   // the elapsed time always lands in the green band here.
   expect(cell.querySelector("span[title]")).toHaveClass("text-emerald-600");
 });
+
+// formatDay is locale/TZ-dependent, so the expected label is derived the same
+// way the component derives it, and the fixture timestamps stay inside offsets
+// the test runners use: 1h apart is the same local date everywhere, 48h apart
+// is a different local date everywhere.
+const dayLabel = (timestamp) => new Date(timestamp).toLocaleDateString([], { year: "numeric", month: "2-digit", day: "2-digit" });
+
+it("shows the day label only on the first record of each local date", async () => {
+  const a = "2026-10-02T12:00:00Z";
+  const b = "2026-10-02T13:00:00Z";
+  await setup({
+    records: [
+      { ...response.records[0], id: "a", timestamp: a },
+      { ...response.records[0], id: "b", model: "fixture-model-b", timestamp: b },
+    ],
+    total: 2,
+    stats: { ...response.stats, total_requests: 2 },
+  });
+  expect(screen.getAllByText(dayLabel(a))).toHaveLength(1);
+});
+
+it("repeats the day label when the local date changes", async () => {
+  const a = "2026-10-02T12:00:00Z";
+  const b = "2026-10-04T12:00:00Z";
+  await setup({
+    records: [
+      { ...response.records[0], id: "a", timestamp: a },
+      { ...response.records[0], id: "b", model: "fixture-model-b", timestamp: b },
+    ],
+    total: 2,
+    stats: { ...response.stats, total_requests: 2 },
+  });
+  expect(screen.getByText(dayLabel(a))).toBeInTheDocument();
+  expect(screen.getByText(dayLabel(b))).toBeInTheDocument();
+});
+
+it("keeps the table actions in the footer next to the pagination", async () => {
+  await setup();
+  const footer = screen.getByText("proxy.requests.range_summary").parentElement.parentElement;
+  expect(footer).toContainElement(screen.getByRole("button", { name: "proxy.requests.col_settings" }));
+  expect(footer).toContainElement(screen.getByRole("button", { name: "proxy.requests.export" }));
+  expect(footer).toContainElement(screen.getByRole("combobox", { name: "proxy.requests.page_size" }));
+});

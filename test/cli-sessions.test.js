@@ -141,6 +141,31 @@ test("codex sessions: session_meta + response_item payloads scan and read", asyn
   assert.deepEqual(messages[2].toolResults, [{ callId: null, output: "ok" }]);
 });
 
+test("codex transcripts: custom tools preserve raw input, call ids and results", async () => {
+  const root = path.join(tmpHome, ".codex", "sessions");
+  fs.mkdirSync(root, { recursive: true });
+  const filePath = path.join(root, "rollout-custom-tools.jsonl");
+  const input = "*** Begin Patch\n*** Add File: hello.txt\n+hello\n*** End Patch";
+  const output = "Success. Updated the following files:\nA hello.txt";
+  fs.writeFileSync(filePath, [
+    { type: "custom_tool_call", call_id: "patch-1", name: "apply_patch", input },
+    { type: "custom_tool_call_output", call_id: "patch-1", output },
+    { type: "function_call", call_id: "shell-1", name: "exec_command", arguments: '{"cmd":"cat hello.txt"}' },
+    { type: "function_call_output", call_id: "shell-1", output: "hello" },
+  ].map((payload) => JSON.stringify({ type: "response_item", timestamp: "2026-10-01T10:00:00Z", payload })).join("\n") + "\n");
+
+  const { messages, usage } = await sessions.readSession({ app: "codex", sourcePath: filePath, home: tmpHome });
+  assert.equal(usage, null);
+  assert.deepEqual(messages.map((row) => [row.role, row.content]), [
+    ["assistant", ""], ["tool", output], ["assistant", ""], ["tool", "hello"],
+  ]);
+  assert.deepEqual(messages[0].toolCalls, [{ callId: "patch-1", name: "apply_patch", input }]);
+  assert.equal(messages[0].ts, Date.parse("2026-10-01T10:00:00Z"));
+  assert.deepEqual(messages[1].toolResults, [{ callId: "patch-1", output }]);
+  assert.deepEqual(messages[2].toolCalls, [{ callId: "shell-1", name: "exec_command", arguments: '{"cmd":"cat hello.txt"}' }]);
+  assert.deepEqual(messages[3].toolResults, [{ callId: "shell-1", output: "hello" }]);
+});
+
 test("gemini sessions: tmp/<project>/chats scans .json and maps toolCalls", async () => {
   const chats = path.join(tmpHome, ".gemini", "tmp", "hash1", "chats");
   fs.mkdirSync(chats, { recursive: true });

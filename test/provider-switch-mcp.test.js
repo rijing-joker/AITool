@@ -7,6 +7,7 @@
 
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
+const fsp = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const { Readable } = require("node:stream");
@@ -91,9 +92,72 @@ function homePath(...parts) {
 const stdioSpec = { type: "stdio", command: "npx", args: ["-y", "@modelcontextprotocol/server-fetch"] };
 const httpSpec = { type: "http", url: "https://mcp.example.com/mcp", headers: { Authorization: "Bearer t0k3n" } };
 
+// Pause after the first live-file snapshot. The second mutation either waits
+// for its lock or completes (the old lost-update behavior), then let the first
+// finish. No timing assumptions or barrier requiring two simultaneous reads.
+async function overlapLiveMutations(t, filePath, first, second) {
+  let releaseFirst;
+  const mayFinish = new Promise((resolve) => { releaseFirst = resolve; });
+  let signalRead;
+  const hasRead = new Promise((resolve) => { signalRead = resolve; });
+  let signalContender;
+  const hasContender = new Promise((resolve) => { signalContender = resolve; });
+  let held = false;
+  const readFile = fsp.readFile;
+  const open = fsp.open;
+  t.mock.method(fsp, "readFile", async (target, ...args) => {
+    const snapshot = await readFile(target, ...args);
+    if (target === filePath && !held) {
+      held = true;
+      signalRead();
+      await mayFinish;
+    }
+    return snapshot;
+  });
+  t.mock.method(fsp, "open", async (target, ...args) => {
+    if (held && target === `${filePath}.lock` && args[0] === "wx") signalContender();
+    return open(target, ...args);
+  });
+  const firstPending = first();
+  await hasRead;
+  const secondPending = second();
+  try {
+    await Promise.race([hasContender, secondPending]);
+  } finally {
+    releaseFirst();
+  }
+  return Promise.all([firstPending, secondPending]);
+}
+
 // ---------------------------------------------------------------------------
 // Projections
 // ---------------------------------------------------------------------------
+
+for (const app of ["claude", "codex", "gemini", "grokbuild", "opencode", "hermes", "mcode"]) {
+  for (const operation of ["insert", "delete"]) {
+    test(`mcp: concurrent ${operation} and insert preserve ${app}'s live entries`, { timeout: 5000 }, async (t) => {
+      const mcp = require("../src/lib/provider-switch/mcp");
+      const file = mcp.mcpLiveFiles()[app];
+      fs.mkdirSync(path.dirname(file.path), { recursive: true });
+      if (app === "claude") fs.mkdirSync(homePath(".claude"), { recursive: true });
+      const insert = (id) => mcp.upsertServer({ id, server: stdioSpec, apps: { [app]: true } });
+      await insert("existing");
+
+      const results = await overlapLiveMutations(t, file.path,
+        () => operation === "insert" ? insert("first") : mcp.deleteServer("existing"),
+        () => insert("second"),
+      );
+      for (const result of results) assert.deepEqual(result.failures, []);
+      const text = fs.readFileSync(file.path, "utf8");
+      const doc = app === "hermes" ? YAML.parse(text)
+        : ["codex", "grokbuild"].includes(app) ? tomlParse(text) : JSON.parse(text);
+      const expected = operation === "insert" ? ["existing", "first", "second"] : ["second"];
+      assert.deepEqual(Object.keys(doc[file.mapKey]).sort(), expected);
+      assert.deepEqual((await mcp.listServers()).map((row) => row.id).sort(), expected);
+      assert.equal(fs.existsSync(`${file.path}.lock`), false);
+    });
+  }
+}
 
 test("mcp: codex projection writes [mcp_servers.<id>] without type, preserving unrelated TOML", async () => {
   fs.mkdirSync(homePath(".codex"), { recursive: true });
@@ -445,6 +509,41 @@ for (const [app, dir] of [["codex", ".codex"], ["grokbuild", ".grok"]]) {
     assert.equal(live.mcp_servers.fetch.tool_timeout_sec, 42);
   });
 }
+
+test("mcp: Gemini httpUrl imports as HTTP and projects across apps", async () => {
+  fs.mkdirSync(homePath(".gemini"), { recursive: true });
+  fs.mkdirSync(homePath(".claude"), { recursive: true });
+  fs.mkdirSync(homePath(".codex"), { recursive: true });
+  const nativeSpec = { httpUrl: httpSpec.url, headers: httpSpec.headers, timeout: 5000 };
+  fs.writeFileSync(homePath(".gemini", "settings.json"), JSON.stringify({
+    mcpServers: {
+      remote: nativeSpec,
+      both: { ...nativeSpec, url: "https://ignored.example.com/sse", type: "sse" },
+      local: stdioSpec,
+      sse: { type: "sse", url: "https://sse.example.com" },
+    },
+  }));
+  const mcp = require("../src/lib/provider-switch/mcp");
+  const imported = await mcp.importFromApps(["gemini"]);
+  assert.equal(imported.changed, 4);
+  assert.deepEqual(imported.skipped, []);
+  for (const id of ["remote", "both"]) {
+    assert.deepEqual(imported.servers.find((row) => row.id === id).server, { ...httpSpec, timeout: 5000 });
+  }
+  assert.deepEqual(imported.servers.find((row) => row.id === "local").server, stdioSpec);
+  assert.equal(imported.servers.find((row) => row.id === "sse").server.type, "sse");
+
+  const remote = imported.servers.find((row) => row.id === "remote");
+  const projected = await mcp.upsertServer({ ...remote, apps: { gemini: true, claude: true, codex: true } });
+  assert.deepEqual(projected.failures, []);
+  for (const app of ["gemini", "claude"]) {
+    const doc = JSON.parse(fs.readFileSync(mcp.mcpLiveFiles()[app].path, "utf8"));
+    assert.deepEqual(doc.mcpServers.remote, { ...httpSpec, timeout: 5000 });
+  }
+  const codex = tomlParse(fs.readFileSync(mcp.mcpLiveFiles().codex.path, "utf8"));
+  assert.equal(codex.mcp_servers.remote.url, httpSpec.url);
+  assert.deepEqual({ ...codex.mcp_servers.remote.http_headers }, httpSpec.headers);
+});
 
 test("mcp: import from opencode converts local/remote back to stdio/sse", async () => {
   fs.mkdirSync(homePath(".config", "opencode"), { recursive: true });

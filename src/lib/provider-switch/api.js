@@ -79,24 +79,26 @@ async function writeLiveFile(file, content) {
   if (file.private) await chmod600IfPossible(file.path);
 }
 
-// Files a backup may belong to. MCP projections write live files that are not
-// provider-switch targets (claude's ~/.claude.json, gemini's settings.json,
-// MiniMax's mcp.json), so a restore has to consider them too — otherwise the
-// backup is listed in the UI but can never be applied.
+// MCP registries and prompt instruction files also create backups, even when
+// they are not provider-switch targets. Include them so listed backups restore.
 const BACKUP_FORMATS = { ".toml": "toml", ".yaml": "yaml", ".yml": "yaml" };
 
 function restoreTargets(app) {
   const live = mcp.mcpLiveFiles()[app];
-  if (!live) return paths.targetFiles(app);
-  return [
-    ...paths.targetFiles(app),
-    {
-      id: `mcp-${app}`,
-      path: live.path,
-      format: BACKUP_FORMATS[path.extname(live.path)] || "json",
-      private: true,
-    },
-  ];
+  const files = [...paths.targetFiles(app)];
+  if (live) files.push({
+    id: `mcp-${app}`,
+    path: live.path,
+    format: BACKUP_FORMATS[path.extname(live.path)] || "json",
+    private: true,
+  });
+  if (prompts.PROMPT_APPS.includes(app)) files.push({
+    id: `prompt-${app}`,
+    path: prompts.promptFilePath(app),
+    format: "text",
+    private: true,
+  });
+  return files;
 }
 
 // ---------------------------------------------------------------------------

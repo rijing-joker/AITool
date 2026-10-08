@@ -514,15 +514,17 @@ async function codexReadMessages(filePath) {
     if (payload.type === "message") {
       role = typeof payload.role === "string" ? payload.role : "unknown";
       content = extractText(payload.content);
-    } else if (payload.type === "function_call") {
+    } else if (payload.type === "function_call" || payload.type === "custom_tool_call") {
       role = "assistant";
       toolCalls = [{
         callId: typeof payload.call_id === "string" ? payload.call_id : null,
         name: typeof payload.name === "string" && payload.name ? payload.name : "unknown",
-        arguments: typeof payload.arguments === "string" ? payload.arguments : null,
+        ...(payload.type === "custom_tool_call"
+          ? { input: typeof payload.input === "string" ? payload.input : null }
+          : { arguments: typeof payload.arguments === "string" ? payload.arguments : null }),
       }];
       content = "";
-    } else if (payload.type === "function_call_output") {
+    } else if (payload.type === "function_call_output" || payload.type === "custom_tool_call_output") {
       role = "tool";
       toolResults = [{
         callId: typeof payload.call_id === "string" ? payload.call_id : null,

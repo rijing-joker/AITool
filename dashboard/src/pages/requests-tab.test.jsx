@@ -22,7 +22,7 @@ async function setup(overrides = {}) {
     vi.stubGlobal("fetch", vi.fn(async () => ({ json: async () => ({ ...response, ...overrides }) })));
   }
   render(<RequestsTab />);
-  await screen.findByText("fixture-model");
+  await screen.findByText(overrides.records?.[0]?.model || "fixture-model");
 }
 it("coalesces typing into one filtered request", async () => {
   await setup();
@@ -79,6 +79,33 @@ it("keeps tiny and zero costs readable in the cost column and tile", async () =>
   });
   expect(screen.getByText("<$0.0001")).toBeInTheDocument();
   expect(screen.getByText("$0")).toBeInTheDocument();
+});
+
+it.each([
+  ["claude", "claude-sonnet-4", 100, 50, 0, "33.33%"],
+  ["anthropic", "custom-model", 100, 50, 50, "25.00%"],
+  ["claude", "custom-model", 0, 50, 0, "100.00%"],
+  [undefined, "claude-sonnet-4", 100, 50, 0, "33.33%"],
+  ["openai", "gpt-5", 100, 50, 0, "50.00%"],
+  ["gemini", "gemini-2.5-pro", 100, 50, 0, "50.00%"],
+  ["openai", "claude-sonnet-4", 100, 50, 0, "50.00%"],
+  ["claude", "gpt-5", 100, 50, 0, "33.33%"],
+  [undefined, "gpt-5", 100, 50, 0, "50.00%"],
+  ["openai", "gpt-5", 100, 200, 0, "100.00%"],
+])("shows cache rates using executor %s and model %s (%i/%i/%i)", async (executor_type, model, inputTokens, cacheReadTokens, cacheCreationTokens, expected) => {
+  await setup({ records: [{
+    ...response.records[0], executor_type, model,
+    tokens: { inputTokens, cacheReadTokens, cacheCreationTokens },
+  }] });
+  // The default combined cache column and the optional rate column agree.
+  expect(screen.getByText(expected)).toBeInTheDocument();
+  await openColumnSettings();
+  fireEvent.click(screen.getByRole("checkbox", { name: "proxy.requests.col.cacheRate" }));
+  fireEvent.click(screen.getByRole("button", { name: "shared.action.apply" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(screen.getAllByText(expected)).toHaveLength(2);
+  expect(screen.getByTitle(expected)).toHaveTextContent(expected);
+  localStorage.removeItem("aitool.usage-events-visible-cols.v1");
 });
 it("exports the loaded page as a CSV download with the injection guard", async () => {
   // A model id that would be interpreted as a formula by spreadsheet apps

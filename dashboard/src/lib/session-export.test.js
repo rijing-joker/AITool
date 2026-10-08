@@ -68,4 +68,16 @@ describe("exportSessionMarkdown", () => {
     expect(markdown).toContain("hello");
     expect(markdown).toContain("/a.js");
   });
+
+  it("exports Codex custom tool input and its result without losing patch text", () => {
+    const input = "*** Begin Patch\n*** Add File: hello.txt\n+hello\n*** End Patch";
+    const output = "Success. Updated the following files:\nA hello.txt";
+    const markdown = exportSessionMarkdown({ title: "T" }, [
+      { role: "assistant", content: "", toolCalls: [{ callId: "p1", name: "apply_patch", input }] },
+      { role: "tool", content: output, toolResults: [{ callId: "p1", output }] },
+    ], () => "ts", identity);
+    expect(markdown).toContain("**Tool: apply_patch**");
+    expect(markdown).toContain(input);
+    expect(markdown).toContain(output);
+  });
 });

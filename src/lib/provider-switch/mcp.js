@@ -3,7 +3,7 @@ const fsp = require("node:fs/promises");
 const path = require("node:path");
 const YAML = require("yaml");
 const { parse: tomlParse } = require("smol-toml");
-const { readJson, updateJsonLocked, ensureDir, writeFileAtomic, chmod600IfPossible } = require("../fs");
+const { readJson, updateJsonLocked, withFileLock, ensureDir, writeFileAtomic, chmod600IfPossible } = require("../fs");
 const paths = require("./paths");
 const toml = require("./toml");
 const backup = require("./backup");
@@ -496,6 +496,10 @@ function mcpLiveFiles() {
 async function upsertServerInApp(app, id, spec) {
   const file = mcpLiveFiles()[app];
   if (app !== "mcode" && !shouldSyncDir(HOME_SUBDIRS[app])) return;
+  return withFileLock(file.path, () => upsertServerInFile(app, file, id, spec));
+}
+
+async function upsertServerInFile(app, file, id, spec) {
   if (app === "claude" || app === "gemini") {
     await upsertJsonMap(app, file.path, file.mapKey, id, spec);
     return;
@@ -549,6 +553,10 @@ function stripInlineMcpEntry(text, id) {
 async function removeServerFromApp(app, id) {
   const file = mcpLiveFiles()[app];
   if (app !== "mcode" && !shouldSyncDir(HOME_SUBDIRS[app])) return;
+  return withFileLock(file.path, () => removeServerFromFile(app, file, id));
+}
+
+async function removeServerFromFile(app, file, id) {
   if (app === "claude" || app === "gemini" || app === "opencode") {
     await removeFromJsonMap(app, file.path, file.mapKey, id);
     return;
@@ -730,6 +738,13 @@ async function importFromApp(app) {
       else if (app === "mcode") spec = mcodeUnifiedSpec(value);
       else spec = tomlEntryToSpec(value, { codexStyle: app === "codex" });
       spec = JSON.parse(JSON.stringify(spec));
+      // Gemini's legacy httpUrl selects streamable HTTP ahead of url/type.
+      // Normalize it before validating or projecting into other apps.
+      if (app === "gemini" && typeof spec?.httpUrl === "string" && spec.httpUrl.trim()) {
+        spec.url = spec.httpUrl;
+        spec.type = "http";
+        delete spec.httpUrl;
+      }
       if (app === "mcode") delete spec.enabled;
       validateServerSpec(spec);
     } catch (error) {

@@ -5,7 +5,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { test } = require("node:test");
 
-const { openLock, updateJsonLocked } = require("../src/lib/fs");
+const { openLock, updateJsonLocked, withFileLock } = require("../src/lib/fs");
 const { acquireSyncLock } = require("../src/commands/sync");
 
 async function withLockPath(fn) {
@@ -73,6 +73,25 @@ test("locked JSON updates serialize their read-modify-write transactions", async
       first: true,
       second: true,
     });
+  });
+});
+
+test("file transactions release failed operations and time out without running a competing write", async () => {
+  await withLockPath(async (lockPath) => {
+    const filePath = path.join(path.dirname(lockPath), "config.toml");
+    await assert.rejects(withFileLock(filePath, async () => {
+      throw new Error("invalid config");
+    }), /invalid config/);
+    const lock = await openLock(`${filePath}.lock`, { quietIfLocked: true });
+    assert.ok(lock, "a failed operation must release its lease");
+    try {
+      let ran = false;
+      await assert.rejects(withFileLock(filePath, () => { ran = true; }, { timeoutMs: 0 }), /Timed out/);
+      assert.equal(ran, false);
+    } finally {
+      await lock.release();
+    }
+    assert.equal(await withFileLock(filePath, () => "updated"), "updated");
   });
 });
 

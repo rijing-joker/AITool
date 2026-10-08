@@ -140,6 +140,30 @@ test("prompts: enabling the first prompt captures a hand-written file as a disab
   assert.equal(list.find((entry) => entry.id === "terse").enabled, true);
 });
 
+for (const app of prompts().PROMPT_APPS) {
+  test(`prompts: ${app} instruction backups restore through the API`, async () => {
+    const filePath = prompts().promptFilePath(app);
+    const original = "# Personal instructions\n保留我的规则。\n";
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, original);
+    const saved = await post("/api/provider-switch/prompts", {
+      app, prompt: { id: "work", content: "new instructions", enabled: true },
+    });
+    assert.equal(saved.status, 200);
+    assert.equal(fs.readFileSync(filePath, "utf8"), "new instructions");
+
+    const listed = await get(`/api/provider-switch/backups?app=${app}`);
+    assert.equal(listed.status, 200);
+    const entry = listed.body.backups.find((row) => row.target === path.basename(filePath));
+    assert.ok(entry);
+    const restored = await post("/api/provider-switch/backups/restore", { app, backup: entry.name });
+    assert.equal(restored.status, 200);
+    assert.equal(restored.body.restored, filePath);
+    assert.equal(fs.readFileSync(filePath, "utf8"), original);
+    assert.equal(fs.readFileSync(restored.body.backup, "utf8"), "new instructions");
+  });
+}
+
 test("prompts: enabling refreshes the currently-enabled prompt with live content", async () => {
   const claudeMd = homePath(".claude", "CLAUDE.md");
   fs.mkdirSync(path.dirname(claudeMd), { recursive: true });

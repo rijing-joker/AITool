@@ -5,7 +5,7 @@ import { copyRegistryPlugin } from "./scripts/copy-registry-plugin.mjs";
 export default defineConfig({
   plugins: [copyRegistryPlugin(), react()],
   test: {
-    environment: "jsdom",
+    environment: "./src/test/jsdom-environment.ts",
     setupFiles: ["./src/test/setupTests.ts"],
     include: ["src/**/*.test.{js,jsx,ts,tsx}"],
     globals: true,

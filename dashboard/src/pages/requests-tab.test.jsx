@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { RequestsTab } from "./requests-tab";
 import { showToast } from "../ui/components/Toast";
+import { managementApi, providerGroupsApi } from "../lib/easy-providers";
 vi.mock("../lib/copy", () => ({ copy: (key) => key }));
 vi.mock("../ui/components/Toast", () => ({ showToast: vi.fn() }));
 const response = { ok: true, total: 1, records: [{ id: "fixture", timestamp: "2026-10-02T00:00:00Z", model: "fixture-model", tokens: { totalTokens: 123 } }], stats: { total_requests: 1, success_count: 1, failure_count: 0, canceled_count: 0, total_tokens: 123, models: [], providers: [{ provider: "fixture-provider", requests: 1, total_tokens: 123, failures: 0 }] } };
@@ -10,7 +11,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.stubGlobal("fetch", vi.fn(async () => ({ json: async () => response })));
 });
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 // BudgetBar polls /api/proxy/budget on its own schedule — count records
 // requests specifically so assertions stay independent of that poll.
 function recordsCalls() {
@@ -21,7 +22,7 @@ async function setup(overrides = {}) {
     vi.stubGlobal("fetch", vi.fn(async () => ({ json: async () => ({ ...response, ...overrides }) })));
   }
   render(<RequestsTab />);
-  await screen.findByText("fixture-model");
+  await screen.findByText(overrides.records?.[0]?.model || "fixture-model");
 }
 it("coalesces typing into one filtered request", async () => {
   await setup();
@@ -79,6 +80,33 @@ it("keeps tiny and zero costs readable in the cost column and tile", async () =>
   expect(screen.getByText("<$0.0001")).toBeInTheDocument();
   expect(screen.getByText("$0")).toBeInTheDocument();
 });
+
+it.each([
+  ["claude", "claude-sonnet-4", 100, 50, 0, "33.33%"],
+  ["anthropic", "custom-model", 100, 50, 50, "25.00%"],
+  ["claude", "custom-model", 0, 50, 0, "100.00%"],
+  [undefined, "claude-sonnet-4", 100, 50, 0, "33.33%"],
+  ["openai", "gpt-5", 100, 50, 0, "50.00%"],
+  ["gemini", "gemini-2.5-pro", 100, 50, 0, "50.00%"],
+  ["openai", "claude-sonnet-4", 100, 50, 0, "50.00%"],
+  ["claude", "gpt-5", 100, 50, 0, "33.33%"],
+  [undefined, "gpt-5", 100, 50, 0, "50.00%"],
+  ["openai", "gpt-5", 100, 200, 0, "100.00%"],
+])("shows cache rates using executor %s and model %s (%i/%i/%i)", async (executor_type, model, inputTokens, cacheReadTokens, cacheCreationTokens, expected) => {
+  await setup({ records: [{
+    ...response.records[0], executor_type, model,
+    tokens: { inputTokens, cacheReadTokens, cacheCreationTokens },
+  }] });
+  // The default combined cache column and the optional rate column agree.
+  expect(screen.getByText(expected)).toBeInTheDocument();
+  await openColumnSettings();
+  fireEvent.click(screen.getByRole("checkbox", { name: "proxy.requests.col.cacheRate" }));
+  fireEvent.click(screen.getByRole("button", { name: "shared.action.apply" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(screen.getAllByText(expected)).toHaveLength(2);
+  expect(screen.getByTitle(expected)).toHaveTextContent(expected);
+  localStorage.removeItem("aitool.usage-events-visible-cols.v1");
+});
 it("exports the loaded page as a CSV download with the injection guard", async () => {
   // A model id that would be interpreted as a formula by spreadsheet apps
   // must be neutralized by the upstream's `'`-prefix guard.
@@ -89,10 +117,13 @@ it("exports the loaded page as a CSV download with the injection guard", async (
   await setup({ records: [response.records[0], injectionRecord] });
   const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
   const createObjectURL = vi.fn(() => "blob:csv");
+  const revokeObjectURL = vi.fn();
   // jsdom's Blob lacks .text(); Node's can be read back.
   const { Blob: NodeBlob } = await import("node:buffer");
   vi.stubGlobal("Blob", NodeBlob);
-  vi.stubGlobal("URL", Object.assign(URL, { createObjectURL }));
+  class DownloadURL extends URL {}
+  vi.stubGlobal("URL", Object.assign(DownloadURL, { createObjectURL, revokeObjectURL }));
+  vi.useFakeTimers();
   fireEvent.click(screen.getByRole("button", { name: "proxy.requests.export" }));
   expect(click).toHaveBeenCalledTimes(1);
   expect(createObjectURL).toHaveBeenCalledTimes(1);
@@ -106,6 +137,8 @@ it("exports the loaded page as a CSV download with the injection guard", async (
   expect(csv).toContain('"estimated_cost_usd"');
   expect(csv).toContain('"fixture-model"');
   expect(csv).toContain('"\'=cmd|\'!A1"'); // guarded, quoted, not bare `=…`
+  act(() => vi.advanceTimersByTime(1000));
+  expect(revokeObjectURL).toHaveBeenCalledWith("blob:csv");
   click.mockRestore();
   vi.unstubAllGlobals();
 });
@@ -116,6 +149,33 @@ it("applies column visibility from the settings dialog", async () => {
   expect(dialog).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "shared.action.apply" }));
   await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+});
+
+it.each([
+  ["auth-second", "https://override.example.com/v1/responses", { "X-Route": "override" }],
+  ["auth-third", "https://group.example.com/v1/responses", { "X-Route": "group", "X-Shared": "yes" }],
+])("replays a non-first group key with its effective config (%s)", async (authIndex, url, headers) => {
+  const group = {
+    name: "Codex relay", "base-url": "https://group.example.com/v1",
+    headers: { "X-Route": "group", "X-Shared": "yes" },
+    keys: [
+      { "api-key": "sk-first", "auth-index": "auth-first" },
+      { "api-key": "sk-second", auth_index: "auth-second", "base-url": "https://override.example.com/v1", headers: { "X-Route": "override" } },
+      { "api-key": "sk-third", authIndex: "auth-third", "base-url": null, headers: null },
+    ],
+  };
+  vi.spyOn(providerGroupsApi, "get").mockImplementation(async (section) => section === "codex-api-key" ? [group] : []);
+  const post = vi.spyOn(managementApi, "post").mockResolvedValue({ status_code: 200, body: "replay succeeded" });
+  await setup({ records: [{ ...response.records[0], auth_index: authIndex }] });
+  fireEvent.click(screen.getByRole("button", { name: "proxy.requests.replay.action" }));
+  await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+  const [endpoint, request, options] = post.mock.calls[0];
+  expect(endpoint).toBe("/api-call");
+  expect(options).toEqual({ timeoutMs: 30000 });
+  expect(request).toMatchObject({ authIndex, method: "POST", url, header: { Authorization: "Bearer $TOKEN$", ...headers } });
+  expect(JSON.parse(request.data).model).toBe("fixture-model");
+  if (authIndex === "auth-second") expect(request.header).not.toHaveProperty("X-Shared");
+  expect(JSON.stringify(request)).not.toContain("sk-");
 });
 
 it("budget dialog accepts repeated typing without dropping the event target", async () => {

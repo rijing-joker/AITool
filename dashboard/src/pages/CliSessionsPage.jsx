@@ -4,7 +4,7 @@ import {
 import { copy } from "../lib/copy";
 import { formatCostUsd } from "../lib/cost-format";
 import { Input } from "../ui/components";
-import { exportSessionMarkdown } from "../lib/session-export";
+import { exportSessionMarkdown, toolCallPayloadText } from "../lib/session-export";
 import { LocalOnlyNotice } from "../components/LocalOnlyNotice.jsx";
 import { isLocalDashboardHost } from "../lib/host-mode";
 import { isMockEnabled } from "../lib/mock-data";
@@ -264,8 +264,7 @@ function TranscriptRow({ message, query = "" }) {
       {toolCalls.length > 0 ? (
         <div className="mt-1.5 flex flex-wrap gap-1.5">
           {toolCalls.map((call, index) => {
-            const payload = call.input ?? call.args ?? (call.arguments ? (() => { try { return JSON.parse(call.arguments); } catch { return call.arguments; } })() : null);
-            const payloadText = payload == null ? "" : typeof payload === "string" ? payload : JSON.stringify(payload, null, 2);
+            const payloadText = toolCallPayloadText(call);
             const key = call.id ?? call.callId ?? `${call.name}-${index}`;
             const patch = call.patch;
             const toolOpen = textHits(payloadText, query) || textHits(call.name, query) || textHits(patch?.body, query);

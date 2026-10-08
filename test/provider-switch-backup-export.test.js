@@ -29,6 +29,25 @@ afterEach(() => {
 });
 
 describe("provider backup export/import", () => {
+  for (const name of ["mcp-servers.json", "prompts.json"]) {
+    it(`round-trips a backup containing only ${name}`, async () => {
+      const root = path.join(homeDir, ".aitool", "provider-switch");
+      fs.unlinkSync(path.join(root, "providers.json"));
+      const original = name === "mcp-servers.json"
+        ? { version: 1, servers: [{ id: "fetch", server: { command: "fetch" }, apps: { codex: true } }] }
+        : { version: 1, apps: { claude: [{ id: "rules", content: "be concise", enabled: false }] } };
+      fs.writeFileSync(path.join(root, name), JSON.stringify(original));
+      const payload = await backupExport.exportEncrypted(PASS);
+      fs.unlinkSync(path.join(root, name));
+
+      const result = await backupExport.importEncrypted(PASS, payload);
+      assert.deepEqual(result.restored, [name]);
+      assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root, name), "utf8")), original);
+      assert.equal(fs.existsSync(path.join(root, "providers.json")), false);
+      assert.equal(fs.readFileSync(path.join(root, "codex-auth-stash.json"), "utf8"), '{"tokens":"secret"}');
+    });
+  }
+
   it("round-trips stores through the encrypted blob", async () => {
     const payload = await backupExport.exportEncrypted(PASS);
     assert.equal(payload.format, backupExport.FORMAT);

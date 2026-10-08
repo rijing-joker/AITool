@@ -154,6 +154,31 @@ test("Command Code presets are registered for claude and codex", () => {
   assert.equal(codex.settingsConfig.config.model_providers.custom.wire_api, "responses");
 });
 
+test("Claude quota queries accept either supported credential field", async () => {
+  for (const env of [
+    { ANTHROPIC_API_KEY: "sk-api-key" },
+    { ANTHROPIC_AUTH_TOKEN: "", ANTHROPIC_API_KEY: "sk-api-key" },
+    { ANTHROPIC_AUTH_TOKEN: "sk-auth-token", ANTHROPIC_API_KEY: "sk-api-key" },
+  ]) {
+    const calls = [];
+    const fetchFixture = stubFetch(FIXTURE);
+    const result = await quota.queryProviderQuota({
+      app: "claude",
+      provider: { id: "key-fields", settingsConfig: { env: { ANTHROPIC_BASE_URL: CLAUDE_ROW.settingsConfig.env.ANTHROPIC_BASE_URL, ...env } } },
+      bypassCache: true,
+      fetchImpl: async (url, options) => {
+        calls.push(options.headers);
+        return fetchFixture(url, options);
+      },
+    });
+    assert.equal(result.ok, true);
+    assert.ok(calls.length > 0);
+    for (const headers of calls) {
+      assert.equal(headers.Authorization, `Bearer ${env.ANTHROPIC_AUTH_TOKEN || env.ANTHROPIC_API_KEY}`);
+    }
+  }
+});
+
 test("credentials resolve per app and base URLs detect the Command Code provider", () => {
   const claude = quota.resolveProviderCredential("claude", CLAUDE_ROW);
   assert.deepEqual(claude, { baseUrl: "https://api.commandcode.ai/provider", apiKey: "sk-relay-key" });
@@ -175,6 +200,51 @@ test("credentials resolve per app and base URLs detect the Command Code provider
   assert.equal(quota.detectQuotaProvider(codex.baseUrl, "codex").id, "command_code");
   assert.equal(quota.detectQuotaProvider("https://api.deepseek.com/anthropic", "claude"), null);
   assert.equal(quota.detectQuotaProvider(claude.baseUrl, "gemini"), null, "app scope limits detection");
+});
+
+// Detection decides whether a row's own API key gets sent to the provider's
+// control plane, so it must match the parsed hostname — not a substring of the
+// URL. A relay whose PATH happens to contain the marker is a different host.
+test("detectQuotaProvider matches the hostname, never a substring of the URL", () => {
+  const detected = (url) => quota.detectQuotaProvider(url, "claude")?.id ?? null;
+
+  assert.equal(detected("https://api.commandcode.ai/provider"), "command_code");
+  assert.equal(detected("https://api.commandcode.ai/provider/v1"), "command_code");
+  assert.equal(detected("https://api.commandcode.ai/provider/"), "command_code", "trailing slash");
+  assert.equal(detected("https://API.CommandCode.AI/provider"), "command_code", "host is case-insensitive");
+  assert.equal(detected("https://api.commandcode.ai/provider?beta=1"), "command_code", "query string");
+
+  assert.equal(detected("https://relay.example/api.commandcode.ai/provider"), null, "marker in the path");
+  assert.equal(detected("https://relay.example/?x=api.commandcode.ai/provider"), null, "marker in the query");
+  assert.equal(detected("https://api.commandcode.ai.evil.example/provider"), null, "subdomain prefix spoof");
+  assert.equal(detected("https://api.commandcode.ai/providerfoo"), null, "path prefix must be a whole segment");
+  assert.equal(detected("https://api.commandcode.ai/"), null, "host alone is not the relay base");
+  assert.equal(detected("not a url"), null, "unparseable base URL");
+  assert.equal(detected(""), null, "empty base URL");
+});
+
+test("a relay whose path mimics the Command Code base URL never receives the row key", async () => {
+  const contacted = [];
+  const result = await quota.queryProviderQuota({
+    app: "claude",
+    provider: {
+      id: "spoofed",
+      settingsConfig: {
+        env: {
+          ANTHROPIC_BASE_URL: "https://relay.example/api.commandcode.ai/provider",
+          ANTHROPIC_AUTH_TOKEN: "sk-row-secret",
+        },
+      },
+    },
+    fetchImpl: async (url) => {
+      contacted.push(String(url));
+      return { ok: true, status: 200, json: async () => ({}) };
+    },
+    bypassCache: true,
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.error, /no quota provider/i);
+  assert.deepEqual(contacted, [], "no request is made, so the key never leaves the machine");
 });
 
 test("queries whoami → credits/subscriptions → summary and parses rolling + monthly tiers", async () => {

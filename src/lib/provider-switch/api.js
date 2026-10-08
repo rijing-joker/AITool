@@ -79,6 +79,28 @@ async function writeLiveFile(file, content) {
   if (file.private) await chmod600IfPossible(file.path);
 }
 
+// MCP registries and prompt instruction files also create backups, even when
+// they are not provider-switch targets. Include them so listed backups restore.
+const BACKUP_FORMATS = { ".toml": "toml", ".yaml": "yaml", ".yml": "yaml" };
+
+function restoreTargets(app) {
+  const live = mcp.mcpLiveFiles()[app];
+  const files = [...paths.targetFiles(app)];
+  if (live) files.push({
+    id: `mcp-${app}`,
+    path: live.path,
+    format: BACKUP_FORMATS[path.extname(live.path)] || "json",
+    private: true,
+  });
+  if (prompts.PROMPT_APPS.includes(app)) files.push({
+    id: `prompt-${app}`,
+    path: prompts.promptFilePath(app),
+    format: "text",
+    private: true,
+  });
+  return files;
+}
+
 // ---------------------------------------------------------------------------
 // Switch orchestration
 // ---------------------------------------------------------------------------
@@ -640,7 +662,7 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
       const backupName = String(body.backup || "");
       const targetBasename = backup.backupTargetBasename(backupName);
       const file =
-        paths.targetFiles(app).find((f) => path.basename(f.path) === targetBasename) ||
+        restoreTargets(app).find((f) => path.basename(f.path) === targetBasename) ||
         paths.targetFile(app, String(body.file || ""));
       if (!file) throw new Error(`Unknown live file for backup: ${backupName}`);
       const content = await backup.readBackup(app, backupName);

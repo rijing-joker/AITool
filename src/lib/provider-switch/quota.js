@@ -22,22 +22,48 @@ const QUOTA_TIMEOUT_MS = 15_000;
 const CACHE_TTL_MS = 60_000;
 
 // Base-URL matchers per provider. Command Code: Claude uses /provider, Codex
-// /provider/v1 — the shared prefix is what matters (cc-switch's
+// /provider/v1 — the shared path prefix is what matters (cc-switch's
 // codingPlanProviders.ts pattern).
+//
+// Matching is on the parsed hostname, never a substring of the whole URL: a
+// detected row gets its own API key sent to the provider's control plane, so
+// `https://relay.example/api.commandcode.ai/provider` (marker in the PATH)
+// must not be mistaken for Command Code and leak the key to a host the user
+// never pointed that row at.
 const QUOTA_PROVIDERS = [
   {
     id: "command_code",
     label: "Command Code",
     apps: ["claude", "codex"],
     apiBase: COMMANDCODE_API_BASE_URL,
-    pattern: /api\.commandcode\.ai\/provider(?:[\/?#]|$)/i,
+    hostname: "api.commandcode.ai",
+    pathPrefix: "/provider",
   },
 ];
 
+// Exact host, or a subdomain of it — `api.commandcode.ai.evil.example` shares
+// the prefix but is a different registrable domain, so the dot matters.
+function hostMatches(hostname, expected) {
+  return hostname === expected || hostname.endsWith(`.${expected}`);
+}
+
+function pathMatches(pathname, prefix) {
+  return pathname === prefix || pathname.startsWith(`${prefix}/`);
+}
+
 function detectQuotaProvider(baseUrl, app) {
-  const url = String(baseUrl || "");
-  if (!url) return null;
-  const provider = QUOTA_PROVIDERS.find((entry) => entry.pattern.test(url));
+  const raw = String(baseUrl || "").trim();
+  if (!raw) return null;
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    return null;
+  }
+  const hostname = url.hostname.toLowerCase();
+  const pathname = url.pathname.replace(/\/+$/, "") || "/";
+  const provider = QUOTA_PROVIDERS.find((entry) =>
+    hostMatches(hostname, entry.hostname) && pathMatches(pathname, entry.pathPrefix));
   if (!provider) return null;
   if (app && !provider.apps.includes(app)) return null;
   return provider;
@@ -53,7 +79,8 @@ function resolveProviderCredential(app, provider) {
     const env = settings.env ?? {};
     return {
       baseUrl: String(env.ANTHROPIC_BASE_URL ?? "").trim(),
-      apiKey: String(env.ANTHROPIC_AUTH_TOKEN ?? "").trim(),
+      apiKey: String(env.ANTHROPIC_AUTH_TOKEN ?? "").trim()
+        || String(env.ANTHROPIC_API_KEY ?? "").trim(),
     };
   }
   if (app === "codex") {

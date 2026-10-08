@@ -11,6 +11,8 @@ import { sendBudgetAlerts } from "../lib/budget-alerts";
 import { getLocalApiAuthHeaders } from "../lib/local-api-auth";
 import {
   managementApi,
+  effectiveProviderKey,
+  providerGroupKeys,
   providerGroupsApi,
   providerHeadersFromRecord,
   providerLoadDefinitions,
@@ -63,9 +65,18 @@ function formatSpeed(outputTokens, latencyMs) {
   return Number.isFinite(speed) && speed > 0 ? `${speed.toFixed(1)} t/s` : "—";
 }
 
-function formatCacheRate(inputTokens, cacheReadTokens) {
-  if (!Number.isFinite(inputTokens) || inputTokens <= 0 || !Number.isFinite(cacheReadTokens) || cacheReadTokens <= 0) return "—";
-  return `${(Math.min(cacheReadTokens, inputTokens) / inputTokens * 100).toFixed(2)}%`;
+function formatCacheRate(record) {
+  const { inputTokens, cacheReadTokens, cacheCreationTokens } = record.tokens || {};
+  if (!Number.isFinite(inputTokens) || inputTokens < 0 || !Number.isFinite(cacheReadTokens) || cacheReadTokens <= 0) return "—";
+  // Match proxy pricing: executor semantics win over the model name. Claude
+  // reports fresh input; other executors include cache reads in input already.
+  const freshInput = typeof record.executor_type === "string" && record.executor_type
+    ? /claude|anthropic/i.test(record.executor_type)
+    : /^claude/i.test(String(record.model ?? ""));
+  const cacheWrites = Number.isFinite(cacheCreationTokens) ? Math.max(0, cacheCreationTokens) : 0;
+  const totalInput = freshInput ? inputTokens + cacheReadTokens + cacheWrites : inputTokens;
+  if (totalInput <= 0) return "—";
+  return `${(Math.min(cacheReadTokens, totalInput) / totalInput * 100).toFixed(2)}%`;
 }
 
 function formatClock(timestamp) {
@@ -459,8 +470,8 @@ function EventCell({ record, column, onReplay, replayState, showDate }) {
       );
     case "cacheRate":
       return (
-        <td className="px-2 py-2 align-top text-xs tabular-nums" title={formatCacheRate(tokens.inputTokens, tokens.cacheReadTokens)}>
-          {formatCacheRate(tokens.inputTokens, tokens.cacheReadTokens)}
+        <td className="px-2 py-2 align-top text-xs tabular-nums" title={formatCacheRate(record)}>
+          {formatCacheRate(record)}
         </td>
       );
     case "total":
@@ -479,7 +490,7 @@ function EventCell({ record, column, onReplay, replayState, showDate }) {
     case "cache":
       return (
         <td className="px-2 py-2 align-top" title={`${copy("proxy.requests.detail.cacheRead")}: ${formatCount(tokens.cacheReadTokens)} / ${copy("proxy.requests.detail.cacheCreation")}: ${formatCount(tokens.cacheCreationTokens)}`}>
-          <span className="block text-xs font-semibold tabular-nums">{formatCacheRate(tokens.inputTokens, tokens.cacheReadTokens)}</span>
+          <span className="block text-xs font-semibold tabular-nums">{formatCacheRate(record)}</span>
           <span className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5">
             <MetricRow icon={Database} tone="text-sky-600 dark:text-sky-400" title={`${copy("proxy.requests.detail.cacheRead")}: ${formatCount(tokens.cacheReadTokens)}`} label={copy("proxy.requests.detail.cacheRead")} value={tokens.cacheReadTokens} />
             {tokens.cacheCreationTokens > 0 ? (
@@ -928,7 +939,13 @@ export function RequestsTab() {
       })),
     );
     return responses.flatMap((result) => (result.status === "fulfilled"
-      ? result.value.records.map((record, index) => rowFromRecord(result.value.section, record, index))
+      ? result.value.records.flatMap((record, index) => {
+          const keys = providerGroupKeys(record);
+          const records = Array.isArray(record.keys)
+            ? keys.map((key) => effectiveProviderKey(record, key))
+            : [record];
+          return records.map((entry) => rowFromRecord(result.value.section, entry, index));
+        })
       : []));
   }, []);
 

@@ -174,8 +174,9 @@ export interface ProviderSwitchProviderPayload {
   // cc-switch's EditorSave: the full projected config the dialog opened with;
   // on save the backend splits floor keys (row) from the user's other edits
   // (three-way write into the live files). slotKey: additive apps' echo of
-  // the container entry the row owns (from the editor view).
-  editor?: { base: unknown; onConflict?: ProviderSwitchConflictPolicy; slotKey?: string };
+  // the container entry the row owns (from the editor view). draft: the initial
+  // Claude add fragment, identifying exclusive keys owned by the new row.
+  editor?: { base: unknown; draft?: unknown; onConflict?: ProviderSwitchConflictPolicy; slotKey?: string };
 }
 
 export type ProviderSwitchConflictPolicy = "keepMine" | "keepTheirs";

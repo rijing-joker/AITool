@@ -653,7 +653,13 @@ async function handleProxyApiRequest(req, res, url, ctx) {
       // Per-day totals for the 53-week usage heatmap (cc-switch cf2e6a7's
       // surviving "All" range). Days are server-local (same convention as
       // the TT base's aggregateByDay); cost follows the records route.
-      const rows = await recordStore.readRecords(paths.usageDir);
+      const now = Date.now();
+      const start = new Date(now);
+      start.setHours(0, 0, 0, 0);
+      start.setDate(start.getDate() - (start.getDay() + 6) % 7 - 52 * 7);
+      const since = start.getTime();
+      const rows = (await recordStore.readRecords(paths.usageDir, { since }))
+        .filter((row) => recordTimestamp(row) >= since && recordTimestamp(row) <= now);
       const byDay = new Map();
       const dayKeyOf = (ts) => {
         const date = new Date(ts);
@@ -776,7 +782,11 @@ async function handleProxyApiRequest(req, res, url, ctx) {
     }
     if (p === "/api/proxy/budget") {
       const budgets = budget.normalizeBudgets(config.readSettings().budgets);
-      const rows = await recordStore.readRecords(paths.usageDir);
+      const now = Date.now();
+      const start = new Date(now);
+      start.setDate(1);
+      start.setHours(0, 0, 0, 0);
+      const rows = await recordStore.readRecords(paths.usageDir, { since: start.getTime() });
       const pricingSnapshot = await pricing.getPricingSnapshot(paths.pricingPath);
       const pricingModels = pricingSnapshot.models;
       const costOf = pricingModels
@@ -784,7 +794,7 @@ async function handleProxyApiRequest(req, res, url, ctx) {
         : () => null;
       json(res, {
         ok: true,
-        budget: budget.computeBudgetStatus({ budgets, rows, costOf }),
+        budget: budget.computeBudgetStatus({ budgets, rows, costOf, now }),
         pricingAvailable: Boolean(pricingModels),
       });
       return true;

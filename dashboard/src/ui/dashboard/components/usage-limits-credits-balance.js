@@ -11,8 +11,8 @@ export function buildCreditsBalanceLine(balance) {
   // this helper renders, it does not parse.
   if (typeof balance !== "number" || !Number.isFinite(balance) || balance <= 0) return null;
   // Whole dollars, no thousands separator ("≈ $2500"); below $1 renders "<$1".
-  const usdTotal = Math.round(balance * CODEX_USD_PER_CREDIT);
-  const usd = usdTotal >= 1 ? `$${usdTotal}` : "<$1";
+  const usdTotal = balance * CODEX_USD_PER_CREDIT;
+  const usd = usdTotal >= 1 ? `$${Math.round(usdTotal)}` : "<$1";
   let count;
   try {
     count = new Intl.NumberFormat(getCopyLocale(), { maximumFractionDigits: 2 }).format(balance);

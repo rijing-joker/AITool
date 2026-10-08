@@ -423,9 +423,11 @@ async function openLock(
   }
 }
 
-async function updateJsonLocked(
+// Hold the lease across the entire read/modify/write operation, including any
+// pre-write backup. Atomic rename alone does not prevent lost updates.
+async function withFileLock(
   filePath,
-  update,
+  operation,
   { timeoutMs = 30_000, retryMs = 10 } = {},
 ) {
   await ensureDir(path.dirname(filePath));
@@ -436,12 +438,20 @@ async function updateJsonLocked(
     lock = await openLock(lockPath, { quietIfLocked: true });
     if (lock) break;
     if (Date.now() >= deadline) {
-      throw new Error(`Timed out waiting to update JSON file: ${filePath}`);
+      throw new Error(`Timed out waiting to update file: ${filePath}`);
     }
     await new Promise((resolve) => setTimeout(resolve, retryMs));
   }
 
   try {
+    return await operation();
+  } finally {
+    await lock.release();
+  }
+}
+
+async function updateJsonLocked(filePath, update, options) {
+  return withFileLock(filePath, async () => {
     const result = await readJsonStrict(filePath);
     if (result.status !== "ok" && result.status !== "missing") throw result.error;
     const current = result.status === "missing" ? {} : result.value;
@@ -452,9 +462,7 @@ async function updateJsonLocked(
     if (next == null) return current;
     await writeFileAtomic(filePath, JSON.stringify(next, null, 2) + "\n", { mode: 0o600 });
     return next;
-  } finally {
-    await lock.release();
-  }
+  }, options);
 }
 
 module.exports = {
@@ -466,5 +474,6 @@ module.exports = {
   chmod600IfPossible,
   openLock,
   inspectLock,
+  withFileLock,
   updateJsonLocked,
 };

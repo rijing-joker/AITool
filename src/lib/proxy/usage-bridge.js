@@ -265,9 +265,14 @@ function handleUsagePayload(payloadText) {
   // upstreams report input including the cache amounts — fold the fresh
   // portion so computeRowCost does not double-bill the cached share (same
   // executor semantics pricing.js uses for the Requests-tab estimates).
+  // cached_input_tokens goes through the same resolver: the core aliases cache
+  // reads into `cachedTokens` on some upstreams, and filing that share under
+  // input instead of cached would bill it at the full input rate here while
+  // the Requests tab prices it at the cache-read rate.
   const executorType = typeof record.executor_type === "string" ? record.executor_type : "";
-  bucket.input_tokens += pricing.freshInputTokens(tokens, { executorType, model });
-  bucket.cached_input_tokens += Number(tokens.cacheReadTokens) || 0;
+  const tokenSemantics = { executorType, model };
+  bucket.input_tokens += pricing.freshInputTokens(tokens, tokenSemantics);
+  bucket.cached_input_tokens += pricing.cacheReadTokensFor(tokens, tokenSemantics);
   bucket.cache_creation_input_tokens += Number(tokens.cacheCreationTokens) || 0;
   bucket.output_tokens += Number(tokens.outputTokens) || 0;
   // Reasoning is a subset of output_tokens for Claude/OpenAI upstreams (their

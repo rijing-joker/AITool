@@ -1401,8 +1401,8 @@ export const rowFromRecord = (
         : excludedModels.some((model) => model.trim() === "*"),
     priority: readNumber(record, "priority"),
     authIndex: entry
-      ? readString(entry, "auth-index", "authIndex")
-      : readString(record, "auth-index", "authIndex"),
+      ? readString(entry, "auth-index", "authIndex", "auth_index")
+      : readString(record, "auth-index", "authIndex", "auth_index"),
     remark: "",
   };
 };

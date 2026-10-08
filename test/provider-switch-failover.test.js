@@ -167,6 +167,49 @@ describe("provider-switch failover", () => {
     assert.equal(failover.findCredential({ env: { DEEP: true } }), null);
   });
 
+  it("matches Codex relay failures using the selected route's bearer token", async () => {
+    const active = await store.createProvider("codex", {
+      name: "Local proxy",
+      settingsConfig: {
+        auth: null,
+        config: { model_provider: "relay", model_providers: {
+          inactive: { experimental_bearer_token: "sk-inactive" },
+          relay: { base_url: "https://relay.example.com/v1", experimental_bearer_token: "sk-active" },
+        } },
+      },
+    });
+    const backup = await store.createProvider("codex", {
+      name: "Backup relay", settingsConfig: { config: { experimental_bearer_token: "sk-backup" } },
+    });
+    await store.setCurrentProvider("codex", active.id);
+    await failover.updateConfig({ enabled: true, minRequests: 2, failureRatePct: 50 });
+    writeRecords([
+      coreRecord({ provider: "codex", failed: true }),
+      coreRecord({ provider: "codex", failed: true }),
+      coreRecord({ provider: "codex", apiKey: "sk-inactive" }),
+    ]);
+    const status = await failover.evaluate({ now: NOW });
+    assert.equal(status.apps.codex.health.requests, 2);
+    assert.equal(status.apps.codex.health.failed, 2);
+    assert.ok(status.apps.codex.cooldown.remainingMs > 0);
+    assert.deepEqual(status.apps.codex.suggestion, { id: backup.id, name: "Backup relay" });
+  });
+
+  it("resolves legacy auth and top-level Codex keys with the same precedence as switching", () => {
+    const hash = (key) => require("node:crypto").createHash("sha256").update(key).digest("hex");
+    const provider = { settingsConfig: {
+      auth: { OPENAI_API_KEY: "sk-auth" },
+      config: { experimental_bearer_token: "sk-top", model_providers: { custom: { experimental_bearer_token: "sk-route" } } },
+    } };
+    assert.equal(failover.providerCredentialHash(provider, "codex"), hash("sk-auth"));
+    provider.settingsConfig.auth = null;
+    assert.equal(failover.providerCredentialHash(provider, "codex"), hash("sk-route"));
+    delete provider.settingsConfig.config.model_providers;
+    assert.equal(failover.providerCredentialHash(provider, "codex"), hash("sk-top"));
+    provider.settingsConfig.config.experimental_bearer_token = "$TOKEN$";
+    assert.equal(failover.providerCredentialHash(provider, "codex"), null);
+  });
+
   it("clamps the config into sane bounds", () => {
     const config = failover.normalizeConfig({
       enabled: true, windowMinutes: 0, minRequests: -5, failureRatePct: 900, cooldownMinutes: 99999,

@@ -21,6 +21,7 @@ const crypto = require("node:crypto");
 const { updateJsonLocked } = require("../fs");
 const store = require("./store");
 const paths = require("./paths");
+const { resolveProviderCredential } = require("./quota");
 const recordStore = require("../proxy/usage-records").createUsageRecordStore();
 
 const DEFAULT_CONFIG = {
@@ -135,8 +136,13 @@ function findCredential(value, depth = 0) {
   return null;
 }
 
-function providerCredentialHash(provider) {
-  const key = findCredential(provider?.settingsConfig);
+function providerCredentialHash(provider, app) {
+  // Codex's active route can hold the key in config.toml rather than auth.json.
+  // Use its route-aware resolution order, not a search of inactive provider tables.
+  const key = app === "codex"
+    ? resolveProviderCredential(app, provider)?.apiKey
+    : findCredential(provider?.settingsConfig);
+  if (key?.includes("$TOKEN$") || key?.includes("://")) return null;
   return key ? sha256Hex(key) : null;
 }
 
@@ -178,8 +184,8 @@ async function evaluate({ switchFn = null, now = Date.now() } = {}) {
     return Number.isFinite(ts) && ts >= windowStart;
   });
 
-  const healthOf = (provider) => {
-    const hash = providerCredentialHash(provider);
+  const healthOf = (provider, app) => {
+    const hash = providerCredentialHash(provider, app);
     if (!hash && !provider?.name) return null;
     // Credential-hash match is authoritative; the core's provider field is an
     // executor-type label, so name matching is only a fallback for providers
@@ -204,7 +210,7 @@ async function evaluate({ switchFn = null, now = Date.now() } = {}) {
     const currentProvider = current ? providers.find((provider) => provider.id === current) : null;
 
     if (currentProvider) {
-      const health = healthOf(currentProvider);
+      const health = healthOf(currentProvider, app);
       if (health) appInfo.health = health;
       if (health && health.requests >= config.minRequests && health.ratePct >= config.failureRatePct
         && !cooldowns[cooldownKey]) {

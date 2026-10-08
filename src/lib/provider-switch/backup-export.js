@@ -104,8 +104,9 @@ async function importEncrypted(passphrase, payload) {
     throw fail("Corrupted backup payload");
   }
   const stores = parsed && typeof parsed === "object" ? parsed.stores : null;
-  if (!stores || typeof stores !== "object" || !stores["providers.json"]) {
-    throw fail("Backup has no providers store");
+  if (!stores || typeof stores !== "object" || Array.isArray(stores)
+      || !STORE_FILES.some((name) => typeof stores[name] === "string" && stores[name].trim())) {
+    throw fail("Backup has no readable stores");
   }
   // Keep whatever the current files are before overwriting them.
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");

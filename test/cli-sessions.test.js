@@ -29,6 +29,19 @@ function writeClaudeSession(home, id, lines) {
   return path.join(projectDir, `${id}.jsonl`);
 }
 
+test("Windows USERPROFILE supports session discovery and reading without HOME", async () => {
+  const sourcePath = writeClaudeSession(tmpHome, "windows", [
+    JSON.stringify({ sessionId: "windows", type: "user", message: { role: "user", content: "hello" } }),
+  ]);
+  const env = { USERPROFILE: tmpHome };
+  assert.equal(sessions.listSessionApps({ env }).find((app) => app.id === "claude").available, true);
+  assert.equal((await sessions.listSessions({ app: "claude", env }))[0].sourcePath, sourcePath);
+  assert.equal((await sessions.readSession({ app: "claude", sourcePath, env })).messages[0].content, "hello");
+  assert.deepEqual(await sessions.listSessions({ app: "claude", env: {} }), []);
+  assert.deepEqual(await sessions.listSessions({ app: "claude", env: { ...env, HOME: path.join(tmpHome, "empty") } }), []);
+  assert.equal((await sessions.listSessions({ app: "claude", home: tmpHome, env: { HOME: "/missing", USERPROFILE: "/missing" } })).length, 1);
+});
+
 test("claude sessions: scan derives title, project, timestamps and resume command", async () => {
   const filePath = writeClaudeSession(tmpHome, "session-abc", [
     JSON.stringify({ type: "file-history-snapshot", messageId: "m1", snapshot: {} }),
@@ -126,6 +139,37 @@ test("codex sessions: session_meta + response_item payloads scan and read", asyn
   ]);
   assert.deepEqual(messages[1].toolCalls, [{ callId: null, name: "shell", arguments: null }]);
   assert.deepEqual(messages[2].toolResults, [{ callId: null, output: "ok" }]);
+});
+
+test("codex transcripts: custom tools preserve raw input, call ids and results", async () => {
+  const root = path.join(tmpHome, ".codex", "sessions");
+  fs.mkdirSync(root, { recursive: true });
+  const filePath = path.join(root, "rollout-custom-tools.jsonl");
+  const input = "*** Begin Patch\n*** Add File: hello.txt\n+hello\n*** End Patch";
+  const output = "Success. Updated the following files:\nA hello.txt";
+  fs.writeFileSync(filePath, [
+    { type: "custom_tool_call", call_id: "patch-1", name: "apply_patch", input },
+    { type: "custom_tool_call_output", call_id: "patch-1", output },
+    { type: "function_call", call_id: "shell-1", name: "exec_command", arguments: '{"cmd":"cat hello.txt"}' },
+    { type: "function_call_output", call_id: "shell-1", output: "hello" },
+  ].map((payload) => JSON.stringify({ type: "response_item", timestamp: "2026-10-01T10:00:00Z", payload })).join("\n") + "\n");
+
+  const { messages, usage } = await sessions.readSession({ app: "codex", sourcePath: filePath, home: tmpHome });
+  assert.equal(usage, null);
+  assert.deepEqual(messages.map((row) => [row.role, row.content]), [
+    ["assistant", ""], ["tool", output], ["assistant", ""], ["tool", "hello"],
+  ]);
+  assert.deepEqual(messages[0].toolCalls, [{
+    callId: "patch-1", name: "apply_patch", input,
+    patch: {
+      body: input, files: [{ kind: "add", path: "hello.txt" }],
+      additions: 1, deletions: 0, status: "success", error: false,
+    },
+  }]);
+  assert.equal(messages[0].ts, Date.parse("2026-10-01T10:00:00Z"));
+  assert.deepEqual(messages[1].toolResults, [{ callId: "patch-1", output }]);
+  assert.deepEqual(messages[2].toolCalls, [{ callId: "shell-1", name: "exec_command", arguments: '{"cmd":"cat hello.txt"}' }]);
+  assert.deepEqual(messages[3].toolResults, [{ callId: "shell-1", output: "hello" }]);
 });
 
 test("gemini sessions: tmp/<project>/chats scans .json and maps toolCalls", async () => {
@@ -253,6 +297,54 @@ test("readSession refuses paths outside the app roots and unsupported apps", asy
   );
 });
 
+for (const [app, rootParts, extension] of [
+  ["claude", [".claude", "projects"], ".jsonl"],
+  ["codex", [".codex", "sessions"], ".jsonl"],
+  ["codex", [".codex", "archived_sessions"], ".jsonl"],
+  ["gemini", [".gemini", "tmp"], ".json"],
+]) {
+  test(`readSession rejects file and directory symlinks escaping ${rootParts.join("/")}`, async () => {
+    const root = path.join(tmpHome, ...rootParts);
+    fs.mkdirSync(root, { recursive: true });
+    const outsideDir = `${root}-outside`;
+    fs.mkdirSync(outsideDir);
+    const outside = path.join(outsideDir, `session${extension}`);
+    fs.writeFileSync(outside, "{}");
+    const fileLink = path.join(root, `linked${extension}`);
+    const dirLink = path.join(root, "linked-dir");
+    fs.symlinkSync(outside, fileLink, "file");
+    fs.symlinkSync(outsideDir, dirLink, "junction");
+    for (const sourcePath of [fileLink, path.join(dirLink, `session${extension}`)]) {
+      await assert.rejects(() => sessions.readSession({ app, sourcePath, home: tmpHome }), /outside this app's session roots/);
+    }
+  });
+}
+
+test("readSession accepts symlinks inside the root and a relocated session root", async () => {
+  const source = writeClaudeSession(tmpHome, "original", [
+    JSON.stringify({ type: "user", message: { role: "user", content: "hello" } }),
+  ]);
+  const link = path.join(path.dirname(source), "alias.jsonl");
+  fs.symlinkSync(source, link, "file");
+  assert.equal((await sessions.readSession({ app: "claude", sourcePath: link, home: tmpHome })).messages[0].content, "hello");
+
+  const root = path.join(tmpHome, ".claude", "projects");
+  const moved = path.join(tmpHome, "relocated-projects");
+  fs.renameSync(root, moved);
+  fs.symlinkSync(moved, root, "junction");
+  assert.equal((await sessions.readSession({ app: "claude", sourcePath: source, home: tmpHome })).messages[0].content, "hello");
+});
+
+test("Gemini listing ignores a chats directory linked outside its session root", async () => {
+  const project = path.join(tmpHome, ".gemini", "tmp", "project");
+  fs.mkdirSync(project, { recursive: true });
+  const outside = path.join(tmpHome, "external-chats");
+  fs.mkdirSync(outside);
+  fs.writeFileSync(path.join(outside, "session.json"), JSON.stringify({ sessionId: "external", messages: [{ type: "user", content: "outside" }] }));
+  fs.symlinkSync(outside, path.join(project, "chats"), "junction");
+  assert.deepEqual(await sessions.listSessions({ app: "gemini", home: tmpHome }), []);
+});
+
 test("session usage: claude dedupes retries, codex takes the last cumulative count, gemini sums", async () => {
   // Claude: two writes of the same assistant message id keep the larger
   // output; usage fields are independent of input (fresh-input semantics).
@@ -316,6 +408,51 @@ test("sessions without usage data return null usage", async () => {
   assert.equal(usage.totalTokens, 0);
   assert.equal(usage.model, null);
   assert.equal(usage.durationMs, 1000);
+});
+
+test("codex attributes cumulative deltas to each model without billing duplicate snapshots", async () => {
+  const root = path.join(tmpHome, ".codex", "sessions");
+  fs.mkdirSync(root, { recursive: true });
+  const sourcePath = path.join(root, "mixed.jsonl");
+  const first = { input_tokens: 100, cached_input_tokens: 40, output_tokens: 50, reasoning_output_tokens: 20, total_tokens: 150 };
+  const second = { input_tokens: 300, cached_input_tokens: 140, output_tokens: 90, reasoning_output_tokens: 40, total_tokens: 390 };
+  const count = (total) => ({ type: "event_msg", payload: { type: "token_count", info: { total_token_usage: total } } });
+  fs.writeFileSync(sourcePath, [
+    { type: "turn_context", payload: { model: "gpt-a" } }, count(first),
+    { type: "turn_context", payload: { model: "gpt-b" } }, count(first), count(second),
+    { type: "turn_context", payload: { model: "gpt-a" } }, count(second),
+  ].map(JSON.stringify).join("\n") + "\n");
+  const { usage } = await sessions.readSession({ app: "codex", sourcePath, home: tmpHome });
+  assert.equal(usage.totalTokens, 390);
+  assert.deepEqual(usage.perModel, [
+    { model: "gpt-b", inputTokens: 200, cacheReadTokens: 100, outputTokens: 40, reasoningTokens: 20, cacheCreationTokens: 0 },
+    { model: "gpt-a", inputTokens: 100, cacheReadTokens: 40, outputTokens: 50, reasoningTokens: 20, cacheCreationTokens: 0 },
+  ]);
+  const { estimateCostUsd } = require("../src/lib/proxy/pricing");
+  const prices = { "gpt-a": { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 0 }, "gpt-b": { input: 3, output: 6, cacheRead: 0.3, cacheWrite: 0 } };
+  const cost = usage.perModel.reduce((sum, entry) => sum + estimateCostUsd(prices, entry.model, entry, { inputInclusive: usage.inputInclusive }), 0);
+  assert.ok(Math.abs(cost - (60 + 50 * 2 + 40 * 0.1 + 100 * 3 + 40 * 6 + 100 * 0.3) / 1e6) < 1e-12);
+});
+
+test("codex resets and cache-read aliases keep session totals aligned with the model breakdown", async () => {
+  const root = path.join(tmpHome, ".codex", "sessions");
+  fs.mkdirSync(root, { recursive: true });
+  const sourcePath = path.join(root, "reset.jsonl");
+  const first = { input_tokens: 100, cache_read_input_tokens: 40, output_tokens: 50 };
+  const reset = { input_tokens: 20, cache_read_input_tokens: 5, output_tokens: 10 };
+  fs.writeFileSync(sourcePath, [
+    { type: "turn_context", payload: { model: "gpt-a" } },
+    { type: "event_msg", payload: { type: "token_count", info: { total_token_usage: first, last_token_usage: first } } },
+    { type: "turn_context", payload: { model: "gpt-b" } },
+    { type: "event_msg", payload: { type: "token_count", info: { total_token_usage: reset, last_token_usage: reset } } },
+    { type: "event_msg", payload: { type: "token_count", info: { total_token_usage: reset, last_token_usage: reset } } },
+  ].map(JSON.stringify).join("\n") + "\n");
+  const { usage } = await sessions.readSession({ app: "codex", sourcePath, home: tmpHome });
+  assert.equal(usage.totalTokens, 180);
+  assert.equal(usage.cacheReadTokens, 45);
+  for (const field of ["inputTokens", "outputTokens", "cacheReadTokens"]) {
+    assert.equal(usage[field], usage.perModel.reduce((sum, entry) => sum + entry[field], 0));
+  }
 });
 
 test("claude session usage keeps a per-model breakdown for mixed-model sessions", async () => {

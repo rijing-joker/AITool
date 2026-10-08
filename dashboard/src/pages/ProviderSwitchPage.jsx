@@ -549,6 +549,8 @@ export function ProviderSwitchPage() {
       }
     } catch {
       /* the suggestion banner stays; user can switch manually */
+    } finally {
+      runAutoEvaluate.current = false;
     }
   }, []);
 

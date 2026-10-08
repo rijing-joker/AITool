@@ -195,7 +195,11 @@ class DashboardViewModel: ObservableObject {
 
         var errorCount = 0
         var firstError: String?
-        let totalFetches = (period == .day || period == .total) ? 9 : 8
+        // Counted as each request is attempted rather than hardcoded: the set
+        // varies by period (hourly only on .day, monthly only on .total) and a
+        // denominator larger than the real count made "every request failed"
+        // unreachable, so a full outage still stamped lastRefreshed.
+        var attemptedFetches = 0
         var summaryRequests: [String: Task<UsageSummaryFetchResult, Error>] = [:]
         @MainActor func fetchSummary(from: String, to: String) async throws -> UsageSummaryFetchResult {
             let key = "\(from)|\(to)"
@@ -210,6 +214,7 @@ class DashboardViewModel: ObservableObject {
             // ride the same response, so today + rolling needs only one request)
             group.addTask { @MainActor in
                 do {
+                    attemptedFetches += 1
                     let result = try await fetchSummary(
                         from: rollingTo,
                         to: rollingTo
@@ -246,6 +251,7 @@ class DashboardViewModel: ObservableObject {
             // Period summary (for the selected period — drives chart/models)
             group.addTask { @MainActor in
                 do {
+                    attemptedFetches += 1
                     let result = try await fetchSummary(
                         from: range.from,
                         to: range.to
@@ -266,6 +272,7 @@ class DashboardViewModel: ObservableObject {
             // All-time total summary (matches dashboard "Total" range)
             group.addTask { @MainActor in
                 do {
+                    attemptedFetches += 1
                     let result = try await fetchSummary(
                         from: totalRange.from,
                         to: totalRange.to
@@ -291,6 +298,7 @@ class DashboardViewModel: ObservableObject {
             group.addTask { @MainActor in
                 do {
                     // Always fetch 30-day daily for week/month chart
+                    attemptedFetches += 1
                     let result = try await APIClient.shared.fetchDaily(from: rollingFrom, to: rollingTo)
                     if self.shouldPublish(
                         result.source,
@@ -308,6 +316,7 @@ class DashboardViewModel: ObservableObject {
             group.addTask { @MainActor in
                 do {
                     if self.period == .day {
+                        attemptedFetches += 1
                         let result = try await APIClient.shared.fetchHourly(day: rollingTo)
                         if self.shouldPublish(
                             result.source,
@@ -320,6 +329,7 @@ class DashboardViewModel: ObservableObject {
                         self.monthly = []
                         self.accountViewState.clear(.monthly)
                     } else if self.period == .total {
+                        attemptedFetches += 1
                         let result = try await APIClient.shared.fetchMonthly(from: range.from, to: range.to)
                         if self.shouldPublish(
                             result.source,
@@ -345,6 +355,7 @@ class DashboardViewModel: ObservableObject {
             // Heatmap (always full year)
             group.addTask { @MainActor in
                 do {
+                    attemptedFetches += 1
                     let result = try await APIClient.shared.fetchHeatmap()
                     if self.shouldPublish(
                         result.source,
@@ -362,6 +373,7 @@ class DashboardViewModel: ObservableObject {
             // Model breakdown (for selected period)
             group.addTask { @MainActor in
                 do {
+                    attemptedFetches += 1
                     let result = try await APIClient.shared.fetchModelBreakdown(from: range.from, to: range.to)
                     if self.shouldPublish(
                         result.source,
@@ -379,6 +391,7 @@ class DashboardViewModel: ObservableObject {
             // Project usage (for selected period)
             group.addTask { @MainActor in
                 do {
+                    attemptedFetches += 1
                     self.projectUsage = try await APIClient.shared.fetchProjectUsage(from: range.from, to: range.to)
                 } catch {
                     errorCount += 1
@@ -410,10 +423,9 @@ class DashboardViewModel: ObservableObject {
             )
         }
 
-        if errorCount >= totalFetches {
+        if errorCount > 0 && errorCount >= attemptedFetches {
             self.error = firstError
-        }
-        if errorCount < totalFetches {
+        } else {
             self.lastRefreshed = Date()
         }
 

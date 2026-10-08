@@ -42,7 +42,10 @@ function scanLines(lines) {
       } else if (ch === "[" || ch === "{") depth++;
       else if (ch === "]" || ch === "}") depth--;
     }
-    return { header, key };
+    // `open` reports that the line ended mid-value (an unterminated array or
+    // multiline string), so a caller can tell a value's continuation lines
+    // apart from the blank/comment lines that merely follow it.
+    return { header, key, open: quote !== null || depth > 0 };
   });
 }
 
@@ -130,9 +133,22 @@ function formatTomlValue(value, depth = 0) {
   throw new Error(`Unsupported TOML value type: ${value === null ? "null" : typeof value}`);
 }
 
+// Split `key = value` into its parts. Bare keys keep their literal text (a
+// numeric-looking key is still the string "123"); quoted keys are unquoted so
+// `"fetch" = …` and `fetch = …` compare equal.
+const KEY_ASSIGN_REGEX = /^\s*("(?:[^"\\]|\\.)*"|'[^']*'|[A-Za-z0-9_.-]+)\s*=\s*([\s\S]*)$/;
+
+function splitKeyValue(line) {
+  const m = line.match(KEY_ASSIGN_REGEX);
+  if (!m) return null;
+  const token = m[1];
+  const key = token.startsWith('"') || token.startsWith("'") ? String(parseTomlScalar(token)) : token;
+  return { key, rhs: m[2] };
+}
+
 function lineKey(line) {
-  const m = line.match(/^\s*([A-Za-z0-9_.-]+)\s*=\s*(.*)\s*$/);
-  return m ? m[1] : null;
+  const parts = splitKeyValue(line);
+  return parts ? parts.key : null;
 }
 
 // Set `key = value` at top level (before the first table header), replacing
@@ -192,7 +208,7 @@ function getTopLevelValue(text, key) {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (context[i].header) return undefined;
-    if (context[i].key === key) return parseTomlScalar(line.replace(/^\s*[A-Za-z0-9_.-]+\s*=\s*/, ""));
+    if (context[i].key === key) return parseTomlScalar(splitKeyValue(line).rhs);
   }
   return undefined;
 }
@@ -254,6 +270,34 @@ function setTable(text, dottedName, entries) {
   return finish(out, text);
 }
 
+// End index (exclusive) of the assignment starting at `start`, following the
+// value across the continuation lines of a wrapped array/multiline string.
+function assignmentEnd(context, start) {
+  let end = start + 1;
+  while (end < context.length && context[end - 1].open) end++;
+  return end;
+}
+
+// Remove `key = value` from inside the [table] block — the inline form of a
+// child table (`fetch = { command = … }` under [mcp_servers]). setTable can
+// only replace a `[table.key]` header block, so a caller that is about to
+// write one must drop the inline form first or TOML ends up with the same
+// table defined twice. Returns the text unchanged when the key is absent.
+function removeTableKey(text, dottedName, key) {
+  const lines = text.split(/\r?\n/);
+  const context = scanLines(lines);
+  const start = findTableStart(lines, dottedName, context);
+  if (start === -1) return text;
+  const end = tableBlockEnd(lines, start, dottedName, context);
+  for (let i = start + 1; i < end; i++) {
+    if (context[i].header) break;
+    if (context[i].key !== key) continue;
+    const stop = Math.min(assignmentEnd(context, i), end);
+    return finish(lines.slice(0, i).concat(lines.slice(stop)), text);
+  }
+  return text;
+}
+
 // Read the key/values of a dotted table (scalar values only).
 function getTableEntries(text, dottedName) {
   const lines = text.split(/\r?\n/);
@@ -266,7 +310,7 @@ function getTableEntries(text, dottedName) {
     if (context[i].header) break;
     const key = context[i].key;
     if (!key) continue;
-    entries[key] = parseTomlScalar(lines[i].replace(/^\s*[A-Za-z0-9_.-]+\s*=\s*/, ""));
+    entries[key] = parseTomlScalar(splitKeyValue(lines[i]).rhs);
   }
   return entries;
 }
@@ -288,6 +332,7 @@ module.exports = {
   getTopLevelValue,
   setTable,
   getTableEntries,
+  removeTableKey,
   parseTomlScalar,
   formatTomlValue,
 };

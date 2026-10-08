@@ -82,10 +82,16 @@ function createUsageRecordStore({ maxFiles = 14, maxCachedBytes = 64 * 1024 * 10
     idleTimer?.unref?.();
   }
 
-  async function load(usageDir) {
+  async function load(usageDir, fromDate) {
     let names;
     try {
-      names = (await fs.readdir(usageDir)).filter((name) => RECORD_FILE.test(name)).sort().reverse().slice(0, maxFiles);
+      names = (await fs.readdir(usageDir)).filter((name) => RECORD_FILE.test(name)).sort().reverse();
+      // Files are partitioned by UTC receipt day. A time-window read must
+      // include every file since its boundary, even beyond the list's cap.
+      // Callers still filter event timestamps (late events can be backdated).
+      names = fromDate
+        ? names.filter((name) => name.slice(8, 18) >= fromDate)
+        : names.slice(0, maxFiles);
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
       retain(null);
@@ -131,13 +137,15 @@ function createUsageRecordStore({ maxFiles = 14, maxCachedBytes = 64 * 1024 * 10
   }
 
   return {
-    async readRecords(usageDir) {
+    async readRecords(usageDir, { since } = {}) {
+      const fromDate = Number.isFinite(since) ? new Date(since).toISOString().slice(0, 10) : null;
+      const requestKey = `${usageDir}\0${fromDate || "recent"}`;
       // Share simultaneous list/stats/overview reads, including the cold scan.
-      // Serialize a different directory too (useful after a runtime path change).
-      while (pending && pending.usageDir !== usageDir) await pending.promise.catch(() => {});
+      // Serialize different directories/windows so callers get their own range.
+      while (pending && pending.key !== requestKey) await pending.promise.catch(() => {});
       if (!pending) {
-        const request = { usageDir, promise: null };
-        request.promise = load(usageDir).finally(() => { if (pending === request) pending = null; });
+        const request = { key: requestKey, promise: null };
+        request.promise = load(usageDir, fromDate).finally(() => { if (pending === request) pending = null; });
         pending = request;
       }
       return pending.promise;

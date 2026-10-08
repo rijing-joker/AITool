@@ -440,6 +440,8 @@ export function ProviderSwitchPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dialogDirty, setDialogDirty] = useState(false);
   const [dialogSaving, setDialogSaving] = useState(false);
+  const [utilityEditor, setUtilityEditor] = useState({ open: false, dirty: false, busy: false });
+  const onUtilityEditorState = useCallback((next) => setUtilityEditor(next), []);
   const onDialogDirty = useCallback((dirty, saving) => { setDialogDirty(dirty); setDialogSaving(saving); }, []);
   const [editingProvider, setEditingProvider] = useState(null);
   const [presets, setPresets] = useState([]);
@@ -743,12 +745,12 @@ export function ProviderSwitchPage() {
   }, [activeApp, refreshBackups, restoreTarget]);
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
-      <UnsavedChangesGuard dirty={dialogOpen && dialogDirty} busy={dialogOpen && dialogSaving} />
-      <PageHeader title={copy("pswitch.title")} description={copy("pswitch.subtitle")}
+    <div className={`mx-auto w-full px-4 py-6 sm:px-6 sm:py-8 ${utilityEditor.open ? "flex flex-1 flex-col" : "max-w-6xl"}`}>
+      <UnsavedChangesGuard dirty={(dialogOpen && dialogDirty) || utilityEditor.dirty} busy={(dialogOpen && dialogSaving) || utilityEditor.busy} />
+      {!utilityEditor.open ? <PageHeader title={copy("pswitch.title")} description={copy("pswitch.subtitle")}
         actions={<Button variant="secondary" size="sm" onClick={() => void refreshStatus()} disabled={busy}>
           <RefreshCw className="h-4 w-4" />{copy("pswitch.action.refresh")}
-        </Button>} />
+        </Button>} /> : null}
 
       {loadError ? (
         <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
@@ -764,7 +766,7 @@ export function ProviderSwitchPage() {
         </div>
       ) : null}
 
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+      {!utilityEditor.open ? <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <PageTabs
           options={[
             ...visibleApps.map((item) => ({ ...item, label: copy(item.labelKey) })),
@@ -788,11 +790,11 @@ export function ProviderSwitchPage() {
             </Button>
           </div>
         ) : null}
-      </div>
+      </div> : null}
 
-      <div role="tabpanel" id="provider-panel" aria-labelledby={`provider-panel-${activeApp}`}>
+      <div role="tabpanel" id="provider-panel" aria-labelledby={utilityEditor.open ? undefined : `provider-panel-${activeApp}`} aria-label={utilityEditor.open ? copy(isMcpTab ? "pswitch.mcp.tab" : "pswitch.prompts.tab") : undefined} className={utilityEditor.open ? "flex min-w-0 flex-1 flex-col" : undefined}>
       {isUtilityTab ? (
-        isMcpTab ? <ProviderMcpPanel /> : <ProviderPromptsPanel />
+        isMcpTab ? <ProviderMcpPanel onEditorStateChange={onUtilityEditorState} /> : <ProviderPromptsPanel onEditorStateChange={onUtilityEditorState} />
       ) : (
       <>
       <FailoverBar

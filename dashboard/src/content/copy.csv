@@ -2534,6 +2534,13 @@ pswitch.encrypted.bad_file,pswitch,ProviderSwitchPage,EncryptedBackupDialog,encr
 pswitch.encrypted.imported,pswitch,ProviderSwitchPage,EncryptedBackupDialog,encrypted_imported,"Restored {{count}} stores",,active
 clisessions.msg_tokens,ui,CliSessionsPage,TranscriptRow,msg_tokens,"Input {{up}} · output {{down}} tokens",,active
 clisessions.thinking,ui,CliSessionsPage,TranscriptRow,thinking,Thinking,,active
+clisessions.patch.failed,ui,CliSessionsPage,TranscriptRow,patch_failed,Failed,,active
+clisessions.patch.success,ui,CliSessionsPage,TranscriptRow,patch_success,Applied,,active
+clisessions.patch.pending,ui,CliSessionsPage,TranscriptRow,patch_pending,Unconfirmed,,active
+clisessions.patch.show_more,ui,CliSessionsPage,PatchDiff,show_more,Show {{count}} more lines,,active
+clisessions.image.alt,ui,CliSessionsPage,TranscriptImage,image_alt,Attached image {{count}},,active
+clisessions.image.unavailable,ui,CliSessionsPage,TranscriptImage,image_unavailable,Image could not be displayed,,active
+clisessions.image.oversized,ui,CliSessionsPage,TranscriptRow,image_oversized,"Image too large to load inline",,active
 clisessions.export,clisessions,CliSessionsPage,CliSessionsPage,export,Export as Markdown,,active
 pswitch.catalog.add_model,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_add_model,Add manually,,active
 pswitch.catalog.picker_title,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_picker_title,Available models ({{count}}),,active

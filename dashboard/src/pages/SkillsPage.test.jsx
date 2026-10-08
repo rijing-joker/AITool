@@ -225,7 +225,7 @@ describe("SkillsPage", () => {
     expect(screen.getByText(copy("skills.select.count", { count: 1 }))).toBeInTheDocument();
   });
 
-  it("select-all picks every shown row, goes indeterminate on a partial pick and keeps out-of-filter picks", async () => {
+  it("select-all selects shown rows, reflects partial selections, and clears them", async () => {
     const user = userEvent.setup();
     vi.mocked(getInstalledSkills).mockResolvedValue({
       targets: [
@@ -268,6 +268,32 @@ describe("SkillsPage", () => {
     expect(screen.getByText(copy("skills.select.count", { count: 3 }))).toBeInTheDocument();
     await user.click(batchSelectAll);
     expect(screen.getByText(copy("skills.filter.result_count", { filtered: 3, total: 3 }))).toBeInTheDocument();
+  });
+
+  it("selects only filtered editable rows and disables select-all with no matches", async () => {
+    const user = userEvent.setup();
+    vi.mocked(getInstalledSkills).mockResolvedValue({
+      targets: [{ id: "claude", label: "Claude" }],
+      skills: [
+        { id: "alpha", name: "Alpha editable", directory: "alpha", targets: ["claude"], managed: true },
+        { id: "beta", name: "Beta editable", directory: "beta", targets: ["claude"], managed: true },
+        { id: "locked", name: "Alpha locked", directory: "locked", targets: ["claude"], readOnly: true },
+        { id: "remote", name: "Alpha remote", directory: "remote", targets: ["claude"], remote: true },
+      ],
+    });
+    render(<SkillsPage />);
+    await screen.findByText("Alpha editable");
+    await user.type(screen.getByRole("searchbox", { name: copy("skills.action.search_aria") }), "Alpha");
+    await waitFor(() => expect(screen.queryByText("Beta editable")).not.toBeInTheDocument());
+    await user.click(screen.getByRole("checkbox", { name: copy("skills.select.select_all_aria") }));
+    expect(screen.getByText(copy("skills.select.count", { count: 1 }))).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: copy("skills.select.row_aria", { name: "Alpha editable" }) })).toBeChecked();
+    await user.click(screen.getByRole("checkbox", { name: copy("skills.select.select_all_aria") }));
+    await user.clear(screen.getByRole("searchbox", { name: copy("skills.action.search_aria") }));
+    await screen.findByText("Beta editable");
+    expect(screen.getByRole("checkbox", { name: copy("skills.select.row_aria", { name: "Beta editable" }) })).not.toBeChecked();
+    await user.type(screen.getByRole("searchbox", { name: copy("skills.action.search_aria") }), "no-match");
+    await waitFor(() => expect(screen.getByRole("checkbox", { name: copy("skills.select.select_all_aria") })).toBeDisabled());
   });
 
   it("does not mark an unrelated browse skill installed when only the nested local leaf matches", async () => {

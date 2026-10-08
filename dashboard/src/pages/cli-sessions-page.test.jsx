@@ -22,7 +22,77 @@ const session = {
 beforeEach(() => {
   vi.clearAllMocks();
 });
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
+
+async function openTranscript(messages) {
+  vi.stubGlobal("fetch", vi.fn(async (url) => {
+    const path = String(url);
+    if (path === "/api/cli-sessions") return { json: async () => ({ ok: true, apps: [{ id: "claude", available: true }] }) };
+    if (path.startsWith("/api/cli-sessions/list")) return { json: async () => ({ ok: true, sessions: [session] }) };
+    if (path.startsWith("/api/cli-sessions/read")) return { json: async () => ({ ok: true, messages }) };
+    throw new Error(`unexpected fetch: ${path}`);
+  }));
+  render(<CliSessionsPage />);
+  fireEvent.click(await screen.findByText(session.title));
+  await screen.findByLabelText("clisessions.export");
+}
+
+it("renders image-only messages with accessible previews and visible fallbacks", async () => {
+  const dataUrl = "data:image/png;base64,aW1hZ2U=";
+  await openTranscript([{ role: "user", content: "", images: [
+    { dataUrl, byteLength: 5 },
+    { oversized: true, byteLength: 3000000 },
+  ] }]);
+  const image = screen.getByRole("img", { name: 'clisessions.image.alt:{"count":1}' });
+  expect(image).toHaveAttribute("src", dataUrl);
+  expect(screen.getByText("clisessions.image.oversized")).toBeInTheDocument();
+  fireEvent.error(image);
+  expect(screen.getByText("clisessions.image.unavailable")).toBeInTheDocument();
+});
+
+it("only shows applied patch counts and preserves failed and unconfirmed diffs", async () => {
+  const body = "*** Begin Patch\n*** Update File: file.txt\n+++literal plus\n---literal minus\n*** End Patch";
+  await openTranscript([{
+    role: "assistant", content: "", toolCalls: ["success", "failed", "pending"].map((status) => ({
+      callId: status, name: `apply_patch_${status}`, arguments: body,
+      patch: { body, files: [{ kind: "update", path: "file.txt" }], additions: 1, deletions: 1, status, error: status === "failed" },
+    })),
+  }]);
+  const applied = screen.getByText("apply_patch_success").closest("details");
+  expect(applied.querySelector("summary")).toHaveTextContent("+1−1clisessions.patch.success");
+  for (const status of ["failed", "pending"]) {
+    const details = screen.getByText(`apply_patch_${status}`).closest("details");
+    expect(details.querySelector("summary")).not.toHaveTextContent("+1");
+    expect(details.querySelector("summary")).toHaveTextContent(`clisessions.patch.${status}`);
+    expect(details.querySelector("pre")).toHaveTextContent("+++literal plus");
+  }
+  expect(applied.querySelector("pre").children[2]).toHaveClass("text-emerald-700");
+  expect(applied.querySelector("pre").children[3]).toHaveClass("text-red-700");
+});
+
+it("expands truncated patches and reveals search hits beyond the preview", async () => {
+  const body = [...Array.from({ length: 401 }, (_, i) => `+line ${i}`), "+deep-needle"].join("\n");
+  await openTranscript([{ role: "assistant", content: "", toolCalls: [{
+    name: "apply_patch", patch: { body, files: [], additions: 402, deletions: 0, status: "success" },
+  }] }]);
+  expect(screen.queryByText("+deep-needle")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: 'clisessions.patch.show_more:{"count":2}' }));
+  expect(screen.getByText("+deep-needle")).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("clisessions.search"), { target: { value: "deep-needle" } });
+  await waitFor(() => expect(screen.getByText("apply_patch").closest("details")).toHaveAttribute("open"));
+  expect(screen.getByText("deep-needle", { selector: "mark" })).toBeInTheDocument();
+});
+
+it("refreshes the list without requiring an abort signal", async () => {
+  await openTranscript([{ role: "user", content: "refresh fixture" }]);
+  fireEvent.click(screen.getByLabelText("clisessions.refresh"));
+  await waitFor(() => expect(screen.getByLabelText("clisessions.refresh")).not.toBeDisabled());
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+});
 
 it("lists sessions for the active app and opens the transcript", async () => {
   const fetchMock = vi.fn(async (url) => {

@@ -1251,7 +1251,7 @@ export function SkillsPage() {
   // Drop selections whose rows no longer exist (removed, refreshed, or
   // replaced by a cloud-inventory merge) so the select-all state stays honest.
   const installedIdentities = useMemo(
-    () => new Set((installedData.skills || []).map((skill) => skillIdentity(skill))),
+    () => new Set((installedData.skills || []).filter((skill) => !skill.readOnly && !skill.remote).map((skill) => skillIdentity(skill))),
     [installedData.skills],
   );
   useEffect(() => {

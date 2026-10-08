@@ -92,6 +92,32 @@ function extractTextFromItem(item) {
 // text so a runaway reasoning stream cannot bloat the API response.
 const THINKING_MAX_CHARS = 32 * 1024;
 
+// Inline raster images are bounded independently and across the transcript.
+const IMAGE_MAX_BASE64_CHARS = 2 * 1024 * 1024;
+const IMAGES_TOTAL_MAX_BASE64_CHARS = 8 * 1024 * 1024;
+const IMAGE_MEDIA_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+
+function extractImageFromItem(item, budget) {
+  if (item == null || typeof item !== "object" || item.type !== "image") return null;
+  const source = item.source;
+  if (source == null || typeof source !== "object" || source.type !== "base64") return null;
+  const mediaType = source.media_type;
+  const data = typeof source.data === "string" ? source.data : "";
+  if (!IMAGE_MEDIA_TYPES.has(mediaType) || !data || data.length % 4 !== 0) return null;
+  // Avoid decoding a large attachment just to validate its transport encoding.
+  const padding = data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0;
+  const encoded = data.slice(0, data.length - padding);
+  if (/[^A-Za-z0-9+/]/.test(encoded)) return null;
+  const entry = { mediaType, byteLength: data.length / 4 * 3 - padding };
+  if (data.length > IMAGE_MAX_BASE64_CHARS || data.length > budget.remaining) {
+    entry.oversized = true;
+    return entry;
+  }
+  budget.remaining -= data.length;
+  entry.dataUrl = `data:${mediaType};base64,${data}`;
+  return entry;
+}
+
 function capThinking(text) {
   const trimmed = String(text ?? "").trim();
   if (trimmed === "") return null;
@@ -279,6 +305,7 @@ async function claudeParseSession(filePath) {
 async function claudeReadMessages(filePath) {
   const raw = await fsp.readFile(filePath, "utf8");
   const messages = [];
+  const imageBudget = { remaining: IMAGES_TOTAL_MAX_BASE64_CHARS };
   // Claude can rewrite the same assistant message (streaming retries); keep
   // the row with the larger output_tokens per message id, like cc-switch does.
   const usageById = new Map();
@@ -320,12 +347,22 @@ async function claudeReadMessages(filePath) {
           .map((item) => item.thinking)
           .join("\n"))
       : null;
+    // Transcript images (pasted screenshots): any content position, user or
+    // assistant. The extractText path ignores them.
+    let images = null;
+    if (Array.isArray(message.content)) {
+      for (const item of message.content) {
+        const image = extractImageFromItem(item, imageBudget);
+        if (image) (images ??= []).push(image);
+      }
+    }
     const content = extractText(message.content);
-    if (content.trim() !== "" || thinking || toolCalls || toolResults) {
+    if (content.trim() !== "" || thinking || toolCalls || toolResults || images) {
       const row = { role, content, ts: parseTimestampToMs(value.timestamp) };
       if (thinking) row.thinking = thinking;
       if (toolCalls) row.toolCalls = toolCalls;
       if (toolResults) row.toolResults = toolResults;
+      if (images) row.images = images;
       // Attach the winning usage row to its message after retries resolve.
       if (role === "assistant" && typeof message.id === "string" && message.id) row._msgId = message.id;
       if (role === "assistant" && typeof message.model === "string" && message.model) row.model = message.model;
@@ -459,6 +496,51 @@ async function codexParseSession(filePath) {
   };
 }
 
+// Rejected patches often have no exit code. Missing output is not success.
+function applyPatchStatus(output) {
+  const text = String(output ?? "").trim();
+  const exit = text.match(/(?:^|\n)(?:Exit code:|Process exited with code)\s*(-?\d+)/i);
+  if (/^(?:apply_patch verification failed|patch rejected|error:|failed to)/im.test(text)
+      || (exit && Number(exit[1]) !== 0)) return "failed";
+  if ((exit && Number(exit[1]) === 0) || /^Success\.?(?:\s|$)/im.test(text)) return "success";
+  return "pending";
+}
+
+function parseApplyPatch(argumentsText) {
+  const parsed = typeof argumentsText === "string" ? parseJsonLine(argumentsText) : argumentsText;
+  const text = typeof parsed === "string" ? parsed
+    : typeof parsed?.patch === "string" ? parsed.patch
+      : typeof parsed?.input === "string" ? parsed.input : String(argumentsText ?? "");
+  const begin = text.indexOf("*** Begin Patch");
+  if (begin === -1) return null;
+  const end = text.indexOf("*** End Patch", begin);
+  const body = text.slice(begin, end === -1 ? undefined : end + "*** End Patch".length);
+  const files = [];
+  let additions = 0;
+  let deletions = 0;
+  let kind = null;
+  for (const line of body.split("\n")) {
+    if (line.startsWith("*** Add File: ")) {
+      kind = "add";
+      files.push({ kind, path: line.slice("*** Add File: ".length).trim() });
+    } else if (line.startsWith("*** Update File: ")) {
+      kind = "update";
+      files.push({ kind, path: line.slice("*** Update File: ".length).trim() });
+    } else if (line.startsWith("*** Delete File: ")) {
+      kind = "delete";
+      files.push({ kind, path: line.slice("*** Delete File: ".length).trim() });
+    } else if (line.startsWith("*** Move to: ") && files.length > 0) {
+      files[files.length - 1].moveTo = line.slice("*** Move to: ".length).trim();
+    } else if (line.startsWith("***")) {
+      kind = null;
+    } else if (kind === "add" || kind === "update") {
+      if (line.startsWith("+")) additions += 1;
+      else if (kind === "update" && line.startsWith("-")) deletions += 1;
+    }
+  }
+  return { body, files, additions, deletions, status: "pending", error: false };
+}
+
 async function codexReadMessages(filePath) {
   const raw = await fsp.readFile(filePath, "utf8");
   const messages = [];
@@ -500,21 +582,32 @@ async function codexReadMessages(filePath) {
     if (payload.type === "message") {
       role = typeof payload.role === "string" ? payload.role : "unknown";
       content = extractText(payload.content);
-    } else if (payload.type === "function_call") {
+    } else if (payload.type === "function_call" || payload.type === "custom_tool_call") {
       role = "assistant";
+      const args = payload.type === "custom_tool_call" ? payload.input : payload.arguments;
       toolCalls = [{
         callId: typeof payload.call_id === "string" ? payload.call_id : null,
         name: typeof payload.name === "string" && payload.name ? payload.name : "unknown",
-        arguments: typeof payload.arguments === "string" ? payload.arguments : null,
+        arguments: typeof args === "string" ? args : null,
       }];
+      const patch = payload.name === "apply_patch" ? parseApplyPatch(args) : null;
+      if (patch) toolCalls[0].patch = patch;
       content = "";
-    } else if (payload.type === "function_call_output") {
+    } else if (payload.type === "function_call_output" || payload.type === "custom_tool_call_output") {
       role = "tool";
+      content = extractText(payload.output);
       toolResults = [{
         callId: typeof payload.call_id === "string" ? payload.call_id : null,
-        output: typeof payload.output === "string" ? payload.output : "",
+        output: content,
       }];
-      content = typeof payload.output === "string" ? payload.output : "";
+      if (typeof payload.call_id === "string") {
+        const callRow = messages.findLast((row) => row.toolCalls?.some((call) => call.callId === payload.call_id && call.patch));
+        const patch = callRow?.toolCalls.find((call) => call.callId === payload.call_id)?.patch;
+        if (patch) {
+          patch.status = applyPatchStatus(content);
+          patch.error = patch.status === "failed";
+        }
+      }
     } else if (payload.type === "reasoning") {
       // Reasoning summaries render as their own collapsed thinking row.
       const summary = Array.isArray(payload.summary)

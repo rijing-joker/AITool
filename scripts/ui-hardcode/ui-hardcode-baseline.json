@@ -111,9 +111,11 @@
     },
     "dashboard/src/pages/CliSessionsPage.jsx": {
       "colors": 0,
-      "rawText": 1,
+      "rawText": 5,
       "rawTextTokens": [
-        "0 ? ("
+        ") : payloadText ? (",
+        "0 ? (",
+        "400; return ("
       ]
     },
     "dashboard/src/pages/DashboardPage.jsx": {
@@ -195,12 +197,13 @@
     },
     "dashboard/src/pages/SkillsPage.jsx": {
       "colors": 4,
-      "rawText": 9,
+      "rawText": 10,
       "rawTextTokens": [
         ") : null; const hintNode = !manageOpen && !isSkillsSh && !isPopular && repos.length",
         ") : null; contentNode = (",
         ") : source === SOURCE_POPULAR ? null : (",
         "); const browseLoadingNode = (",
+        "0 && !allSelected; return (",
         "0 ? (",
         "0 || browseAnyFilter) ? (",
         "t.id === id)?.label || id) .join(\", \") : copy(\"skills.action.choose_targets\"); return ("

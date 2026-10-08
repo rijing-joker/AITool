@@ -3,7 +3,7 @@ import { FileText, Import, Pencil, Plus, Trash2 } from "lucide-react";
 import { copy } from "../lib/copy";
 import { piPromptFilesApi, promptsApi } from "../lib/provider-switch-api";
 import { Button, Card, ConfirmModal } from "../ui/components";
-import { ModalFrame } from "../ui/components/ModalFrame";
+import { ProviderPanelEditor, useProviderPanelEditor } from "./provider-panel-editor";
 import { showToast } from "../ui/components/Toast";
 
 // Prompt management (cc-switch's prompt panel): each agent owns a list of
@@ -35,7 +35,9 @@ function firstLine(text) {
   return line ? line.trim() : "";
 }
 
-export function ProviderPromptsPanel() {
+export function ProviderPromptsPanel({ onEditorStateChange }) {
+  const [piEditing, setPiEditing] = useState(null);
+  const [piRefresh, setPiRefresh] = useState(0);
   const [app, setApp] = useState("claude");
   const [prompts, setPrompts] = useState(null);
   const [targetPath, setTargetPath] = useState("");
@@ -115,6 +117,28 @@ export function ProviderPromptsPanel() {
   const openEdit = (prompt) => { setEditing(prompt); setDialogOpen(true); };
   const closeDialog = () => { setDialogOpen(false); setEditing(null); };
 
+  if (dialogOpen) {
+    return (
+      <PromptEditor
+        app={app} editing={editing} busy={busy} targetPath={targetPath}
+        onClose={closeDialog} onEditorStateChange={onEditorStateChange}
+        onSaved={(result) => {
+          setPrompts(result.prompts);
+          setTargetPath(result.targetPath);
+          closeDialog();
+          showToast({ title: copy("pswitch.prompts.toast_saved") });
+        }}
+      />
+    );
+  }
+  if (piEditing) {
+    return (
+      <PiFileEditor kind={piEditing.kind} file={piEditing}
+        onClose={() => setPiEditing(null)} onEditorStateChange={onEditorStateChange}
+        onSaved={() => { setPiEditing(null); setPiRefresh((value) => value + 1); }} />
+    );
+  }
+
   return (
     <div className="flex min-w-0 flex-col gap-4">
       <Card>
@@ -154,7 +178,7 @@ export function ProviderPromptsPanel() {
         {loadError ? <p className="mt-2 text-xs text-red-600 dark:text-red-400">{loadError}</p> : null}
       </Card>
 
-      {app === "pi" ? <PiNativePromptFiles /> : null}
+      {app === "pi" ? <PiNativePromptFiles key={piRefresh} onEdit={setPiEditing} /> : null}
 
       {prompts !== null && prompts.length === 0 ? (
         <Card>
@@ -182,21 +206,6 @@ export function ProviderPromptsPanel() {
       {showNoneEnabledHint ? (
         <p className="text-xs text-oai-gray-400 dark:text-oai-gray-500">{copy("pswitch.prompts.none_enabled_hint")}</p>
       ) : null}
-
-      <PromptDialog
-        open={dialogOpen}
-        app={app}
-        editing={editing}
-        busy={busy}
-        onClose={closeDialog}
-        onSaved={(result) => {
-          setPrompts(result.prompts);
-          setTargetPath(result.targetPath);
-          setDialogOpen(false);
-          setEditing(null);
-          showToast({ title: copy("pswitch.prompts.toast_saved") });
-        }}
-      />
 
       <ConfirmModal
         open={deleteTarget !== null}
@@ -262,26 +271,19 @@ function PromptCard({ prompt, busy, onEnable, onEdit, onDelete }) {
   );
 }
 
-function PromptDialog({ open, app, editing, busy, onClose, onSaved }) {
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [content, setContent] = useState("");
-  const [enabled, setEnabled] = useState(false);
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    if (!open) return;
-    setName(editing ? editing.name : "");
-    setDescription(editing ? editing.description || "" : "");
-    setContent(editing ? editing.content : "");
-    setEnabled(editing ? editing.enabled : false);
-  }, [open, editing]);
-
-  const canSave = open && !busy && !saving && name.trim() !== "";
+function PromptEditor({ app, editing, busy, targetPath, onClose, onSaved, onEditorStateChange }) {
+  const [name, setName] = useState(editing?.name || "");
+  const [description, setDescription] = useState(editing?.description || "");
+  const [content, setContent] = useState(editing?.content || "");
+  const [enabled, setEnabled] = useState(editing?.enabled || false);
+  const editor = useProviderPanelEditor({
+    snapshot: JSON.stringify([name, description, content, enabled]),
+    busy, onClose, onEditorStateChange,
+  });
+  const canSave = !editor.busy && name.trim() !== "";
 
   const save = async () => {
-    if (!canSave) return;
-    setSaving(true);
+    if (!canSave || !editor.beginSave()) return;
     try {
       const result = await promptsApi.upsert(app, {
         id: editing ? editing.id : `prompt-${Date.now()}`,
@@ -294,14 +296,13 @@ function PromptDialog({ open, app, editing, busy, onClose, onSaved }) {
     } catch (error) {
       showToast({ title: `${copy("pswitch.prompts.toast_error")} — ${error instanceof Error ? error.message : String(error)}` });
     } finally {
-      setSaving(false);
+      editor.endSave();
     }
   };
 
   return (
-    <ModalFrame open={open} onClose={onClose} busy={busy || saving} label={copy("pswitch.prompts.dialog_title")}>
-      <div className="flex min-w-0 flex-col gap-3">
-        <h2 className="text-sm font-semibold">{editing ? copy("pswitch.prompts.edit") : copy("pswitch.prompts.add")}</h2>
+    <ProviderPanelEditor title={editing ? copy("pswitch.prompts.edit") : copy("pswitch.prompts.add")} context={targetPath} editor={editor} canSave={canSave} onSave={() => void save()}>
+      <div className="flex min-w-0 flex-col gap-4">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <label className="block space-y-1">
             <span className="text-xs font-medium text-oai-gray-500 dark:text-oai-gray-400">{copy("pswitch.prompts.field_name")}</span>
@@ -316,7 +317,7 @@ function PromptDialog({ open, app, editing, busy, onClose, onSaved }) {
           <span className="text-xs font-medium text-oai-gray-500 dark:text-oai-gray-400">{copy("pswitch.prompts.field_content")}</span>
           <textarea
             aria-label={copy("pswitch.prompts.field_content")}
-            rows={12}
+            rows={20}
             spellCheck={false}
             value={content}
             onChange={(event) => setContent(event.currentTarget.value)}
@@ -328,12 +329,8 @@ function PromptDialog({ open, app, editing, busy, onClose, onSaved }) {
           <span>{copy("pswitch.prompts.field_enabled")}</span>
         </label>
         <p className="text-xs text-oai-gray-400 dark:text-oai-gray-500">{copy("pswitch.prompts.enabled_hint")}</p>
-        <div className="flex items-center justify-end gap-2 border-t border-oai-gray-100 pt-3 dark:border-oai-gray-800">
-          <Button variant="secondary" size="sm" disabled={busy || saving} onClick={onClose}>{copy("pswitch.action.cancel")}</Button>
-          <Button size="sm" disabled={!canSave} onClick={() => void save()}>{copy("pswitch.action.save")}</Button>
-        </div>
       </div>
-    </ModalFrame>
+    </ProviderPanelEditor>
   );
 }
 
@@ -346,10 +343,9 @@ const PI_FILES = [
 // APPEND_SYSTEM.md live next to AGENTS.md; the file existing = active,
 // deleting it = off. Saves are CAS-guarded by the content revision so an
 // external edit is reported instead of clobbered.
-function PiNativePromptFiles() {
+function PiNativePromptFiles({ onEdit }) {
   const [files, setFiles] = useState(null);
   const [loadError, setLoadError] = useState("");
-  const [editingKind, setEditingKind] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
 
   const load = useCallback(async () => {
@@ -408,7 +404,7 @@ function PiNativePromptFiles() {
                   variant="secondary"
                   size="sm"
                   disabled={!file}
-                  onClick={() => setEditingKind(entry.kind)}
+                  onClick={() => onEdit(file)}
                 >
                   {file?.exists ? copy("pswitch.pi_files.edit") : copy("pswitch.pi_files.create")}
                 </Button>
@@ -422,14 +418,6 @@ function PiNativePromptFiles() {
           );
         })}
       </div>
-      {editingKind ? (
-        <PiFileEditor
-          kind={editingKind}
-          file={(files || []).find((item) => item.kind === editingKind)}
-          onClose={() => setEditingKind(null)}
-          onSaved={() => { setEditingKind(null); void load(); }}
-        />
-      ) : null}
       <ConfirmModal
         open={deleteTarget !== null}
         title={copy("pswitch.pi_files.remove_confirm_title")}
@@ -454,46 +442,29 @@ function PiNativePromptFiles() {
   );
 }
 
-function PiFileEditor({ kind, file, onClose, onSaved }) {
+function PiFileEditor({ kind, file, onClose, onSaved, onEditorStateChange }) {
   const meta = PI_FILES.find((entry) => entry.kind === kind);
-  const [content, setContent] = useState(file?.content || "");
-  const [loaded, setLoaded] = useState(Boolean(file));
-  const [revision, setRevision] = useState(file?.revision ?? null);
-  const [saving, setSaving] = useState(false);
+  const [content, setContent] = useState(file.content || "");
   const [error, setError] = useState("");
-
-  useEffect(() => {
-    let disposed = false;
-    if (!file) {
-      piPromptFilesApi.get(kind).then((res) => {
-        if (disposed) return;
-        setContent(res.file.content || "");
-        setRevision(res.file.revision);
-        setLoaded(true);
-      }).catch(() => { if (!disposed) setLoaded(true); });
-    }
-    return () => { disposed = true; };
-  }, [kind, file]);
+  const editor = useProviderPanelEditor({ snapshot: content, onClose, onEditorStateChange });
 
   const save = async () => {
-    if (saving || !content.trim()) return;
-    setSaving(true);
+    if (!content.trim() || !editor.beginSave()) return;
     setError("");
     try {
-      await piPromptFilesApi.replace(kind, content, revision);
+      await piPromptFilesApi.replace(kind, content, file.revision);
       showToast({ title: copy("pswitch.pi_files.saved_toast") });
       onSaved();
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : String(requestError));
     } finally {
-      setSaving(false);
+      editor.endSave();
     }
   };
 
   return (
-    <ModalFrame open onClose={onClose} label={copy(meta?.titleKey || "pswitch.pi_files.title")}>
-      <div className="flex min-w-0 flex-col gap-3">
-        <h2 className="text-sm font-semibold">{copy(meta?.titleKey || "pswitch.pi_files.title")}</h2>
+    <ProviderPanelEditor title={copy(meta?.titleKey || "pswitch.pi_files.title")} context={file.path} editor={editor} canSave={Boolean(content.trim())} onSave={() => void save()}>
+      <div className="flex min-w-0 flex-col gap-4">
         {!meta?.recommended ? (
           <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
             {copy("pswitch.pi_files.override_warning")}
@@ -501,22 +472,15 @@ function PiFileEditor({ kind, file, onClose, onSaved }) {
         ) : null}
         <textarea
           aria-label={copy(meta?.titleKey || "pswitch.pi_files.title")}
-          rows={14}
+          rows={20}
           spellCheck={false}
           value={content}
           onChange={(event) => setContent(event.currentTarget.value)}
-          disabled={!loaded}
           className="w-full resize-y rounded-lg border border-oai-gray-200 dark:border-oai-gray-700 bg-oai-gray-50 dark:bg-oai-gray-950 p-3 font-mono text-xs leading-relaxed focus:outline-none focus:ring-2 focus:ring-oai-brand-500"
         />
         {error ? <p className="text-xs text-red-600 dark:text-red-400">{error}</p> : null}
         <p className="text-xs text-oai-gray-400 dark:text-oai-gray-500">{copy("pswitch.pi_files.editor_hint")}</p>
-        <div className="flex items-center justify-end gap-2 border-t border-oai-gray-100 pt-3 dark:border-oai-gray-800">
-          <Button variant="secondary" size="sm" disabled={saving} onClick={onClose}>{copy("pswitch.action.cancel")}</Button>
-          <Button size="sm" disabled={saving || !loaded || !content.trim()} onClick={() => void save()}>
-            {copy("pswitch.action.save")}
-          </Button>
-        </div>
       </div>
-    </ModalFrame>
+    </ProviderPanelEditor>
   );
 }

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Brain, Download, Wrench, ArrowLeft, Coins, History, RefreshCw, Search, Timer, User } from "lucide-react";
+  Brain, Download, Wrench, ArrowLeft, Coins, History, Image as ImageIcon, RefreshCw, Search, Timer, User } from "lucide-react";
 import { copy } from "../lib/copy";
 import { formatCostUsd } from "../lib/cost-format";
 import { Input } from "../ui/components";
@@ -154,9 +154,69 @@ function compactTokenCount(value) {
   return String(value);
 }
 
-// Structured transcript row: content text, collapsible tool calls with their
-// input payloads, and a per-message token chip where the source attributes
-// usage to the message (claude/gemini).
+function TranscriptImage({ image, index }) {
+  const [failed, setFailed] = useState(false);
+  if (image.dataUrl && !failed) {
+    return (
+      <img
+        src={image.dataUrl}
+        alt={copy("clisessions.image.alt", { count: index + 1 })}
+        loading="lazy"
+        onError={() => setFailed(true)}
+        className="max-h-48 max-w-full rounded-lg border border-oai-gray-200 dark:border-oai-gray-700"
+      />
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 rounded-lg border border-dashed border-oai-gray-300 px-2 py-1 text-[11px] text-oai-gray-500 dark:border-oai-gray-700 dark:text-oai-gray-400">
+      <ImageIcon size={11} aria-hidden="true" />
+      {copy(failed ? "clisessions.image.unavailable" : "clisessions.image.oversized")}
+    </span>
+  );
+}
+
+function PatchDiff({ patch, query }) {
+  const [showAll, setShowAll] = useState(false);
+  const lines = patch.body.split("\n");
+  const truncated = !showAll && !textHits(patch.body, query) && lines.length > 400;
+  return (
+    <>
+      {Array.isArray(patch.files) && patch.files.length > 0 ? (
+        <div className="mt-1 flex flex-wrap gap-1">
+          {patch.files.map((file, index) => (
+            <span key={index} className="break-all rounded bg-oai-gray-100 px-1.5 py-0.5 font-mono text-[10px] text-oai-gray-600 dark:bg-oai-gray-900 dark:text-oai-gray-300">
+              {file.path}
+            </span>
+          ))}
+        </div>
+      ) : null}
+      <pre className="mt-1.5 max-h-72 max-w-full overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-5">
+        {(truncated ? lines.slice(0, 400) : lines).map((line, index) => (
+          <span
+            key={index}
+            className={`block ${
+              line.startsWith("+")
+                ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300"
+                : line.startsWith("-")
+                  ? "bg-red-50 text-red-700 dark:bg-red-950/30 dark:text-red-300"
+                  : line.startsWith("***")
+                    ? "font-semibold text-oai-gray-700 dark:text-oai-gray-200"
+                    : "text-oai-gray-500 dark:text-oai-gray-400"
+            }`}
+          >
+            <HighlightedText text={line} query={query} />
+          </span>
+        ))}
+      </pre>
+      {truncated ? (
+        <button type="button" onClick={() => setShowAll(true)} className="min-h-10 text-xs text-oai-brand-600 dark:text-oai-brand-400">
+          {copy("clisessions.patch.show_more", { count: lines.length - 400 })}
+        </button>
+      ) : null}
+    </>
+  );
+}
+
 function TranscriptRow({ message, query = "" }) {
   const style = ROLE_STYLES[roleKey(message.role)];
   const toolCalls = Array.isArray(message.toolCalls) ? message.toolCalls : [];
@@ -185,6 +245,13 @@ function TranscriptRow({ message, query = "" }) {
           <HighlightedText text={message.content} query={query} />
         </p>
       ) : null}
+      {Array.isArray(message.images) && message.images.length > 0 ? (
+        <div className="mt-1.5 flex flex-wrap gap-1.5">
+          {message.images.map((image, index) => (
+            <TranscriptImage key={index} image={image} index={index} />
+          ))}
+        </div>
+      ) : null}
       {thinking ? (
         <details open={thinkingOpen} className="mt-1.5 rounded-lg border border-oai-gray-200 bg-oai-gray-50/60 px-2 py-1 dark:border-oai-gray-700 dark:bg-oai-gray-800/40">
           <summary className="flex cursor-pointer list-none items-center gap-1 text-xs font-medium text-oai-gray-500 dark:text-oai-gray-400">
@@ -200,14 +267,31 @@ function TranscriptRow({ message, query = "" }) {
             const payload = call.input ?? call.args ?? (call.arguments ? (() => { try { return JSON.parse(call.arguments); } catch { return call.arguments; } })() : null);
             const payloadText = payload == null ? "" : typeof payload === "string" ? payload : JSON.stringify(payload, null, 2);
             const key = call.id ?? call.callId ?? `${call.name}-${index}`;
-            const toolOpen = textHits(payloadText, query) || textHits(call.name, query);
+            const patch = call.patch;
+            const toolOpen = textHits(payloadText, query) || textHits(call.name, query) || textHits(patch?.body, query);
+            const patchStatus = patch?.error ? "failed" : patch?.status ?? "pending";
             return (
               <details key={key} open={toolOpen} className="max-w-full rounded-lg border border-oai-gray-200 bg-oai-gray-50/60 px-2 py-1 dark:border-oai-gray-700 dark:bg-oai-gray-800/40">
                 <summary className="flex cursor-pointer list-none items-center gap-1 text-xs font-medium text-oai-gray-600 dark:text-oai-gray-300">
                   <Wrench size={11} aria-hidden="true" />
                   <span className="truncate"><HighlightedText text={call.name} query={query} /></span>
+                  {patch ? (
+                    <>
+                      {patchStatus === "success" ? (
+                        <>
+                          <span className="tabular-nums text-[10px] text-emerald-600 dark:text-emerald-400">+{patch.additions}</span>
+                          <span className="tabular-nums text-[10px] text-red-500 dark:text-red-400">−{patch.deletions}</span>
+                        </>
+                      ) : null}
+                      <span className={`rounded px-1 text-[10px] font-semibold ${patchStatus === "failed" ? "bg-red-50 text-red-600 dark:bg-red-950/40 dark:text-red-400" : "bg-oai-gray-100 text-oai-gray-500 dark:bg-oai-gray-800 dark:text-oai-gray-400"}`}>
+                        {copy(`clisessions.patch.${patchStatus}`)}
+                      </span>
+                    </>
+                  ) : null}
                 </summary>
-                {payloadText ? (
+                {patch ? (
+                  <PatchDiff patch={patch} query={query} />
+                ) : payloadText ? (
                   <pre className="mt-1.5 max-h-56 max-w-full overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-oai-gray-500 dark:text-oai-gray-400"><HighlightedText text={payloadText} query={query} /></pre>
                 ) : null}
               </details>
@@ -238,7 +322,7 @@ export function CliSessionsPage() {
   const loadApps = useCallback(async (signal) => {
     try {
       const data = await fetch("/api/cli-sessions", { cache: "no-store", signal }).then((response) => response.json());
-      if (signal.aborted) return;
+      if (signal?.aborted) return;
       if (data?.ok) setApps(data.apps ?? []);
     } catch {
       if (!signal?.aborted) setApps([]);
@@ -249,16 +333,16 @@ export function CliSessionsPage() {
     setLoading(true);
     try {
       const data = await fetch(`/api/cli-sessions/list?app=${encodeURIComponent(app)}`, { cache: "no-store", signal }).then((response) => response.json());
-      if (signal.aborted) return;
+      if (signal?.aborted) return;
       if (!data?.ok) throw new Error(data?.error || "HTTP sessions");
       setSessions(data.sessions ?? []);
       setError(null);
     } catch (e) {
-      if (signal.aborted) return;
+      if (signal?.aborted) return;
       setSessions([]);
       setError(e instanceof Error ? e.message : String(e));
     } finally {
-      if (!signal.aborted) setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
   }, []);
 
@@ -438,7 +522,7 @@ export function CliSessionsPage() {
       ) : null}
 
       <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[22rem_1fr]">
-        <div className={`min-w-0 flex-col gap-2 overflow-y-auto ${selected ? "hidden lg:flex" : "flex"}`}>
+        <div className={`min-w-0 flex-col gap-2 overflow-y-auto [scrollbar-gutter:stable] ${selected ? "hidden lg:flex" : "flex"}`}>
           {listContent}
         </div>
 
@@ -485,7 +569,7 @@ export function CliSessionsPage() {
                   </button>
                 ) : null}
               </div>
-              <div className="flex flex-col gap-2.5 overflow-y-auto p-4">
+              <div className="flex flex-col gap-2.5 overflow-y-auto [scrollbar-gutter:stable] p-4">
                 {transcriptContent}
               </div>
             </>

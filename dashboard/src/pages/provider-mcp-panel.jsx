@@ -3,7 +3,7 @@ import { Import, Pencil, Plus, Server, Trash2 } from "lucide-react";
 import { copy } from "../lib/copy";
 import { mcpApi } from "../lib/provider-switch-api";
 import { Button, Card, ConfirmModal } from "../ui/components";
-import { ModalFrame } from "../ui/components/ModalFrame";
+import { ProviderPanelEditor, useProviderPanelEditor } from "./provider-panel-editor";
 import { showToast } from "../ui/components/Toast";
 
 // MCP server management (cc-switch's unified mcp_servers panel): one list of
@@ -90,7 +90,7 @@ function specJsonOf(server) {
   return JSON.stringify(spec, null, 2);
 }
 
-export function ProviderMcpPanel() {
+export function ProviderMcpPanel({ onEditorStateChange }) {
   const [servers, setServers] = useState(null);
   const [loadError, setLoadError] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -193,6 +193,25 @@ export function ProviderMcpPanel() {
   const openEdit = (server) => { setEditing(server); setDialogOpen(true); };
   const closeDialog = () => { setDialogOpen(false); setEditing(null); };
 
+  if (dialogOpen) {
+    return (
+      <McpServerEditor
+        editing={editing}
+        busy={busy}
+        existingIds={(servers || []).map((server) => server.id)}
+        onClose={closeDialog}
+        onEditorStateChange={onEditorStateChange}
+        onSaved={(result) => {
+          setServers(result.servers);
+          closeDialog();
+          showToast({ title: result.failures.length
+            ? `${copy("pswitch.mcp.toast_saved")} — ${result.failures[0]}`
+            : copy("pswitch.mcp.toast_saved") });
+        }}
+      />
+    );
+  }
+
   return (
     <div className="flex min-w-0 flex-col gap-4">
       <Card>
@@ -261,24 +280,6 @@ export function ProviderMcpPanel() {
           />
         ))}
       </div>
-
-      <McpServerDialog
-        open={dialogOpen}
-        editing={editing}
-        busy={busy}
-        existingIds={(servers || []).map((server) => server.id)}
-        onClose={closeDialog}
-        onSaved={(result) => {
-          setServers(result.servers);
-          setDialogOpen(false);
-          setEditing(null);
-          if (result.failures.length) {
-            showToast({ title: `${copy("pswitch.mcp.toast_saved")} — ${result.failures[0]}` });
-          } else {
-            showToast({ title: copy("pswitch.mcp.toast_saved") });
-          }
-        }}
-      />
 
       <ConfirmModal
         open={deleteTarget !== null}
@@ -352,30 +353,20 @@ function McpServerCard({ server, busy, onToggle, onEdit, onDelete }) {
   );
 }
 
-function McpServerDialog({ open, editing, busy, existingIds, onClose, onSaved }) {
-  const [id, setId] = useState("");
-  const [name, setName] = useState("");
-  const [configText, setConfigText] = useState("{\n  \"type\": \"stdio\",\n  \"command\": \"\"\n}");
+function McpServerEditor({ editing, busy, existingIds, onClose, onSaved, onEditorStateChange }) {
+  const [id, setId] = useState(editing?.id || "");
+  const [name, setName] = useState(editing?.name || "");
+  const [configText, setConfigText] = useState(() => specJsonOf(editing));
   const [configError, setConfigError] = useState("");
-  const [apps, setApps] = useState({});
-  const [description, setDescription] = useState("");
-  const [homepage, setHomepage] = useState("");
-  const [docs, setDocs] = useState("");
-  const [tags, setTags] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    if (!open) return;
-    setId(editing ? editing.id : "");
-    setName(editing ? editing.name : "");
-    setConfigText(specJsonOf(editing));
-    setConfigError("");
-    setApps(editing ? { ...editing.apps } : {});
-    setDescription(editing ? editing.description || "" : "");
-    setHomepage(editing ? editing.homepage || "" : "");
-    setDocs(editing ? editing.docs || "" : "");
-    setTags(editing && Array.isArray(editing.tags) ? editing.tags.join(", ") : "");
-  }, [open, editing]);
+  const [apps, setApps] = useState(editing?.apps || {});
+  const [description, setDescription] = useState(editing?.description || "");
+  const [homepage, setHomepage] = useState(editing?.homepage || "");
+  const [docs, setDocs] = useState(editing?.docs || "");
+  const [tags, setTags] = useState(editing?.tags?.join(", ") || "");
+  const editor = useProviderPanelEditor({
+    snapshot: JSON.stringify([id, name, configText, Object.keys(apps).filter((app) => apps[app]).sort(), description, homepage, docs, tags]),
+    busy, onClose, onEditorStateChange,
+  });
 
   const parseSpec = () => {
     try {
@@ -402,12 +393,11 @@ function McpServerDialog({ open, editing, busy, existingIds, onClose, onSaved })
 
   const idTaken = !editing && existingIds.includes(id.trim());
   const idValid = /^[A-Za-z0-9_-]{1,64}$/.test(id.trim());
-  const parsed = open ? parseSpec() : { spec: null };
-  const canSave = open && !busy && !saving && id.trim() !== "" && idValid && !idTaken && !parsed.error && configError === "";
+  const parsed = parseSpec();
+  const canSave = !editor.busy && id.trim() !== "" && idValid && !idTaken && !parsed.error && configError === "";
 
   const save = async () => {
-    if (!canSave) return;
-    setSaving(true);
+    if (!canSave || !editor.beginSave()) return;
     try {
       const result = await mcpApi.upsert({
         id: id.trim(),
@@ -423,14 +413,13 @@ function McpServerDialog({ open, editing, busy, existingIds, onClose, onSaved })
     } catch (error) {
       showToast({ title: `${copy("pswitch.mcp.toast_error")} — ${error instanceof Error ? error.message : String(error)}` });
     } finally {
-      setSaving(false);
+      editor.endSave();
     }
   };
 
   return (
-    <ModalFrame open={open} onClose={onClose} busy={busy || saving} label={copy("pswitch.mcp.dialog_title")}>
-      <div className="flex min-w-0 flex-col gap-3">
-        <h2 className="text-sm font-semibold">{editing ? copy("pswitch.mcp.edit") : copy("pswitch.mcp.add")}</h2>
+    <ProviderPanelEditor title={editing ? copy("pswitch.mcp.edit") : copy("pswitch.mcp.add")} editor={editor} canSave={canSave} onSave={() => void save()}>
+      <div className="flex min-w-0 flex-col gap-4">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <label className="block space-y-1">
             <span className="text-xs font-medium text-oai-gray-500 dark:text-oai-gray-400">{copy("pswitch.mcp.field_id")}</span>
@@ -483,7 +472,7 @@ function McpServerDialog({ open, editing, busy, existingIds, onClose, onSaved })
           </div>
           <textarea
             aria-label={copy("pswitch.mcp.field_spec")}
-            rows={8}
+            rows={16}
             spellCheck={false}
             value={configText}
             onChange={(event) => {
@@ -541,12 +530,8 @@ function McpServerDialog({ open, editing, busy, existingIds, onClose, onSaved })
           </div>
         </details>
 
-        <div className="flex items-center justify-end gap-2 border-t border-oai-gray-100 pt-3 dark:border-oai-gray-800">
-          <Button variant="secondary" size="sm" disabled={busy || saving} onClick={onClose}>{copy("pswitch.action.cancel")}</Button>
-          <Button size="sm" disabled={!canSave} onClick={() => void save()}>{copy("pswitch.action.save")}</Button>
-        </div>
       </div>
-    </ModalFrame>
+    </ProviderPanelEditor>
   );
 }
 

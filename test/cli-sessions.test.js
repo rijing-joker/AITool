@@ -445,3 +445,110 @@ test("claude transcripts carry structured tool calls/results and per-message usa
   assert.deepEqual(tool.toolResults, [{ toolUseId: "tu_1", content: "file.txt" }]);
   assert.equal(usage.outputTokens, 6);
 });
+
+test("claude image extraction: data URLs, per-image cap and session budget", async () => {
+  const small = Buffer.from("tiny-image").toString("base64");
+  const filePath = writeClaudeSession(tmpHome, "session-img2", [
+    JSON.stringify({ sessionId: "session-img2", cwd: "/tmp/p", timestamp: "2026-10-01T10:00:00Z" }),
+    JSON.stringify({ type: "user", message: { role: "user", content: [
+      { type: "text", text: "screenshot attached" },
+      { type: "image", source: { type: "base64", media_type: "image/png", data: small } },
+      { type: "image", source: { type: "base64", media_type: "image/png", data: "A".repeat(2 * 1024 * 1024 + 4) } },
+    ] }, timestamp: "2026-10-01T10:00:01Z" }),
+    JSON.stringify({ type: "user", message: { role: "user", content: [
+      { type: "image", source: { type: "base64", media_type: "image/jpeg", data: Buffer.from("second").toString("base64") } },
+    ] }, timestamp: "2026-10-01T10:00:02Z" }),
+  ]);
+
+  const session = await sessions.readSession({ app: "claude", sourcePath: filePath, home: tmpHome });
+  const withImages = session.messages.filter((row) => row.images);
+  assert.equal(withImages.length, 2);
+  const [first, second] = withImages;
+  assert.equal(first.images.length, 2);
+  assert.equal(first.images[0].dataUrl, `data:image/png;base64,${small}`);
+  assert.equal(first.images[1].oversized, true, "over the per-image cap");
+  assert.equal(second.images[0].dataUrl, `data:image/jpeg;base64,${Buffer.from("second").toString("base64")}`);
+  assert.equal(session.messages.find((row) => row.content === "screenshot attached").content, "screenshot attached");
+});
+
+test("codex apply_patch: counts stop at End Patch, Add-file minus lines are content, failure outputs mark errors", async () => {
+  const projectDir = path.join(tmpHome, ".codex", "sessions", "2026", "10", "01");
+  fs.mkdirSync(projectDir, { recursive: true });
+  const filePath = path.join(projectDir, "rollout-patch.jsonl");
+  const patch = [
+    "*** Begin Patch",
+    "*** Add File: new.txt",
+    "+added line 1",
+    "-not a deletion inside Add hunks",
+    "*** Update File: old.txt",
+    "+kept",
+    "-dropped",
+    "*** Delete File: gone.txt",
+    "*** End Patch",
+    "+counting must stop here",
+  ].join("\n");
+  const lines = [
+    JSON.stringify({ timestamp: "2026-10-01T10:00:00Z", type: "session_meta", payload: { id: "patch", cwd: "/tmp/p" } }),
+    JSON.stringify({ timestamp: "2026-10-01T10:00:01Z", type: "response_item", payload: { type: "function_call", call_id: "c1", name: "apply_patch", arguments: patch } }),
+    JSON.stringify({ timestamp: "2026-10-01T10:00:02Z", type: "response_item", payload: { type: "function_call_output", call_id: "c1", output: "apply_patch verification failed" } }),
+    JSON.stringify({ timestamp: "2026-10-01T10:00:03Z", type: "response_item", payload: { type: "function_call", call_id: "c2", name: "apply_patch", arguments: patch } }),
+    JSON.stringify({ timestamp: "2026-10-01T10:00:04Z", type: "response_item", payload: { type: "function_call_output", call_id: "c2", output: "success. Updated the following files:" } }),
+  ];
+  fs.writeFileSync(filePath, lines.join("\n") + "\n");
+
+  const session = await sessions.readSession({ app: "codex", sourcePath: filePath, home: tmpHome });
+  const callRows = session.messages.filter((row) => row.toolCalls?.some((call) => call.patch));
+  assert.equal(callRows.length, 2);
+  const [failed, ok] = callRows.map((row) => row.toolCalls[0].patch);
+  assert.deepEqual(failed.files.map((f) => f.path), ["new.txt", "old.txt", "gone.txt"]);
+  assert.equal(failed.additions, 2, "Add-hunk `-` line skipped, Update hunk +1, Add hunk +1");
+  assert.equal(failed.deletions, 1, "only the Update-hunk deletion counts");
+  assert.equal(failed.error, true);
+  assert.equal(ok.error, false);
+  assert.equal(failed.status, "failed");
+  assert.equal(ok.status, "success");
+});
+
+test("claude image budget is shared and unsafe or invalid attachments are ignored", async () => {
+  const image = (data, media_type = "image/png") => ({ type: "image", source: { type: "base64", data, media_type } });
+  const large = "A".repeat(2 * 1024 * 1024);
+  const sourcePath = writeClaudeSession(tmpHome, "image-budget", [
+    ...Array.from({ length: 5 }, () => JSON.stringify({ type: "user", message: { role: "user", content: [image(large)] } })),
+    JSON.stringify({ type: "user", message: { role: "user", content: [
+      image(""), image("not base64!!"), image("AAAA", "image/svg+xml"), image("AAAA", "text/html"),
+      { type: "image", source: { type: "url", url: "https://example.com/private.png" } },
+    ] } }),
+  ]);
+  const { messages } = await sessions.readSession({ app: "claude", sourcePath, home: tmpHome });
+  assert.equal(messages.length, 5);
+  assert.equal(messages.filter((row) => row.images[0].dataUrl).length, 4);
+  assert.equal(messages[4].images[0].oversized, true);
+  assert.equal(messages[0].images[0].byteLength, 1572864);
+});
+
+test("codex custom calls and JSON patches retain pending, failed and successful outcomes", async () => {
+  const dir = path.join(tmpHome, ".codex", "sessions");
+  fs.mkdirSync(dir, { recursive: true });
+  const sourcePath = path.join(dir, "custom-patches.jsonl");
+  const patch = "*** Begin Patch\n*** Update File: old.txt\n*** Move to: new.txt\n@@\n+++literal\n---literal\n*** End Patch\n+ignored";
+  const calls = [
+    { type: "custom_tool_call", name: "apply_patch", call_id: "pending", input: patch },
+    { type: "function_call", name: "apply_patch", call_id: "json", arguments: JSON.stringify({ patch }) },
+    { type: "custom_tool_call", name: "apply_patch", call_id: "rejected", input: patch },
+    { type: "custom_tool_call", name: "apply_patch", call_id: "exit", input: patch },
+    { type: "custom_tool_call_output", call_id: "rejected", output: "patch rejected by user" },
+    { type: "function_call_output", call_id: "json", output: [{ type: "input_text", text: "Exit code: 0\nOutput:\nSuccess. Updated the following files:\nM old.txt" }] },
+    { type: "custom_tool_call_output", call_id: "exit", output: "Exit code: 1\nOutput:\nInvalid patch" },
+  ];
+  fs.writeFileSync(sourcePath, calls.map((payload) => JSON.stringify({ type: "response_item", payload })).join("\n"));
+  const { messages } = await sessions.readSession({ app: "codex", sourcePath, home: tmpHome });
+  const patches = Object.fromEntries(messages.flatMap((row) => (row.toolCalls || []).map((call) => [call.callId, call.patch])));
+  assert.equal(patches.pending.status, "pending");
+  assert.equal(patches.json.status, "success");
+  assert.equal(patches.rejected.status, "failed");
+  assert.equal(patches.exit.status, "failed");
+  assert.equal(patches.json.additions, 1);
+  assert.equal(patches.json.deletions, 1);
+  assert.equal(patches.json.files[0].moveTo, "new.txt");
+  assert.ok(patches.json.body.endsWith("*** End Patch"));
+});

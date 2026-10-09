@@ -110,6 +110,25 @@ test("claude transcripts: tool_use renders as [Tool:], tool_result rows reclassi
   assert.ok(messages[2].content.includes("Please continue"));
 });
 
+test("claude tool results retain explicit error flags without inferring failures from output", async () => {
+  const flags = [true, false, undefined, "true"];
+  const sourcePath = writeClaudeSession(tmpHome, "tool-errors", flags.map((is_error, index) =>
+    JSON.stringify({ message: { role: "user", content: [{
+      type: "tool_result", tool_use_id: `tool-${index}`, is_error,
+      content: index === 0 ? "" : "An error message quoted by a successful tool",
+    }] } }),
+  ));
+
+  const { messages } = await sessions.readSession({ app: "claude", sourcePath, home: tmpHome });
+  assert.equal(messages.length, flags.length, "empty failed results are retained");
+  assert.deepEqual(messages.map((message) => message.role), flags.map(() => "tool"));
+  assert.deepEqual(messages.map((message) => message.toolResults[0]), flags.map((flag, index) => ({
+    toolUseId: `tool-${index}`,
+    content: index === 0 ? "" : "An error message quoted by a successful tool",
+    ...(typeof flag === "boolean" ? { isError: flag } : {}),
+  })));
+});
+
 test("codex sessions: session_meta + response_item payloads scan and read", async () => {
   const root = path.join(tmpHome, ".codex", "sessions", "2026", "10", "01");
   fs.mkdirSync(root, { recursive: true });
@@ -688,4 +707,65 @@ test("codex custom calls and JSON patches retain pending, failed and successful 
   assert.equal(patches.json.deletions, 1);
   assert.equal(patches.json.files[0].moveTo, "new.txt");
   assert.ok(patches.json.body.endsWith("*** End Patch"));
+});
+
+test("codex patch outcomes unwrap native JSON results without replacing the transcript output", async () => {
+  const dir = path.join(tmpHome, ".codex", "sessions");
+  fs.mkdirSync(dir, { recursive: true });
+  const sourcePath = path.join(dir, "wrapped-patches.jsonl");
+  const input = "*** Begin Patch\n*** Add File: fixture.txt\n+hello\n*** End Patch";
+  const cases = [
+    { id: "applied", output: "Success. Updated the following files:\nA fixture.txt", exitCode: 0, expected: "success" },
+    { id: "exit-only", output: "", exitCode: 0, expected: "success" },
+    { id: "failed-exit", output: "Invalid patch", exitCode: 1, expected: "failed" },
+    { id: "conflicting-success", output: "Success.", exitCode: 1, expected: "failed" },
+    { id: "failed-text", output: "apply_patch verification failed", exitCode: 0, expected: "failed" },
+    { id: "text-only", output: "Success.", expected: "success" },
+    { id: "unknown", output: "No result available", expected: "pending" },
+    { id: "null-exit", output: "", exitCode: null, expected: "pending" },
+    { id: "invalid-exit", output: "", exitCode: false, expected: "pending" },
+  ];
+  const results = cases.map(({ output, exitCode }) => JSON.stringify({ output, metadata: { exit_code: exitCode, duration_seconds: 0.1 } }));
+  const rows = cases.flatMap(({ id }, index) => [
+    { type: "custom_tool_call", name: "apply_patch", call_id: id, input },
+    { type: "custom_tool_call_output", call_id: id, output: results[index] },
+  ]);
+  fs.writeFileSync(sourcePath, rows.map((payload) => JSON.stringify({ type: "response_item", payload })).join("\n"));
+
+  const { messages } = await sessions.readSession({ app: "codex", sourcePath, home: tmpHome });
+  cases.forEach(({ id, expected }, index) => {
+    const patch = messages[index * 2].toolCalls[0].patch;
+    assert.equal(patch.status, expected, id);
+    assert.equal(patch.error, expected === "failed", id);
+    assert.equal(messages[index * 2 + 1].content, results[index]);
+    assert.deepEqual(messages[index * 2 + 1].toolResults, [{ callId: id, output: results[index] }]);
+  });
+});
+
+test("codex associates delayed patch results by call id across ordinary tool history", async () => {
+  const dir = path.join(tmpHome, ".codex", "sessions");
+  fs.mkdirSync(dir, { recursive: true });
+  const sourcePath = path.join(dir, "interleaved-patches.jsonl");
+  const input = "*** Begin Patch\n*** Add File: fixture.txt\n+hello\n*** End Patch";
+  const rows = ["first", "second", "pending", null].map((call_id) => ({
+    type: "custom_tool_call", name: "apply_patch", call_id, input,
+  }));
+  for (let i = 0; i < 1000; i += 1) {
+    rows.push(
+      { type: "function_call", name: "exec_command", call_id: `shell-${i}`, arguments: '{"cmd":"pwd"}' },
+      { type: "function_call_output", call_id: `shell-${i}`, output: "Success." },
+    );
+  }
+  rows.push(
+    { type: "custom_tool_call_output", call_id: "unknown", output: "Success." },
+    { type: "custom_tool_call_output", call_id: null, output: "Success." },
+    { type: "custom_tool_call_output", call_id: "second", output: "patch rejected by user" },
+    { type: "custom_tool_call_output", call_id: "first", output: "Success." },
+  );
+  fs.writeFileSync(sourcePath, rows.map((payload) => JSON.stringify({ type: "response_item", payload })).join("\n"));
+
+  const { messages } = await sessions.readSession({ app: "codex", sourcePath, home: tmpHome });
+  assert.equal(messages.length, rows.length);
+  assert.deepEqual(messages.slice(0, 4).map((row) => row.toolCalls[0].patch.status), ["success", "failed", "pending", "pending"]);
+  assert.equal(messages.filter((row) => row.toolCalls?.[0].patch).length, 4);
 });

@@ -1,580 +1,347 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  Brain, Download, Wrench, ArrowLeft, Coins, History, Image as ImageIcon, RefreshCw, Search, Timer, User } from "lucide-react";
+import React, {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { History, RefreshCw, Search } from "lucide-react";
 import { copy } from "../lib/copy";
-import { formatCostUsd } from "../lib/cost-format";
 import { Input } from "../ui/components";
-import { exportSessionMarkdown, toolCallPayloadText } from "../lib/session-export";
 import { LocalOnlyNotice } from "../components/LocalOnlyNotice.jsx";
 import { isLocalDashboardHost } from "../lib/host-mode";
 import { isMockEnabled } from "../lib/mock-data";
-
-// CLI session history (cc-switch session_manager port, minimal reader):
-// left column lists the session logs found on disk per app, right pane shows
-// the plain transcript (user / assistant / tool rows). Reads go through the
-// local API, which clamps every path to the app's own session roots.
+import { SessionList } from "./cli-session-list";
+import { SessionReader } from "./cli-session-reader";
+import {
+  filterSessions,
+  readPreference,
+  SESSION_PREFS,
+  sessionAppLabel,
+  sessionIconButton,
+  sessionKey,
+  writePreference,
+} from "./cli-sessions-model";
 
 const IS_LOCAL_HOST = isLocalDashboardHost();
 
-const APP_LABELS = {
-  claude: () => "Claude Code",
-  codex: () => "Codex",
-  gemini: () => "Gemini CLI",
-};
-
-function formatTime(ms) {
-  if (ms == null || !Number.isFinite(ms)) return "—";
-  return new Date(ms).toLocaleString([], {
-    year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false,
-  });
+async function readApi(url, signal) {
+  const response = await fetch(url, { cache: "no-store", signal });
+  const data = await response.json();
+  if (response.ok === false || !data?.ok)
+    throw new Error(data?.error || copy("clisessions.load_failed"));
+  return data;
 }
 
-const compactNumber = new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 });
-
-function formatUsageTokens(value) {
-  if (!Number.isFinite(value) || value <= 0) return null;
-  return compactNumber.format(value);
-}
-
-function formatUsageDuration(ms) {
-  if (!Number.isFinite(ms) || ms <= 0) return null;
-  const seconds = Math.round(ms / 1000);
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m${seconds % 60}s`;
-  return `${Math.floor(minutes / 60)}h${minutes % 60}m`;
-}
-
-function relativeFrom(ms) {
-  if (ms == null || !Number.isFinite(ms)) return null;
-  const diff = Date.now() - ms;
-  if (!Number.isFinite(diff) || diff < 0) return null;
-  const minutes = Math.floor(diff / 60_000);
-  if (minutes < 1) return copy("clisessions.time.now");
-  if (minutes < 60) return copy("clisessions.time.minutes", { count: minutes });
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return copy("clisessions.time.hours", { count: hours });
-  const days = Math.floor(hours / 24);
-  if (days < 30) return copy("clisessions.time.days", { count: days });
-  return null;
-}
-
-const ROLE_STYLES = {
-  user: {
-    chip: "bg-oai-brand-50 text-oai-brand-600 dark:bg-oai-brand-950/50 dark:text-oai-brand-400",
-    bubble: "bg-oai-gray-50 dark:bg-oai-gray-800/60",
-  },
-  assistant: {
-    chip: "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400",
-    bubble: "bg-white dark:bg-oai-gray-900",
-  },
-  tool: {
-    chip: "bg-oai-gray-100 text-oai-gray-500 dark:bg-oai-gray-800 dark:text-oai-gray-400",
-    bubble: "bg-oai-gray-50/60 dark:bg-oai-gray-800/30",
-  },
-  unknown: {
-    chip: "bg-oai-gray-100 text-oai-gray-500 dark:bg-oai-gray-800 dark:text-oai-gray-400",
-    bubble: "bg-white dark:bg-oai-gray-900",
-  },
-};
-
-function roleKey(role) {
-  return ROLE_STYLES[role] ? role : "unknown";
-}
-
-// Reader-header usage chips (cc-switch 31e5ae3): total tokens, active span and
-// the models.dev-estimated cost, when the server could price the session.
-function UsageChips({ usage }) {
-  if (!usage || typeof usage !== "object") return null;
-  const chips = [];
-  const tokens = formatUsageTokens(usage.totalTokens);
-  if (tokens != null) {
-    chips.push({ key: "tokens", icon: Coins, label: copy("clisessions.usage.tokens"), value: tokens, title: String(usage.totalTokens) });
-  }
-  const duration = formatUsageDuration(usage.durationMs);
-  if (duration != null) {
-    chips.push({ key: "duration", icon: Timer, label: copy("clisessions.usage.duration"), value: duration, title: `${Math.round(usage.durationMs / 1000)}s` });
-  }
-  const cost = formatCostUsd(usage.estimatedCostUsd);
-  if (cost != null) {
-    chips.push({ key: "cost", label: copy("clisessions.usage.cost"), value: cost, title: usage.model ? `$${usage.estimatedCostUsd.toFixed(6)} · ${usage.model}` : undefined });
-  }
-  if (chips.length === 0) return null;
-  return (
-    <div className="flex shrink-0 flex-wrap items-center justify-end gap-x-2 gap-y-0.5 text-[11px] tabular-nums text-oai-gray-500 dark:text-oai-gray-400">
-      {chips.map((chip) => (
-        <span key={chip.key} className="inline-flex items-center gap-1" title={chip.title}>
-          {chip.icon ? <chip.icon size={11} aria-hidden="true" /> : null}
-          <span className="hidden sm:inline">{chip.label}</span>
-          <span className="font-medium text-oai-gray-700 dark:text-oai-gray-300">{chip.value}</span>
-        </span>
-      ))}
-    </div>
+function LocalCliSessionsPage() {
+  const [apps, setApps] = useState(null);
+  const [activeApp, setActiveApp] = useState("claude");
+  const [sessions, setSessions] = useState(null);
+  const [search, setSearch] = useState("");
+  const query = useDeferredValue(search.trim().toLowerCase());
+  const [mode, setMode] = useState(() =>
+    readPreference(SESSION_PREFS.group, "project") === "time"
+      ? "time"
+      : "project",
   );
-}
+  const [selected, setSelected] = useState(null);
+  const [messages, setMessages] = useState(null);
+  const [usage, setUsage] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [listError, setListError] = useState(null);
+  const [readError, setReadError] = useState(null);
+  const [notice, setNotice] = useState(null);
+  const sessionsController = useRef(null);
+  const transcriptController = useRef(null);
+  const opener = useRef(null);
+  const availableApps = useMemo(
+    () => (apps ?? []).filter((app) => app.available),
+    [apps],
+  );
 
-// Split text into plain and hit segments for search highlighting (cc-switch
-// 4ca7f47/b23c9d5: a find hit inside a collapsed block also OPENS it).
-function highlightSegments(text, query) {
-  if (!query) return null;
-  const segments = [];
-  const lower = String(text ?? "").toLowerCase();
-  const needle = query.toLowerCase();
-  let index = 0;
-  for (;;) {
-    const hit = lower.indexOf(needle, index);
-    if (hit < 0) {
-      if (index < text.length) segments.push({ text: text.slice(index), hit: false });
-      break;
+  useEffect(() => {
+    const controller = new AbortController();
+    readApi("/api/cli-sessions", controller.signal)
+      .then((data) => {
+        if (controller.signal.aborted) return;
+        const next = data.apps ?? [];
+        setApps(next);
+        const first = next.find((app) => app.available);
+        if (first && !next.some((app) => app.id === "claude" && app.available))
+          setActiveApp(first.id);
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted) {
+          setApps([]);
+          setListError(error.message);
+        }
+      });
+    return () => controller.abort();
+  }, []);
+
+  const loadSessions = useCallback(
+    async (app) => {
+      sessionsController.current?.abort();
+      const controller = new AbortController();
+      sessionsController.current = controller;
+      setLoading(true);
+      try {
+        const ids =
+          app === "all" ? availableApps.map((entry) => entry.id) : [app];
+        const responses = await Promise.all(
+          ids.map((id) =>
+            readApi(
+              `/api/cli-sessions/list?app=${encodeURIComponent(id)}`,
+              controller.signal,
+            ),
+          ),
+        );
+        if (controller.signal.aborted) return;
+        setSessions(responses.flatMap((data) => data.sessions ?? []));
+        setListError(null);
+      } catch (error) {
+        if (!controller.signal.aborted) {
+          setSessions([]);
+          setListError(error.message);
+        }
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    },
+    [availableApps],
+  );
+
+  useEffect(() => {
+    if (apps === null) return;
+    setSessions(null);
+    void loadSessions(activeApp);
+    return () => sessionsController.current?.abort();
+  }, [activeApp, apps, loadSessions]);
+  useEffect(() => () => transcriptController.current?.abort(), []);
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(null), 2500);
+    return () => clearTimeout(timer);
+  }, [notice]);
+
+  const handleCopy = async (text) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setNotice(copy("clisessions.copied"));
+    } catch {
+      setNotice(copy("clisessions.copy_failed"));
     }
-    if (hit > index) segments.push({ text: text.slice(index, hit), hit: false });
-    segments.push({ text: text.slice(hit, hit + needle.length), hit: true });
-    index = hit + needle.length;
-  }
-  return segments;
-}
-
-function HighlightedText({ text, query }) {
-  const segments = highlightSegments(text, query);
-  if (!segments) { return text; }
-  const parts = segments.map((segment, index) => {
-    if (segment.hit) { return <mark key={index} className="rounded-sm bg-amber-200 px-0.5 text-oai-black dark:bg-amber-500/40 dark:text-white">{segment.text}</mark>; }
-    return <React.Fragment key={index}>{segment.text}</React.Fragment>;
-  });
-  return parts;
-}
-
-function textHits(text, query) {
-  return !!query && String(text ?? "").toLowerCase().includes(query);
-}
-
-function compactTokenCount(value) {
-  if (!Number.isFinite(value) || value <= 0) return null;
-  if (value >= 1000) return `${(value / 1000).toFixed(value >= 10000 ? 0 : 1)}k`;
-  return String(value);
-}
-
-function TranscriptImage({ image, index }) {
-  const [failed, setFailed] = useState(false);
-  if (image.dataUrl && !failed) {
-    return (
-      <img
-        src={image.dataUrl}
-        alt={copy("clisessions.image.alt", { count: index + 1 })}
-        loading="lazy"
-        onError={() => setFailed(true)}
-        className="max-h-48 max-w-full rounded-lg border border-oai-gray-200 dark:border-oai-gray-700"
-      />
+  };
+  const openSession = async (session) => {
+    if (!selected) opener.current = document.activeElement;
+    transcriptController.current?.abort();
+    const controller = new AbortController();
+    transcriptController.current = controller;
+    setSelected(session);
+    setMessages(null);
+    setUsage(null);
+    setReadError(null);
+    try {
+      const params = new URLSearchParams({
+        app: session.appId,
+        path: session.sourcePath,
+      });
+      const data = await readApi(
+        `/api/cli-sessions/read?${params}`,
+        controller.signal,
+      );
+      if (controller.signal.aborted) return;
+      setMessages(data.messages ?? []);
+      setUsage(data.usage ?? null);
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        setMessages([]);
+        setReadError(error.message);
+      }
+    }
+  };
+  const backToList = () => {
+    transcriptController.current?.abort();
+    setSelected(null);
+    setMessages(null);
+    setUsage(null);
+    setReadError(null);
+    requestAnimationFrame(
+      () =>
+        opener.current?.isConnected &&
+        opener.current.focus({ preventScroll: true }),
     );
-  }
-  return (
-    <span className="inline-flex items-center gap-1 rounded-lg border border-dashed border-oai-gray-300 px-2 py-1 text-[11px] text-oai-gray-500 dark:border-oai-gray-700 dark:text-oai-gray-400">
-      <ImageIcon size={11} aria-hidden="true" />
-      {copy(failed ? "clisessions.image.unavailable" : "clisessions.image.oversized")}
-    </span>
-  );
-}
+  };
+  const filtered = useMemo(() => {
+    return filterSessions(sessions ?? [], query);
+  }, [sessions, query]);
 
-function PatchDiff({ patch, query }) {
-  const [showAll, setShowAll] = useState(false);
-  const lines = patch.body.split("\n");
-  const truncated = !showAll && !textHits(patch.body, query) && lines.length > 400;
   return (
-    <>
-      {Array.isArray(patch.files) && patch.files.length > 0 ? (
-        <div className="mt-1 flex flex-wrap gap-1">
-          {patch.files.map((file, index) => (
-            <span key={index} className="break-all rounded bg-oai-gray-100 px-1.5 py-0.5 font-mono text-[10px] text-oai-gray-600 dark:bg-oai-gray-900 dark:text-oai-gray-300">
-              {file.path}
-            </span>
-          ))}
+    <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden font-oai text-oai-black antialiased dark:text-oai-white">
+      {notice ? (
+        <div
+          role="status"
+          className="shrink-0 bg-oai-brand-50 px-4 py-2 text-xs text-oai-brand-700 dark:bg-oai-brand-950/40 dark:text-oai-brand-300"
+        >
+          {notice}
         </div>
       ) : null}
-      <pre className="mt-1.5 max-h-72 max-w-full overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-5">
-        {(truncated ? lines.slice(0, 400) : lines).map((line, index) => (
-          <span
-            key={index}
-            className={`block ${
-              line.startsWith("+")
-                ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300"
-                : line.startsWith("-")
-                  ? "bg-red-50 text-red-700 dark:bg-red-950/30 dark:text-red-300"
-                  : line.startsWith("***")
-                    ? "font-semibold text-oai-gray-700 dark:text-oai-gray-200"
-                    : "text-oai-gray-500 dark:text-oai-gray-400"
-            }`}
+      <div
+        hidden={Boolean(selected)}
+        className={
+          selected
+            ? "hidden"
+            : "shrink-0 border-b border-oai-gray-200 dark:border-oai-gray-800"
+        }
+      >
+        <div className="flex items-start justify-between gap-4 px-4 pb-3 pt-5 sm:px-6">
+          <div>
+            <h1 className="text-xl font-semibold tracking-tight">
+              {copy("clisessions.title")}
+            </h1>
+            <p className="mt-1 text-sm text-oai-gray-500">
+              {copy("clisessions.subtitle")}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => void loadSessions(activeApp)}
+            disabled={loading || apps === null}
+            aria-label={copy("clisessions.refresh")}
+            title={copy("clisessions.refresh")}
+            className={sessionIconButton}
           >
-            <HighlightedText text={line} query={query} />
+            <RefreshCw
+              size={16}
+              className={
+                loading ? "animate-spin motion-reduce:animate-none" : ""
+              }
+            />
+          </button>
+        </div>
+        <div className="flex gap-1 overflow-x-auto px-4 sm:px-6">
+          {availableApps.length !== 1 && availableApps.length !== 0 ? (
+            <button
+              type="button"
+              aria-pressed={activeApp === "all"}
+              onClick={() => {
+                setActiveApp("all");
+                setSearch("");
+              }}
+              className={`min-h-10 shrink-0 border-b-2 px-3 text-sm ${activeApp === "all" ? "border-oai-brand-500 text-oai-brand-600" : "border-transparent text-oai-gray-500"}`}
+            >
+              {copy("clisessions.all_apps")}
+            </button>
+          ) : null}
+          {availableApps.map((app) => (
+            <button
+              key={app.id}
+              type="button"
+              aria-pressed={activeApp === app.id}
+              onClick={() => {
+                setActiveApp(app.id);
+                setSearch("");
+              }}
+              className={`min-h-10 shrink-0 border-b-2 px-3 text-sm ${activeApp === app.id ? "border-oai-brand-500 text-oai-brand-600 dark:text-oai-brand-400" : "border-transparent text-oai-gray-500"}`}
+            >
+              {sessionAppLabel(app.id)}
+            </button>
+          ))}
+          {apps !== null && availableApps.length === 0 ? (
+            <span className="py-2 text-xs text-oai-gray-500">
+              {copy("clisessions.no_apps")}
+            </span>
+          ) : null}
+        </div>
+        <div className="flex flex-wrap items-center gap-2 px-4 py-3 sm:px-6">
+          <div className="relative min-w-0 flex-1 basis-48">
+            <Search
+              size={15}
+              className="pointer-events-none absolute left-3 top-3 text-oai-gray-400"
+            />
+            <Input
+              aria-label={copy("clisessions.search")}
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder={copy("clisessions.search")}
+              className="h-10 w-full pl-9"
+            />
+          </div>
+          <div className="inline-flex shrink-0 rounded-lg bg-oai-gray-100 p-0.5 dark:bg-oai-gray-800">
+            {["project", "time"].map((value) => (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={mode === value}
+                onClick={() => {
+                  setMode(value);
+                  writePreference(SESSION_PREFS.group, value);
+                }}
+                className={`min-h-10 rounded-md px-3 text-xs ${mode === value ? "bg-oai-white shadow-sm dark:bg-oai-gray-700" : "text-oai-gray-500"}`}
+              >
+                {copy(`clisessions.group.${value}`)}
+              </button>
+            ))}
+          </div>
+          <span
+            role="status"
+            className="text-xs tabular-nums text-oai-gray-500"
+          >
+            {sessions !== null
+              ? copy("clisessions.count", { count: filtered.length })
+              : ""}
           </span>
-        ))}
-      </pre>
-      {truncated ? (
-        <button type="button" onClick={() => setShowAll(true)} className="min-h-10 text-xs text-oai-brand-600 dark:text-oai-brand-400">
-          {copy("clisessions.patch.show_more", { count: lines.length - 400 })}
-        </button>
-      ) : null}
-    </>
-  );
-}
-
-function TranscriptRow({ message, query = "" }) {
-  const style = ROLE_STYLES[roleKey(message.role)];
-  const toolCalls = Array.isArray(message.toolCalls) ? message.toolCalls : [];
-  const up = compactTokenCount(message.usage?.inputTokens);
-  const down = compactTokenCount(message.usage?.outputTokens);
-  const thinking = String(message.thinking ?? "");
-  const thinkingOpen = textHits(thinking, query);
-  return (
-    <div className={`rounded-xl border border-oai-gray-100 p-3 dark:border-oai-gray-800 ${style.bubble}`}>
-      <div className="flex items-center gap-2 text-xs">
-        <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-medium ${style.chip}`}>
-          {message.role === "user" ? <User size={11} aria-hidden="true" /> : null}
-          {copy(`clisessions.role.${roleKey(message.role)}`)}
-        </span>
-        {message.ts != null ? (
-          <span className="tabular-nums text-oai-gray-400">{formatTime(message.ts)}</span>
-        ) : null}
-        {up || down ? (
-          <span className="ml-auto shrink-0 tabular-nums text-[10px] text-oai-gray-400" title={copy("clisessions.msg_tokens", { up: message.usage?.inputTokens ?? 0, down: message.usage?.outputTokens ?? 0 })}>
-            {up ? `↑${up}` : ""}{up && down ? " " : ""}{down ? `↓${down}` : ""}
-          </span>
+        </div>
+        {listError ? (
+          <p role="alert" className="px-4 pb-3 text-sm text-red-600 sm:px-6">
+            {listError}
+          </p>
         ) : null}
       </div>
-      {message.content ? (
-        <p className={`mt-1.5 break-words whitespace-pre-wrap text-sm leading-6 ${message.role === "tool" || message.role === "unknown" ? "font-mono text-xs leading-5" : ""}`}>
-          <HighlightedText text={message.content} query={query} />
-        </p>
-      ) : null}
-      {Array.isArray(message.images) && message.images.length > 0 ? (
-        <div className="mt-1.5 flex flex-wrap gap-1.5">
-          {message.images.map((image, index) => (
-            <TranscriptImage key={index} image={image} index={index} />
-          ))}
+      {!selected && (sessions === null || filtered.length === 0) ? (
+        <div className="px-5 py-16 text-center text-sm text-oai-gray-400">
+          <History size={28} className="mx-auto mb-3" />
+          {copy(
+            sessions === null
+              ? "clisessions.loading"
+              : query
+                ? "clisessions.no_matches"
+                : "clisessions.empty",
+          )}
         </div>
       ) : null}
-      {thinking ? (
-        <details open={thinkingOpen} className="mt-1.5 rounded-lg border border-oai-gray-200 bg-oai-gray-50/60 px-2 py-1 dark:border-oai-gray-700 dark:bg-oai-gray-800/40">
-          <summary className="flex cursor-pointer list-none items-center gap-1 text-xs font-medium text-oai-gray-500 dark:text-oai-gray-400">
-            <Brain size={11} aria-hidden="true" />
-            {copy("clisessions.thinking")}
-          </summary>
-          <pre className="mt-1.5 max-h-56 max-w-full overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] italic leading-5 text-oai-gray-500 dark:text-oai-gray-400"><HighlightedText text={thinking} query={query} /></pre>
-        </details>
-      ) : null}
-      {toolCalls.length > 0 ? (
-        <div className="mt-1.5 flex flex-wrap gap-1.5">
-          {toolCalls.map((call, index) => {
-            const payloadText = toolCallPayloadText(call);
-            const key = call.id ?? call.callId ?? `${call.name}-${index}`;
-            const patch = call.patch;
-            const toolOpen = textHits(payloadText, query) || textHits(call.name, query) || textHits(patch?.body, query);
-            const patchStatus = patch?.error ? "failed" : patch?.status ?? "pending";
-            return (
-              <details key={key} open={toolOpen} className="max-w-full rounded-lg border border-oai-gray-200 bg-oai-gray-50/60 px-2 py-1 dark:border-oai-gray-700 dark:bg-oai-gray-800/40">
-                <summary className="flex cursor-pointer list-none items-center gap-1 text-xs font-medium text-oai-gray-600 dark:text-oai-gray-300">
-                  <Wrench size={11} aria-hidden="true" />
-                  <span className="truncate"><HighlightedText text={call.name} query={query} /></span>
-                  {patch ? (
-                    <>
-                      {patchStatus === "success" ? (
-                        <>
-                          <span className="tabular-nums text-[10px] text-emerald-600 dark:text-emerald-400">+{patch.additions}</span>
-                          <span className="tabular-nums text-[10px] text-red-500 dark:text-red-400">−{patch.deletions}</span>
-                        </>
-                      ) : null}
-                      <span className={`rounded px-1 text-[10px] font-semibold ${patchStatus === "failed" ? "bg-red-50 text-red-600 dark:bg-red-950/40 dark:text-red-400" : "bg-oai-gray-100 text-oai-gray-500 dark:bg-oai-gray-800 dark:text-oai-gray-400"}`}>
-                        {copy(`clisessions.patch.${patchStatus}`)}
-                      </span>
-                    </>
-                  ) : null}
-                </summary>
-                {patch ? (
-                  <PatchDiff patch={patch} query={query} />
-                ) : payloadText ? (
-                  <pre className="mt-1.5 max-h-56 max-w-full overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-5 text-oai-gray-500 dark:text-oai-gray-400"><HighlightedText text={payloadText} query={query} /></pre>
-                ) : null}
-              </details>
-            );
-          })}
-        </div>
+      <SessionList
+        sessions={filtered}
+        query={query}
+        mode={mode}
+        hidden={Boolean(selected)}
+        onOpen={openSession}
+        onCopy={handleCopy}
+      />
+      {selected ? (
+        <SessionReader
+          key={sessionKey(selected)}
+          session={selected}
+          messages={messages}
+          usage={usage}
+          error={readError}
+          onBack={backToList}
+          onReload={() => void openSession(selected)}
+          onCopy={handleCopy}
+        />
       ) : null}
     </div>
   );
 }
 
 export function CliSessionsPage() {
-  const [apps, setApps] = useState(null);
-  const [activeApp, setActiveApp] = useState("claude");
-  const [sessions, setSessions] = useState(null);
-  const [search, setSearch] = useState("");
-  const [selected, setSelected] = useState(null);
-  const [messages, setMessages] = useState(null);
-  const [usage, setUsage] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [deferredSearch, setDeferredSearch] = useState("");
-  useEffect(() => {
-    const timer = setTimeout(() => setDeferredSearch(search.trim().toLowerCase()), 200);
-    return () => clearTimeout(timer);
-  }, [search]);
-
-  const loadApps = useCallback(async (signal) => {
-    try {
-      const data = await fetch("/api/cli-sessions", { cache: "no-store", signal }).then((response) => response.json());
-      if (signal?.aborted) return;
-      if (data?.ok) setApps(data.apps ?? []);
-    } catch {
-      if (!signal?.aborted) setApps([]);
-    }
-  }, []);
-
-  const loadSessions = useCallback(async (app, signal) => {
-    setLoading(true);
-    try {
-      const data = await fetch(`/api/cli-sessions/list?app=${encodeURIComponent(app)}`, { cache: "no-store", signal }).then((response) => response.json());
-      if (signal?.aborted) return;
-      if (!data?.ok) throw new Error(data?.error || "HTTP sessions");
-      setSessions(data.sessions ?? []);
-      setError(null);
-    } catch (e) {
-      if (signal?.aborted) return;
-      setSessions([]);
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      if (!signal?.aborted) setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    void loadApps(controller.signal);
-    return () => controller.abort();
-  }, [loadApps]);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    setSelected(null);
-    setMessages(null);
-    setUsage(null);
-    void loadSessions(activeApp, controller.signal);
-    return () => controller.abort();
-  }, [activeApp, loadSessions]);
-
-  const openRequestIdRef = useRef(0);
-  const openSession = async (session) => {
-    // Stale-response guard (same pattern as loadSessions' abort checks):
-    // a slow transcript read for session A must never render into the
-    // panel the user already pointed at session B.
-    const requestId = ++openRequestIdRef.current;
-    setSelected(session);
-    setMessages(null);
-    setUsage(null);
-    try {
-      const params = new URLSearchParams({ app: activeApp, path: session.sourcePath });
-      const data = await fetch(`/api/cli-sessions/read?${params}`, { cache: "no-store" }).then((response) => response.json());
-      if (openRequestIdRef.current !== requestId) return;
-      if (!data?.ok) throw new Error(data?.error || "HTTP transcript");
-      setMessages(data.messages ?? []);
-      setUsage(data.usage ?? null);
-    } catch (e) {
-      if (openRequestIdRef.current !== requestId) return;
-      setMessages([]);
-      setUsage(null);
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  };
-
-  const filtered = useMemo(() => {
-    if (sessions === null) return [];
-    if (!deferredSearch) return sessions;
-    return sessions.filter((session) => {
-      const haystack = `${session.title ?? ""} ${session.summary ?? ""} ${session.projectDir ?? ""}`.toLowerCase();
-      return haystack.includes(deferredSearch);
-    });
-  }, [sessions, deferredSearch]);
-
-  const availableApps = (apps ?? []).filter((app) => app.available);
-
-  let listContent;
-  if (sessions === null) {
-    listContent = <div className="px-5 py-8 text-center text-sm text-oai-gray-400">{copy("clisessions.loading")}</div>;
-  } else if (filtered.length === 0) {
-    listContent = (
-      <div className="rounded-xl border border-dashed border-oai-gray-200 dark:border-oai-gray-800 px-5 py-10 text-center">
-        <History className="mx-auto h-8 w-8 text-oai-gray-300 dark:text-oai-gray-600" />
-        <p className="mt-3 text-sm text-oai-gray-500 dark:text-oai-gray-400">{copy("clisessions.empty")}</p>
-      </div>
-    );
-  } else {
-    listContent = filtered.map((session) => (
-      <button
-        key={session.sourcePath}
-        type="button"
-        onClick={() => void openSession(session)}
-        className={`rounded-xl border px-3.5 py-3 text-left transition-colors ${
-          selected?.sourcePath === session.sourcePath
-            ? "border-oai-brand-500 bg-oai-brand-50/50 dark:bg-oai-brand-950/20"
-            : "border-oai-gray-200 bg-white hover:bg-oai-gray-50 dark:border-oai-gray-800 dark:bg-oai-gray-900 dark:hover:bg-oai-gray-800/60"
-        }`}
-      >
-        <span className="flex items-center justify-between gap-2">
-          <span className="min-w-0 flex-1 truncate text-sm font-medium">{session.title || copy("clisessions.untitled")}</span>
-          {session.lastActiveAt ? (
-            <span className="shrink-0 text-[10px] tabular-nums text-oai-gray-400" title={formatTime(session.lastActiveAt)}>
-              {relativeFrom(session.lastActiveAt) ?? formatTime(session.lastActiveAt)}
-            </span>
-          ) : null}
-        </span>
-        {session.summary ? (
-          <span className="mt-1 line-clamp-2 block text-xs leading-5 text-oai-gray-500 dark:text-oai-gray-400">{session.summary}</span>
-        ) : null}
-        {session.projectDir ? (
-          <span className="mt-1 block truncate font-mono text-[10px] text-oai-gray-400" title={session.projectDir}>{session.projectDir}</span>
-        ) : null}
-      </button>
-    ));
-  }
-
-  const hasExportableTranscript = Array.isArray(messages) && messages.length > 0;
-
-  let transcriptContent;
-  if (!selected) {
-    transcriptContent = (
-      <div className="flex flex-1 flex-col items-center justify-center gap-2 px-5 py-16 text-center">
-        <Search className="h-8 w-8 text-oai-gray-300 dark:text-oai-gray-600" />
-        <p className="text-sm text-oai-gray-500 dark:text-oai-gray-400">{copy("clisessions.pick_hint")}</p>
-      </div>
-    );
-  } else if (messages === null) {
-    transcriptContent = <div className="px-5 py-8 text-center text-sm text-oai-gray-400">{copy("clisessions.loading")}</div>;
-  } else if (messages.length === 0) {
-    transcriptContent = <div className="px-5 py-8 text-center text-sm text-oai-gray-400">{copy("clisessions.empty_transcript")}</div>;
-  } else {
-    transcriptContent = messages.map((message, index) => <TranscriptRow key={index} message={message} query={deferredSearch} />);
-  }
-
   if (!IS_LOCAL_HOST && !isMockEnabled()) {
     return (
-      <div className="flex flex-col flex-1 text-oai-black dark:text-oai-white font-oai antialiased">
+      <div className="flex flex-1 flex-col">
         <LocalOnlyNotice />
       </div>
     );
   }
-
-  return (
-    <div className="flex flex-col flex-1 gap-4 text-oai-black dark:text-oai-white font-oai antialiased">
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight">{copy("clisessions.title")}</h1>
-        <p className="mt-1 text-sm text-oai-gray-500 dark:text-oai-gray-400">{copy("clisessions.subtitle")}</p>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="inline-flex overflow-x-auto rounded-lg border border-oai-gray-200 dark:border-oai-gray-800 bg-oai-gray-50 dark:bg-oai-gray-800/60 p-0.5">
-          {availableApps.length === 0 && apps !== null ? (
-            <span className="px-2.5 py-2 text-xs text-oai-gray-500">{copy("clisessions.no_apps")}</span>
-          ) : null}
-          {availableApps.map((app) => (
-            <button
-              key={app.id}
-              type="button"
-              onClick={() => {
-                setActiveApp(app.id);
-                setSearch("");
-              }}
-              aria-pressed={activeApp === app.id}
-              className={`shrink-0 rounded-md px-2.5 py-2 sm:py-1 text-xs font-medium transition-colors ${
-                activeApp === app.id
-                  ? "bg-white dark:bg-oai-gray-900 shadow-oai-sm text-oai-black dark:text-white"
-                  : "text-oai-gray-500 hover:text-oai-black dark:hover:text-white"
-              }`}
-            >
-              {(APP_LABELS[app.id] ?? (() => app.id))()}
-            </button>
-          ))}
-        </div>
-        <Input
-          aria-label={copy("clisessions.search")}
-          value={search}
-          onChange={(event) => setSearch(event.currentTarget.value)}
-          placeholder={copy("clisessions.search")}
-          className="h-10 sm:h-8 w-full sm:w-56"
-        />
-        <button
-          type="button"
-          onClick={() => void loadSessions(activeApp)}
-          disabled={loading}
-          aria-label={copy("clisessions.refresh")}
-          title={copy("clisessions.refresh")}
-          className="inline-flex h-10 sm:h-8 w-10 sm:w-8 items-center justify-center rounded-lg border border-oai-gray-200 text-oai-gray-500 hover:bg-oai-gray-50 dark:border-oai-gray-700 dark:hover:bg-oai-gray-800"
-        >
-          <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin motion-reduce:animate-none" : ""}`} />
-        </button>
-        <span className="text-xs text-oai-gray-500 dark:text-oai-gray-400" role="status">
-          {sessions !== null ? copy("clisessions.count", { count: filtered.length }) : ""}
-        </span>
-      </div>
-
-      {error ? (
-        <div role="alert" className="rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-3.5 py-2.5 text-sm text-amber-800 dark:text-amber-300">
-          {error}
-        </div>
-      ) : null}
-
-      <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[22rem_1fr]">
-        <div className={`min-w-0 flex-col gap-2 overflow-y-auto [scrollbar-gutter:stable] ${selected ? "hidden lg:flex" : "flex"}`}>
-          {listContent}
-        </div>
-
-        <div className={`min-w-0 flex-col rounded-xl border border-oai-gray-200 bg-white dark:border-oai-gray-800 dark:bg-oai-gray-900 ${selected ? "flex" : "hidden lg:flex"}`}>
-          {selected ? (
-            <>
-              <div className="flex items-center gap-2 border-b border-oai-gray-100 px-4 py-3 dark:border-oai-gray-800">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelected(null);
-                    setMessages(null);
-                    setUsage(null);
-                  }}
-                  aria-label={copy("clisessions.back")}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-oai-gray-500 hover:bg-oai-gray-100 lg:hidden dark:hover:bg-oai-gray-800"
-                >
-                  <ArrowLeft className="h-4 w-4" />
-                </button>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">{selected.title || copy("clisessions.untitled")}</p>
-                  {selected.resumeCommand ? (
-                    <p className="truncate font-mono text-[10px] text-oai-gray-400" title={selected.resumeCommand}>{selected.resumeCommand}</p>
-                  ) : null}
-                </div>
-                <UsageChips usage={usage} />
-                {hasExportableTranscript ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const blob = new Blob([exportSessionMarkdown(selected, messages, formatTime, roleKey)], { type: "text/markdown;charset=utf-8" });
-                      const url = URL.createObjectURL(blob);
-                      const anchor = document.createElement("a");
-                      anchor.href = url;
-                      anchor.download = `${(selected.title || selected.sourcePath.split("/").pop() || "session").replace(/[\\/:*?"<>|]+/g, "-").slice(0, 80)}.md`;
-                      anchor.click();
-                      URL.revokeObjectURL(url);
-                    }}
-                    aria-label={copy("clisessions.export")}
-                    title={copy("clisessions.export")}
-                    className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-oai-gray-500 hover:bg-oai-gray-100 dark:hover:bg-oai-gray-800"
-                  >
-                    <Download className="h-4 w-4" />
-                  </button>
-                ) : null}
-              </div>
-              <div className="flex flex-col gap-2.5 overflow-y-auto [scrollbar-gutter:stable] p-4">
-                {transcriptContent}
-              </div>
-            </>
-          ) : null}
-        </div>
-      </div>
-    </div>
-  );
+  return <LocalCliSessionsPage />;
 }

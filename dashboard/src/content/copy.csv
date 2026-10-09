@@ -2310,14 +2310,14 @@ quota.close_hint,ui,QuotaWidget,QuotaWidget,close_hint,"Close widget; reopen fro
 nav.provider_switch,pswitch,ProviderSwitchPage,Sidebar,nav_provider_switch,Provider Configs,,active
 nav.cli_sessions,clisessions,CliSessionsPage,Sidebar,nav_cli_sessions,CLI Sessions,,active
 clisessions.title,clisessions,CliSessionsPage,CliSessionsPage,title,CLI Sessions,,active
-clisessions.subtitle,clisessions,CliSessionsPage,CliSessionsPage,subtitle,Browse the session transcripts your CLI tools recorded on this machine. Ported from cc-switch.,,active
+clisessions.subtitle,clisessions,CliSessionsPage,CliSessionsPage,subtitle,Browse local CLI conversations by project or time.,,active
 clisessions.search,clisessions,CliSessionsPage,CliSessionsPage,search,Search sessions,,active
 clisessions.refresh,clisessions,CliSessionsPage,CliSessionsPage,refresh,Rescan,,active
 clisessions.count,clisessions,CliSessionsPage,CliSessionsPage,count,"{{count}} sessions",,active
 clisessions.loading,clisessions,CliSessionsPage,CliSessionsPage,loading,Loading…,,active
 clisessions.empty,clisessions,CliSessionsPage,CliSessionsPage,empty,No session logs found for this app yet.,,active
 clisessions.empty_transcript,clisessions,CliSessionsPage,CliSessionsPage,empty_transcript,This session has no readable messages.,,active
-clisessions.pick_hint,clisessions,CliSessionsPage,CliSessionsPage,pick_hint,Pick a session on the left to read its transcript.,,active
+clisessions.pick_hint,clisessions,CliSessionsPage,CliSessionsPage,pick_hint,Open a session to read its transcript.,,active
 clisessions.untitled,clisessions,CliSessionsPage,CliSessionsPage,untitled,Untitled session,,active
 clisessions.no_apps,clisessions,CliSessionsPage,CliSessionsPage,no_apps,No CLI session roots found,,active
 clisessions.back,clisessions,CliSessionsPage,CliSessionsPage,back,Back to list,,active
@@ -2758,3 +2758,43 @@ pswitch.provider.save_effect,pswitch,Shared,Shared,save_effect,Saves this preset
 pswitch.provider.save_effect_active,pswitch,Shared,Shared,save_effect_active,Saving also applies changes to the configuration currently in use.,,active
 
 trend.monitor.pin_hint,dashboard,DashboardPage,TrendMonitor,hint,"Click a bar to pin and scroll details",,active
+clisessions.all_apps,clisessions,CliSessionsPage,CliSessionsPage,all_apps,All apps,,active
+clisessions.group.project,clisessions,CliSessionsPage,CliSessionsPage,group_project,By project,,active
+clisessions.group.time,clisessions,CliSessionsPage,CliSessionsPage,group_time,By time,,active
+clisessions.group.today,clisessions,CliSessionsPage,CliSessionsPage,group_today,Today,,active
+clisessions.group.yesterday,clisessions,CliSessionsPage,CliSessionsPage,group_yesterday,Yesterday,,active
+clisessions.group.week,clisessions,CliSessionsPage,CliSessionsPage,group_week,This week,,active
+clisessions.group.earlier,clisessions,CliSessionsPage,CliSessionsPage,group_earlier,Earlier,,active
+clisessions.unknown_project,clisessions,CliSessionsPage,CliSessionsPage,unknown_project,Unknown project,,active
+clisessions.expand_groups,clisessions,CliSessionsPage,CliSessionsPage,expand_groups,Expand groups,,active
+clisessions.collapse_groups,clisessions,CliSessionsPage,CliSessionsPage,collapse_groups,Collapse groups,,active
+clisessions.no_matches,clisessions,CliSessionsPage,CliSessionsPage,no_matches,No matching sessions.,,active
+clisessions.load_failed,clisessions,CliSessionsPage,CliSessionsPage,load_failed,Unable to load sessions. Try rescanning.,,active
+clisessions.copy_resume,clisessions,CliSessionsPage,CliSessionsPage,copy_resume,Copy resume command,,active
+clisessions.copy_id,clisessions,CliSessionsPage,CliSessionsPage,copy_id,Copy session ID,,active
+clisessions.copy_path,clisessions,CliSessionsPage,CliSessionsPage,copy_path,Copy source path,,active
+clisessions.copy_message,clisessions,CliSessionsPage,CliSessionsPage,copy_message,Copy message,,active
+clisessions.copied,clisessions,CliSessionsPage,CliSessionsPage,copied,Copied,,active
+clisessions.copy_failed,clisessions,CliSessionsPage,CliSessionsPage,copy_failed,Could not copy. Check clipboard permission.,,active
+clisessions.reload,clisessions,CliSessionsPage,CliSessionsPage,reload,Reload transcript,,active
+clisessions.details,clisessions,CliSessionsPage,CliSessionsPage,details,Session actions,,active
+clisessions.turn,clisessions,CliSessionsPage,CliSessionsPage,turn,Turn {{count}},,active
+clisessions.turn_count,clisessions,CliSessionsPage,CliSessionsPage,turn_count,{{count}} turns,,active
+clisessions.process,clisessions,CliSessionsPage,CliSessionsPage,process,Execution process · {{count}} steps,,active
+clisessions.process_failed,clisessions,CliSessionsPage,CliSessionsPage,process_failed,{{count}} failed,,active
+clisessions.expand_processes,clisessions,CliSessionsPage,CliSessionsPage,expand_processes,Expand processes,,active
+clisessions.collapse_processes,clisessions,CliSessionsPage,CliSessionsPage,collapse_processes,Collapse processes,,active
+clisessions.filter.all,clisessions,CliSessionsPage,CliSessionsPage,filter_all,All,,active
+clisessions.filter.conversation,clisessions,CliSessionsPage,CliSessionsPage,filter_conversation,Conversation,,active
+clisessions.filter.changes,clisessions,CliSessionsPage,CliSessionsPage,filter_changes,Changes,,active
+clisessions.outline,clisessions,CliSessionsPage,CliSessionsPage,outline,Outline,,active
+clisessions.find,clisessions,CliSessionsPage,CliSessionsPage,find,Find in transcript,,active
+clisessions.find_count,clisessions,CliSessionsPage,CliSessionsPage,find_count,{{current}} / {{count}} matching turns,,active
+clisessions.find_previous,clisessions,CliSessionsPage,CliSessionsPage,find_previous,Previous matching turn,,active
+clisessions.find_next,clisessions,CliSessionsPage,CliSessionsPage,find_next,Next matching turn,,active
+clisessions.find_clear,clisessions,CliSessionsPage,CliSessionsPage,find_clear,Clear transcript search,,active
+clisessions.no_changes,clisessions,CliSessionsPage,CliSessionsPage,no_changes,No file changes in this transcript.,,active
+clisessions.remote_image,clisessions,CliSessionsPage,CliSessionsPage,remote_image,Open linked image,,active
+clisessions.expand_content,clisessions,CliSessionsPage,CliSessionsPage,expand_content,Show full message,,active
+clisessions.collapse_content,clisessions,CliSessionsPage,CliSessionsPage,collapse_content,Collapse message,,active
+clisessions.tool_output,clisessions,CliSessionsPage,CliSessionsPage,tool_output,Tool output,,active

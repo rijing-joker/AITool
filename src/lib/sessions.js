@@ -331,6 +331,7 @@ async function claudeReadMessages(filePath) {
         toolResults = results.map((item) => ({
           toolUseId: typeof item.tool_use_id === "string" ? item.tool_use_id : null,
           content: extractText(item.content),
+          ...(typeof item.is_error === "boolean" ? { isError: item.is_error } : {}),
         }));
       }
     }
@@ -501,11 +502,17 @@ async function codexParseSession(filePath) {
 
 // Rejected patches often have no exit code. Missing output is not success.
 function applyPatchStatus(output) {
-  const text = String(output ?? "").trim();
+  // Native Codex results may be JSON-encoded { output, metadata } envelopes.
+  // Decode only for status detection; the transcript keeps the original text.
+  const rawText = extractText(output);
+  const result = typeof output === "string" || Array.isArray(output) ? parseJsonLine(rawText) : output;
+  const text = extractText(result?.output ?? rawText).trim();
   const exit = text.match(/(?:^|\n)(?:Exit code:|Process exited with code)\s*(-?\d+)/i);
+  const exitCode = Number.isInteger(result?.metadata?.exit_code)
+    ? result.metadata.exit_code : exit ? Number(exit[1]) : null;
   if (/^(?:apply_patch verification failed|patch rejected|error:|failed to)/im.test(text)
-      || (exit && Number(exit[1]) !== 0)) return "failed";
-  if ((exit && Number(exit[1]) === 0) || /^Success\.?(?:\s|$)/im.test(text)) return "success";
+      || (exitCode !== null && exitCode !== 0)) return "failed";
+  if (exitCode === 0 || /^Success\.?(?:\s|$)/im.test(text)) return "success";
   return "pending";
 }
 
@@ -547,6 +554,8 @@ function parseApplyPatch(argumentsText) {
 async function codexReadMessages(filePath) {
   const raw = await fsp.readFile(filePath, "utf8");
   const messages = [];
+  // Ordinary tool results must not scan the transcript for a patch they lack.
+  const patchesByCallId = new Map();
   // Attribute cumulative increments to the model active for each event.
   // Input includes cache reads; reasoning is already included in output.
   const usage = emptyUsage(true);
@@ -607,7 +616,10 @@ async function codexReadMessages(filePath) {
           : { arguments: typeof args === "string" ? args : null }),
       }];
       const patch = payload.name === "apply_patch" ? parseApplyPatch(args) : null;
-      if (patch) toolCalls[0].patch = patch;
+      if (patch) {
+        toolCalls[0].patch = patch;
+        if (typeof payload.call_id === "string") patchesByCallId.set(payload.call_id, patch);
+      }
       content = "";
     } else if (payload.type === "function_call_output" || payload.type === "custom_tool_call_output") {
       role = "tool";
@@ -616,13 +628,10 @@ async function codexReadMessages(filePath) {
         callId: typeof payload.call_id === "string" ? payload.call_id : null,
         output: content,
       }];
-      if (typeof payload.call_id === "string") {
-        const callRow = messages.findLast((row) => row.toolCalls?.some((call) => call.callId === payload.call_id && call.patch));
-        const patch = callRow?.toolCalls.find((call) => call.callId === payload.call_id)?.patch;
-        if (patch) {
-          patch.status = applyPatchStatus(content);
-          patch.error = patch.status === "failed";
-        }
+      const patch = patchesByCallId.get(payload.call_id);
+      if (patch) {
+        patch.status = applyPatchStatus(payload.output);
+        patch.error = patch.status === "failed";
       }
     } else if (payload.type === "reasoning") {
       // Reasoning summaries render as their own collapsed thinking row.

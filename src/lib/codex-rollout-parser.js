@@ -9,7 +9,7 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 
-const { listRolloutFiles } = require("./rollout");
+const { listRolloutFiles, isRolloutFileName, isCompressedRolloutFilePath, materializeCompressedRolloutView } = require("./rollout");
 const {
   consumeUsageDelta,
   createUsageDeltaState,
@@ -160,7 +160,7 @@ function listJsonlFiles(rootDir) {
       const filePath = path.join(dir, entry.name);
       if (entry.isDirectory()) {
         stack.push(filePath);
-      } else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
+      } else if (entry.isFile() && (entry.name.endsWith(".jsonl") || isRolloutFileName(entry.name))) {
         out.push(filePath);
       }
     }
@@ -331,7 +331,8 @@ function discoverCodexSessionFiles(rootDirs, options = {}) {
         stack.push(filePath);
         continue;
       }
-      if (!child.isFile() || !child.name.endsWith(".jsonl") || visited.has(filePath)) continue;
+      if (!child.isFile() || visited.has(filePath)) continue;
+      if (!child.name.endsWith(".jsonl") && !isRolloutFileName(child.name)) continue;
       visited.add(filePath);
       if (diagnostics) diagnostics.discovered_files += 1;
       const cached = inventory.files.get(filePath) || null;
@@ -1193,19 +1194,30 @@ async function* readCodexObjectsIncremental(filePath, diagnostics, fileIndex, {
   contentHasher = null,
   sourceHandle = null,
 } = {}) {
-  const start = Math.max(0, Number(startOffset) || 0);
-  const requestedEnd = Number(endOffset);
-  const hasBoundedEnd = endOffset !== null && endOffset !== undefined &&
+  // Compressed rollouts stream from a temp decompressed view with no byte
+  // bounds: callers pass offsets derived from the compressed file's stat, which
+  // have no meaning on the decompressed stream. The view is materialized fresh
+  // per read (compressed rollouts are frozen; the event dedup keeps re-reads
+  // idempotent — see materializeCompressedRolloutView).
+  let compressedView = null;
+  if (!sourceHandle && isCompressedRolloutFilePath(filePath)) {
+    compressedView = await materializeCompressedRolloutView(filePath);
+  }
+  const readPath = compressedView ? compressedView.path : filePath;
+  const start = compressedView ? 0 : Math.max(0, Number(startOffset) || 0);
+  const requestedEnd = compressedView ? Number.NaN : Number(endOffset);
+  const hasBoundedEnd = !compressedView && endOffset !== null && endOffset !== undefined &&
     Number.isFinite(requestedEnd) && requestedEnd >= 0;
   if (hasBoundedEnd && requestedEnd <= start) {
     if (readProgress) readProgress.endOffset = start;
+    compressedView.cleanup();
     return;
   }
 
   if (diagnostics) diagnostics.opened_files += 1;
   const stream = sourceHandle && typeof sourceHandle.read === "function"
     ? null
-    : fs.createReadStream(filePath, {
+    : fs.createReadStream(readPath, {
         start,
         ...(hasBoundedEnd ? { end: requestedEnd - 1 } : {}),
       });
@@ -1286,6 +1298,7 @@ async function* readCodexObjectsIncremental(filePath, diagnostics, fileIndex, {
   } finally {
     if (readProgress) readProgress.endOffset = nextChunkOffset;
     stream?.destroy();
+    compressedView?.cleanup();
     if (diagnostics) diagnostics.parsed_files += 1;
   }
 }
@@ -1360,7 +1373,7 @@ async function* iterateCodexObjects(filePaths, diagnostics, options = {}) {
 
 function rolloutSessionIdFromPath(filePath) {
   const match = path.basename(String(filePath || "")).match(
-    /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i,
+    /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl(?:\.zst)?$/i,
   );
   return match ? match[1] : null;
 }

@@ -19,6 +19,10 @@ const fs = require("node:fs");
 const fsp = require("node:fs/promises");
 const path = require("node:path");
 const { createUsageDeltaState, consumeUsageDelta } = require("./codex-token-usage");
+const {
+  decompressZstdBuffer,
+  MAX_COMPRESSED_ROLLOUT_BYTES,
+} = require("./rollout");
 
 const TITLE_MAX_CHARS = 80;
 const SUMMARY_MAX_CHARS = 160;
@@ -128,7 +132,7 @@ function capThinking(text) {
 }
 
 async function readHeadTailLines(filePath, headN = HEAD_LINES, tailN = TAIL_LINES) {
-  const raw = await fsp.readFile(filePath, "utf8");
+  const raw = await readSessionText(filePath);
   const lines = raw.split("\n").filter((line) => line !== "");
   if (lines.length <= headN + tailN) return { head: lines, tail: lines };
   return {
@@ -204,22 +208,49 @@ function trackModelUsage(usage, model, row) {
   entry.cacheCreationTokens += row.cacheCreationTokens;
 }
 
-async function collectJsonlFiles(root, files = []) {
+async function collectJsonlFiles(root, files = [], { compressed = false } = {}) {
   let entries;
   try {
     entries = await fsp.readdir(root, { withFileTypes: true });
   } catch {
     return files;
   }
+  const plainNames = compressed
+    ? new Set(entries.filter((e) => e.isFile() && e.name.endsWith(".jsonl")).map((e) => e.name))
+    : null;
   for (const entry of entries) {
     const fullPath = path.join(root, entry.name);
     if (entry.isDirectory()) {
-      await collectJsonlFiles(fullPath, files);
+      await collectJsonlFiles(fullPath, files, { compressed });
     } else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
+      files.push(fullPath);
+    } else if (
+      compressed &&
+      entry.isFile() &&
+      entry.name.endsWith(".jsonl.zst") &&
+      // When Codex compression briefly leaves both forms in place, the plain
+      // file is the source of truth (cc-switch 8641cd1).
+      !plainNames.has(entry.name.slice(0, -".zst".length))
+    ) {
       files.push(fullPath);
     }
   }
   return files;
+}
+
+// Codex compresses 7-day-old rollouts to rollout-*.jsonl.zst (cc-switch
+// 8641cd1 adaptation); decompress transparently so transcript readers stay
+// byte-identical for both forms.
+async function readSessionText(filePath) {
+  if (filePath.endsWith(".jsonl.zst")) {
+    const compressed = await fsp.readFile(filePath);
+    const data = await decompressZstdBuffer(compressed);
+    if (data.length > MAX_COMPRESSED_ROLLOUT_BYTES) {
+      throw new Error(`compressed session decompresses to ${data.length} bytes, over the cap`);
+    }
+    return data.toString("utf8");
+  }
+  return fsp.readFile(filePath, "utf8");
 }
 
 // ---------------------------------------------------------------------------
@@ -545,7 +576,7 @@ function parseApplyPatch(argumentsText) {
 }
 
 async function codexReadMessages(filePath) {
-  const raw = await fsp.readFile(filePath, "utf8");
+  const raw = await readSessionText(filePath);
   const messages = [];
   // Attribute cumulative increments to the model active for each event.
   // Input includes cache reads; reasoning is already included in output.
@@ -924,7 +955,7 @@ async function listSessions({ app, home, env = process.env } = {}) {
 
   const files = [];
   for (const root of rootsForApp(app, resolvedHome)) {
-    await collectJsonlFiles(root, files);
+    await collectJsonlFiles(root, files, { compressed: app === "codex" });
   }
   const sessions = [];
   for (const filePath of files) {
@@ -968,7 +999,7 @@ async function readSession({ app, sourcePath, home, env = process.env } = {}) {
   if (app === "gemini" && path.extname(realPath) !== ".json" && path.extname(realPath) !== ".jsonl") {
     throw new Error("Not a gemini session file");
   }
-  if (app !== "gemini" && path.extname(realPath) !== ".jsonl") {
+  if (app !== "gemini" && path.extname(realPath) !== ".jsonl" && !realPath.endsWith(".jsonl.zst")) {
     throw new Error("Not a session transcript file");
   }
   if (app === "claude" && (isClaudeAgentSession(path.basename(resolved)) || isClaudeAgentSession(path.basename(realPath)))) {

@@ -16,6 +16,7 @@ const os = require("node:os");
 const path = require("node:path");
 
 const { resolveEnvRoot } = require("./scan-roots");
+const { isCompressedRolloutFilePath } = require("./rollout");
 
 const {
   emptyTotals,
@@ -244,7 +245,10 @@ function selectAppendHashPaths(candidateGroups) {
   for (const entries of candidateGroups.values()) {
     if (
       entries.length !== 1 ||
-      !rolloutSessionIdFromPath(entries[0].filePath)
+      !rolloutSessionIdFromPath(entries[0].filePath) ||
+      // A compressed rollout is re-parsed from a fresh decompressed view every
+      // scan — no byte cursor, no append-hash state to validate against.
+      isCompressedRolloutFilePath(entries[0].filePath)
     ) continue;
     const entry = entries[0];
     if (!newest) {

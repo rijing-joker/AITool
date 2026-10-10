@@ -175,11 +175,63 @@ async function listRolloutDayFiles(dayDir, { dayInventoryCache, stats } = {}) {
   return files.map((name) => path.join(dayDir, name));
 }
 
+const COMPRESSED_ROLLOUT_SUFFIX = ".jsonl.zst";
+// Codex compresses rollouts untouched for 7 days into a sibling
+// rollout-*.jsonl.zst and deletes the original (cc-switch 8641cd1
+// adaptation). Decompressed size is capped so a corrupt/hostile archive
+// cannot exhaust memory.
+const MAX_COMPRESSED_ROLLOUT_BYTES = 512 * 1024 * 1024;
+
 function isRolloutFileName(name) {
   if (typeof name !== "string") return false;
   if (name.includes("/") || name.includes("\\")) return false;
   if (name !== path.basename(name)) return false;
-  return name.startsWith("rollout-") && name.endsWith(".jsonl");
+  return name.startsWith("rollout-") &&
+    (name.endsWith(".jsonl") || name.endsWith(COMPRESSED_ROLLOUT_SUFFIX));
+}
+
+function isCompressedRolloutFilePath(filePath) {
+  return typeof filePath === "string" && filePath.endsWith(COMPRESSED_ROLLOUT_SUFFIX);
+}
+
+// The logical rollout path strips the compression suffix: cursors, event keys
+// and day-shard identity must treat rollout-X.jsonl.zst as the same file that
+// was already counted in its plain form, never as a new session.
+function rolloutLogicalPath(filePath) {
+  if (!isCompressedRolloutFilePath(filePath)) return filePath;
+  return filePath.slice(0, -".zst".length);
+}
+
+async function decompressZstdBuffer(data) {
+  const zlib = require("node:zlib");
+  if (typeof zlib.zstdDecompressSync === "function") return zlib.zstdDecompressSync(data);
+  return Buffer.from(await require("@mongodb-js/zstd").decompress(data));
+}
+
+// Decompress a rollout-*.jsonl.zst into a temp file so the byte-stream readers
+// keep working unchanged; the caller owns cleanup(). Compressed rollouts are
+// frozen (Codex only compresses sessions untouched for 7 days), so the view is
+// materialized fresh on every scan and no byte cursor is persisted for it.
+async function materializeCompressedRolloutView(filePath) {
+  const compressed = await fs.readFile(filePath);
+  const data = await decompressZstdBuffer(compressed);
+  if (data.length > MAX_COMPRESSED_ROLLOUT_BYTES) {
+    const error = new Error(
+      `compressed rollout decompresses to ${data.length} bytes, over the ${MAX_COMPRESSED_ROLLOUT_BYTES} cap`,
+    );
+    error.code = "TOKENTRACKER_ROLLOUT_TOO_LARGE";
+    throw error;
+  }
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "aitool-rollout-"));
+  const viewPath = path.join(tempDir, path.basename(filePath).slice(0, -".zst".length));
+  await fs.writeFile(viewPath, data);
+  return {
+    path: viewPath,
+    size: data.length,
+    cleanup() {
+      fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
+    },
+  };
 }
 
 function directoryInventoryStatKey(st) {
@@ -191,7 +243,8 @@ function directoryInventoryStatKey(st) {
   ].join(":");
 }
 
-// Collect rollout-*.jsonl at ANY depth under dir. listRolloutFiles requires the
+// Collect rollout-*.jsonl (plain or .jsonl.zst-compressed) at ANY depth under
+// dir. listRolloutFiles requires the
 // strict YYYY/MM/DD/ nesting Codex itself writes, but Codex-Manager archives
 // sessions FLAT into ~/.codex/archived_sessions/ (issue #187), so the strict
 // scanner misses them. This recursive variant handles both flat and nested
@@ -205,7 +258,7 @@ async function listRolloutFilesDeep(dir) {
       const p = path.join(d, e.name);
       if (e.isDirectory()) {
         await walk(p);
-      } else if (e.isFile() && e.name.startsWith("rollout-") && e.name.endsWith(".jsonl")) {
+      } else if (e.isFile() && isRolloutFileName(e.name)) {
         out.push(p);
       }
     }
@@ -483,12 +536,31 @@ async function parseRolloutIncremental({
     const st = rolloutStats[idx];
     if (!st || !st.isFile()) continue;
 
+    // A compressed rollout is re-parsed from a fresh decompressed view on
+    // every sync and persists no byte cursor: compressed files are frozen, so
+    // the only cost is the decompress, and the persisted codex event dedup
+    // (keyed by the logical sessionUUID) keeps the re-parse a no-op.
+    let compressedView = null;
+    if (isCompressedRolloutFilePath(filePath)) {
+      try {
+        compressedView = await materializeCompressedRolloutView(filePath);
+      } catch {
+        if (syncDiagnostics) {
+          syncDiagnostics.compressed_rollout_errors =
+            Number(syncDiagnostics.compressed_rollout_errors || 0) + 1;
+        }
+        continue;
+      }
+    }
+    const readPath = compressedView ? compressedView.path : filePath;
+    const readStat = compressedView ? { isFile: () => true, ino: 0, size: compressedView.size } : st;
+
     const key = filePath;
-    const prev = cursors.files[key] || null;
-    const inode = st.ino || 0;
+    const prev = compressedView ? null : cursors.files[key] || null;
+    const inode = readStat.ino || 0;
     const sameInode = prev && prev.inode === inode;
     const prevOffset = sameInode ? prev.offset || 0 : 0;
-    const truncated = sameInode && prevOffset > st.size;
+    const truncated = sameInode && prevOffset > readStat.size;
     const rebuildingCodexBaseline = Boolean(
       (fileSource === DEFAULT_SOURCE || fileSource === "acode") &&
       sameInode &&
@@ -574,59 +646,70 @@ async function parseRolloutIncremental({
         ? getAcodeEventDedup()
         : null;
     const codexEventTracker = rolloutEventDedup
-      ? (needsHistoricalRolloutDedup({
-          filePath,
-          prev,
-          sameInode,
-          truncated,
-          startOffset,
-          rebuildingBaseline: rebuildingCodexBaseline,
-        })
+      ? ((
+          // A compressed rollout persists no byte cursor, so every sync is a
+          // full re-parse — only the persisted event set can keep it a no-op.
+          compressedView ||
+          needsHistoricalRolloutDedup({
+            filePath,
+            prev,
+            sameInode,
+            truncated,
+            startOffset,
+            rebuildingBaseline: rebuildingCodexBaseline,
+          })
+        )
           ? rolloutEventDedup.getHistoricalEvents
           : rolloutEventDedup.getAppendOnlyEvents)
       : null;
-    const result = projectContextOnlyScan
-      ? await scanRolloutProjectFileContexts({
-          filePath,
-          fileStat: st,
-          lastTotal,
-          tokenUsageBaselines,
-          lastModel,
-          lastServiceTier,
-          modelAttributionState,
-          projectState,
-          projectMetaCache,
-          publicRepoCache,
-          publicRepoResolver,
-          projectContext,
-          invalidRecordPolicy,
-        })
-      : await parseRolloutFile({
-          filePath,
-          fileStat: st,
-          startOffset,
-          lastTotal,
-          tokenUsageBaselines,
-          lastModel,
-          lastServiceTier,
-          modelAttributionState,
-          usageRecordState,
-          compactionResponseIds,
-          hourlyState,
-          touchedBuckets,
-          source: fileSource,
-          projectState,
-          projectTouchedBuckets,
-          projectRef,
-          projectKey,
-          projectMetaCache,
-          publicRepoCache,
-          publicRepoResolver,
-          projectContext,
-          seenCodexEvents: codexEventTracker,
-          sessionId: codexSessionIdFromPath(filePath),
-          invalidRecordPolicy,
-        });
+    let result;
+    try {
+      result = projectContextOnlyScan
+        ? await scanRolloutProjectFileContexts({
+            filePath,
+            fileStat: st,
+            lastTotal,
+            tokenUsageBaselines,
+            lastModel,
+            lastServiceTier,
+            modelAttributionState,
+            projectState,
+            projectMetaCache,
+            publicRepoCache,
+            publicRepoResolver,
+            projectContext,
+            invalidRecordPolicy,
+          })
+        : await parseRolloutFile({
+            filePath,
+            readPath,
+            fileStat: readStat,
+            startOffset,
+            lastTotal,
+            tokenUsageBaselines,
+            lastModel,
+            lastServiceTier,
+            modelAttributionState,
+            usageRecordState,
+            compactionResponseIds,
+            hourlyState,
+            touchedBuckets,
+            source: fileSource,
+            projectState,
+            projectTouchedBuckets,
+            projectRef,
+            projectKey,
+            projectMetaCache,
+            publicRepoCache,
+            publicRepoResolver,
+            projectContext,
+            seenCodexEvents: codexEventTracker,
+            sessionId: codexSessionIdFromPath(filePath),
+            invalidRecordPolicy,
+          });
+    } finally {
+      compressedView?.cleanup();
+    }
 
     const nextCursor = {
       inode,
@@ -652,17 +735,23 @@ async function parseRolloutIncremental({
         delete cursors.codexUsageRecordOnlyFiles[key];
       }
     }
-    if (codexProjectFastPath) {
-      nextCursor.projectOffset = result.endOffset;
-      nextCursor.projectFileContext = buildProjectFileContext(
-        result.projectFileContexts,
-        projectFreshnessNowMs,
-      );
-    } else if (Number.isFinite(prev?.projectOffset)) {
-      nextCursor.projectOffset = prev.projectOffset;
-      if (prev?.projectFileContext) nextCursor.projectFileContext = prev.projectFileContext;
+    if (compressedView) {
+      // No byte cursor for a compressed rollout — the view is rematerialized
+      // and re-parsed (deduped) on every sync.
+      delete cursors.files[key];
+    } else {
+      if (codexProjectFastPath) {
+        nextCursor.projectOffset = result.endOffset;
+        nextCursor.projectFileContext = buildProjectFileContext(
+          result.projectFileContexts,
+          projectFreshnessNowMs,
+        );
+      } else if (Number.isFinite(prev?.projectOffset)) {
+        nextCursor.projectOffset = prev.projectOffset;
+        if (prev?.projectFileContext) nextCursor.projectFileContext = prev.projectFileContext;
+      }
+      cursors.files[key] = nextCursor;
     }
-    cursors.files[key] = nextCursor;
 
     filesProcessed += 1;
     eventsAggregated += result.eventsAggregated;
@@ -2185,13 +2274,14 @@ function openclawUsageEventIdentity(obj, msg, usage, model) {
 function codexSessionIdFromPath(filePath) {
   if (typeof filePath !== "string") return null;
   const m = filePath.match(
-    /([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\.jsonl$/,
+    /([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\.jsonl(?:\.zst)?$/,
   );
   return m ? m[1] : null;
 }
 
 async function parseRolloutFile({
   filePath,
+  readPath = null,
   fileStat,
   startOffset,
   lastTotal,
@@ -2216,7 +2306,7 @@ async function parseRolloutFile({
   sessionId,
   invalidRecordPolicy,
 }) {
-  const st = fileStat || (await fs.stat(filePath));
+  const st = fileStat || (await fs.stat(readPath || filePath));
   const endOffset = st.size;
   const projectFileContexts = [];
   addProjectFileContext(projectFileContexts, projectContext);
@@ -2234,7 +2324,7 @@ async function parseRolloutFile({
     };
   }
 
-  const stream = fssync.createReadStream(filePath, {
+  const stream = fssync.createReadStream(readPath || filePath, {
     start: startOffset,
     end: endOffset - 1,
   });
@@ -12254,11 +12344,7 @@ async function decodeZedThreadBlob({ dataType, data }) {
     return data.toString("utf8");
   }
   if (type === "zstd") {
-    const zlib = require("node:zlib");
-    const out =
-      typeof zlib.zstdDecompressSync === "function"
-        ? zlib.zstdDecompressSync(data)
-        : Buffer.from(await require("@mongodb-js/zstd").decompress(data));
+    const out = await decompressZstdBuffer(data);
     if (out.length > MAX_ZED_THREAD_JSON_BYTES) {
       throw new Error(`decoded zstd blob exceeds ${MAX_ZED_THREAD_JSON_BYTES} bytes`);
     }
@@ -24366,6 +24452,12 @@ module.exports = {
   listRolloutFiles,
   listRolloutFilesDeep,
   codexSessionIdFromPath,
+  isRolloutFileName,
+  isCompressedRolloutFilePath,
+  rolloutLogicalPath,
+  materializeCompressedRolloutView,
+  decompressZstdBuffer,
+  MAX_COMPRESSED_ROLLOUT_BYTES,
   filterColdCodexRolloutFiles,
   listClaudeProjectFiles,
   listGeminiSessionFiles,

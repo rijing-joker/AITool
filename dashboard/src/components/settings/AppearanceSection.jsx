@@ -10,6 +10,7 @@ import { copy } from "../../lib/copy";
 import { Select } from "../../ui/components";
 import { SectionCard, SegmentedControl, SettingsRow } from "./Controls.jsx";
 import { TOKEN_FORMAT_MODES, TOKEN_GROUPINGS, TOKEN_UNIT_SYSTEMS } from "../../lib/token-format.js";
+import { useQuotaDisplayMode, QUOTA_DISPLAY_MODES } from "../../lib/quota-display";
 
 function buildThemeOptions() {
   return [
@@ -110,6 +111,7 @@ export function AppearanceSection() {
   const { theme, setTheme } = useTheme();
   const { locale, setLocale } = useLocale();
   const { currency, rate, rateSource, rateFetchedAt, setCurrency } = useCurrency();
+  const [quotaDisplayMode, setQuotaDisplayMode] = useQuotaDisplayMode();
   const {
     mode: tokenFormatMode,
     setMode: setTokenFormatMode,
@@ -201,6 +203,26 @@ export function AppearanceSection() {
             ]}
             value={tokenGrouping}
             onChange={setTokenGrouping}
+          />
+        }
+      />
+      <SettingsRow
+        label={copy("settings.appearance.quota_display.label")}
+        hint={copy("settings.appearance.quota_display.hint")}
+        control={
+          <SegmentedControl
+            options={[
+              {
+                value: QUOTA_DISPLAY_MODES.LEFT,
+                label: copy("settings.appearance.quota_display.left"),
+              },
+              {
+                value: QUOTA_DISPLAY_MODES.USED,
+                label: copy("settings.appearance.quota_display.used"),
+              },
+            ]}
+            value={quotaDisplayMode}
+            onChange={setQuotaDisplayMode}
           />
         }
       />

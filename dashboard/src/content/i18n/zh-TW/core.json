@@ -762,5 +762,10 @@
   "settings.appearance.token_grouping.label": "數字分組",
   "settings.appearance.token_grouping.hint": "精確數字使用 3 位或中文 4 位分組；精簡模式的懸停數值也會使用該設定。",
   "settings.appearance.token_grouping.thousand": "3位",
-  "settings.appearance.token_grouping.wan": "4位"
+  "settings.appearance.token_grouping.wan": "4位",
+  "settings.appearance.quota_display.label": "配額顯示",
+  "settings.appearance.quota_display.hint": "方案配額視窗顯示剩餘或已用百分比；顏色與警示始終按剩餘判定。",
+  "settings.appearance.quota_display.left": "剩餘",
+  "settings.appearance.quota_display.used": "已用",
+  "pswitch.quota.used": "已用 {{value}}%"
 }

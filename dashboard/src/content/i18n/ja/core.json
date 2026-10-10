@@ -578,5 +578,10 @@
   "settings.appearance.token_grouping.label": "数値の区切り",
   "settings.appearance.token_grouping.hint": "正確な数値は 3 桁または中国語の 4 桁区切りを使用します。コンパクト表示のツールチップにも適用されます。",
   "settings.appearance.token_grouping.thousand": "3桁",
-  "settings.appearance.token_grouping.wan": "4桁"
+  "settings.appearance.token_grouping.wan": "4桁",
+  "settings.appearance.quota_display.label": "クォータ表示",
+  "settings.appearance.quota_display.hint": "プランのクォータ枠の残量または使用量を表示します。色と警告は常に残量に基づきます。",
+  "settings.appearance.quota_display.left": "残り",
+  "settings.appearance.quota_display.used": "使用済み",
+  "pswitch.quota.used": "使用済み {{value}}%"
 }

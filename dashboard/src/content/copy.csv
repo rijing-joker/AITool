@@ -522,6 +522,11 @@ settings.appearance.token_unit.chinese,ui,SettingsPage,SettingsPage,token_unit_c
 settings.appearance.token_grouping.label,ui,SettingsPage,SettingsPage,token_grouping_label,"Number grouping",,active
 settings.appearance.token_grouping.hint,ui,SettingsPage,SettingsPage,token_grouping_hint,"Exact numbers use 3-digit or Chinese 4-digit grouping. Compact tooltips follow this setting.",,active
 settings.appearance.token_grouping.thousand,ui,SettingsPage,SettingsPage,token_grouping_thousand,"3-digit",,active
+settings.appearance.quota_display.label,ui,SettingsPage,SettingsPage,quota_display_label,"Quota display",,active
+settings.appearance.quota_display.hint,ui,SettingsPage,SettingsPage,quota_display_hint,"Show what is left or what is used in the plan quota windows. Colors and warnings always track what is left.",,active
+settings.appearance.quota_display.left,ui,SettingsPage,SettingsPage,quota_display_left,"Left",,active
+settings.appearance.quota_display.used,ui,SettingsPage,SettingsPage,quota_display_used,"Used",,active
+pswitch.quota.used,pswitch,ProviderSwitchPage,ProviderQuotaLine,quota_used,"{{value}}% used",,active
 settings.appearance.token_grouping.wan,ui,SettingsPage,SettingsPage,token_grouping_wan,"4-digit",,active
 settings.appearance.currency.opt.usd,ui,SettingsPage,SettingsPage,currency_opt_usd,"USD ($)",,active
 settings.appearance.currency.opt.eur,ui,SettingsPage,SettingsPage,currency_opt_eur,"EUR (€)",,active

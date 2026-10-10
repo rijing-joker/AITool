@@ -716,3 +716,31 @@ test("Claude 1h cache-write split flows into per-model usage for pricing", async
   // The 1h share must not inflate the total: it is a subset of cache writes.
   assert.equal(usage.totalTokens, 100 + 50 + 900 + 1000);
 });
+
+test("Codex session usage imports cache writes and falls through stub-zero cache reads", async () => {
+  // token_count info carries cumulative totals; newer Codex versions report
+  // cache writes as cache_write_input_tokens (cc-switch 4bbdbcd) and some
+  // relays stub cache fields to 0 with the real count elsewhere
+  // (cc-switch 5667b28).
+  const codexRoot = path.join(tmpHome, ".codex", "sessions", "2026", "10", "02");
+  fs.mkdirSync(codexRoot, { recursive: true });
+  const codexPath = path.join(codexRoot, "rollout-cache-write.jsonl");
+  fs.writeFileSync(codexPath, [
+    JSON.stringify({ timestamp: "2026-10-02T11:00:00Z", type: "session_meta", payload: { id: "codex-cw", cwd: "/tmp/c" } }),
+    JSON.stringify({ timestamp: "2026-10-02T11:00:01Z", type: "turn_context", payload: { model: "gpt-5.6" } }),
+    JSON.stringify({
+      timestamp: "2026-10-02T11:00:02Z", type: "event_msg",
+      payload: { type: "token_count", info: { total_token_usage: {
+        input_tokens: 1000, cached_input_tokens: 0, cache_read_input_tokens: 400,
+        cache_write_input_tokens: 300, output_tokens: 50, reasoning_output_tokens: 0, total_tokens: 1350,
+      } } },
+    }),
+  ].join("\n") + "\n");
+
+  const { usage } = await sessions.readSession({ app: "codex", sourcePath: codexPath, home: tmpHome });
+  assert.deepEqual(
+    { inputTokens: usage.inputTokens, cacheReadTokens: usage.cacheReadTokens, outputTokens: usage.outputTokens, cacheCreationTokens: usage.cacheCreationTokens, model: usage.model, inputInclusive: usage.inputInclusive },
+    { inputTokens: 1000, cacheReadTokens: 400, outputTokens: 50, cacheCreationTokens: 300, model: "gpt-5.6", inputInclusive: true },
+  );
+  assert.equal(usage.perModel[0].cacheCreationTokens, 300);
+});

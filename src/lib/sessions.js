@@ -589,7 +589,10 @@ async function codexReadMessages(filePath) {
   const usageState = createUsageDeltaState();
   const snapshot = (value) => value && typeof value === "object" && !Array.isArray(value) ? {
     ...value,
-    cached_input_tokens: value.cached_input_tokens ?? value.cache_read_input_tokens,
+    // Explicit-zero stubs fall through to the documented alternates
+    // (cc-switch 5667b28): some relays hardcode the leading cache field to 0
+    // and only report the real count in the other one.
+    cached_input_tokens: value.cached_input_tokens || value.cache_read_input_tokens || 0,
     total_tokens: value.total_tokens ?? ((Number(value.input_tokens) || 0) + (Number(value.output_tokens) || 0)),
   } : null;
   let usageSeen = false;
@@ -614,7 +617,10 @@ async function codexReadMessages(filePath) {
           outputTokens: delta.output_tokens,
           reasoningTokens: delta.reasoning_output_tokens,
           cacheReadTokens: delta.cached_input_tokens,
-          cacheCreationTokens: 0,
+          // Codex rollouts report cache writes as cache_write_input_tokens
+          // (canonicalUsage maps it); billing GPT-5.6+ cache writes at the
+          // plain input rate undercounts (cc-switch 4bbdbcd).
+          cacheCreationTokens: delta.cache_creation_input_tokens || 0,
         };
         trackModelUsage(usage, usage.model, row);
         for (const [key, count] of Object.entries(row)) usage[key] += count;

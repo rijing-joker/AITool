@@ -826,5 +826,9 @@
   "settings.appearance.quota_display.hint": "计划配额窗口显示剩余或已用百分比；颜色与预警始终按剩余判定。",
   "settings.appearance.quota_display.left": "剩余",
   "settings.appearance.quota_display.used": "已用",
-  "pswitch.quota.used": "已用 {{value}}%"
+  "pswitch.quota.used": "已用 {{value}}%",
+  "pswitch.search.toggle_aria": "搜索供应商",
+  "pswitch.search.placeholder": "按名称、备注或 API 地址搜索…",
+  "pswitch.search.aria": "筛选供应商",
+  "pswitch.search.empty": "没有供应商匹配此搜索。"
 }

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-06T04:52:01.619Z",
+  "generatedAt": "2026-10-10T17:58:04.051Z",
   "root": "dashboard/src",
   "rules": {
     "colors": "hex/rgb(a) literals",
@@ -7,7 +7,7 @@
   },
   "totals": {
     "colors": 412,
-    "rawText": 227
+    "rawText": 232
   },
   "files": {
     "dashboard/src/components/InsforgeUserHeaderControls.jsx": {
@@ -164,9 +164,10 @@
     },
     "dashboard/src/pages/ProviderSwitchPage.jsx": {
       "colors": 0,
-      "rawText": 2,
+      "rawText": 3,
       "rawTextTokens": [
         ") : appInfo.suggestion ? (",
+        ") : filteredProviderRows.length === 0 && searchQuery.trim() ? (",
         "= 8 && (isExport || payloadText.trim() !== \"\"); return ("
       ]
     },
@@ -300,7 +301,7 @@
     },
     "dashboard/src/pages/requests-tab.jsx": {
       "colors": 0,
-      "rawText": 23,
+      "rawText": 22,
       "rawTextTokens": [
         ") : record.alias && record.alias !== record.model ? (",
         ") : records.length === 0 ? (",
@@ -314,7 +315,6 @@
         "); case \"source\": return (",
         "); case \"speed\": return (",
         "); case \"total\": return (",
-        "); case \"ttft\": return (",
         "); return (",
         "0 ? (",
         "; case \"output\": return",
@@ -617,10 +617,9 @@
     },
     "dashboard/src/ui/dashboard/components/__tests__/TrendMonitor.test.jsx": {
       "colors": 0,
-      "rawText": 2,
+      "rawText": 1,
       "rawTextTokens": [
-        "); expect(plain.container.textContent).not.toContain(\"14:00\"); const zoomed = render(",
-        "); expect(without.queryByRole(\"button\")).toBeNull(); const withCfg = render("
+        "); expect(plain.container.textContent).not.toContain(\"14:00\"); const zoomed = render("
       ]
     },
     "dashboard/src/ui/dashboard/views/DashboardView.jsx": {
@@ -645,6 +644,13 @@
         "en",
         "zh",
         "zh-tw"
+      ]
+    },
+    "dashboard/src/ui/foundation/__tests__/TokenFormatProvider.test.jsx": {
+      "colors": 0,
+      "rawText": 1,
+      "rawTextTokens": [
+        "grouping"
       ]
     },
     "dashboard/src/ui/marketing/MarketingLanding.jsx": {
@@ -738,13 +744,6 @@
         "0; return (",
         "The Token Tracker",
         "→ tokentracker.cc"
-      ]
-    },
-    "dashboard/src/ui/foundation/__tests__/TokenFormatProvider.test.jsx": {
-      "colors": 0,
-      "rawText": 1,
-      "rawTextTokens": [
-        "grouping"
       ]
     }
   }

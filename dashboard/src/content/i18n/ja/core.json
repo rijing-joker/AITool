@@ -583,5 +583,9 @@
   "settings.appearance.quota_display.hint": "プランのクォータ枠の残量または使用量を表示します。色と警告は常に残量に基づきます。",
   "settings.appearance.quota_display.left": "残り",
   "settings.appearance.quota_display.used": "使用済み",
-  "pswitch.quota.used": "使用済み {{value}}%"
+  "pswitch.quota.used": "使用済み {{value}}%",
+  "pswitch.search.toggle_aria": "プロバイダーを検索",
+  "pswitch.search.placeholder": "名前・メモ・APIアドレスで検索…",
+  "pswitch.search.aria": "プロバイダーを絞り込む",
+  "pswitch.search.empty": "一致するプロバイダーがありません。"
 }

@@ -24,6 +24,7 @@ import {
   Plus,
   RefreshCw,
   RotateCcw,
+  Search,
   ShieldAlert,
   TimerReset,
   Trash2,
@@ -31,7 +32,7 @@ import {
 } from "lucide-react";
 import { copy } from "../lib/copy";
 import { providerSwitchApi } from "../lib/provider-switch-api";
-import { Button, Card, ConfirmModal } from "../ui/components";
+import { Button, Card, ConfirmModal, Input } from "../ui/components";
 import { PageHeader } from "../ui/components/PageHeader";
 import { PageTabs } from "../ui/components/PageTabs";
 import { UnsavedChangesGuard } from "../ui/components/UnsavedChangesGuard";
@@ -429,12 +430,32 @@ function SortableProviderCard({ app, provider, isCurrent, busy, dragLabel, coold
   );
 }
 
+// Base URL of a provider row across app shapes (same resolution the server's
+// quota.js uses): claude env, codex model_providers slot, gemini env, and the
+// additive wrapper's provider block (cc-switch's extractProviderBaseUrl).
+function providerBaseUrl(app, provider) {
+  const settings = provider?.settingsConfig;
+  if (!settings || typeof settings !== "object") return "";
+  if (app === "claude") return String(settings.env?.ANTHROPIC_BASE_URL ?? "").trim();
+  if (app === "codex") {
+    const config = settings.config ?? {};
+    const slot = String(config.model_provider ?? "custom").trim();
+    return String(config.model_providers?.[slot]?.base_url ?? "").trim();
+  }
+  if (app === "gemini") return String(settings.env?.GOOGLE_GEMINI_BASE_URL ?? "").trim();
+  return String(settings.provider?.baseUrl ?? "").trim();
+}
+
 export function ProviderSwitchPage() {
   const [status, setStatus] = useState(null);
   const [loadError, setLoadError] = useState(null);
   const [busy, setBusy] = useState(false);
   const [activeApp, setActiveApp] = useState("claude");
   const [notice, setNotice] = useState(null);
+  // Provider search (cc-switch 5cbb/5c5efe0b port): a header button toggles
+  // the panel; matches cover the row's name, notes and base URL.
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
 
   // dialog state
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -502,6 +523,24 @@ export function ProviderSwitchPage() {
       cooldownMs: failover?.cooldowns?.find((entry) => entry.app === activeApp && entry.id === provider.id)?.remainingMs ?? null,
     }));
   }, [appState, activeApp, failover]);
+
+  const filteredProviderRows = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return providerRows;
+    return providerRows.filter((provider) => {
+      const haystack = [
+        provider.name,
+        provider.notes,
+        providerBaseUrl(activeApp, provider),
+      ].join("\n").toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [providerRows, activeApp, searchQuery]);
+
+  const closeProviderSearch = useCallback(() => {
+    setSearchOpen(false);
+    setSearchQuery("");
+  }, []);
 
   const refreshStatus = useCallback(async () => {
     try {
@@ -782,6 +821,16 @@ export function ProviderSwitchPage() {
         />
         {!isUtilityTab ? (
           <div className="flex items-center gap-2">
+            <Button
+              variant={searchOpen ? "primary" : "secondary"}
+              size="sm"
+              aria-label={copy("pswitch.search.toggle_aria")}
+              aria-expanded={searchOpen}
+              title={copy("pswitch.search.toggle_aria")}
+              onClick={() => (searchOpen ? closeProviderSearch() : setSearchOpen(true))}
+            >
+              <Search className="h-4 w-4" />
+            </Button>
             <Button variant="secondary" size="sm" disabled={busy} onClick={() => void importFromLive()}>
               <Import className="h-4 w-4" />
               {copy("pswitch.action.import_live")}
@@ -806,11 +855,30 @@ export function ProviderSwitchPage() {
         onEdit={openFailoverEdit}
         onSwitchTo={(suggestion) => void switchToSuggestion(suggestion)}
       />
+      {searchOpen ? (
+        <div className="mb-4">
+          <Input
+            autoFocus
+            type="search"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") closeProviderSearch();
+            }}
+            placeholder={copy("pswitch.search.placeholder")}
+            aria-label={copy("pswitch.search.aria")}
+          />
+        </div>
+      ) : null}
       <section className="mb-8">
         <SectionTitle>{copy("pswitch.section.providers")}</SectionTitle>
         {!appState || appState.providers.length === 0 ? (
           <Card>
             <p className="text-sm text-oai-gray-500 dark:text-oai-gray-400">{loadError || copy(!status ? "proxy.loading" : "pswitch.providers.empty")}</p>
+          </Card>
+        ) : filteredProviderRows.length === 0 && searchQuery.trim() ? (
+          <Card>
+            <p className="text-sm text-oai-gray-500 dark:text-oai-gray-400">{copy("pswitch.search.empty")}</p>
           </Card>
         ) : (
           <DndContext
@@ -826,7 +894,7 @@ export function ProviderSwitchPage() {
               strategy={verticalListSortingStrategy}
             >
               <div className="flex flex-col gap-2.5">
-                {providerRows.map((provider) => (
+                {filteredProviderRows.map((provider) => (
                   <SortableProviderCard
                     key={provider.id}
                     app={activeApp}

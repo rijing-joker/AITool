@@ -583,5 +583,9 @@
   "settings.appearance.quota_display.hint": "플랜 할당 창에 남은 용량 또는 사용량을 표시합니다. 색상과 경고는 항상 남은 용량을 기준으로 합니다.",
   "settings.appearance.quota_display.left": "남음",
   "settings.appearance.quota_display.used": "사용됨",
-  "pswitch.quota.used": "사용됨 {{value}}%"
+  "pswitch.quota.used": "사용됨 {{value}}%",
+  "pswitch.search.toggle_aria": "공급자 검색",
+  "pswitch.search.placeholder": "이름, 메모 또는 API 주소로 검색…",
+  "pswitch.search.aria": "공급자 필터",
+  "pswitch.search.empty": "일치하는 공급자가 없습니다."
 }

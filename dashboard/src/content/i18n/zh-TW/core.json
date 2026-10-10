@@ -767,5 +767,9 @@
   "settings.appearance.quota_display.hint": "方案配額視窗顯示剩餘或已用百分比；顏色與警示始終按剩餘判定。",
   "settings.appearance.quota_display.left": "剩餘",
   "settings.appearance.quota_display.used": "已用",
-  "pswitch.quota.used": "已用 {{value}}%"
+  "pswitch.quota.used": "已用 {{value}}%",
+  "pswitch.search.toggle_aria": "搜尋供應商",
+  "pswitch.search.placeholder": "按名稱、備註或 API 位址搜尋…",
+  "pswitch.search.aria": "篩選供應商",
+  "pswitch.search.empty": "沒有供應商符合此搜尋。"
 }

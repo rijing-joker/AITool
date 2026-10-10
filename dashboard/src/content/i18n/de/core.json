@@ -580,5 +580,9 @@
   "settings.appearance.quota_display.hint": "Zeigt im Plan-Quota-Fenster den Rest oder den Verbrauch. Farben und Warnungen richten sich immer nach dem Rest.",
   "settings.appearance.quota_display.left": "Rest",
   "settings.appearance.quota_display.used": "Verbraucht",
-  "pswitch.quota.used": "{{value}}% verbraucht"
+  "pswitch.quota.used": "{{value}}% verbraucht",
+  "pswitch.search.toggle_aria": "Anbieter durchsuchen",
+  "pswitch.search.placeholder": "Nach Name, Notizen oder API-Adresse suchen…",
+  "pswitch.search.aria": "Anbieter filtern",
+  "pswitch.search.empty": "Kein Anbieter passt zu dieser Suche."
 }

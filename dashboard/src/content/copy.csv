@@ -527,6 +527,10 @@ settings.appearance.quota_display.hint,ui,SettingsPage,SettingsPage,quota_displa
 settings.appearance.quota_display.left,ui,SettingsPage,SettingsPage,quota_display_left,"Left",,active
 settings.appearance.quota_display.used,ui,SettingsPage,SettingsPage,quota_display_used,"Used",,active
 pswitch.quota.used,pswitch,ProviderSwitchPage,ProviderQuotaLine,quota_used,"{{value}}% used",,active
+pswitch.search.toggle_aria,pswitch,ProviderSwitchPage,ProviderSwitchPage,search_toggle,"Search providers",,active
+pswitch.search.placeholder,pswitch,ProviderSwitchPage,ProviderSwitchPage,search_placeholder,"Search by name, notes or API address…",,active
+pswitch.search.aria,pswitch,ProviderSwitchPage,ProviderSwitchPage,search_aria,"Filter providers",,active
+pswitch.search.empty,pswitch,ProviderSwitchPage,ProviderSwitchPage,search_empty,"No provider matches this search.",,active
 settings.appearance.token_grouping.wan,ui,SettingsPage,SettingsPage,token_grouping_wan,"4-digit",,active
 settings.appearance.currency.opt.usd,ui,SettingsPage,SettingsPage,currency_opt_usd,"USD ($)",,active
 settings.appearance.currency.opt.eur,ui,SettingsPage,SettingsPage,currency_opt_eur,"EUR (€)",,active

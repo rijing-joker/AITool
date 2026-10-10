@@ -198,7 +198,7 @@ function trackModelUsage(usage, model, row) {
   const key = model || "unknown";
   let entry = perModel.get(key);
   if (!entry) {
-    entry = { model: key, inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 };
+    entry = { model: key, inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, cacheCreation1hTokens: 0 };
     perModel.set(key, entry);
   }
   entry.inputTokens += row.inputTokens;
@@ -206,6 +206,7 @@ function trackModelUsage(usage, model, row) {
   entry.reasoningTokens += row.reasoningTokens;
   entry.cacheReadTokens += row.cacheReadTokens;
   entry.cacheCreationTokens += row.cacheCreationTokens;
+  entry.cacheCreation1hTokens = (entry.cacheCreation1hTokens || 0) + (row.cacheCreation1hTokens || 0);
 }
 
 async function collectJsonlFiles(root, files = [], { compressed = false } = {}) {
@@ -413,6 +414,9 @@ async function claudeReadMessages(filePath) {
           outputTokens: Number(message.usage.output_tokens) || 0,
           cacheReadTokens: Number(message.usage.cache_read_input_tokens) || 0,
           cacheCreationTokens: Number(message.usage.cache_creation_input_tokens) || 0,
+          // 1h cache writes bill at 1.6x the cache-write rate (cc-switch
+          // 533055b); the pricing table's cache_write is the 5m rate.
+          cacheCreation1hTokens: Number(message.usage.cache_creation?.ephemeral_1h_input_tokens) || 0,
           reasoningTokens: 0,
           model: typeof message.model === "string" && message.model ? message.model : null,
           stopReason: typeof message.stop_reason === "string" && message.stop_reason ? message.stop_reason : null,
@@ -433,6 +437,7 @@ async function claudeReadMessages(filePath) {
     usage.outputTokens += row.outputTokens;
     usage.cacheReadTokens += row.cacheReadTokens;
     usage.cacheCreationTokens += row.cacheCreationTokens;
+    usage.cacheCreation1hTokens = (usage.cacheCreation1hTokens || 0) + (row.cacheCreation1hTokens || 0);
     trackModelUsage(usage, row.model, row);
   }
   usage.totalTokens = usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheCreationTokens;

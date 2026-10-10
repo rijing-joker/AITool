@@ -425,8 +425,8 @@ test("codex attributes cumulative deltas to each model without billing duplicate
   const { usage } = await sessions.readSession({ app: "codex", sourcePath, home: tmpHome });
   assert.equal(usage.totalTokens, 390);
   assert.deepEqual(usage.perModel, [
-    { model: "gpt-b", inputTokens: 200, cacheReadTokens: 100, outputTokens: 40, reasoningTokens: 20, cacheCreationTokens: 0 },
-    { model: "gpt-a", inputTokens: 100, cacheReadTokens: 40, outputTokens: 50, reasoningTokens: 20, cacheCreationTokens: 0 },
+    { model: "gpt-b", inputTokens: 200, cacheReadTokens: 100, outputTokens: 40, reasoningTokens: 20, cacheCreationTokens: 0, cacheCreation1hTokens: 0 },
+    { model: "gpt-a", inputTokens: 100, cacheReadTokens: 40, outputTokens: 50, reasoningTokens: 20, cacheCreationTokens: 0, cacheCreation1hTokens: 0 },
   ]);
   const { estimateCostUsd } = require("../src/lib/proxy/pricing");
   const prices = { "gpt-a": { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 0 }, "gpt-b": { input: 3, output: 6, cacheRead: 0.3, cacheWrite: 0 } };
@@ -464,8 +464,8 @@ test("claude session usage keeps a per-model breakdown for mixed-model sessions"
   ]);
   const { usage } = await sessions.readSession({ app: "claude", sourcePath: filePath, home: tmpHome });
   assert.deepEqual(usage.perModel, [
-    { model: "claude-opus-4-6", inputTokens: 100, outputTokens: 50, reasoningTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 },
-    { model: "claude-haiku-4-5", inputTokens: 10, outputTokens: 5, reasoningTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 },
+    { model: "claude-opus-4-6", inputTokens: 100, outputTokens: 50, reasoningTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, cacheCreation1hTokens: 0 },
+    { model: "claude-haiku-4-5", inputTokens: 10, outputTokens: 5, reasoningTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, cacheCreation1hTokens: 0 },
   ]);
   assert.equal(usage.model, "claude-opus-4-6");
 });
@@ -688,4 +688,31 @@ test("codex custom calls and JSON patches retain pending, failed and successful 
   assert.equal(patches.json.deletions, 1);
   assert.equal(patches.json.files[0].moveTo, "new.txt");
   assert.ok(patches.json.body.endsWith("*** End Patch"));
+});
+
+test("Claude 1h cache-write split flows into per-model usage for pricing", async () => {
+  const filePath = writeClaudeSession(tmpHome, "session-1h-cache", [
+    JSON.stringify({ type: "user", message: { role: "user", content: "hi" }, timestamp: "2026-10-03T10:00:00Z" }),
+    JSON.stringify({
+      type: "assistant",
+      message: {
+        id: "msg_1", role: "assistant", model: "claude-sonnet-5",
+        content: [{ type: "text", text: "ok" }],
+        usage: {
+          input_tokens: 100, output_tokens: 50,
+          cache_read_input_tokens: 900,
+          cache_creation_input_tokens: 1000,
+          cache_creation: { ephemeral_5m_input_tokens: 400, ephemeral_1h_input_tokens: 600 },
+        },
+      },
+      timestamp: "2026-10-03T10:00:05Z",
+    }),
+  ]);
+
+  const { usage } = await sessions.readSession({ app: "claude", sourcePath: filePath, home: tmpHome });
+  assert.equal(usage.cacheCreationTokens, 1000);
+  assert.equal(usage.cacheCreation1hTokens, 600);
+  assert.equal(usage.perModel[0].cacheCreation1hTokens, 600);
+  // The 1h share must not inflate the total: it is a subset of cache writes.
+  assert.equal(usage.totalTokens, 100 + 50 + 900 + 1000);
 });

@@ -375,6 +375,10 @@ function estimateCostUsd(models, model, tokens, { inputInclusive, executorType }
   // resolved by cacheReadTokensFor so the queue fold bills the same split.
   const cacheReadTokens = cacheReadTokensFor(tokens, { executorType, model, inputInclusive: inclusive });
   const cacheCreationTokens = tokenNumber(tokens?.cacheCreationTokens);
+  // Anthropic bills 1h cache writes at 2x input vs 1.25x for 5m; the pricing
+  // table's cache_write is the 5m rate, so the 1h share costs 1.6x that
+  // (cc-switch 533055b). Clamped to the total — the 1h field is a subset.
+  const cacheCreation1hTokens = Math.min(tokenNumber(tokens?.cacheCreation1hTokens), cacheCreationTokens);
   if (inputTokens + outputTokens + reasoningTokens + cacheReadTokens + cacheCreationTokens === 0) return null;
   const billableInput = inclusive
     ? Math.max(0, inputTokens - cacheReadTokens - cacheCreationTokens)
@@ -383,7 +387,8 @@ function estimateCostUsd(models, model, tokens, { inputInclusive, executorType }
   const cost = (billableInput * pricing.input
     + (outputTokens + billableReasoning) * pricing.output
     + cacheReadTokens * pricing.cacheRead
-    + cacheCreationTokens * pricing.cacheWrite) / 1_000_000;
+    + (cacheCreationTokens - cacheCreation1hTokens) * pricing.cacheWrite
+    + cacheCreation1hTokens * pricing.cacheWrite * 1.6) / 1_000_000;
   return Number.isFinite(cost) ? cost : null;
 }
 

@@ -1,3 +1,4 @@
+const codexFiles = require("./codex-rollout-file");
 // CLI session history (cc-switch session_manager port, minimal reader):
 // scan each AI CLI's on-disk session logs and read them back as a plain
 // transcript of {role, content, ts} rows. Providers and layouts mirror
@@ -128,7 +129,7 @@ function capThinking(text) {
 }
 
 async function readHeadTailLines(filePath, headN = HEAD_LINES, tailN = TAIL_LINES) {
-  const raw = await fsp.readFile(filePath, "utf8");
+  const raw = await codexFiles.readText(filePath);
   const lines = raw.split("\n").filter((line) => line !== "");
   if (lines.length <= headN + tailN) return { head: lines, tail: lines };
   return {
@@ -204,7 +205,7 @@ function trackModelUsage(usage, model, row) {
   entry.cacheCreationTokens += row.cacheCreationTokens;
 }
 
-async function collectJsonlFiles(root, files = []) {
+async function collectJsonlFiles(root, files = [], compressed = false) {
   let entries;
   try {
     entries = await fsp.readdir(root, { withFileTypes: true });
@@ -214,8 +215,8 @@ async function collectJsonlFiles(root, files = []) {
   for (const entry of entries) {
     const fullPath = path.join(root, entry.name);
     if (entry.isDirectory()) {
-      await collectJsonlFiles(fullPath, files);
-    } else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
+      await collectJsonlFiles(fullPath, files, compressed);
+    } else if (entry.isFile() && (entry.name.endsWith(".jsonl") || (compressed && codexFiles.isCompressed(entry.name)))) {
       files.push(fullPath);
     }
   }
@@ -306,7 +307,7 @@ async function claudeParseSession(filePath) {
 }
 
 async function claudeReadMessages(filePath) {
-  const raw = await fsp.readFile(filePath, "utf8");
+  const raw = await codexFiles.readText(filePath);
   const messages = [];
   const imageBudget = { remaining: IMAGES_TOTAL_MAX_BASE64_CHARS };
   // Claude can rewrite the same assistant message (streaming retries); keep
@@ -552,7 +553,7 @@ function parseApplyPatch(argumentsText) {
 }
 
 async function codexReadMessages(filePath) {
-  const raw = await fsp.readFile(filePath, "utf8");
+  const raw = await codexFiles.readText(filePath);
   const messages = [];
   // Ordinary tool results must not scan the transcript for a patch they lack.
   const patchesByCallId = new Map();
@@ -777,7 +778,7 @@ function geminiParseJsonlDocument(raw) {
 }
 
 async function geminiLoadDocument(filePath) {
-  const raw = await fsp.readFile(filePath, "utf8");
+  const raw = await codexFiles.readText(filePath);
   if (filePath.endsWith(".jsonl")) {
     const { metadata, messages } = geminiParseJsonlDocument(raw);
     if (!metadata || typeof metadata.sessionId !== "string") return null;
@@ -933,14 +934,17 @@ async function listSessions({ app, home, env = process.env } = {}) {
 
   const files = [];
   for (const root of rootsForApp(app, resolvedHome)) {
-    await collectJsonlFiles(root, files);
+    await collectJsonlFiles(root, files, app === "codex");
   }
   const sessions = [];
-  for (const filePath of files) {
+  for (const filePath of codexFiles.dedupeSiblings(files)) {
+    try { await resolveSessionPath(filePath, rootsForApp(app, resolvedHome)); } catch { continue; }
     const meta = app === "claude" ? await claudeParseSession(filePath) : await codexParseSession(filePath);
     if (meta) sessions.push(meta);
   }
-  return sortByRecency(sessions);
+  return sortByRecency(app === "codex"
+    ? [...new Map(sortByRecency(sessions).reverse().map((row) => [row.sessionId, row])).values()]
+    : sessions);
 }
 
 function sortByRecency(sessions) {
@@ -973,11 +977,17 @@ async function readSession({ app, sourcePath, home, env = process.env } = {}) {
     throw new Error("Session path is required");
   }
   const resolved = path.resolve(sourcePath);
-  const realPath = await resolveSessionPath(resolved, rootsForApp(app, resolvedHome));
+  let realPath;
+  try { realPath = await resolveSessionPath(resolved, rootsForApp(app, resolvedHome)); }
+  catch (error) {
+    const sibling = app === "codex" && error.code === "ENOENT" ? codexFiles.siblingPath(resolved) : null;
+    if (!sibling) throw error;
+    realPath = await resolveSessionPath(sibling, rootsForApp(app, resolvedHome));
+  }
   if (app === "gemini" && path.extname(realPath) !== ".json" && path.extname(realPath) !== ".jsonl") {
     throw new Error("Not a gemini session file");
   }
-  if (app !== "gemini" && path.extname(realPath) !== ".jsonl") {
+  if (app !== "gemini" && !(app === "codex" ? codexFiles.isRollout(realPath) : path.extname(realPath) === ".jsonl")) {
     throw new Error("Not a session transcript file");
   }
   if (app === "claude" && (isClaudeAgentSession(path.basename(resolved)) || isClaudeAgentSession(path.basename(realPath)))) {

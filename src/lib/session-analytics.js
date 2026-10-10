@@ -1,3 +1,4 @@
+const codexFiles = require("./codex-rollout-file");
 "use strict";
 
 // Metadata-only session analytics sidecar.
@@ -1144,7 +1145,7 @@ function groupClaudeFilesAcrossRoots(groups) {
   const rootGroups = (groups || []).filter((group) => Array.isArray(group) && group.length > 0);
   if (rootGroups.length <= 1) return [...new Set(rootGroups[0] || [])].map((filePath) => [filePath]);
   const sessionIdOf = (filePath) =>
-    path.basename(filePath).match(/^([0-9a-f-]{36})\.jsonl$/i)?.[1] || null;
+    path.basename(filePath).match(/^([0-9a-f-]{36})\.jsonl(?:\.zst)?$/i)?.[1] || null;
 
   // A UUID appearing twice inside ONE root has no resolvable identity: nothing
   // in the paths says which sibling a copy in another root mirrors. Collapsing
@@ -1231,8 +1232,8 @@ function dedupeClaudeFilesAcrossRoots(groups) {
 function groupCodexFiles(filePaths) {
   const ordered = [];
   const bySession = new Map();
-  for (const filePath of [...new Set(filePaths || [])]) {
-    const id = path.basename(filePath).match(/([0-9a-f-]{36})\.jsonl$/i)?.[1] || filePath;
+  for (const filePath of codexFiles.dedupeSiblings([...new Set(filePaths || [])])) {
+    const id = path.basename(filePath).match(/([0-9a-f-]{36})\.jsonl(?:\.zst)?$/i)?.[1] || filePath;
     let group = bySession.get(id);
     if (!group) {
       group = [];
@@ -1322,7 +1323,7 @@ function sessionFileCacheKey(source, filePath) {
   const filePaths = (Array.isArray(filePath) ? filePath : [filePath]).filter(Boolean);
   return crypto
     .createHash("sha256")
-    .update(`${source}\0${filePaths.map((value) => path.resolve(value)).join("\0")}`)
+    .update(`${source}\0${filePaths.map((value) => source === "codex" ? (path.basename(value).match(/([0-9a-f-]{36})\.jsonl(?:\.zst)?$/i)?.[1] || path.resolve(codexFiles.logicalPath(value))) : path.resolve(value)).filter((value, index, values) => values.indexOf(value) === index).join("\0")}`)
     .digest("hex")
     .slice(0, 24);
 }
@@ -1506,7 +1507,11 @@ async function buildSessionAnalyticsInternal({ home = os.homedir(), force = fals
         }
       }
     }
-    if (!row) continue;
+    if (!row) {
+      const previous = previousRowsByFile.get(cacheKey);
+      if (previous) { sessions.push(previous); nextFiles[cacheKey] = previousFiles[cacheKey]; }
+      continue;
+    }
     repriceSessionRecord(row);
     // A one-way file hash enables incremental reuse without persisting or
     // exposing the user's local session path.

@@ -1,3 +1,4 @@
+const codexFiles = require("./codex-rollout-file");
 // Codex rollout JSONL parser — extracted from codex-context-breakdown.js.
 //
 // Handles file discovery and per-file parsing. Does NOT hold any aggregation
@@ -160,14 +161,14 @@ function listJsonlFiles(rootDir) {
       const filePath = path.join(dir, entry.name);
       if (entry.isDirectory()) {
         stack.push(filePath);
-      } else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
+      } else if (entry.isFile() && codexFiles.isRollout(entry.name)) {
         out.push(filePath);
       }
     }
   }
 
   out.sort((a, b) => a.localeCompare(b));
-  return out;
+  return codexFiles.dedupeSiblings(out);
 }
 
 function rolloutPathDay(filePath) {
@@ -331,7 +332,7 @@ function discoverCodexSessionFiles(rootDirs, options = {}) {
         stack.push(filePath);
         continue;
       }
-      if (!child.isFile() || !child.name.endsWith(".jsonl") || visited.has(filePath)) continue;
+      if (!child.isFile() || !codexFiles.isRollout(child.name) || visited.has(filePath)) continue;
       visited.add(filePath);
       if (diagnostics) diagnostics.discovered_files += 1;
       const cached = inventory.files.get(filePath) || null;
@@ -371,7 +372,7 @@ function discoverCodexSessionFiles(rootDirs, options = {}) {
   }
   if (fullMetadataAudit) inventory.lastFullAuditAtMs = nowMs;
 
-  return entries.sort((a, b) => a.filePath.localeCompare(b.filePath));
+  return codexFiles.dedupeSiblings(entries, (entry) => entry.filePath).sort((a, b) => a.filePath.localeCompare(b.filePath));
 }
 
 async function listCodexSessionFiles(baseDir) {
@@ -382,7 +383,7 @@ async function listCodexSessionFiles(baseDir) {
 
   const merged = new Set(rolloutFiles);
   for (const filePath of allJsonlFiles) merged.add(filePath);
-  return Array.from(merged).sort((a, b) => a.localeCompare(b));
+  return codexFiles.dedupeSiblings(Array.from(merged)).sort((a, b) => a.localeCompare(b));
 }
 
 // ---------------------------------------------------------------------------
@@ -1162,7 +1163,7 @@ async function parseCodexRolloutFile(filePath, {
       compactionResponseIds: Array.from(compactionResponseIds),
     };
     result.endOffset = readProgress.endOffset;
-    result.appendable = Boolean(contentHasher) && (
+    result.appendable = !filePaths.some(codexFiles.isCompressed) && Boolean(contentHasher) && (
       readProgress.endOffset === 0 || readProgress.lastByte === 0x0a
     );
     result.contentHashState = contentHasher;
@@ -1305,6 +1306,21 @@ async function* readCodexObjectsFull(filePath, diagnostics, fileIndex, {
 }
 
 async function* readCodexObjects(filePath, diagnostics, fileIndex, options = {}) {
+  if (codexFiles.isCompressed(filePath)) {
+    if (Number(options.startOffset) > 0) {
+      const error = new Error("Compressed Codex snapshots cannot resume byte cursors");
+      error.code = CODEX_RESUME_INVALIDATED;
+      throw error;
+    }
+    const { data } = await codexFiles.readSnapshot(filePath);
+    const sourceHandle = { read: async (buffer, offset, length, position) => {
+      const bytesRead = Math.min(length, Math.max(0, data.length - position));
+      data.copy(buffer, offset, position, position + bytesRead);
+      return { bytesRead, buffer };
+    } };
+    yield* readCodexObjectsIncremental(filePath, diagnostics, fileIndex, { ...options, endOffset: data.length, sourceHandle });
+    return;
+  }
   const start = Math.max(0, Number(options.startOffset) || 0);
   const reader = start > 0 || options.sourceHandle
     ? readCodexObjectsIncremental

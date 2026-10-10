@@ -1734,3 +1734,65 @@ test("every codex preset uses the custom model_providers slot", () => {
     );
   }
 });
+
+test("fetch-models forwards provider header overrides on the probe (cc-switch 315aeda)", async () => {
+  const { handleProviderSwitchApiRequest } = require("../src/lib/provider-switch/api");
+  const handler = handleProviderSwitchApiRequest;
+  const prefix = "/api/provider-switch";
+  const seen = [];
+  const server = http.createServer((req, res) => {
+    seen.push({ url: req.url, auth: req.headers.authorization, gateway: req.headers["cf-aig-authorization"] });
+    if (req.url === "/v1/models" && req.headers["cf-aig-authorization"] === "secret-gateway-token") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ data: [{ id: "gpt-5.2" }] }));
+      return;
+    }
+    res.writeHead(403);
+    res.end("gateway rejected");
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+  try {
+    // A valid override rides the probe and gets the guarded list.
+    const ok = await call(handler, {
+      method: "POST",
+      url: `${prefix}/fetch-models`,
+      body: JSON.stringify({
+        baseUrl: `http://127.0.0.1:${port}`,
+        apiKey: "sk-test",
+        requestHeaders: '{"cf-aig-authorization": "secret-gateway-token"}',
+      }),
+    });
+    assert.deepEqual(ok.body.models, ["gpt-5.2"]);
+    assert.equal(seen.at(-1).gateway, "secret-gateway-token");
+    assert.equal(seen.at(-1).auth, "Bearer sk-test", "default Authorization still sent");
+
+    // An explicit Authorization in the override wins over the key default.
+    await call(handler, {
+      method: "POST",
+      url: `${prefix}/fetch-models`,
+      body: JSON.stringify({
+        baseUrl: `http://127.0.0.1:${port}`,
+        apiKey: "sk-test",
+        requestHeaders: '{"Authorization": "Bearer override"}',
+      }),
+    });
+    assert.equal(seen.at(-1).auth, "Bearer override");
+
+    // Invalid override JSON falls back to a plain fetch (probe fails 403,
+    // the route surfaces the upstream error instead of crashing).
+    const bad = await call(handler, {
+      method: "POST",
+      url: `${prefix}/fetch-models`,
+      body: JSON.stringify({
+        baseUrl: `http://127.0.0.1:${port}`,
+        apiKey: "sk-test",
+        requestHeaders: "{not json",
+      }),
+    });
+    assert.equal(bad.status, 400);
+    assert.equal(seen.at(-1).gateway, undefined);
+  } finally {
+    server.close();
+  }
+});

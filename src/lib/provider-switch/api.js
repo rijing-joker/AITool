@@ -889,10 +889,37 @@ function extractModelIds(payload) {
   return null;
 }
 
-async function fetchModelList({ baseUrl, apiKey, modelsUrl, isFullUrl }) {
+// cc-switch 315aeda: gateways like Cloudflare AI Gateway require extra
+// headers (cf-aig-authorization) on GET /v1/models. The provider's Header
+// override JSON is parsed leniently — invalid or empty overrides fall back
+// to a plain fetch (the form's own validation surfaces the error); valid
+// ones are applied after the defaults, so an explicit Authorization in the
+// override wins.
+function parseModelFetchHeaders(raw) {
+  const text = String(raw || "").trim();
+  if (!text) return null;
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  const headers = {};
+  for (const [name, value] of Object.entries(parsed)) {
+    const headerName = String(name).trim();
+    if (!headerName || !/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(headerName)) return null;
+    if (typeof value !== "string") return null;
+    headers[headerName] = value;
+  }
+  return Object.keys(headers).length ? headers : null;
+}
+
+async function fetchModelList({ baseUrl, apiKey, modelsUrl, isFullUrl, requestHeaders }) {
   const base = String(baseUrl || "").trim().replace(/\/+$/, "");
   const explicit = String(modelsUrl || "").trim();
   if (!base && !explicit) throw new Error("Base URL is required");
+  const overrideHeaders = parseModelFetchHeaders(requestHeaders);
   const candidates = [];
   if (explicit && /^https?:\/\//.test(explicit)) {
     candidates.push(explicit);
@@ -910,6 +937,7 @@ async function fetchModelList({ baseUrl, apiKey, modelsUrl, isFullUrl }) {
     try {
       const headers = { Accept: "application/json" };
       if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+      if (overrideHeaders) Object.assign(headers, overrideHeaders);
       const response = await fetch(url, { headers, signal: controller.signal });
       if (!response.ok) {
         errors.push(`HTTP ${response.status} for ${url}`);

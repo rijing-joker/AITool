@@ -339,6 +339,7 @@ export const providerSwitchApi = {
     apiKey?: string;
     modelsUrl?: string;
     isFullUrl?: boolean;
+    requestHeaders?: string;
   }): Promise<{ ok: true; url: string; models: string[] }> {
     return mutate("/api/provider-switch/fetch-models", "POST", payload);
   },

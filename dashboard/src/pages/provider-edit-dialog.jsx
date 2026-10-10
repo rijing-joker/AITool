@@ -930,6 +930,9 @@ export function ProviderEditDialog({
         apiKey: currentApiKey,
         modelsUrl: selectedPreset?.modelsUrl,
         isFullUrl: !!meta.isFullUrl,
+        // cc-switch 315aeda: gateways behind header overrides need them on the
+        // /v1/models probe too; invalid JSON falls back server-side.
+        requestHeaders: meta.localProxyRequestOverrides?.headers,
       });
       setFetchedModels(res.models);
       setFetchState("done");
@@ -947,7 +950,7 @@ export function ProviderEditDialog({
         }),
       });
     }
-  }, [currentApiKey, currentEndpoint, ensureModelMetadata, fetchState, meta.isFullUrl, selectedPreset]);
+  }, [currentApiKey, currentEndpoint, ensureModelMetadata, fetchState, meta.isFullUrl, meta.localProxyRequestOverrides, selectedPreset]);
 
   // --- claude model roles helpers ---
   const oneMOn = (role) => String(getPath(draft, role.modelPath) ?? "").endsWith("[1m]");

@@ -1,4 +1,3 @@
-const fs = require("node:fs");
 const fsPromises = require("node:fs/promises");
 const path = require("node:path");
 
@@ -53,8 +52,13 @@ async function serveStaticFile(baseDir, pathname, res, req = {}) {
   // prevent directory traversal
   if (!filePath.startsWith(baseDir)) return false;
 
+  // Bind the stat and the read to one checked descriptor (cc-switch-free
+  // upstream d9c0226f): a stat-then-open race could swap the file for
+  // something outside baseDir after the traversal check passed.
+  let handle;
   try {
-    const stat = await fsPromises.stat(filePath);
+    handle = await fsPromises.open(filePath, "r");
+    const stat = await handle.stat();
     if (!stat.isFile()) return false;
 
     const ext = path.extname(filePath).toLowerCase();
@@ -99,13 +103,20 @@ async function serveStaticFile(baseDir, pathname, res, req = {}) {
       res.end();
       return true;
     }
-    const stream = fs.createReadStream(selectedPath);
+    // The selected path may be a sibling pre-compressed variant, so re-open it
+    // under the same checked-descriptor rule; the winning stream owns and
+    // closes its descriptor.
+    const streamHandle = encoding ? await fsPromises.open(selectedPath, "r") : handle;
+    handle = null; // The stream owns and closes this descriptor.
+    const stream = streamHandle.createReadStream();
     stream.on("error", (error) => res.destroy(error));
     res.on("close", () => stream.destroy());
     stream.pipe(res);
     return true;
   } catch (_e) {
     return false;
+  } finally {
+    if (handle) await handle.close();
   }
 }
 

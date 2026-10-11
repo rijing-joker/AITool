@@ -1889,5 +1889,9 @@
   "pswitch.profile.deleted": "配置方案已删除。",
   "pswitch.profile.delete_confirm_title": "删除配置方案",
   "pswitch.profile.delete_confirm_desc": "删除“{{name}}”？该应用的当前方案标记会清除，快照本身不会被恢复。",
-  "pswitch.universal.added_but_sync_failed": "统一供应商已添加，但同步失败。"
+  "pswitch.universal.added_but_sync_failed": "统一供应商已添加，但同步失败。",
+  "proxy.action.restart": "重启",
+  "proxy.settings.update_available": "发现新版本：v{{latest}}",
+  "proxy.settings.up_to_date": "已是最新（最新版 v{{latest}}）",
+  "proxy.settings.update_recheck": "重新检查内核更新"
 }

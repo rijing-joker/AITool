@@ -265,12 +265,21 @@ async function status() {
   };
 }
 
+// easy parity (Kernel.tsx restart_core_process): one action that recycles the
+// core. The usage bridge goes down with it and the caller brings it back once
+// the start handshake succeeds.
+async function restart() {
+  await stop();
+  return start();
+}
+
 module.exports = {
   binaryExists,
   installCore,
   installFromRepo,
   start,
   stop,
+  restart,
   status,
   readPid,
   pidAlive,

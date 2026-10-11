@@ -1948,5 +1948,9 @@
   "pswitch.profile.deleted": "設定檔已刪除。",
   "pswitch.profile.delete_confirm_title": "刪除設定檔",
   "pswitch.profile.delete_confirm_desc": "刪除「{{name}}」？該應用的目前設定檔標記會清除，快照本身不會被還原。",
-  "pswitch.universal.added_but_sync_failed": "統一供應商已新增，但同步失敗。"
+  "pswitch.universal.added_but_sync_failed": "統一供應商已新增，但同步失敗。",
+  "proxy.action.restart": "重新啟動",
+  "proxy.settings.update_available": "發現新版本：v{{latest}}",
+  "proxy.settings.up_to_date": "已是最新（最新版 v{{latest}}）",
+  "proxy.settings.update_recheck": "重新檢查核心更新"
 }

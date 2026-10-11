@@ -413,6 +413,14 @@ async function handleProxyApiRequest(req, res, url, ctx) {
       json(res, { ok: true, result });
       return true;
     }
+    if (p === "/api/proxy/restart" && method === "POST") {
+      if (!requireMutation()) return true;
+      bridge.stopBridge();
+      const result = await manager.restart();
+      bridge.startBridge();
+      json(res, { ok: true, result, bridge: bridge.bridgeStatus() });
+      return true;
+    }
     if (p === "/api/proxy/install" && method === "POST") {
       if (!requireMutation()) return true;
       // Starts the background install task (EasyCLIProxyAPI's stop-and-update
@@ -427,6 +435,20 @@ async function handleProxyApiRequest(req, res, url, ctx) {
     }
     if (p === "/api/proxy/install" && method === "GET") {
       json(res, { ok: true, task: coreInstall().snapshot() });
+      return true;
+    }
+    if (p === "/api/proxy/core-update" && method === "GET") {
+      // Update check for the settings page (original: checks on page entry +
+      // a manual button). Resolves GitCode → GitHub latest and compares with
+      // the installed version; failures surface as ok:false, the page stays
+      // quiet about them.
+      try {
+        const fetchCoreModule = require("../../../scripts/fetch-core.cjs");
+        const update = await fetchCoreModule.checkUpdate({ signal: AbortSignal.timeout(15_000) });
+        json(res, { ok: true, update });
+      } catch (error) {
+        json(res, { ok: false, error: error?.message || String(error) });
+      }
       return true;
     }
     if (p === "/api/proxy/install/cancel" && method === "POST") {

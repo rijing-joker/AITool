@@ -8,6 +8,7 @@ import {
   KeyRound,
   PauseCircle,
   PlayCircle,
+  RefreshCw,
   Server,
   Shuffle,
   Upload,
@@ -183,6 +184,22 @@ function OverviewTab({ status, statusError, onRefresh, onInstallCore, onSelectTa
     }
   }, [status, onRefresh, refreshOverview]);
 
+  // easy parity (Kernel.tsx): a dedicated restart action next to start/stop.
+  const restartCore = useCallback(async () => {
+    if (!status) return;
+    setActionBusy(true);
+    setError(null);
+    try {
+      await proxyApi.restart();
+      onRefresh();
+      void refreshOverview();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setActionBusy(false);
+    }
+  }, [status, onRefresh, refreshOverview]);
+
   const running = status?.core.running ?? false;
   const connectHost = status && ["0.0.0.0", "::", "[::]"].includes(status.core.host)
     ? window.location.hostname : status?.core.host;
@@ -236,17 +253,31 @@ function OverviewTab({ status, statusError, onRefresh, onInstallCore, onSelectTa
                 {copy("proxy.action.install_core")}
               </button>
             ) : (
-              <button
-                type="button"
-                onClick={() => void toggleCore()}
-                disabled={actionBusy || !!statusError}
-                className={`inline-flex h-10 items-center gap-1.5 rounded-lg px-3.5 text-sm font-medium text-white transition-colors disabled:opacity-50 ${
-                  running ? "bg-red-600 hover:bg-red-700" : "bg-oai-brand-600 hover:bg-oai-brand-700"
-                }`}
-              >
-                {running ? <PauseCircle className="h-4 w-4" /> : <PlayCircle className="h-4 w-4" />}
-                {running ? copy("proxy.action.stop") : copy("proxy.action.start")}
-              </button>
+              <>
+                {running ? (
+                  <button
+                    type="button"
+                    onClick={() => void restartCore()}
+                    disabled={actionBusy || !!statusError}
+                    title={copy("proxy.action.restart")}
+                    aria-label={copy("proxy.action.restart")}
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-oai-gray-200 text-oai-gray-600 transition-colors hover:bg-oai-gray-100 disabled:opacity-50 dark:border-oai-gray-700 dark:text-oai-gray-300 dark:hover:bg-oai-gray-800"
+                  >
+                    <RefreshCw className="h-4 w-4" />
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => void toggleCore()}
+                  disabled={actionBusy || !!statusError}
+                  className={`inline-flex h-10 items-center gap-1.5 rounded-lg px-3.5 text-sm font-medium text-white transition-colors disabled:opacity-50 ${
+                    running ? "bg-red-600 hover:bg-red-700" : "bg-oai-brand-600 hover:bg-oai-brand-700"
+                  }`}
+                >
+                  {running ? <PauseCircle className="h-4 w-4" /> : <PlayCircle className="h-4 w-4" />}
+                  {running ? copy("proxy.action.stop") : copy("proxy.action.start")}
+                </button>
+              </>
             )}
           </div>
         </div>

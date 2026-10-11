@@ -1712,6 +1712,7 @@ proxy.core.toast_start_failed,proxy,ProxyPage,ProxyPage,toast_start_failed,"Coul
 proxy.action.install_core,proxy,ProxyPage,ProxyPage,install_core,Fetch core,,active
 proxy.action.stop,proxy,ProxyPage,ProxyPage,stop,Stop,,active
 proxy.action.start,proxy,ProxyPage,ProxyPage,start,Start,,active
+proxy.action.restart,proxy,ProxyPage,ProxyPage,restart,Restart,,active
 proxy.action.copy,proxy,ProxyPage,ProxyPage,copy,Copy,,active
 proxy.bridge.label,proxy,ProxyPage,ProxyPage,label,Usage bridge,,active
 proxy.bridge.streaming,proxy,ProxyPage,ProxyPage,streaming,streaming,,active
@@ -1780,6 +1781,9 @@ proxy.settings.autostart,proxy,ProxyPage,ProxyPage,autostart,Start proxy with da
 proxy.settings.autostart_hint,proxy,ProxyPage,ProxyPage,autostart_hint,"When enabled, the AiTool server boots the CLIProxyAPI core and the usage bridge automatically.",,active
 proxy.settings.core,proxy,ProxyPage,ProxyPage,core,Core binary,,active
 proxy.settings.core_version,proxy,ProxyPage,ProxyPage,core_version,Installed version: {{version}},,active
+proxy.settings.update_available,proxy,ProxyPage,ProxyPage,update_available,"Update available: v{{latest}}",,active
+proxy.settings.up_to_date,proxy,ProxyPage,ProxyPage,up_to_date,"Up to date (latest v{{latest}})",,active
+proxy.settings.update_recheck,proxy,ProxyPage,ProxyPage,update_recheck,"Re-check for core updates",,active
 proxy.settings.core_updated,proxy,ProxyPage,ProxyPage,core_updated,Core binary fetched.,,active
 proxy.settings.fetch_core,proxy,ProxyPage,ProxyPage,fetch_core,Fetch / update,,active
 proxy.settings.config,proxy,ProxyPage,ProxyPage,config,config.yaml,,active

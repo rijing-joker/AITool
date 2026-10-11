@@ -142,10 +142,20 @@ export interface CoreInstallTask {
   finishedAt: string | null;
 }
 
+export type CoreUpdateCheck = {
+  installed: string | null;
+  latest: string;
+  source: string;
+  hasUpdate: boolean;
+};
+
 export const proxyApi = {
   status: (signal?: AbortSignal) => get<ProxyStatus>("/api/proxy/status", signal),
   start: () => mutate<{ ok: true }>("/api/proxy/start", "POST"),
   stop: () => mutate<{ ok: true }>("/api/proxy/stop", "POST"),
+  restart: () => mutate<{ ok: true }>("/api/proxy/restart", "POST"),
+  coreUpdateCheck: (signal?: AbortSignal) =>
+    get<{ ok: true; update: CoreUpdateCheck }>("/api/proxy/core-update", signal),
   install: () => mutate<{ ok: true; task: CoreInstallTask }>("/api/proxy/install", "POST"),
   installStatus: () => get<{ ok: true; task: CoreInstallTask | null }>("/api/proxy/install"),
   installCancel: () => mutate<{ ok: true; task: CoreInstallTask | null }>("/api/proxy/install/cancel", "POST"),

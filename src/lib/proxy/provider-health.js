@@ -157,12 +157,18 @@ async function probe(request) {
   // core's api-call still handles socks).
   const proxyUrl = String(request?.proxyUrl || "").trim();
   let dispatcher = null;
+  let doFetch = fetch;
   if (proxyUrl && !/^https?:/i.test(proxyUrl)) {
     throw new Error(`Health checks support only http(s) proxy URLs, got: ${proxyUrl}`);
   }
   if (proxyUrl) {
-    const { ProxyAgent } = require("undici");
+    // undici's own fetch must carry the dispatcher: the global fetch pairs
+    // badly with npm-undici dispatchers (rejected with UND_ERR_INVALID_ARG
+    // on current runtimes) — same rule proxy-env.js follows for its
+    // connectivity test.
+    const { ProxyAgent, fetch: undiciFetch } = require("undici");
     dispatcher = new ProxyAgent(proxyUrl);
+    doFetch = undiciFetch;
   }
 
   await acquireSlot();
@@ -173,7 +179,7 @@ async function probe(request) {
   try {
     let response;
     try {
-      response = await fetch(parsed, {
+      response = await doFetch(parsed, {
         method: "POST",
         headers: { ...(request?.header || {}) },
         body: data,
@@ -219,6 +225,9 @@ async function probe(request) {
     controller.abort();
     if (reader) await reader.cancel().catch(() => {});
     clearTimeout(timer);
+    // 68b031797 made probe cleanup unconditional — the dispatcher's
+    // keep-alive pool belongs in the same finally.
+    if (dispatcher) await dispatcher.close().catch(() => {});
     releaseSlot();
   }
 }

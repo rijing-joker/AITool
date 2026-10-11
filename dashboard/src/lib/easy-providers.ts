@@ -420,7 +420,7 @@ export type ModelOption = {
   inputModalities?: Array<"text" | "image">;
   thinking?: Record<string, unknown>;
 };
-export type ModelProvider = "gemini" | "codex" | "deepseek" | "claude" | "openai";
+export type ModelProvider = "gemini" | "codex" | "deepseek" | "claude" | "openai" | "interactions" | "vertex" | "xai" | "meta";
 export type ModelSelectionMode = "initial" | "refresh";
 
 const DEFAULT_GEMINI_BASE_URL = "https://generativelanguage.googleapis.com";
@@ -508,22 +508,16 @@ const stripKnownSuffix = (baseUrl: string) =>
     .replace(/\/models$/i, "");
 
 export const modelEndpointCandidates = (provider: ModelProvider, baseUrl: string): string[] => {
-  const resolvedBaseUrl = baseUrl.trim()
-    || (provider === "gemini"
-      ? DEFAULT_GEMINI_BASE_URL
-      : provider === "claude"
-        ? DEFAULT_CLAUDE_BASE_URL
-        : provider === "deepseek"
-          ? DEEPSEEK_BASE_URL
-          : "");
+  const resolvedBaseUrl = baseUrl.trim() || defaultBaseUrl(provider);
   const normalized = normalizeBaseUrl(resolvedBaseUrl);
   if (!normalized) return [];
-  if (provider === "openai") {
+  if (provider === "openai" || provider === "xai" || provider === "meta") {
     return [/\/models$/i.test(normalized) ? normalized : `${normalized}/models`];
   }
   const base = stripKnownSuffix(normalized);
   const withoutVersion = base.replace(/\/(?:v1beta|v1)$/i, "");
-  if (provider === "gemini") return [`${withoutVersion}/v1beta/models`];
+  if (provider === "gemini" || provider === "interactions") return [`${withoutVersion}/v1beta/models`];
+  if (provider === "vertex") return [`${withoutVersion}/v1/publishers/google/models`, `${base}/models`, `${withoutVersion}/v1/models`];
   if (provider === "claude") return [`${withoutVersion}/v1/models`];
   if (provider === "deepseek") return [`${base}/models`];
   return [/\/v1$/i.test(base) ? `${base}/models` : `${base}/v1/models`];
@@ -581,10 +575,15 @@ export async function fetchModels(
   const headers: Record<string, string> = { ...customHeaders };
   const hasHeader = (name: string) =>
     Object.keys(headers).some((key) => key.toLowerCase() === name.toLowerCase());
+  // easy parity (modelService.ts): meta's executor identity rides along unless
+  // the caller supplied its own.
+  for (const [name, value] of Object.entries(providerDefaultHeaders(provider))) {
+    if (!hasHeader(name)) headers[name] = value;
+  }
   const headerValue = (name: string) =>
     Object.entries(headers).find(([key]) => key.toLowerCase() === name.toLowerCase())?.[1] ?? "";
   const key = apiKey.trim();
-  if (provider === "gemini") {
+  if (provider === "gemini" || provider === "interactions" || provider === "vertex") {
     if (key && !hasHeader("x-goog-api-key")) headers["x-goog-api-key"] = key;
     else if (authIndex && !hasHeader("x-goog-api-key")) headers["x-goog-api-key"] = "$TOKEN$";
   } else if (provider === "claude") {
@@ -606,7 +605,7 @@ export async function fetchModels(
       const seen = new Set<string>();
       let pageToken = "";
 
-      for (let page = 0; page < (provider === "gemini" ? 20 : 1); page += 1) {
+      for (let page = 0; page < (provider === "gemini" || provider === "interactions" || provider === "vertex" ? 20 : 1); page += 1) {
         const pageUrl = new URL(url);
         if (pageToken) pageUrl.searchParams.set("pageToken", pageToken);
         const response = await managementApi.post<Record<string, unknown>>("/api-call", {
@@ -626,7 +625,9 @@ export async function fetchModels(
 
         const payload = response.body ?? response.bodyText;
         modelsFromDiscoveredPayload(payload).forEach((model) => {
-          const name = provider === "gemini" ? model.name.replace(/^models\//i, "") : model.name;
+          const name = provider === "gemini" || provider === "interactions" || provider === "vertex"
+            ? model.name.replace(/^(?:publishers\/google\/)?models\//i, "")
+            : model.name;
           const dedupeKey = name.toLowerCase();
           if (!name || seen.has(dedupeKey)) return;
           seen.add(dedupeKey);
@@ -693,7 +694,7 @@ export type ProviderHealthProbe = {
   url: string;
   header: Record<string, string>;
   data: string;
-  protocol: "openai-chat" | "openai-responses" | "claude" | "gemini";
+  protocol: "openai-chat" | "openai-responses" | "claude" | "gemini" | "interactions";
   model: string;
   source: string;
   authIndex: string;
@@ -727,10 +728,22 @@ export type ProviderHealthCheckOptions = {
 
 const defaultBaseUrl = (provider: ModelProvider) => {
   if (provider === "claude") return "https://api.anthropic.com";
-  if (provider === "gemini") return "https://generativelanguage.googleapis.com";
+  if (provider === "gemini" || provider === "interactions") return "https://generativelanguage.googleapis.com";
+  if (provider === "vertex") return "https://aiplatform.googleapis.com";
+  if (provider === "xai") return "https://api.x.ai/v1";
+  if (provider === "meta") return "https://api.meta.ai/v1";
   if (provider === "deepseek") return "https://api.deepseek.com";
   return "";
 };
+
+// Meta's native executor sends this client identity on model and inference
+// requests (easy modelService.ts providerDefaultHeaders).
+export function providerDefaultHeaders(provider: ModelProvider): Record<string, string> {
+  return provider === "meta" ? {
+    "User-Agent": "muse-build/1.3.0 (interactive; macos-aarch64; build ac7280f2aca67769d1455a8847bb502b617d50f6)",
+    "X-Client-Id": "tbh:tui",
+  } : {};
+}
 
 const endpointRoot = (provider: ModelProvider, baseUrl: string) => {
   const normalized = normalizeBaseUrl(baseUrl.trim() || defaultBaseUrl(provider));
@@ -799,13 +812,28 @@ export function buildProviderHealthProbe(
     authIndex: authIndex.trim(),
   };
   setHeaderIfMissing(headers, "Content-Type", "application/json");
+  for (const [name, value] of Object.entries(providerDefaultHeaders(provider))) setHeaderIfMissing(headers, name, value);
 
-  if (provider === "gemini") {
+  if (provider === "interactions") {
     if (key) setHeaderIfMissing(headers, "x-goog-api-key", key);
     else if (authIndex) setHeaderIfMissing(headers, "x-goog-api-key", "$TOKEN$");
     return {
       ...metadata,
-      url: `${root}/v1beta/models/${encodeURIComponent(normalizedModel)}:generateContent?alt=sse`,
+      url: `${root}/v1beta/interactions`,
+      header: headers,
+      protocol: "interactions",
+      data: JSON.stringify({ model: normalizedModel, input: "hi", stream: true }),
+    };
+  }
+
+  if (provider === "gemini" || provider === "vertex") {
+    if (key) setHeaderIfMissing(headers, "x-goog-api-key", key);
+    else if (authIndex) setHeaderIfMissing(headers, "x-goog-api-key", "$TOKEN$");
+    return {
+      ...metadata,
+      url: provider === "vertex"
+        ? `${root}/v1/publishers/google/models/${encodeURIComponent(normalizedModel)}:streamGenerateContent?alt=sse`
+        : `${root}/v1beta/models/${encodeURIComponent(normalizedModel)}:streamGenerateContent?alt=sse`,
       header: headers,
       protocol: "gemini",
       data: JSON.stringify({
@@ -838,10 +866,10 @@ export function buildProviderHealthProbe(
   if (key) setHeaderIfMissing(headers, "Authorization", `Bearer ${key}`);
   else if (authIndex) setHeaderIfMissing(headers, "Authorization", "Bearer $TOKEN$");
 
-  if (provider === "codex" || provider === "deepseek") {
+  if (provider === "codex" || provider === "deepseek" || provider === "xai" || provider === "meta") {
     return {
       ...metadata,
-      url: provider === "deepseek"
+      url: provider === "deepseek" || provider === "xai" || provider === "meta"
         ? `${normalizeBaseUrl(baseUrl.trim() || defaultBaseUrl(provider))}/responses`
         : `${root}/v1/responses`,
       header: headers,
@@ -1153,8 +1181,12 @@ export async function saveApiAccessRemark(update: {
 
 export type ProviderSection =
   | "gemini-api-key"
+  | "interactions-api-key"
+  | "vertex-api-key"
   | "codex-api-key"
   | "claude-api-key"
+  | "xai-api-key"
+  | "meta-api-key"
   | "openai-compatibility";
 
 export type ProviderCategory = ProviderSection | "deepseek";
@@ -1222,6 +1254,11 @@ export const providerDefinitions: ProviderDefinition[] = [
   { id: "deepseek", section: "codex-api-key", responseKey: "codex-api-key", openAi: false },
   { id: "claude-api-key", section: "claude-api-key", responseKey: "claude-api-key", openAi: false },
   { id: "gemini-api-key", section: "gemini-api-key", responseKey: "gemini-api-key", openAi: false },
+  // easy c89e2fb: the four v8 sections that shipped after the initial port.
+  { id: "interactions-api-key", section: "interactions-api-key", responseKey: "interactions-api-key", openAi: false },
+  { id: "vertex-api-key", section: "vertex-api-key", responseKey: "vertex-api-key", openAi: false },
+  { id: "xai-api-key", section: "xai-api-key", responseKey: "xai-api-key", openAi: false },
+  { id: "meta-api-key", section: "meta-api-key", responseKey: "meta-api-key", openAi: false },
 ];
 
 export const providerSectionOrder = providerDefinitions.map((definition) => definition.id);
@@ -1233,8 +1270,12 @@ export const providerLoadDefinitions = providerDefinitions.filter(
 
 export const emptyRecords = (): Record<ProviderSection, Record<string, unknown>[]> => ({
   "gemini-api-key": [],
+  "interactions-api-key": [],
+  "vertex-api-key": [],
   "codex-api-key": [],
   "claude-api-key": [],
+  "xai-api-key": [],
+  "meta-api-key": [],
   "openai-compatibility": [],
 });
 
@@ -1423,6 +1464,10 @@ export const providerModelType = (
   record?: Record<string, unknown>,
 ): ModelProvider => {
   if (section === "gemini-api-key") return "gemini";
+  if (section === "interactions-api-key") return "interactions";
+  if (section === "vertex-api-key") return "vertex";
+  if (section === "xai-api-key") return "xai";
+  if (section === "meta-api-key") return "meta";
   if (section === "claude-api-key") return "claude";
   if (section === "codex-api-key" && record && isDeepSeekRecord(record)) return "deepseek";
   if (section === "codex-api-key") return "codex";

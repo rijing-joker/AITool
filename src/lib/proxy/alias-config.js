@@ -25,6 +25,8 @@ const OAUTH_ALIAS_CHANNELS = [
   { key: "kimi", provider: "Kimi OAuth", kind: "kimi-oauth", protocol: "openai", supportsReasoning: true, supportsFast: false, forceMapping: false },
   { key: "devin", provider: "Devin OAuth", kind: "devin-oauth", protocol: "interactions", supportsReasoning: false, supportsFast: false, forceMapping: false },
   { key: "xai", provider: "xAI OAuth", kind: "xai-oauth", protocol: "codex", supportsReasoning: true, supportsFast: false, forceMapping: false },
+  // easy c89e2fb: the Muse channel — plain aliases only, no reasoning/fast.
+  { key: "meta", provider: "Meta OAuth", kind: "meta-oauth", protocol: "openai", supportsReasoning: false, supportsFast: false, forceMapping: false },
 ];
 
 const ALIAS_SECTIONS = [
@@ -334,6 +336,7 @@ function normalizeOauthAliasChannel(value) {
     case "kimi": case "moonshot": return "kimi";
     case "devin": case "cognition": return "devin";
     case "xai": case "x-ai": case "grok": return "xai";
+    case "meta": case "muse": return "meta";
     default: return null;
   }
 }

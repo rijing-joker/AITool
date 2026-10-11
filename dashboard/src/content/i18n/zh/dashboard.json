@@ -1901,5 +1901,9 @@
   "proxy.creds.cooldown.resetConfirm": "确定清除“{{name}}”的本地路由冷却状态吗？清除后此凭证可能立即再次参与请求，但不会恢复上游额度。",
   "proxy.creds.cooldown.resetSuccess": "已清除 {{name}} 的冷却状态。",
   "proxy.creds.cooldown.missingIndex": "凭证缺少有效的认证索引，无法清除冷却。请刷新列表后重试。",
-  "proxy.creds.cooldown.invalidResponse": "内核未返回有效的清除结果，请刷新列表确认冷却状态。"
+  "proxy.creds.cooldown.invalidResponse": "内核未返回有效的清除结果，请刷新列表确认冷却状态。",
+  "proxy.upstream.provider.interactions": "Gemini Interactions",
+  "proxy.upstream.provider.vertex": "Vertex AI",
+  "proxy.upstream.provider.xai": "xAI",
+  "proxy.upstream.provider.meta": "Meta"
 }

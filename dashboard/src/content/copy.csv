@@ -1858,6 +1858,10 @@ proxy.upstream.provider.openaiCompat,proxy,ProxyPage,Upstreams,provider_openai_c
 proxy.upstream.provider.deepseek,proxy,ProxyPage,Upstreams,provider_deepseek,DeepSeek,,active
 proxy.upstream.provider.claude,proxy,ProxyPage,Upstreams,provider_claude,Claude,,active
 proxy.upstream.provider.gemini,proxy,ProxyPage,Upstreams,provider_gemini,Gemini,,active
+proxy.upstream.provider.interactions,proxy,ProxyPage,Upstreams,provider_interactions,Gemini Interactions,,active
+proxy.upstream.provider.vertex,proxy,ProxyPage,Upstreams,provider_vertex,Vertex AI,,active
+proxy.upstream.provider.xai,proxy,ProxyPage,Upstreams,provider_xai,xAI,,active
+proxy.upstream.provider.meta,proxy,ProxyPage,Upstreams,provider_meta,Meta,,active
 proxy.upstream.search,proxy,ProxyPage,Upstreams,search,"Search notes, keys or URLs",,active
 proxy.upstream.add,proxy,ProxyPage,Upstreams,add,Add,,active
 proxy.upstream.count,proxy,ProxyPage,Upstreams,count,{{count}} provider(s),,active

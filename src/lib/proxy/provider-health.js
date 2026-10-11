@@ -5,7 +5,7 @@
 
 const MAX_STREAM_BYTES = 256 * 1024;
 const MAX_PROBE_CONCURRENCY = 4;
-const SUPPORTED_PROTOCOLS = new Set(["openai-chat", "openai-responses", "claude", "gemini"]);
+const SUPPORTED_PROTOCOLS = new Set(["openai-chat", "openai-responses", "claude", "gemini", "interactions"]);
 
 let activeProbes = 0;
 const waiters = [];
@@ -64,6 +64,17 @@ function jsonHasText(protocol, value) {
       return (value.candidates ?? []).some((candidate) =>
         (candidate?.content?.parts ?? []).some((part) => hasText(part?.text)),
       );
+    case "interactions": {
+      // easy provider_health.rs: the Gemini Interactions API emits typed events.
+      const event = value.event_type ?? value.type;
+      if (event === "content.delta") {
+        return value?.delta?.type === "text" && hasText(value?.delta?.text);
+      }
+      if (event === "interaction.complete") {
+        return value?.interaction?.status === "completed" && hasText(value?.interaction?.outputs);
+      }
+      return false;
+    }
     default:
       return false;
   }
@@ -100,7 +111,12 @@ function geminiTerminalSuccess(value) {
 }
 
 function streamHasTerminalSuccess(protocol, buffer) {
-  if (protocol !== "gemini") return false;
+  if (protocol !== "gemini" && protocol !== "interactions") return false;
+  if (protocol === "interactions") {
+    return sseJsonEvents(buffer.toString("utf8")).some((value) =>
+      (value.event_type ?? value.type) === "interaction.complete"
+      && value?.interaction?.status === "completed");
+  }
   return sseJsonEvents(buffer.toString("utf8")).some(geminiTerminalSuccess);
 }
 
@@ -112,9 +128,8 @@ function isStreamingContentType(contentType) {
 }
 
 // request: { url, header, data, protocol, timeoutMs, proxyUrl } (EasyCLIProxyAPI
-// shape).
-// `model`/`source`/`authIndex` are accepted for shape parity; they only feed
-// the Rust side's local usage log, which AiTool does not keep.
+// shape). `model`/`source`/`authIndex` are accepted for shape parity; they only
+// feed the Rust side's local usage log, which AiTool does not keep.
 async function probe(request) {
   const url = String(request?.url || "").trim();
   let parsed;

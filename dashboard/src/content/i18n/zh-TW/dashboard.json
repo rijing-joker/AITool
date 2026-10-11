@@ -1960,5 +1960,9 @@
   "proxy.creds.cooldown.resetConfirm": "確定清除「{{name}}」的本機路由冷卻狀態嗎？清除後此憑證可能立即再次參與請求，但不會恢復上游額度。",
   "proxy.creds.cooldown.resetSuccess": "已清除 {{name}} 的冷卻狀態。",
   "proxy.creds.cooldown.missingIndex": "憑證缺少有效的驗證索引，無法清除冷卻。請重新整理列表後重試。",
-  "proxy.creds.cooldown.invalidResponse": "核心未傳回有效的清除結果，請重新整理列表確認冷卻狀態。"
+  "proxy.creds.cooldown.invalidResponse": "核心未傳回有效的清除結果，請重新整理列表確認冷卻狀態。",
+  "proxy.upstream.provider.interactions": "Gemini Interactions",
+  "proxy.upstream.provider.vertex": "Vertex AI",
+  "proxy.upstream.provider.xai": "xAI",
+  "proxy.upstream.provider.meta": "Meta"
 }

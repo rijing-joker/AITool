@@ -18,11 +18,13 @@ import { CSS as DndCss } from "@dnd-kit/utilities";
 import {
   AlertTriangle,
   ArrowRight,
+  Bot,
   Boxes,
   Check,
   Edit3,
   Feather,
   GripVertical,
+  Layers,
   LoaderCircle,
   Plus,
   RefreshCw,
@@ -112,6 +114,10 @@ const CATEGORY_LABEL_KEYS = {
   "deepseek": "proxy.upstream.provider.deepseek",
   "claude-api-key": "proxy.upstream.provider.claude",
   "gemini-api-key": "proxy.upstream.provider.gemini",
+  "interactions-api-key": "proxy.upstream.provider.interactions",
+  "vertex-api-key": "proxy.upstream.provider.vertex",
+  "xai-api-key": "proxy.upstream.provider.xai",
+  "meta-api-key": "proxy.upstream.provider.meta",
 };
 
 const CATEGORY_ICONS = {
@@ -120,6 +126,10 @@ const CATEGORY_ICONS = {
   "deepseek": Waves,
   "claude-api-key": Feather,
   "gemini-api-key": Sparkles,
+  "interactions-api-key": Sparkles,
+  "vertex-api-key": Layers,
+  "xai-api-key": Zap,
+  "meta-api-key": Bot,
 };
 
 function UpstreamSwitch({ checked, onChange, disabled, title, label }) {

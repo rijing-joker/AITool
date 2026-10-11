@@ -12,6 +12,8 @@ import { ProviderEditDialog } from "./provider-edit-dialog";
 const require = createRequire(import.meta.url);
 const { listPresets } = require("../../../src/lib/provider-switch/presets");
 const { projectAdditive, serializeLive, planSaveAdditive, sanitizeWrapper } = require("../../../src/lib/provider-switch/additive");
+const { projectCodex } = require("../../../src/lib/provider-switch/targets");
+import { prefillProviderMeta } from "./provider-preset-meta";
 
 vi.mock("../lib/copy", () => ({ copy: (key) => key }));
 vi.mock("../lib/provider-switch-api", () => ({
@@ -50,6 +52,35 @@ beforeEach(() => {
   providerSwitchApi.getEditorView.mockResolvedValue({ settings: base, inactive: [] });
 });
 afterEach(cleanup);
+
+it.each([false, true])("saves MoArk catalog defaults while preserving an existing custom catalog (%s)", async (custom) => {
+  const preset = listPresets("codex").find((row) => row.id === "codex_moark");
+  const meta = custom ? { codexCatalogModels: [{ model: "my-model", inputModalities: ["text"] }] } : { customUserAgent: "kept" };
+  const settingsConfig = structuredClone(preset.settingsConfig);
+  settingsConfig.auth.OPENAI_API_KEY = "fixture-key";
+  const editing = { id: "moark", name: "MoArk", category: "custom", settingsConfig, meta };
+  const projection = projectCodex({ prev: null, target: editing, liveToml: "", liveAuth: {}, stash: null });
+  providerSwitchApi.getEditorView.mockResolvedValue({ configToml: projection.configToml, authJson: {}, inactive: [] });
+  providerSwitchApi.updateProvider.mockResolvedValue({ provider: editing });
+  const callbacks = { ...props(), app: "codex", presets: listPresets("codex"), editing };
+  render(<ProviderEditDialog {...callbacks} />);
+  const save = screen.getByRole("button", { name: "pswitch.action.save" });
+  await waitFor(() => expect(save).toBeEnabled());
+  expect(screen.getAllByLabelText("pswitch.catalog.col_model")).toHaveLength(custom ? 1 : 5);
+  fireEvent.click(save);
+  await waitFor(() => expect(providerSwitchApi.updateProvider).toHaveBeenCalledTimes(1));
+  const saved = providerSwitchApi.updateProvider.mock.calls[0][2].meta;
+  expect(saved.codexCatalogModels).toEqual(custom ? meta.codexCatalogModels : preset.meta.codexCatalogModels);
+  if (!custom) expect(saved.customUserAgent).toBe("kept");
+});
+
+it("does not prefill an external catalog or unrelated endpoint", () => {
+  const presets = listPresets("codex");
+  for (const config of [
+    { base_url: "https://moark.com/v1", model_catalog_json: "user-catalog.json" },
+    { base_url: "https://other.test/v1" },
+  ]) expect(prefillProviderMeta("codex", { settingsConfig: { config } }, presets)).toEqual({});
+});
 
 it("saves the projected config and editor base once during repeated clicks", async () => {
   const pendingSave = deferred();

@@ -1898,5 +1898,7 @@
   "sessions.detail.session_id": "會話 ID",
   "sessions.detail.local_path": "本機路徑",
   "sessions.detail.resume_command": "恢復命令",
-  "sessions.performance.first_response_value_single": "{{seconds}} 秒 · {{count}} 個樣本"
+  "sessions.performance.first_response_value_single": "{{seconds}} 秒 · {{count}} 個樣本",
+  "proxy.alias.aliasName.sharedParameters": "思考等級和 Fast 設定也會影響 {{protocol}} 協定下的另外 {{count}} 條同名映射。",
+  "proxy.alias.source.keyScope": "金鑰 {{index}}"
 }

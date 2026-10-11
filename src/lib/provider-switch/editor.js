@@ -4,6 +4,7 @@ const targets = require("./targets");
 const paths = require("./paths");
 const floor = require("./floor");
 const toml = require("./toml");
+const { normalizeCodexProviderConfig } = require("./codex-provider-config");
 const envfile = require("./envfile");
 const additive = require("./additive");
 
@@ -238,8 +239,8 @@ function codexEntries(config) {
   return entries;
 }
 
-function codexRowSettings(storedRow, edited) {
-  const editedConfig = isPlainObject(edited && edited.config) ? edited.config : {};
+function codexRowSettings(storedRow, edited, options) {
+  const editedConfig = normalizeCodexProviderConfig(isPlainObject(edited && edited.config) ? edited.config : {}, options);
   const auth = edited && isPlainObject(edited.auth) ? edited.auth : null;
   const authKey = auth ? String(auth.OPENAI_API_KEY ?? "").trim() : "";
 
@@ -263,7 +264,7 @@ function codexRowSettings(storedRow, edited) {
   return { auth: authKey ? { OPENAI_API_KEY: authKey } : null, config };
 }
 
-function codexPlanSave(storedRow, edited, base) {
+function codexPlanSave(storedRow, edited, base, options) {
   const editedConfig = isPlainObject(edited && edited.config) ? edited.config : {};
   const baseConfig = isPlainObject(base && base.config) ? base.config : {};
   const baseEntries = new Map(codexEntries(baseConfig).map((entry) => [pathKey(entry.path), entry]));
@@ -278,7 +279,7 @@ function codexPlanSave(storedRow, edited, base) {
     if (before && stableEqual(before.value, entry.value)) continue;
     changes.push({ path: entry.path, before: before ? before.value : undefined, after: entry.value });
   }
-  return { rowSettings: codexRowSettings(storedRow, edited), changes };
+  return { rowSettings: codexRowSettings(storedRow, edited, options), changes };
 }
 
 function codexInactiveFields(row) {
@@ -539,9 +540,9 @@ async function buildEditorView(app, { settingsConfig, id, category } = {}) {
 // edits) against the base it was opened with. Returns the provider row
 // content and the global-settings changes for the live files. `slotKey` is
 // the additive editor-view echo (which container entry the row owns).
-function planSave(app, storedRow, edited, base, slotKey, draft) {
+function planSave(app, storedRow, edited, base, slotKey, draft, options) {
   if (app === "claude") return claudePlanSave(storedRow, edited, base, draft);
-  if (app === "codex") return codexPlanSave(storedRow, edited, base);
+  if (app === "codex") return codexPlanSave(storedRow, edited, base, options);
   if (app === "gemini") return geminiPlanSave(storedRow, edited, base);
   if (additive.isAdditiveApp(app)) return additive.planSaveAdditive(app, { settingsConfig: storedRow }, edited, base, slotKey);
   throw new Error(`Unsupported app: ${app}`);

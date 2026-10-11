@@ -169,10 +169,16 @@ function sanitizeProviderFields(app, { name, category, settingsConfig, notes, we
   if (!trimmedName) throw new Error("Provider name is required");
   if (trimmedName.length > 100) throw new Error("Provider name is too long");
   const normalizedCategory = PROVIDER_CATEGORIES.includes(category) ? category : "custom";
+  const normalizedSettings = sanitizeSettingsConfig(app, settingsConfig || {}, trimmedName);
+  if (app === "codex") {
+    normalizedSettings.config = require("./codex-provider-config").normalizeCodexProviderConfig(
+      normalizedSettings.config, { official: normalizedCategory === "official" },
+    );
+  }
   return {
     name: trimmedName,
     category: normalizedCategory,
-    settingsConfig: sanitizeSettingsConfig(app, settingsConfig || {}, trimmedName),
+    settingsConfig: normalizedSettings,
     notes: String(notes || "").slice(0, 2000),
     websiteUrl: sanitizeWebsiteUrl(websiteUrl),
     icon: sanitizeIcon(icon),

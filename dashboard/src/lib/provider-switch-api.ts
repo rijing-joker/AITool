@@ -135,6 +135,7 @@ export interface ProviderSwitchPreset {
   endpointCandidates?: string[];
   modelsUrl?: string;
   settingsConfig: unknown;
+  meta?: ProviderSwitchProviderMeta;
   formFields: ProviderSwitchFormField[];
 }
 

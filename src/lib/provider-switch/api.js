@@ -299,6 +299,7 @@ async function saveProvider({ app, id, body }) {
     app === "claude" && editorInput.draft && typeof editorInput.draft === "object"
       ? editorInput.draft
       : undefined,
+    { official: (body.category ?? existing?.category) === "official" },
   );
 
   const state = await store.listProviders(app);
@@ -739,7 +740,7 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
     if (p === `${prefix}/editor-view` && method === "POST") {
       const body = await readJsonBody(req);
       const app = body.app || "claude";
-      json(res, await editor.buildEditorView(app, { settingsConfig: body.settingsConfig, id: body.id }));
+      json(res, await editor.buildEditorView(app, { settingsConfig: body.settingsConfig, id: body.id, category: body.category }));
       return true;
     }
 

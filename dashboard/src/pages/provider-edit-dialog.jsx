@@ -12,6 +12,7 @@ import { ProviderIconPicker, iconComponentFor } from "./provider-icon-picker";
 import { CodexCatalogEditor } from "./provider-codex-catalog";
 import { ModelDropdown, ModelInputAction } from "./provider-model-dropdown";
 import { withClaudeGatewayDefaults } from "./provider-claude-gateway-defaults";
+import { mergePresetMeta, prefillProviderMeta } from "./provider-preset-meta";
 
 // Additive apps (cc-switch's additive mode, backed by
 // src/lib/provider-switch/additive.js): the provider owns one keyed entry in
@@ -749,6 +750,7 @@ export function ProviderEditDialog({
     // editor view is re-projected for the preset's draft.
     setPresetOpen(false);
     setSelectedPresetId(preset.id);
+    setMeta((current) => mergePresetMeta(current, preset.meta, editing?.settingsConfig?.config));
     setDraft(additiveInitialDraft(app, preset.settingsConfig ?? {}));
     setCategory(preset.group === "official" ? "official" : "custom");
     setName(preset.nameKey ? copy(preset.nameKey) : preset.name);
@@ -774,7 +776,7 @@ export function ProviderEditDialog({
     const initial = {
       name: editing?.name || "", category: editing?.category || "custom",
       notes: editing?.notes || "", websiteUrl: editing?.websiteUrl || "",
-      icon: editing?.icon || "", iconColor: editing?.iconColor || "", meta: { ...(editing?.meta || {}) },
+      icon: editing?.icon || "", iconColor: editing?.iconColor || "", meta: prefillProviderMeta(app, editing, presets),
     };
     setClaudeApiKeyName("ANTHROPIC_AUTH_TOKEN");
     setAdvancedOpen(false);
@@ -803,12 +805,12 @@ export function ProviderEditDialog({
       setNotes(editing.notes || "");
       setIcon(editing.icon || "");
       setIconColor(editing.iconColor || "");
-      setMeta({ ...(editing.meta || {}) });
+      setMeta(initial.meta);
       setDraft(additiveInitialDraft(app, editing.settingsConfig ?? {}));
       if (app === "claude" && editing.settingsConfig?.env) {
         if ("ANTHROPIC_API_KEY" in editing.settingsConfig.env) setClaudeApiKeyName("ANTHROPIC_API_KEY");
       }
-      const editingMeta = editing.meta || {};
+      const editingMeta = initial.meta;
       if (app === "claude" && claudeHasAdvancedValues(editing.settingsConfig ?? {}, editingMeta)) {
         setAdvancedOpen(true);
       }

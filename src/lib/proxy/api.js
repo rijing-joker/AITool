@@ -898,7 +898,7 @@ async function handleProxyApiRequest(req, res, url, ctx) {
             json(res, { ok: false, error: "Unknown alias-config action" }, 400);
         }
       } catch (error) {
-        json(res, { ok: false, error: error?.message || String(error) });
+        json(res, { ok: false, error: error?.message || String(error) }, error?.statusCode || 400);
       }
       return true;
     }

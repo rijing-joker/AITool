@@ -257,6 +257,10 @@ function buildCodexCatalog(models, officialModels) {
     entry.context_window = window;
     entry.max_context_window = window;
     entry.priority = 1000 + entries.length;
+    if (Array.isArray(row.inputModalities)) {
+      const modalities = ["text", "image"].filter((value) => row.inputModalities.includes(value));
+      if (modalities.length) entry.input_modalities = modalities;
+    }
     const levels = sanitizeLevels(row && row.reasoningLevels);
     if (levels.length > 0) {
       entry.supported_reasoning_levels = levels.map((effort) => ({
@@ -316,6 +320,10 @@ function parseCodexCatalog(text, officialModels) {
       contextWindow:
         Number.isFinite(entry.context_window) && entry.context_window > 0 ? String(Math.floor(entry.context_window)) : "",
     };
+    if (Array.isArray(entry.input_modalities)) {
+      const modalities = ["text", "image"].filter((value) => entry.input_modalities.includes(value));
+      if (modalities.length) row.inputModalities = modalities;
+    }
     const instructions =
       typeof entry.base_instructions === "string" && entry.base_instructions.trim()
         ? entry.base_instructions

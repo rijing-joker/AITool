@@ -2,6 +2,7 @@ const floor = require("./floor");
 const toml = require("./toml");
 const envfile = require("./envfile");
 const catalog = require("./catalog");
+const { normalizeCodexProviderConfig } = require("./codex-provider-config");
 
 // Provider → live-file projections, ported from cc-switch's
 // live/project/{claude,codex,gemini}.rs. Each projection computes the next
@@ -79,8 +80,8 @@ function projectCodex({ prev, target, liveToml, liveAuth, stash }) {
   if (typeof liveToml !== "string") {
     throw new Error("Live ~/.codex/config.toml is missing (create it or run Codex once)");
   }
-  const prevConfig = { ...((prev && prev.settingsConfig && prev.settingsConfig.config) || {}) };
-  const targetConfig = { ...((target && target.settingsConfig && target.settingsConfig.config) || {}) };
+  const prevConfig = normalizeCodexProviderConfig(prev?.settingsConfig?.config, { official: prev?.category === "official" });
+  const targetConfig = normalizeCodexProviderConfig(target?.settingsConfig?.config, { official: target?.category === "official" });
 
   // The model catalog sidecar rides on provider meta; inject its config.toml
   // pointer as a virtual floor key so the generic residue logic below manages
@@ -92,6 +93,14 @@ function projectCodex({ prev, target, liveToml, liveAuth, stash }) {
   if (targetCatalog.length > 0) targetConfig.model_catalog_json = catalog.CODEX_CATALOG_FILENAME;
 
   let text = liveToml;
+  // Route-based providers must not leave a second, obsolete endpoint or key
+  // at top level. This also cleans a legacy live file on its first switch.
+  for (const key of ["base_url", "openai_base_url", "wire_api", "experimental_bearer_token"]) {
+    if (hasOwn(targetConfig, key)) continue;
+    if (targetConfig.model_providers?.custom || hasOwn(prev?.settingsConfig?.config || {}, key)) {
+      text = toml.removeTopLevelKey(text, key);
+    }
+  }
 
   // Top-level floor keys: residue first, then the target's values.
   const managedKeys = new Set([...floor.CODEX_FLOOR_TOP, ...Object.keys(prevConfig), ...Object.keys(targetConfig)]);
@@ -125,13 +134,13 @@ function projectCodex({ prev, target, liveToml, liveAuth, stash }) {
   if (targetTable && typeof targetTable === "object") {
     const entries = structuredClone(targetTable);
     applyCodexRouteAuth(entries, codexRowKey(target, entries), loginOnDiskAfter);
-    text = toml.setTable(text, floor.CODEX_PROVIDER_TABLE, entries);
+    text = toml.replaceTable(text, floor.CODEX_PROVIDER_TABLE, entries);
   } else {
     // Remove when the previous provider wrote one and the target has none.
-    const liveTable = toml.getTableEntries(text, floor.CODEX_PROVIDER_TABLE);
+    const liveTable = require("smol-toml").parse(text || "").model_providers?.custom;
     const unchanged = liveTable && prevTable && stableEqual(liveTable, normalizeTable(prevTable));
     if (unchanged) {
-      text = toml.setTable(text, floor.CODEX_PROVIDER_TABLE, null);
+      text = toml.replaceTable(text, floor.CODEX_PROVIDER_TABLE, null);
     }
   }
 
@@ -298,11 +307,12 @@ function extractClaudeConfig(live) {
 function extractCodexConfig(liveToml) {
   const config = {};
   if (typeof liveToml !== "string") return { auth: null, config };
+  const parsed = normalizeCodexProviderConfig(require("smol-toml").parse(liveToml || ""));
   for (const key of floor.CODEX_FLOOR_TOP) {
-    const value = toml.getTopLevelValue(liveToml, key);
+    const value = parsed[key];
     if (value !== undefined) config[key] = value;
   }
-  const table = toml.getTableEntries(liveToml, floor.CODEX_PROVIDER_TABLE);
+  const table = parsed.model_providers?.custom;
   if (table && Object.keys(table).length > 0) {
     config.model_providers = { custom: table };
   }
@@ -352,7 +362,7 @@ function mergeLiveIntoSettingsConfig(app, settingsConfig, live) {
     const providerTable =
       config.model_providers && typeof config.model_providers === "object" ? config.model_providers.custom : null;
     if (providerTable && typeof providerTable === "object") {
-      const liveTable = toml.getTableEntries(liveToml, floor.CODEX_PROVIDER_TABLE) || {};
+      const liveTable = require("smol-toml").parse(liveToml || "").model_providers?.custom || {};
       for (const key of Object.keys(providerTable)) {
         if (key in liveTable) providerTable[key] = liveTable[key];
       }

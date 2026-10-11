@@ -191,9 +191,13 @@ function AliasEditorDialog({ editor, onClose, onSaved }) {
   const normalizedEffort = effort.trim().toLowerCase();
   const defaultAlias = defaultModelAlias(selectedSource?.model, normalizedEffort, fastEnabled);
   const uniqueDefaultAlias = uniqueModelAlias(defaultAlias, baseSources.map((source) => source.model));
-  const aliasReusesExistingName = !editingEntry
-    && Boolean(alias.trim())
-    && editor.entries.some((entry) => entry.alias.trim().toLowerCase() === alias.trim().toLowerCase());
+  const sharedMappings = editor.entries.filter((entry) =>
+    (!editingEntry || (entry.mappingId ? entry.mappingId !== editingEntry.mappingId
+      : ["alias", "sourceModel", "provider", "kind", "oauthChannel", "section", "providerIndex", "modelIndex"]
+        .some((key) => entry[key] !== editingEntry[key])))
+    && entry.alias.trim().toLowerCase() === alias.trim().toLowerCase()
+    && (!entry.protocol || entry.protocol === selectedSource?.protocol));
+  const aliasReusesExistingName = Boolean(alias.trim()) && sharedMappings.length > 0;
   const availableEfforts = selectedSource?.reasoningLevels ?? [];
   const visibleEffortOptions = availableEfforts.map((value) => {
     const preset = EFFORT_OPTIONS.find((option) => option.value === value);
@@ -502,7 +506,7 @@ function AliasEditorDialog({ editor, onClose, onSaved }) {
                   className="h-9 w-full rounded-lg border border-oai-gray-200 bg-transparent px-3 font-mono text-sm placeholder:text-oai-gray-400 focus:outline-none focus:ring-2 focus:ring-oai-brand-500 dark:border-oai-gray-700"
                 />
                 {aliasReusesExistingName ? (
-                  <p className="text-xs text-oai-gray-400 dark:text-oai-gray-500">{copy("proxy.alias.aliasName.reuseHint")}</p>
+                  <p className="text-xs text-oai-gray-400 dark:text-oai-gray-500">{copy("proxy.alias.aliasName.sharedParameters", { count: sharedMappings.length, protocol: selectedSource?.protocol || "" })}</p>
                 ) : null}
               </div>
 
@@ -602,7 +606,7 @@ export function ModelAliasesTab() {
     setNotice("");
     try {
       const context = await fetchAliasEditContext(entry);
-      setEditingEntry(entry);
+      setEditingEntry({ ...entry, mappingId: context.mappingId ?? entry.mappingId, revision: context.revision });
       setEditingSource(context.source);
       setEditingRevision(context.revision);
       setInitialEffort(context.effort ?? "");
@@ -662,7 +666,7 @@ export function ModelAliasesTab() {
         <ul className="flex flex-col gap-2">
           {entries.map((entry) => (
             <li
-              key={[
+              key={entry.mappingId || [
                 entry.kind,
                 entry.section ?? "oauth",
                 entry.providerIndex ?? "",
@@ -682,6 +686,7 @@ export function ModelAliasesTab() {
                     <span title={thinkingAliasProviderDetail(entry.kind, entry.provider)}>
                       {thinkingAliasProviderDetail(entry.kind, entry.provider)}
                     </span>
+                    {entry.keyIndex != null ? <span>{copy("proxy.alias.source.keyScope", { index: entry.keyIndex + 1 })}</span> : null}
                   </small>
                 </div>
                 <ArrowRight className="h-3.5 w-3.5 shrink-0 text-oai-gray-400" />

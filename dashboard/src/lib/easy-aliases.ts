@@ -8,6 +8,11 @@ import { copy } from "./copy";
 import { getLocalApiAuthHeaders } from "./local-api-auth";
 
 export type ThinkingAliasEntry = {
+  mappingId?: string;
+  revision?: string;
+  protocol?: string;
+  sharedMappingCount?: number;
+  keyIndex?: number | null;
   sourceModel: string;
   alias: string;
   effort: string | null;
@@ -20,6 +25,11 @@ export type ThinkingAliasEntry = {
 };
 
 export type SpeedAliasEntry = {
+  mappingId?: string;
+  revision?: string;
+  protocol?: string;
+  sharedMappingCount?: number;
+  keyIndex?: number | null;
   sourceModel: string;
   alias: string;
   serviceTier: string;
@@ -51,6 +61,7 @@ export type ModelAliasSource = ThinkingAliasSource & {
 };
 
 export type ModelAliasEditContext = {
+  mappingId?: string;
   source: ThinkingAliasSource;
   revision: string;
   effort: string | null;
@@ -86,6 +97,8 @@ async function aliasConfig<T>(body: AliasRequest): Promise<T> {
 export const loadAliasState = () => aliasConfig<AliasState>({ action: "load" });
 
 export const fetchAliasEditContext = (entry: {
+  mappingId?: string;
+  revision?: string;
   alias: string;
   oauthChannel?: string | null;
   section?: string | null;
@@ -94,17 +107,24 @@ export const fetchAliasEditContext = (entry: {
 }) => aliasConfig<ModelAliasEditContext>({
   action: "edit-source",
   alias: entry.alias,
+  mappingId: entry.mappingId,
+  revision: entry.revision,
+  oauthChannel: entry.oauthChannel ?? undefined,
   section: entry.section ?? undefined,
   providerIndex: entry.providerIndex ?? undefined,
   modelIndex: entry.modelIndex ?? undefined,
 });
 
 const aliasLocationArgs = (entry: {
+  mappingId?: string;
+  revision?: string;
   oauthChannel?: string | null;
   section?: string | null;
   providerIndex?: number | null;
   modelIndex?: number | null;
 }) => ({
+  mappingId: entry.mappingId,
+  revision: entry.revision,
   oauthChannel: entry.oauthChannel ?? undefined,
   section: entry.section ?? undefined,
   providerIndex: entry.providerIndex ?? undefined,
@@ -158,9 +178,9 @@ export const combineModelAliasEntries = (
 ): AliasListEntry[] => {
   const entries = new Map<string, AliasListEntry>();
   const entryKey = (
-    entry: Pick<ThinkingAliasEntry, "kind" | "provider" | "sourceModel" | "alias" | "oauthChannel">,
+    entry: Pick<ThinkingAliasEntry, "mappingId" | "kind" | "provider" | "sourceModel" | "alias" | "oauthChannel">,
   ) => (
-    [entry.oauthChannel ?? "", entry.kind, entry.provider, entry.sourceModel, entry.alias]
+    entry.mappingId || [entry.oauthChannel ?? "", entry.kind, entry.provider, entry.sourceModel, entry.alias]
       .map((value) => value.toLocaleLowerCase())
       .join("\u0000")
   );

@@ -532,5 +532,7 @@
   "sessions.detail.session_id": "セッション ID",
   "sessions.detail.local_path": "ローカルパス",
   "sessions.detail.resume_command": "再開コマンド",
-  "sessions.performance.first_response_value_single": "{{seconds}}秒 · {{count}} サンプル"
+  "sessions.performance.first_response_value_single": "{{seconds}}秒 · {{count}} サンプル",
+  "proxy.alias.aliasName.sharedParameters": "推論と Fast の設定は、{{protocol}} の同名の他の {{count}} 件のマッピングにも適用されます。",
+  "proxy.alias.source.keyScope": "キー {{index}}"
 }

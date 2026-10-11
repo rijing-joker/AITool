@@ -339,6 +339,15 @@ const CODEX_MOARK = {
   color: "blue",
   websiteUrl: "https://moark.com",
   endpointCandidates: ["https://moark.com/v1"],
+  meta: {
+    codexCatalogModels: [
+      { model: "deepseek-v4-flash-0731", displayName: "DeepSeek V4 Flash", contextWindow: "1000000", inputModalities: ["text"], reasoningLevels: ["low", "high", "max"], defaultReasoningLevel: "high" },
+      { model: "DeepSeek-V4-Pro", displayName: "DeepSeek V4 Pro", contextWindow: "1000000", inputModalities: ["text"], reasoningLevels: ["low", "medium", "high", "xhigh", "max"], defaultReasoningLevel: "high" },
+      { model: "GLM-5.3", displayName: "GLM-5.3", contextWindow: "1048576", inputModalities: ["text"], reasoningLevels: ["none", "low", "medium", "high", "xhigh", "max"], defaultReasoningLevel: "high" },
+      { model: "Kimi-K2.7-Code", displayName: "Kimi K2.7 Code", contextWindow: "262144", inputModalities: ["text", "image"], reasoningLevels: ["none", "minimal", "low", "medium", "high", "xhigh"], defaultReasoningLevel: "high" },
+      { model: "qwen3-coder-plus", displayName: "Qwen3 Coder Plus", contextWindow: "1000000", inputModalities: ["text"], reasoningLevels: ["none"], defaultReasoningLevel: "none" },
+    ],
+  },
   settingsConfig: {
     auth: { OPENAI_API_KEY: "" },
     config: {

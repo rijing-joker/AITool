@@ -532,5 +532,7 @@
   "sessions.detail.session_id": "세션 ID",
   "sessions.detail.local_path": "로컬 경로",
   "sessions.detail.resume_command": "재개 명령",
-  "sessions.performance.first_response_value_single": "{{seconds}}초 · 표본 {{count}}개"
+  "sessions.performance.first_response_value_single": "{{seconds}}초 · 표본 {{count}}개",
+  "proxy.alias.aliasName.sharedParameters": "추론 및 Fast 설정은 {{protocol}}에서 이름이 같은 다른 매핑 {{count}}개에도 적용됩니다.",
+  "proxy.alias.source.keyScope": "키 {{index}}"
 }

@@ -2869,3 +2869,5 @@ sessions.detail.session_id,ui,SessionsPage,UsageInsights,session_id,Session ID,,
 sessions.detail.local_path,ui,SessionsPage,UsageInsights,local_path,Local path,,active
 sessions.detail.resume_command,ui,SessionsPage,SessionDetailModal,resume_command,Resume command,,active
 sessions.performance.first_response_value_single,ui,SessionsPage,SessionDetailModal,first_response_single,{{seconds}}s · {{count}} sample,,active
+proxy.alias.aliasName.sharedParameters,proxy,ProxyPage,ModelAliasesTab,sharedParameters,Reasoning and Fast settings also affect {{count}} other mappings named the same on {{protocol}}.,,active
+proxy.alias.source.keyScope,proxy,ProxyPage,ModelAliasesTab,keyScope,Key {{index}},,active

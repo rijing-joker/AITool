@@ -1839,5 +1839,7 @@
   "sessions.detail.session_id": "会话 ID",
   "sessions.detail.local_path": "本地路径",
   "sessions.detail.resume_command": "恢复命令",
-  "sessions.performance.first_response_value_single": "{{seconds}} 秒 · {{count}} 个样本"
+  "sessions.performance.first_response_value_single": "{{seconds}} 秒 · {{count}} 个样本",
+  "proxy.alias.aliasName.sharedParameters": "思考等级和 Fast 设置也会影响 {{protocol}} 协议下的另外 {{count}} 条同名映射。",
+  "proxy.alias.source.keyScope": "密钥 {{index}}"
 }

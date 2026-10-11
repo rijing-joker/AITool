@@ -543,5 +543,7 @@
   "sessions.detail.session_id": "Sitzungs-ID",
   "sessions.detail.local_path": "Lokaler Pfad",
   "sessions.detail.resume_command": "Fortsetzungsbefehl",
-  "sessions.performance.first_response_value_single": "{{seconds}}s · {{count}} Messung"
+  "sessions.performance.first_response_value_single": "{{seconds}}s · {{count}} Messung",
+  "proxy.alias.aliasName.sharedParameters": "Die Einstellungen für Reasoning und Fast gelten auch für {{count}} weitere gleichnamige Zuordnungen unter {{protocol}}.",
+  "proxy.alias.source.keyScope": "Schlüssel {{index}}"
 }

@@ -136,14 +136,14 @@ function formatTomlValue(value, depth = 0) {
 // Split `key = value` into its parts. Bare keys keep their literal text (a
 // numeric-looking key is still the string "123"); quoted keys are unquoted so
 // `"fetch" = …` and `fetch = …` compare equal.
-const KEY_ASSIGN_REGEX = /^\s*("(?:[^"\\]|\\.)*"|'[^']*'|[A-Za-z0-9_.-]+)\s*=\s*([\s\S]*)$/;
+const KEY_ASSIGN_REGEX = /^\s*((?:"(?:[^"\\]|\\.)*"|'[^']*'|[A-Za-z0-9_-]+)(?:\s*\.\s*(?:"(?:[^"\\]|\\.)*"|'[^']*'|[A-Za-z0-9_-]+))*)\s*=\s*([\s\S]*)$/;
 
 function splitKeyValue(line) {
   const m = line.match(KEY_ASSIGN_REGEX);
   if (!m) return null;
   const token = m[1];
   const key = token.startsWith('"') || token.startsWith("'") ? String(parseTomlScalar(token)) : token;
-  return { key, rhs: m[2] };
+  return { key, token, parts: parseDottedPath(token), rhs: m[2] };
 }
 
 function lineKey(line) {
@@ -278,6 +278,53 @@ function assignmentEnd(context, start) {
   return end;
 }
 
+// Replace an owned table regardless of block, dotted or inline syntax. Only
+// assignments containing the owned path are rewritten; unrelated tables,
+// comments and multiline values stay byte-for-byte intact.
+function replaceTable(text, dottedName, entries) {
+  const target = dottedName.split(".");
+  const doc = require("smol-toml").parse(text || "");
+  const lines = text.split(/\r?\n/);
+  const context = scanLines(lines);
+  const prefix = (a, b) => a.length <= b.length && a.every((part, i) => part === b[i]);
+  const out = [];
+  let table = [], owned = false;
+  for (let i = 0; i < lines.length; i++) {
+    const header = context[i].header;
+    if (header) {
+      table = header.parts || [];
+      owned = prefix(target, table);
+      if (owned) continue;
+    }
+    if (owned) continue;
+    const assignment = context[i].key ? splitKeyValue(lines[i]) : null;
+    const full = assignment?.parts ? [...table, ...assignment.parts] : null;
+    if (full && prefix(target, full)) {
+      i = assignmentEnd(context, i) - 1;
+      continue;
+    }
+    if (full && prefix(full, target)) {
+      const value = structuredClone(full.reduce((node, key) => node?.[key], doc));
+      const relative = target.slice(full.length);
+      const parent = relative.slice(0, -1).reduce((node, key) => node?.[key], value);
+      if (parent && typeof parent === "object") delete parent[relative.at(-1)];
+      // Keep an inline parent inline: appending a child block beneath it is
+      // forbidden by TOML. Write the new child into that parent instead.
+      if (entries) {
+        let node = value;
+        for (const key of relative.slice(0, -1)) node = node[key] ||= {};
+        node[relative.at(-1)] = entries;
+      }
+      out.push(`${assignment.token} = ${formatTomlValue(value)}`);
+      i = assignmentEnd(context, i) - 1;
+      // A valid TOML document cannot also define this table elsewhere.
+      return finish([...out, ...lines.slice(i + 1)], text);
+    }
+    out.push(lines[i]);
+  }
+  return setTable(finish(out, text), dottedName, entries);
+}
+
 // Remove `key = value` from inside the [table] block — the inline form of a
 // child table (`fetch = { command = … }` under [mcp_servers]). setTable can
 // only replace a `[table.key]` header block, so a caller that is about to
@@ -331,6 +378,7 @@ module.exports = {
   removeTopLevelKey,
   getTopLevelValue,
   setTable,
+  replaceTable,
   getTableEntries,
   removeTableKey,
   parseTomlScalar,

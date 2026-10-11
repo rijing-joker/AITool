@@ -106,6 +106,25 @@ test("Qwen3.8 Flash local and all cloud paths share full cache pricing (#715)", 
   }
 });
 
+test("Claude Haiku 5.5 prices identically on local and all cloud paths", () => {
+  const { getModelPricing: localPricing } = require("../src/lib/pricing");
+  const expected = { input: 0.1, output: 0.5, cache_read: 0.01, cache_write: 0.125 };
+  for (const name of [CANONICAL, ...MIRRORS]) {
+    const { code } = transformSync(extractBlock(name), { loader: "ts", target: "es2020" });
+    const edgePricing = vm.runInNewContext(`${code}\ngetModelPricing;`);
+    for (const model of ["claude-haiku-5-5", "claude-haiku-5.5"]) {
+      const edge = JSON.parse(JSON.stringify(edgePricing(model)));
+      assert.deepEqual(edge, expected, `${name}: ${model} must not fall back to the haiku-4-5 catch-all`);
+      const local = localPricing(model);
+      assert.deepEqual(
+        Object.fromEntries(Object.keys(expected).map((key) => [key, local[key]])),
+        expected,
+        `${model}: local curated pricing diverged from the edge block`,
+      );
+    }
+  }
+});
+
 test("canonical pricing block retains regression-prone entries and matcher order", () => {
   const block = extractBlock(CANONICAL);
 
@@ -121,6 +140,7 @@ test("canonical pricing block retains regression-prone entries and matcher order
     '"glm-5.3-flash"',
     '"deepseek-v4.1-flash"',
     '"deepseek-flash"',
+    '"claude-haiku-5-5"',
   ]) {
     assert.ok(block.includes(`${key}:`), `canonical table lost ${key}`);
   }
@@ -158,6 +178,10 @@ test("canonical pricing block retains regression-prone entries and matcher order
   // and glm-5.3 must precede glm-5, or flash rows bill at 6.7x.
   order('lower.includes("glm-5.3-flash")', 'lower.includes("glm-5.3")');
   order('lower.includes("glm-5.3")', 'lower.includes("glm-5")');
+  // Haiku 5.5 is a distinct cheap SKU ($0.1/$0.5); its matcher must precede
+  // the generic haiku catch-all (claude-haiku-4-5 rates, 10x higher) or the
+  // 5.5 seed silently misprices on the edge.
+  order('/haiku-5[.-]5(?:$|[^0-9.])/', 'lower.includes("haiku")');
 });
 
 test("canonical pricing block retains the complete iFlytek MaaS source table", () => {

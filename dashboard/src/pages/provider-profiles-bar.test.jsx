@@ -40,7 +40,7 @@ it("renders profile chips, creates with a name and applies through the confirm",
   const onChanged = vi.fn();
   mocks.profiles = [aProfile];
   mocks.currentIds = { claude: "pr_1" };
-  const { rerender } = render(<ProviderProfilesBar activeApp="claude" onNotice={onNotice} onChanged={onChanged} />);
+  render(<ProviderProfilesBar activeApp="claude" onNotice={onNotice} onChanged={onChanged} />);
   await waitFor(() => expect(screen.getByText("Work")).toBeTruthy());
 
   // The current profile's chip is highlighted but clicking still applies.
@@ -53,10 +53,12 @@ it("renders profile chips, creates with a name and applies through the confirm",
   // Server warnings surface through the notice (best-effort apply).
   await waitFor(() => expect(onNotice).toHaveBeenCalledWith("pswitch.profile.applied_with_warnings:[claude] provider 'p_gone' no longer exists, skipped"));
   await waitFor(() => expect(onChanged).toHaveBeenCalled());
+});
 
-  rerender(<ProviderProfilesBar activeApp="openclaw" onNotice={onNotice} onChanged={onChanged} />);
-  // openclaw has no MCP/skills support — the bar stays outside profiles.
-  await waitFor(() => expect(screen.queryByText("pswitch.profile.bar_label")).toBeNull());
+it("stays outside profiles for apps without MCP/skills support", () => {
+  render(<ProviderProfilesBar activeApp="openclaw" onNotice={vi.fn()} onChanged={vi.fn()} />);
+  // openclaw has no MCP/skills support — the bar does not render at all.
+  expect(screen.queryByText("pswitch.profile.bar_label")).toBeNull();
 });
 
 it("creates a profile from the initiating app only", async () => {

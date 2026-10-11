@@ -65,3 +65,11 @@ test("stop clears a stale pid file without signaling anyone", async (t) => {
   assert.deepEqual(result, { stopped: false, running: false });
   assert.equal(fs.existsSync(paths.pidPath), false);
 });
+
+test("a pid the existence probe accepts but ps reports gone is classified as gone", async () => {
+  // kill(-1, 0) succeeds (signal 0 to everything we may signal) while
+  // `ps -p -1` exits 1 — the exact mismatch the identity probe must classify
+  // as "process gone", not as "unverifiable → alive". Never call stop() with
+  // such a pid: a regression here would signal the whole process group.
+  assert.equal(await manager.managedCoreAlive(-1), false);
+});

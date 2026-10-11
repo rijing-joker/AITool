@@ -57,10 +57,14 @@ async function managedCoreAlive(pid) {
   let command = await new Promise((resolve) => {
     execFile("ps", ["-p", String(pid), "-o", "command="], (error, stdout) => {
       if (!error) resolve(String(stdout || "").trim());
-      // ENOENT → ps itself is missing; any other error → no such process.
-      else resolve(error.code === "ENOENT" ? null : "");
+      // ENOENT → ps itself is missing (try /proc); exit 1 → the process is
+      // gone; anything else → unverifiable.
+      else if (error.code === "ENOENT") resolve(null);
+      else if (error.code === 1) resolve(false);
+      else resolve("");
     });
   });
+  if (command === false) return false;
   if (command === null) {
     // ps is missing (minimal containers): Linux exposes the same data in /proc.
     try {

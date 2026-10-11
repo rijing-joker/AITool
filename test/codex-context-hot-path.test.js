@@ -55,12 +55,12 @@ const TARGET_USAGE = {
 
 function assertExactTargetDelta(result) {
   assert.deepEqual(result.totals, {
-    input_tokens: 45,
+    input_tokens: 41,
     cached_input_tokens: 15,
     cache_creation_input_tokens: 4,
     output_tokens: 12,
     reasoning_output_tokens: 4,
-    total_tokens: 76,
+    total_tokens: 72,
   });
   assert.equal(result.session_count, 1);
   assert.equal(result.message_count, 1);
@@ -71,27 +71,27 @@ function assertExactPendingBrowserAttribution(result) {
   assert.ok(browser, "the pending pre-range tool must be attributed to the first in-range delta");
   assert.equal(browser.calls, 1);
   assert.deepEqual(browser.totals, {
-    input_tokens: 45,
+    input_tokens: 41,
     cached_input_tokens: 15,
     cache_creation_input_tokens: 4,
     output_tokens: 12,
     reasoning_output_tokens: 4,
-    total_tokens: 76,
+    total_tokens: 72,
   });
   assert.deepEqual(browser.tools, [{
     name: "take_snapshot",
     calls: 1,
     totals: {
-      input_tokens: 45,
+      input_tokens: 41,
       cached_input_tokens: 15,
       cache_creation_input_tokens: 4,
       output_tokens: 12,
       reasoning_output_tokens: 4,
-      total_tokens: 76,
+      total_tokens: 72,
     },
   }]);
   assert.equal(result.tool_calls_breakdown.total_calls, 1);
-  assert.equal(result.tool_calls_breakdown.tools_total, 76);
+  assert.equal(result.tool_calls_breakdown.tools_total, 72);
   assert.deepEqual(
     Object.fromEntries(result.message_breakdown.categories.map((row) => [row.key, row.totals])),
     {
@@ -130,17 +130,17 @@ function assertExactTextResponseBreakdown(result) {
   assert.deepEqual(text.totals, result.totals);
   assert.deepEqual(text.tools, [{ name: "text_response", calls: 1, totals: result.totals }]);
   assert.equal(result.tool_calls_breakdown.total_calls, 1);
-  assert.equal(result.tool_calls_breakdown.tools_total, 76);
+  assert.equal(result.tool_calls_breakdown.tools_total, 72);
   assert.deepEqual(
     Object.fromEntries(result.message_breakdown.categories.map((row) => [row.key, row.totals])),
     {
       user_input: {
-        input_tokens: 45,
+        input_tokens: 41,
         cached_input_tokens: 0,
         cache_creation_input_tokens: 0,
         output_tokens: 0,
         reasoning_output_tokens: 0,
-        total_tokens: 45,
+        total_tokens: 41,
       },
       conversation_history: {
         input_tokens: 0,
@@ -201,12 +201,12 @@ test("bounded Context prunes an unrelated historical rollout and reports per-cal
     const result = await computeCodexContextBreakdown(args);
 
     assert.deepEqual(result.totals, {
-      input_tokens: 45,
+      input_tokens: 41,
       cached_input_tokens: 15,
       cache_creation_input_tokens: 4,
       output_tokens: 12,
       reasoning_output_tokens: 4,
-      total_tokens: 76,
+      total_tokens: 72,
     });
     assert.equal(result.session_count, 1);
     assert.equal(result.message_count, 1);
@@ -476,12 +476,12 @@ test("Context honors custom CODEX_HOME archives and unbounded total scans every 
 
     const total = await computeCodexContextBreakdown();
     assert.deepEqual(total.totals, {
-      input_tokens: 15,
+      input_tokens: 14,
       cached_input_tokens: 3,
       cache_creation_input_tokens: 1,
       output_tokens: 5,
       reasoning_output_tokens: 2,
-      total_tokens: 24,
+      total_tokens: 23,
     });
     assert.equal(total.session_count, 2);
     assert.equal(total.message_count, 2);
@@ -1073,12 +1073,12 @@ test("Context preserves appended JSONL records larger than the stable read buffe
     assert.equal(
       fresh.tool_calls_breakdown.categories.find((row) => row.name === "Execution")
         ?.totals.total_tokens,
-      76,
+      72,
     );
     assert.equal(fresh.skills_breakdown.skills[0]?.name, "large-fixture");
     assert.ok(
       fresh.exec_command_breakdown.by_command.some(
-        (row) => row.totals.total_tokens === 76,
+        (row) => row.totals.total_tokens === 72,
       ),
     );
     assert.equal(incrementalDiagnostics.incremental_parse_hits, 1);
@@ -1409,12 +1409,12 @@ test("Context de-duplicates one session while it overlaps live and archived root
 
     const result = await computeCodexContextBreakdown();
     assert.deepEqual(result.totals, {
-      input_tokens: 16,
+      input_tokens: 15,
       cached_input_tokens: 4,
       cache_creation_input_tokens: 1,
       output_tokens: 5,
       reasoning_output_tokens: 2,
-      total_tokens: 26,
+      total_tokens: 25,
     });
     assert.equal(result.session_count, 1);
     assert.equal(result.message_count, 2);
@@ -1479,12 +1479,12 @@ test("Context merges split and suffix-only live/archive fragments by event time"
 
         const result = await computeCodexContextBreakdown();
         assert.deepEqual(result.totals, {
-          input_tokens: 16,
+          input_tokens: 15,
           cached_input_tokens: 4,
           cache_creation_input_tokens: 1,
           output_tokens: 5,
           reasoning_output_tokens: 2,
-          total_tokens: 26,
+          total_tokens: 25,
         });
         assert.equal(result.session_count, 1);
         assert.equal(result.message_count, 2);

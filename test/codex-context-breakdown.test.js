@@ -120,12 +120,12 @@ test("computeCodexContextBreakdown returns non-overlapping totals plus exec dril
     assert.equal(result.session_count, 1);
     assert.equal(result.message_count, 3);
 
-    assert.equal(result.totals.input_tokens, 350);
+    assert.equal(result.totals.input_tokens, 280);
     assert.equal(result.totals.cached_input_tokens, 150);
     assert.equal(result.totals.cache_creation_input_tokens, 70);
     assert.equal(result.totals.output_tokens, 320);
     assert.equal(result.totals.reasoning_output_tokens, 60);
-    assert.equal(result.totals.total_tokens, 890);
+    assert.equal(result.totals.total_tokens, 820);
 
     const executionCategory = result.tool_calls_breakdown.categories.find((row) => row.name === "Execution");
     assert.ok(executionCategory, "Execution category should be present");
@@ -598,7 +598,7 @@ test("computeCodexContextBreakdown infers skills from SKILL.md exec reads", asyn
 
     assert.equal(result.skills_breakdown.total_calls, 1);
     assert.equal(result.skills_breakdown.skills[0].name, "frontend-design");
-    assert.equal(result.skills_breakdown.skills[0].totals.total_tokens, 210);
+    assert.equal(result.skills_breakdown.skills[0].totals.total_tokens, 200);
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }

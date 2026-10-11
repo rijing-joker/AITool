@@ -68,10 +68,10 @@ const compacted = (ts) =>
   });
 const worldState = (ts) => line({ timestamp: ts, type: "world_state", payload: { full: true } });
 
-// Sync-side normalization of one Codex usage object (input excludes cached).
+// Codex input includes both cache subsets; normalized input excludes both.
 function norm(u) {
   return {
-    input_tokens: u.input_tokens - u.cached_input_tokens,
+    input_tokens: u.input_tokens - u.cached_input_tokens - (u.cache_write_input_tokens || 0),
     cached_input_tokens: u.cached_input_tokens,
     cache_creation_input_tokens: u.cache_write_input_tokens || 0,
     output_tokens: u.output_tokens,
@@ -80,9 +80,9 @@ function norm(u) {
   };
 }
 const sumNorm = (...us) => us.map(norm).reduce((a, b) => add(a, b));
-// Session parser totals.total_tokens = input + cache write + output.
+// Session total = inclusive input + output; cache writes are already included.
 const parserTotal = (...us) =>
-  us.reduce((s, u) => s + u.input_tokens + (u.cache_write_input_tokens || 0) + u.output_tokens, 0);
+  us.reduce((s, u) => s + u.input_tokens + u.output_tokens, 0);
 
 // record(RC) -> compacted -> ... -> token_count repeating the previous total
 // (advances: false, what Codex writes today) or already including RC.

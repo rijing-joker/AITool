@@ -892,10 +892,32 @@ function extractModelIds(payload) {
 // cc-switch 315aeda: gateways like Cloudflare AI Gateway require extra
 // headers (cf-aig-authorization) on GET /v1/models. The provider's Header
 // override JSON is parsed leniently — invalid or empty overrides fall back
-// to a plain fetch (the form's own validation surfaces the error); valid
-// ones are applied after the defaults, so an explicit Authorization in the
-// override wins.
+// to a plain fetch with no error surfaced (cc-switch's form shows a
+// validation error for the same input; this port carries no override
+// validation, so the silent fallback is the only signal); valid ones are
+// applied after the defaults, so an explicit Authorization in the override
+// wins.
 const MODEL_FETCH_HEADER_VALUE_CONTROL_CHARS = /[\u0000-\u0008\u000a-\u001f\u007f]/;
+
+// cc-switch's PROTECTED_LOCAL_PROXY_HEADER_NAMES (requestOverrides.ts):
+// managed, hop-by-hop, identity and CDN/tracing headers never ride the
+// model-list request — forwarding content-length/transfer-encoding breaks
+// fetch outright (undici rejects them, the auth-relay outage class), and
+// the rest would smuggle a proxy-managed identity. authorization is the one
+// documented deviation: an explicit Authorization in the override wins.
+const PROTECTED_MODEL_FETCH_HEADER_NAMES = new Set([
+  "host", "content-length", "transfer-encoding", "connection",
+  "proxy-authorization", "proxy-authenticate", "te", "trailer", "upgrade",
+  "accept-encoding", "content-type", "x-api-key", "x-goog-api-key",
+  "chatgpt-account-id", "session_id", "x-client-request-id",
+  "x-codex-window-id", "x-forwarded-host", "x-forwarded-port",
+  "x-forwarded-proto", "forwarded", "cf-connecting-ip", "cf-ipcountry",
+  "cf-ray", "cf-visitor", "true-client-ip", "fastly-client-ip",
+  "x-azure-clientip", "x-azure-fdid", "x-azure-ref", "akamai-origin-hop",
+  "x-akamai-config-log-detail", "x-request-id", "x-correlation-id",
+  "x-trace-id", "x-amzn-trace-id", "x-b3-traceid", "x-b3-spanid",
+  "x-b3-parentspanid", "x-b3-sampled", "traceparent", "tracestate",
+]);
 
 function parseModelFetchHeaders(raw) {
   const text = String(raw || "").trim();
@@ -913,13 +935,15 @@ function parseModelFetchHeaders(raw) {
     const headerName = String(name).trim();
     if (!headerName || !/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(headerName)) return null;
     if (typeof value !== "string") return null;
-    // cc-switch's remaining parseHeaderOverrideJson rules: a value carrying
-    // control characters and a duplicate name after case normalization both
-    // invalidate the whole override (silent plain-fetch fallback) instead of
-    // reaching fetch() and surfacing as a request error.
+    // The remaining cc-switch parseHeaderOverrideJson rules: a value carrying
+    // control characters, a duplicate name after case normalization, and a
+    // protected/managed name all invalidate the whole override (silent
+    // plain-fetch fallback) instead of reaching fetch() and surfacing as a
+    // request error.
     if (MODEL_FETCH_HEADER_VALUE_CONTROL_CHARS.test(value)) return null;
     const normalizedName = headerName.toLowerCase();
     if (seenNames.has(normalizedName)) return null;
+    if (PROTECTED_MODEL_FETCH_HEADER_NAMES.has(normalizedName)) return null;
     seenNames.add(normalizedName);
     headers[headerName] = value;
   }

@@ -1797,13 +1797,13 @@ test("fetch-models forwards provider header overrides on the probe (cc-switch 31
   }
 });
 
-test("fetch-models header overrides invalidate on control chars and case-duplicate names", async () => {
+test("fetch-models header overrides invalidate on control chars, duplicates and protected names", async () => {
   const { handleProviderSwitchApiRequest } = require("../src/lib/provider-switch/api");
   const handler = handleProviderSwitchApiRequest;
   const prefix = "/api/provider-switch";
   const seen = [];
   const server = http.createServer((req, res) => {
-    seen.push({ gateway: req.headers["cf-aig-authorization"] });
+    seen.push({ gateway: req.headers["cf-aig-authorization"], cl: req.headers["content-length"], apiKey: req.headers["x-api-key"] });
     if (req.url === "/v1/models" && req.headers["cf-aig-authorization"] === "token") {
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({ data: [{ id: "m1" }] }));
@@ -1818,6 +1818,11 @@ test("fetch-models header overrides invalidate on control chars and case-duplica
     for (const [label, override] of [
       ["control char in value", '{"cf-aig-authorization": "tok\\nen"}'],
       ["case-duplicate names", '{"cf-aig-authorization": "token", "CF-AIG-Authorization": "other"}'],
+      // cc-switch's PROTECTED_LOCAL_PROXY_HEADER_NAMES (minus the documented
+      // authorization deviation): managed/hop-by-hop names never reach fetch.
+      ["protected content-length", '{"content-length": "999"}'],
+      ["protected transfer-encoding", '{"transfer-encoding": "chunked"}'],
+      ["protected x-api-key", '{"x-api-key": "sk-managed"}'],
     ]) {
       const response = await call(handler, {
         method: "POST",
@@ -1827,6 +1832,8 @@ test("fetch-models header overrides invalidate on control chars and case-duplica
       assert.equal(response.status, 400, `${label}: override must be dropped, not sent`);
       assert.equal(seen.at(-1).gateway, undefined, `${label}: the override never reaches the wire`);
     }
+    assert.equal(seen.every((row) => row.cl === undefined), true, "content-length never forwarded");
+    assert.equal(seen.every((row) => row.apiKey === undefined), true, "x-api-key never forwarded");
   } finally {
     server.close();
   }

@@ -159,13 +159,19 @@ export const combineModelAliasEntries = (
   speedEntries: SpeedAliasEntry[],
 ): AliasListEntry[] => {
   const entries = new Map<string, AliasListEntry>();
+  // easy 209e159: entries merge by configuration position, not by content —
+  // a provider may legitimately carry two identical aliases at different
+  // positions, and content-keyed folding turns the losing one into an
+  // invisible-but-active ghost alias. (The original nests these under
+  // `position`; this port flattened them onto the entry.)
   const entryKey = (
-    entry: Pick<ThinkingAliasEntry, "kind" | "provider" | "sourceModel" | "alias" | "oauthChannel">,
-  ) => (
-    [entry.oauthChannel ?? "", entry.kind, entry.provider, entry.sourceModel, entry.alias]
-      .map((value) => value.toLocaleLowerCase())
-      .join("\u0000")
-  );
+    entry: Pick<ThinkingAliasEntry, "section" | "providerIndex" | "modelIndex" | "oauthChannel">,
+  ) => JSON.stringify([
+    entry.section ?? null,
+    entry.providerIndex ?? null,
+    entry.oauthChannel ?? null,
+    entry.modelIndex ?? null,
+  ]);
 
   thinkingEntries.forEach((entry) => {
     entries.set(entryKey(entry), { ...entry, serviceTier: null });

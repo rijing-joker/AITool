@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-10T17:58:04.051Z",
+  "generatedAt": "2026-10-11T10:24:51.273Z",
   "root": "dashboard/src",
   "rules": {
     "colors": "hex/rgb(a) literals",
@@ -7,7 +7,7 @@
   },
   "totals": {
     "colors": 412,
-    "rawText": 232
+    "rawText": 236
   },
   "files": {
     "dashboard/src/components/InsforgeUserHeaderControls.jsx": {
@@ -164,10 +164,11 @@
     },
     "dashboard/src/pages/ProviderSwitchPage.jsx": {
       "colors": 0,
-      "rawText": 3,
+      "rawText": 4,
       "rawTextTokens": [
         ") : appInfo.suggestion ? (",
         ") : filteredProviderRows.length === 0 && searchQuery.trim() ? (",
+        ": isSkillsTab ?",
         "= 8 && (isExport || payloadText.trim() !== \"\"); return ("
       ]
     },
@@ -278,6 +279,13 @@
         ", ); expect(screen.queryByText(\"pswitch.catalog.picker_title\")).toBeNull(); rerender("
       ]
     },
+    "dashboard/src/pages/provider-env-banner.jsx": {
+      "colors": 0,
+      "rawText": 1,
+      "rawTextTokens": [
+        "0 ? ("
+      ]
+    },
     "dashboard/src/pages/provider-group-keys-editor.jsx": {
       "colors": 0,
       "rawText": 1,
@@ -297,6 +305,14 @@
       "rawText": 1,
       "rawTextTokens": [
         "0 ? value : 0); const total = sum(credits.monthly) + sum(credits.purchased) + sum(credits.free); if (total"
+      ]
+    },
+    "dashboard/src/pages/provider-skills-panel.jsx": {
+      "colors": 0,
+      "rawText": 2,
+      "rawTextTokens": [
+        ") : filtered.length === 0 ? (",
+        "0 ? ("
       ]
     },
     "dashboard/src/pages/requests-tab.jsx": {

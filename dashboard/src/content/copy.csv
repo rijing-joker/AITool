@@ -2468,6 +2468,7 @@ pswitch.quota.tier.weekly,pswitch,ProviderSwitchPage,ProviderQuotaLine,quota_tie
 pswitch.quota.tier.monthly,pswitch,ProviderSwitchPage,ProviderQuotaLine,quota_tier_monthly,"Monthly",,active
 pswitch.quota.credits,pswitch,ProviderSwitchPage,ProviderQuotaLine,quota_credits,"Credits {{value}}",,active
 pswitch.quota.credits_breakdown,pswitch,ProviderSwitchPage,ProviderQuotaLine,quota_credits_breakdown,"Monthly {{monthly}} · Purchased {{purchased}} · Free {{free}}",,active
+pswitch.quota.balance,pswitch,ProviderSwitchPage,ProviderQuotaLine,quota_balance,"{{label}} balance {{value}} {{unit}}",,active
 pswitch.failover.off,pswitch,ProviderSwitchPage,FailoverBar,failover_off,"Failover monitoring is off: providers that keep failing get cooled down and a switch is suggested.",,active
 pswitch.failover.settings,pswitch,ProviderSwitchPage,FailoverBar,failover_settings,"Failover settings",,active
 pswitch.failover.health,pswitch,ProviderSwitchPage,FailoverBar,failover_health,"Last {{window}}m: {{requests}} requests · {{failed}} failed ({{ratePct}}%)",,active
@@ -2607,6 +2608,26 @@ pswitch.provider.created,pswitch,ProviderSwitchPage,ProviderEditDialog,created,"
 pswitch.provider.drag_handle,pswitch,ProviderSwitchPage,ProviderEditDialog,drag_handle,Drag to reorder {{name}},,active
 pswitch.provider.imported,pswitch,ProviderSwitchPage,ProviderEditDialog,imported,"Imported ""{{name}}"" from the live config.",,active
 pswitch.provider.duplicated,pswitch,ProviderSwitchPage,ProviderSwitchPage,provider_duplicated,"Duplicated to {{name}}",,active
+pswitch.env.title,pswitch,ProviderSwitchPage,ProviderEnvBanner,env_title,"{{count}} environment variable(s) may override the switched configs",,active
+pswitch.env.hint,pswitch,ProviderSwitchPage,ProviderEnvBanner,env_hint,"These variables are exported in your shell profiles or system environment and take precedence over the config files. Remove them (a backup is created automatically) or the switch may not take effect.",,active
+pswitch.env.select,pswitch,ProviderSwitchPage,ProviderEnvBanner,env_select,"Select {{name}}",,active
+pswitch.env.remove_selected,pswitch,ProviderSwitchPage,ProviderEnvBanner,env_remove,"Remove selected ({{count}})",,active
+pswitch.env.restore,pswitch,ProviderSwitchPage,ProviderEnvBanner,env_restore,"Restore from backup",,active
+pswitch.env.deleted,pswitch,ProviderSwitchPage,ProviderEnvBanner,env_deleted,"Removed {{count}} variable(s); a backup was saved",,active
+pswitch.env.restored,pswitch,ProviderSwitchPage,ProviderEnvBanner,env_restored,"Restored {{count}} variable(s) from the backup",,active
+pswitch.env.system_hint,pswitch,ProviderSwitchPage,ProviderEnvBanner,env_system_hint,"{{count}} more come from the running process environment — restart the CLI from a fixed shell to clear them.",,active
+pswitch.env.dismiss,pswitch,ProviderSwitchPage,ProviderEnvBanner,env_dismiss,Dismiss,,active
+pswitch.env.confirm_title,pswitch,ProviderSwitchPage,ProviderEnvBanner,env_confirm_title,"Remove {{count}} environment variable(s)?",,active
+pswitch.env.confirm_message,pswitch,ProviderSwitchPage,ProviderEnvBanner,env_confirm_message,"The selected lines are deleted from your shell profiles. A JSON backup is saved first and can be restored from this banner.",,active
+pswitch.skills.tab,pswitch,ProviderSwitchPage,ProviderSkillsPanel,skills_tab,Skills,,active
+pswitch.skills.title,pswitch,ProviderSwitchPage,ProviderSkillsPanel,skills_title,"Skills ({{count}})",,active
+pswitch.skills.subtitle,pswitch,ProviderSwitchPage,ProviderSkillsPanel,skills_subtitle,"One list of skills discovered in your agents\\" skills directories; toggles link (or copy) each skill into the app\\"s skills folder.",,active
+pswitch.skills.search,pswitch,ProviderSwitchPage,ProviderSkillsPanel,skills_search,Search skills…,,active
+pswitch.skills.import,pswitch,ProviderSwitchPage,ProviderSkillsPanel,skills_import,Rescan directories,,active
+pswitch.skills.imported,pswitch,ProviderSwitchPage,ProviderSkillsPanel,skills_imported,"Discovered {{count}} skills",,active
+pswitch.skills.empty,pswitch,ProviderSwitchPage,ProviderSkillsPanel,skills_empty,"No skills found yet. Install one (e.g. under ~/.agents/skills) and rescan.",,active
+pswitch.skills.no_match,pswitch,ProviderSwitchPage,ProviderSkillsPanel,skills_no_match,No skills match the search.,,active
+pswitch.skills.loading,pswitch,ProviderSwitchPage,ProviderSkillsPanel,skills_loading,Loading skills…,,active
 pswitch.provider.loading_live,pswitch,ProviderSwitchPage,ProviderEditDialog,loading_live,Reading the live config files…,,active
 pswitch.provider.notes,pswitch,ProviderSwitchPage,ProviderEditDialog,notes,Notes,,active
 pswitch.provider.preset_no_fields,pswitch,ProviderSwitchPage,ProviderEditDialog,preset_no_fields,This preset has no fields to fill in.,,active

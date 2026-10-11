@@ -43,6 +43,8 @@ import { PresetIcon, providerTileClass, ProviderEditDialog } from "./provider-ed
 import { ProviderMcpPanel } from "./provider-mcp-panel";
 import { ProviderPromptsPanel } from "./provider-prompts-panel";
 import { ProviderQuotaLine } from "./provider-quota-line";
+import { ProviderEnvBanner } from "./provider-env-banner";
+import { ProviderSkillsPanel } from "./provider-skills-panel";
 
 // Provider config management — an interaction port of cc-switch's provider
 // module. Presets live in ~/.aitool/provider-switch (served by the local
@@ -495,6 +497,26 @@ export function ProviderSwitchPage() {
   const [backups, setBackups] = useState([]);
   const [restoreTarget, setRestoreTarget] = useState(null);
 
+  // env conflicts (cc-switch's EnvWarningBanner): session-scoped dismiss.
+  const [envConflicts, setEnvConflicts] = useState(null);
+  const [envBannerDismissed, setEnvBannerDismissed] = useState(
+    () => sessionStorage.getItem("pswitch.env_banner_dismissed") === "true",
+  );
+
+  const refreshEnvConflicts = useCallback(async () => {
+    try {
+      const res = await providerSwitchApi.checkEnvConflicts();
+      setEnvConflicts(res.conflicts || {});
+      return res.conflicts || {};
+    } catch {
+      return {};
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshEnvConflicts();
+  }, [refreshEnvConflicts]);
+
   const dragSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
@@ -508,7 +530,8 @@ export function ProviderSwitchPage() {
   // reads the active app's endpoint paths) don't apply to them.
   const isMcpTab = activeApp === "mcp";
   const isPromptsTab = activeApp === "prompts";
-  const isUtilityTab = isMcpTab || isPromptsTab;
+  const isSkillsTab = activeApp === "skills";
+  const isUtilityTab = isMcpTab || isPromptsTab || isSkillsTab;
 
   // Visible tabs follow the settings-page toggle (cc-switch's
   // AppVisibilitySettings); the backend guarantees at least one stays on.
@@ -519,7 +542,7 @@ export function ProviderSwitchPage() {
   useEffect(() => {
     // "mcp" and "prompts" are tool tabs — not apps, so the visible-apps
     // filter doesn't apply to them.
-    if (activeApp === "mcp" || activeApp === "prompts") return;
+    if (activeApp === "mcp" || activeApp === "prompts" || activeApp === "skills") return;
     if (!visibleApps.some(({ id }) => id === activeApp) && visibleApps.length > 0) {
       setActiveApp(visibleApps[0].id);
     }
@@ -680,7 +703,7 @@ export function ProviderSwitchPage() {
 
   useEffect(() => {
     // The tool tabs have no per-app backup list; skip the doomed request.
-    if (activeApp === "mcp" || activeApp === "prompts") return;
+    if (activeApp === "mcp" || activeApp === "prompts" || activeApp === "skills") return;
     void refreshBackups(activeApp);
   }, [activeApp, refreshBackups]);
 
@@ -833,6 +856,16 @@ export function ProviderSwitchPage() {
           </button>
         </div>
       ) : null}
+      {!envBannerDismissed && envConflicts ? (
+        <ProviderEnvBanner
+          conflicts={envConflicts}
+          onDismiss={() => {
+            setEnvBannerDismissed(true);
+            sessionStorage.setItem("pswitch.env_banner_dismissed", "true");
+          }}
+          onChanged={refreshEnvConflicts}
+        />
+      ) : null}
 
       {!utilityEditor.open ? <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <PageTabs
@@ -840,6 +873,7 @@ export function ProviderSwitchPage() {
             ...visibleApps.map((item) => ({ ...item, label: copy(item.labelKey) })),
             { id: "mcp", label: copy("pswitch.mcp.tab") },
             { id: "prompts", label: copy("pswitch.prompts.tab") },
+            { id: "skills", label: copy("pswitch.skills.tab") },
           ]}
           value={activeApp}
           onChange={setActiveApp}
@@ -872,7 +906,7 @@ export function ProviderSwitchPage() {
 
       <div role="tabpanel" id="provider-panel" aria-labelledby={utilityEditor.open ? undefined : `provider-panel-${activeApp}`} aria-label={utilityEditor.open ? copy(isMcpTab ? "pswitch.mcp.tab" : "pswitch.prompts.tab") : undefined} className={utilityEditor.open ? "flex min-w-0 flex-1 flex-col" : undefined}>
       {isUtilityTab ? (
-        isMcpTab ? <ProviderMcpPanel onEditorStateChange={onUtilityEditorState} /> : <ProviderPromptsPanel onEditorStateChange={onUtilityEditorState} />
+        isMcpTab ? <ProviderMcpPanel onEditorStateChange={onUtilityEditorState} /> : isSkillsTab ? <ProviderSkillsPanel onEditorStateChange={onUtilityEditorState} /> : <ProviderPromptsPanel onEditorStateChange={onUtilityEditorState} />
       ) : (
       <>
       <FailoverBar

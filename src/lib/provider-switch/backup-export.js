@@ -1,10 +1,11 @@
 // Encrypted backup of the provider-switch SSOT stores (cc-switch's backup
 // import/export, tightened): providers.json + mcp-servers.json + prompts.json
-// + skills.json in one passphrase-encrypted blob (scrypt KDF, AES-256-GCM).
-// The passphrase never touches disk; without it the blob is opaque, so it can
-// safely live in a dotfile repo or a sync folder. The codex auth stash (OAuth
-// tokens) is deliberately excluded. Blobs written before skills existed
-// simply restore without skills.json — the other stores come back untouched.
+// + skills.json + profiles.json in one passphrase-encrypted blob (scrypt KDF,
+// AES-256-GCM). The passphrase never touches disk; without it the blob is
+// opaque, so it can safely live in a dotfile repo or a sync folder. The codex
+// auth stash (OAuth tokens) is deliberately excluded. Blobs written before
+// skills or profiles existed simply restore without those stores — the other
+// stores come back untouched.
 
 const fsp = require("node:fs/promises");
 const path = require("node:path");

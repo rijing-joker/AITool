@@ -151,9 +151,10 @@ async function createProfile({ name, app }) {
   return profile;
 }
 
-// Update: rename and/or resnapshot the given app's slots. Resnapshot is only
-// triggered by apply's automatic save-before-switch (upstream removed the
-// manual resnapshot entry point).
+// Update: rename and/or resnapshot the given app's slots. The bundled UI only
+// renames — resnapshot normally runs through apply's automatic
+// save-before-switch, but unlike upstream the fork keeps a manual path open:
+// POST profiles/update forwards resnapshot for local API clients.
 async function updateProfile({ id, name, resnapshot, app }) {
   let updated = null;
   await mutateProfilesStore((profileStore) => {

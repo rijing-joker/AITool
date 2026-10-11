@@ -921,8 +921,22 @@ export function ProviderEditDialog({
       .catch(() => setModelMetadata({}));
   }, []);
 
+  // Fetch sequence: any request-identity input (endpoint / key / full-URL
+  // flag / header override) changes which models the gateway returns — /models
+  // results may be keyed per identity (cc-switch 3703306d) — so a change bumps
+  // the sequence, clears the stale list, and voids an in-flight response for
+  // the old identity.
+  const fetchModelsSeqRef = useRef(0);
+  useEffect(() => {
+    if (!open) return;
+    fetchModelsSeqRef.current += 1;
+    setFetchedModels(null);
+    setFetchState("idle");
+  }, [open, currentEndpoint, currentApiKey, meta.isFullUrl, meta.localProxyRequestOverrides?.headers]);
+
   const fetchModels = useCallback(async () => {
     if (fetchState === "loading") return;
+    const seq = fetchModelsSeqRef.current;
     setFetchState("loading");
     try {
       const res = await providerSwitchApi.fetchModels({
@@ -934,6 +948,7 @@ export function ProviderEditDialog({
         // /v1/models probe too; invalid JSON falls back server-side.
         requestHeaders: meta.localProxyRequestOverrides?.headers,
       });
+      if (seq !== fetchModelsSeqRef.current) return; // identity changed mid-flight
       setFetchedModels(res.models);
       setFetchState("done");
       void ensureModelMetadata();
@@ -943,6 +958,7 @@ export function ProviderEditDialog({
         showToast({ title: copy("pswitch.models.fetch_empty") });
       }
     } catch (err) {
+      if (seq !== fetchModelsSeqRef.current) return;
       setFetchState("idle");
       showToast({
         title: copy("pswitch.models.fetch_failed", {

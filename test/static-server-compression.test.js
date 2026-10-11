@@ -6,6 +6,7 @@ const path = require("node:path");
 const { once } = require("node:events");
 const zlib = require("node:zlib");
 const { test } = require("node:test");
+const { EventEmitter } = require("node:events");
 const { serveStaticFile } = require("../src/lib/static-server");
 
 test("precompressed assets negotiate encodings, preserve MIME/cache headers and fall back safely", async (t) => {
@@ -108,5 +109,36 @@ test("serving a precompressed variant closes the checked base descriptor (no fd 
   assert.equal(first, 1, "base descriptor must be closed after the first variant request");
   const second = await serve();
   assert.equal(second, 2, "…and after the second");
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test("a variant open failure falls back before the response is committed", async (t) => {
+  // The variant is re-opened BEFORE writeHead, so a stat→open race (variant
+  // deleted in between) returns false while headers are still uncommitted and
+  // the caller's 404/SPA fallback proceeds — instead of hanging a
+  // half-committed response (the catch also destroys the socket if headers
+  // ever did go out).
+  const fsp = require("node:fs/promises");
+  const origOpen = fsp.open;
+  fsp.open = async function failingVariantOpen(file, ...args) {
+    if (String(file).endsWith(".gz")) throw new Error("variant vanished between stat and open");
+    return origOpen.call(fsp, file, ...args);
+  };
+  t.after(() => { fsp.open = origOpen; });
+
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "aitool-openfail-"));
+  await fs.writeFile(path.join(dir, "app.js"), 'console.log("open failure test");\n'.repeat(200));
+  const { precompressAssets } = await import("../dashboard/scripts/precompress-assets.mjs");
+  await precompressAssets(dir);
+
+  const res = new EventEmitter();
+  res.headersSent = false;
+  res.write = () => true;
+  res.end = () => {};
+  res.writeHead = () => { res.headersSent = true; return res; };
+  res.destroy = () => {};
+  const served = await serveStaticFile(dir, "/app.js", res, { method: "GET", headers: { "accept-encoding": "gzip" } });
+  assert.equal(served, false, "the caller must get the fallback signal");
+  assert.equal(res.headersSent, false, "no headers may be committed on the failure path");
   await fs.rm(dir, { recursive: true, force: true });
 });

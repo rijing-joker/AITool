@@ -91,23 +91,14 @@ async function serveStaticFile(baseDir, pathname, res, req = {}) {
       return true;
     }
 
-    res.writeHead(200, {
-      "Content-Type": contentType,
-      "Content-Length": selectedStat.size,
-      "Cache-Control": isHtml ? "no-cache" : "public, max-age=31536000, immutable",
-      ...(negotiable ? { "Vary": "Accept-Encoding" } : {}),
-      ...(encoding ? { "Content-Encoding": encoding } : {}),
-    });
-
-    if (req.method === "HEAD") {
-      res.end();
-      return true;
-    }
     // The selected path may be a sibling pre-compressed variant, re-opened
-    // under the same checked-descriptor rule. Whichever descriptor the stream
-    // does not consume is closed here: with a variant, the base descriptor's
-    // job (the checked stat) is done, so it must be closed explicitly —
-    // nulling it without closing leaked one fd per compressible-asset request.
+    // under the same checked-descriptor rule — BEFORE the headers are
+    // committed, so an open failure (variant deleted between stat and open)
+    // still falls back to the caller's 404/SPA path instead of leaving a
+    // half-committed response. Whichever descriptor the stream does not
+    // consume is closed here: with a variant, the base descriptor's job (the
+    // checked stat) is done, so it must be closed explicitly — nulling it
+    // without closing leaked one fd per compressible-asset request.
     let streamHandle;
     if (encoding) {
       streamHandle = await fsPromises.open(selectedPath, "r");
@@ -117,12 +108,33 @@ async function serveStaticFile(baseDir, pathname, res, req = {}) {
       streamHandle = handle;
       handle = null; // The stream owns and closes this descriptor.
     }
+
+    res.writeHead(200, {
+      "Content-Type": contentType,
+      "Content-Length": selectedStat.size,
+      "Cache-Control": isHtml ? "no-cache" : "public, max-age=31536000, immutable",
+      ...(negotiable ? { "Vary": "Accept-Encoding" } : {}),
+      ...(encoding ? { "Content-Encoding": encoding } : {}),
+    });
+
+    if (req.method === "HEAD") {
+      // The descriptor was opened but will not be streamed — close it here.
+      await streamHandle.close();
+      res.end();
+      return true;
+    }
     const stream = streamHandle.createReadStream();
     stream.on("error", (error) => res.destroy(error));
     res.on("close", () => stream.destroy());
     stream.pipe(res);
     return true;
   } catch (_e) {
+    if (res.headersSent) {
+      // Nothing may fall back to the SPA path once the response is committed;
+      // tear the socket down instead of leaving the request hanging.
+      res.destroy();
+      return true;
+    }
     return false;
   } finally {
     if (handle) await handle.close();

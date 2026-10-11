@@ -14,6 +14,8 @@ const mcp = require("./mcp");
 const prompts = require("./prompts");
 const piPromptFiles = require("./pi-prompt-files");
 const backupExport = require("./backup-export");
+const envConflict = require("./env-conflict");
+const skills = require("./skills");
 const quota = require("./quota");
 const failover = require("./failover");
 
@@ -599,20 +601,22 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
       return true;
     }
 
-    // Provider quota (cc-switch's coding_plan service): detects a supported
-    // plan provider from the row's base URL and queries its balance/rolling
-    // windows with the row's own key. Read-only, so no mutation guard.
+    // Provider quota (cc-switch's coding_plan + balance services): detects a
+    // supported plan or balance provider from the row's base URL and queries
+    // it with the row's own key. Read-only, so no mutation guard.
     if (p === `${prefix}/quota` && method === "GET") {
       const app = url.searchParams.get("app") || "claude";
       const id = url.searchParams.get("id") || "";
       if (!store.isSupportedApp(app)) throw new Error(`Unsupported app: ${app}`);
       const provider = await store.getProvider(app, id);
       if (!provider) throw new Error(`Unknown provider: ${id}`);
-      const quotaResult = await quota.queryProviderQuota({
-        app,
-        provider,
-        bypassCache: url.searchParams.get("nocache") === "1",
-      });
+      const bypassCache = url.searchParams.get("nocache") === "1";
+      let quotaResult = await quota.queryProviderQuota({ app, provider, bypassCache });
+      if (!quotaResult.ok && !quotaResult.provider) {
+        // No plan provider on this base URL: try the generic balance probes
+        // (DeepSeek/StepFun/SiliconFlow/OpenRouter/Novita — cc-switch balance.rs).
+        quotaResult = await quota.queryProviderBalance({ app, provider, bypassCache });
+      }
       json(res, { ok: true, app, id, quota: quotaResult });
       return true;
     }
@@ -771,11 +775,64 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
       return true;
     }
 
+    // Skills (cc-switch services/skill.rs, v1): SSOT list discovered from
+    // the agents' skills directories, projected per app via symlink-or-copy.
+    if (p === `${prefix}/skills` && method === "GET") {
+      json(res, { ok: true, skills: await skills.listSkills(), apps: skills.SKILL_APPS });
+      return true;
+    }
+    if (p === `${prefix}/skills/import` && method === "POST") {
+      if (!requireMutation()) return true;
+      json(res, { ok: true, ...(await skills.importSkills()) });
+      return true;
+    }
+    if (p === `${prefix}/skills/toggle` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      const result = await skills.toggleSkill(String(body.id || ""), String(body.app || ""), body.enabled === true);
+      json(res, { ok: true, ...result });
+      return true;
+    }
+    if (p === `${prefix}/skills/sync` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      const result = await skills.syncSkills(Array.isArray(body.apps) ? body.apps : null);
+      json(res, { ok: true, ...result });
+      return true;
+    }
+
     if (p === `${prefix}/speed-test` && method === "POST") {
       if (!requireMutation()) return true;
       const body = await readJsonBody(req);
       const results = await speedTestEndpoints(body.urls || [], body.timeoutMs);
       json(res, { ok: true, results });
+      return true;
+    }
+
+    // Env conflicts (cc-switch's check_env_conflicts / delete_env_vars /
+    // restore_env_backup): shell profiles and the process environment can
+    // override what switching writes, so the page warns and offers removal
+    // with an automatic backup. Read is open; delete/restore mutate files
+    // beyond the live configs and require mutation auth.
+    if (p === `${prefix}/env-conflicts` && method === "GET") {
+      const apps = store.SUPPORTED_APPS.filter((app) => envConflict.keywordsForApp(app).length > 0);
+      json(res, { ok: true, conflicts: envConflict.checkAllConflicts(apps) });
+      return true;
+    }
+
+    if (p === `${prefix}/env-conflicts/delete` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      const result = await envConflict.deleteConflicts(body.conflicts || []);
+      json(res, { ok: true, ...result });
+      return true;
+    }
+
+    if (p === `${prefix}/env-conflicts/restore` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      const result = await envConflict.restoreFromBackup(String(body.backupPath || ""));
+      json(res, { ok: true, ...result });
       return true;
     }
 
@@ -1019,18 +1076,21 @@ async function fetchModelList({ baseUrl, apiKey, modelsUrl, isFullUrl, requestHe
   throw new Error(errors.join("; ") || "No model list found");
 }
 
-// Rows that carry a supported plan provider get `quotaProvider` set so the
-// dashboard only renders quota lines where a query can actually succeed.
-// Applied on every provider-listing surface (/status, /providers) since the
-// page's initial data comes from the status snapshot.
+// Rows that carry a supported plan or balance provider get `quotaProvider`
+// set so the dashboard only renders quota lines where a query can actually
+// succeed. Applied on every provider-listing surface (/status, /providers)
+// since the page's initial data comes from the status snapshot.
 function annotateQuotaProviders(app, providers) {
-  return (Array.isArray(providers) ? providers : []).map((provider) => ({
-    ...provider,
-    quotaProvider: quota.detectQuotaProvider(
-      quota.resolveProviderCredential(app, provider)?.baseUrl,
-      app,
-    )?.id ?? null,
-  }));
+  return (Array.isArray(providers) ? providers : []).map((provider) => {
+    const credential = quota.resolveProviderCredential(app, provider);
+    const plan = quota.detectQuotaProvider(credential?.baseUrl, app)?.id ?? null;
+    const balance = plan ? null : quota.detectBalanceProvider(credential?.baseUrl)?.id ?? null;
+    return {
+      ...provider,
+      quotaProvider: plan ?? balance,
+      quotaKind: plan ? "plan" : balance ? "balance" : null,
+    };
+  });
 }
 
 async function buildStatus() {

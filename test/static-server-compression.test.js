@@ -59,3 +59,54 @@ test("precompressed assets negotiate encodings, preserve MIME/cache headers and 
   assert.equal((await get("/app.js", "gzip")).body.toString(), source, "stale variants are ignored");
   assert.equal((await get("/missing.js", "br")).status, 404);
 });
+
+test("serving a precompressed variant closes the checked base descriptor (no fd leak)", async (t) => {
+  // Regression guard: when a .br/.gz sibling wins negotiation, the base-file
+  // descriptor opened for the checked stat must be closed explicitly — it is
+  // not the one the stream owns. Patch fs/promises.open to count close() calls
+  // per path (the variant fd's close is driven by the stream internals; the
+  // base file has a distinct path, so the two are separable).
+  const fsSync = require("node:fs");
+  const fsp = require("node:fs/promises");
+  const { EventEmitter } = require("node:events");
+  const origOpen = fsp.open;
+  const closesByPath = new Map();
+  fsp.open = async function patchedOpen(file, ...args) {
+    const handle = await origOpen.call(fsp, file, ...args);
+    const key = String(file);
+    const origClose = handle.close.bind(handle);
+    handle.close = async function patchedClose(...cargs) {
+      closesByPath.set(key, (closesByPath.get(key) || 0) + 1);
+      return origClose(...cargs);
+    };
+    return handle;
+  };
+  t.after(() => { fsp.open = origOpen; });
+
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "aitool-fdleak-"));
+  const source = 'console.log("fd leak test");\n'.repeat(200);
+  const basePath = path.join(dir, "app.js");
+  await fs.writeFile(basePath, source);
+  const { precompressAssets } = await import("../dashboard/scripts/precompress-assets.mjs");
+  await precompressAssets(dir);
+
+  const serve = async () => {
+    const req = { method: "GET", headers: { "accept-encoding": "gzip" } };
+    const res = new EventEmitter();
+    res.write = () => true;
+    res.end = () => {};
+    res.writeHead = () => res;
+    res.destroy = () => {};
+    const served = await serveStaticFile(dir, "/app.js", res, req);
+    assert.equal(served, true);
+    // Give the base-handle close (awaited inside serveStaticFile) its tick.
+    await new Promise((resolve) => setImmediate(resolve));
+    return closesByPath.get(basePath) || 0;
+  };
+
+  const first = await serve();
+  assert.equal(first, 1, "base descriptor must be closed after the first variant request");
+  const second = await serve();
+  assert.equal(second, 2, "…and after the second");
+  await fs.rm(dir, { recursive: true, force: true });
+});

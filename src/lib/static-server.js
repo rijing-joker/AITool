@@ -103,11 +103,20 @@ async function serveStaticFile(baseDir, pathname, res, req = {}) {
       res.end();
       return true;
     }
-    // The selected path may be a sibling pre-compressed variant, so re-open it
-    // under the same checked-descriptor rule; the winning stream owns and
-    // closes its descriptor.
-    const streamHandle = encoding ? await fsPromises.open(selectedPath, "r") : handle;
-    handle = null; // The stream owns and closes this descriptor.
+    // The selected path may be a sibling pre-compressed variant, re-opened
+    // under the same checked-descriptor rule. Whichever descriptor the stream
+    // does not consume is closed here: with a variant, the base descriptor's
+    // job (the checked stat) is done, so it must be closed explicitly —
+    // nulling it without closing leaked one fd per compressible-asset request.
+    let streamHandle;
+    if (encoding) {
+      streamHandle = await fsPromises.open(selectedPath, "r");
+      await handle.close();
+      handle = null;
+    } else {
+      streamHandle = handle;
+      handle = null; // The stream owns and closes this descriptor.
+    }
     const stream = streamHandle.createReadStream();
     stream.on("error", (error) => res.destroy(error));
     res.on("close", () => stream.destroy());

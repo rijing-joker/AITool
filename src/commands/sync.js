@@ -1,3 +1,5 @@
+const codexRolloutFiles = require("../lib/codex-rollout-file");
+const { KEYS: CACHE_REPAIR_KEYS, repairCacheHistory, recoverCacheHistoryRepair } = require("../lib/cache-history-repair");
 const os = require("node:os");
 const path = require("node:path");
 const fs = require("node:fs/promises");
@@ -651,6 +653,10 @@ async function cmdSync(argv, context = {}) {
         : {}),
     });
     const cursors = cursorStore.cursors;
+    await recoverCacheHistoryRepair({ trackerDir, cursors,
+      commitCursors: (next) => cursorStore.commit(next),
+      materialize: () => cursorStore.materializeAllCodexState(cursors),
+    });
     const uploadThrottle = normalizeUploadState(await readJson(uploadThrottlePath));
     let uploadThrottleState = uploadThrottle;
     let grokHookSignal = null;
@@ -747,6 +753,48 @@ async function cmdSync(argv, context = {}) {
         new Date().toISOString();
     }
 
+    // Hook syncs keep their bounded hot path. The next unscoped background
+    // refresh repairs existing history; fresh installs already use the fixed parser.
+    if (!autoSourceScope) {
+      let existingQueue = "";
+      try { existingQueue = await fs.readFile(queuePath, "utf8"); } catch (error) { if (error.code !== "ENOENT") throw error; }
+      const historySources = new Set();
+      for (const line of existingQueue.split("\n")) {
+        try { const row = JSON.parse(line); if (Number(row.total_tokens) > 0) historySources.add(row.source); }
+        catch { if (line.trim()) { historySources.add("codex"); historySources.add("claude"); } }
+      }
+      for (const source of ["codex", "claude"]) {
+        if (!sourceAllowed(source) || cursors.migrations?.[CACHE_REPAIR_KEYS[source]]) continue;
+        const hasState = Object.entries(cursors.hourly?.buckets || {}).some(([key, value]) => key.startsWith(source + "|") && Number(value?.totals?.total_tokens) > 0);
+        if (!hasState && !historySources.has(source)) {
+          (cursors.migrations ||= {})[CACHE_REPAIR_KEYS[source]] = { status: "complete", at: new Date().toISOString(), reason: "no_legacy_usage" };
+          cursorStore.requiresCommit = true;
+        }
+      }
+    }
+    const cacheRepairDue = (source) => {
+      if (autoSourceScope || !sourceAllowed(source)) return false;
+      const state = cursors.migrations?.[CACHE_REPAIR_KEYS[source]];
+      if (state?.status === "complete") return false;
+      return !isBackgroundLightweightSync || !state?.at || Date.now() - Date.parse(state.at) >= 5 * 60 * 1000;
+    };
+    const repairCacheSource = async (source, files, roots) => {
+      if (!cacheRepairDue(source)) return;
+      const unavailable = scanRoots[source].some((entry) => entry.origin !== "native" && !entry.exists) || roots.some((root) => scanRootDirState(root).error !== null);
+      if (unavailable) {
+        (cursors.migrations ||= {})[CACHE_REPAIR_KEYS[source]] = { status: "deferred", at: new Date().toISOString(), reason: "scan_root_unavailable" };
+        return;
+      }
+      await cursorStore.materializeAllCodexState(cursors);
+      await repairCacheHistory({ source, files, roots, cursors, trackerDir,
+        completedKeys: source === "codex"
+          ? [CODEX_RESCAN_DEDUP_REPAIR_KEY, CODEX_FORK_REPLAY_REPAIR_KEY, CODEX_USAGE_LINEAGE_REPAIR_KEY]
+          : [CLAUDE_GROUND_TRUTH_REPAIR_KEY],
+        queuePath, projectQueuePath, queueStatePath, projectQueueStatePath,
+        commitCursors: (next) => cursorStore.commit(next),
+        sessionMetaPath: require("../lib/session-analytics").resolveSessionSidecarPath(home) + ".meta.json",
+      });
+    };
     const sources = [];
     if (sourceAllowed("codex")) {
       // resolveInstallPaths stays the single authority for wsl-first /
@@ -778,13 +826,13 @@ async function cmdSync(argv, context = {}) {
       });
       if (codexPaths.native) {
         sources.push({ source: "codex", sessionsDir: path.join(codexPaths.native, "sessions"), inventoryCacheKey: "codexDayInventoryCache" });
-        if (!isBackgroundLightweightSync || backgroundCodexUsageRepair) {
+        if (!isBackgroundLightweightSync || backgroundCodexUsageRepair || cacheRepairDue("codex")) {
           sources.push({ source: "codex", sessionsDir: path.join(codexPaths.native, "archived_sessions"), deep: true });
         }
       }
       if (codexPaths.wsl) {
         sources.push({ source: "codex", sessionsDir: path.join(codexPaths.wsl, "sessions"), inventoryCacheKey: "codexDayInventoryCache" });
-        if (!isBackgroundLightweightSync || backgroundCodexUsageRepair) {
+        if (!isBackgroundLightweightSync || backgroundCodexUsageRepair || cacheRepairDue("codex")) {
           sources.push({ source: "codex", sessionsDir: path.join(codexPaths.wsl, "archived_sessions"), deep: true });
         }
       }
@@ -795,7 +843,7 @@ async function cmdSync(argv, context = {}) {
       for (const extraRoot of extraScanRootPaths(scanRoots.codex)) {
         if (!hasAnyScanChild(extraRoot, ["sessions", "archived_sessions"])) continue;
         sources.push({ source: "codex", sessionsDir: path.join(extraRoot, "sessions"), inventoryCacheKey: "codexDayInventoryCache" });
-        if (!isBackgroundLightweightSync || backgroundCodexUsageRepair) {
+        if (!isBackgroundLightweightSync || backgroundCodexUsageRepair || cacheRepairDue("codex")) {
           sources.push({ source: "codex", sessionsDir: path.join(extraRoot, "archived_sessions"), deep: true });
         }
       }
@@ -886,7 +934,9 @@ async function cmdSync(argv, context = {}) {
       }
     }
 
-    if (isFullSourceScan) {
+    await repairCacheSource("codex", rolloutFiles.filter((entry) => entry.source === "codex").map((entry) => entry.path),
+      codexCursorRoots.flatMap((root) => [path.join(root, "sessions"), path.join(root, "archived_sessions")]));
+    if (isFullSourceScan && cursors.migrations?.[CACHE_REPAIR_KEYS.codex]?.status === "complete") {
       await cursorStore.materializeAllCodexState(cursors);
       await migrateRolloutCumulativeDeltaBuckets({ cursors, queuePath, rolloutFiles });
       const codexRescanRepairRan = await repairCodexRescanInflation({
@@ -1124,7 +1174,8 @@ async function cmdSync(argv, context = {}) {
         }
       }
     }
-    if (isFullSourceScan) {
+    await repairCacheSource("claude", claudeFiles, claudeProjectsDirs);
+    if (isFullSourceScan && cursors.migrations?.[CACHE_REPAIR_KEYS.claude]?.status === "complete") {
       await reincludeClaudeMemObserverFiles({ cursors, claudeFiles, queuePath, queueStatePath });
       // The ground-truth repair rebuilds every Claude queue row from the roots
       // it is given. A configured root that is absent or unreadable right now
@@ -6057,7 +6108,9 @@ async function scanCodexUsageLineages(filePath, maxBytes = Infinity) {
     const byteLimit = Number.isFinite(maxBytes) ? Math.max(0, maxBytes) : Infinity;
     let bytesRead = 0;
     let affected = false;
-    stream = fssync.createReadStream(filePath, { highWaterMark: 32 * 1024 });
+    stream = codexRolloutFiles.isCompressed(filePath)
+      ? codexRolloutFiles.bufferStream((await codexRolloutFiles.readSnapshot(filePath)).data)
+      : fssync.createReadStream(filePath, { highWaterMark: 32 * 1024 });
     for await (const record of physicalJsonlRecords(stream, {
       maxPhysicalBytes: byteLimit,
     })) {
@@ -6181,6 +6234,11 @@ async function scanForForkedCodexRollout(rolloutFiles) {
     if (!fp || src !== "codex") continue;
     let fh = null;
     try {
+      if (codexRolloutFiles.isCompressed(fp)) {
+        const { data } = await codexRolloutFiles.readSnapshot(fp);
+        if (data.subarray(0, HEAD_BYTES).toString("utf8").includes('"forked_from_id"')) return { forked: true, indeterminate: false };
+        continue;
+      }
       fh = await fs.open(fp, "r");
       const buf = Buffer.alloc(HEAD_BYTES);
       const { bytesRead } = await fh.read(buf, 0, HEAD_BYTES, 0);
@@ -6733,6 +6791,7 @@ async function repairClaudeQueueFromGroundTruth({
         input_tokens: r.input_tokens,
         cached_input_tokens: r.cached_input_tokens,
         cache_creation_input_tokens: r.cache_creation_input_tokens,
+        ...require("../lib/cache-tokens").cacheSubset(r),
         output_tokens: r.output_tokens,
         reasoning_output_tokens: r.reasoning_output_tokens,
         total_tokens: r.total_tokens,
@@ -6783,6 +6842,7 @@ async function repairClaudeQueueFromGroundTruth({
       input_tokens: r.input_tokens,
       cached_input_tokens: r.cached_input_tokens,
       cache_creation_input_tokens: r.cache_creation_input_tokens,
+      ...require("../lib/cache-tokens").cacheSubset(r),
       output_tokens: r.output_tokens,
       reasoning_output_tokens: r.reasoning_output_tokens,
       total_tokens: r.total_tokens,

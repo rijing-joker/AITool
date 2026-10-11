@@ -15,6 +15,7 @@ const paths = require("./paths");
 //     codex:  { ... },
 //     gemini: { ... },
 //   },
+//   universalProviders: [UniversalProvider],  // cross-app shared credentials
 //   settings: {
 //     visibleApps: { claude: true, ..., mcode: true },  // which agent tabs the dashboard shows
 //   },
@@ -22,12 +23,20 @@ const paths = require("./paths");
 //
 // Provider: { id, name, category: "official"|"custom", settingsConfig, notes,
 //             createdAt, updatedAt }
+// UniversalProvider: { id, name, providerType, apps: {claude,codex,gemini},
+//                      baseUrl, apiKey, models, websiteUrl, notes, icon,
+//                      iconColor, meta?, createdAt, updatedAt, sortIndex }
 
 const additive = require("./additive");
 const floor = require("./floor");
 
 const SUPPORTED_APPS = ["claude", "codex", "gemini", "opencode", "openclaw", "mcode", "hermes", "pi", "grokbuild"];
 const PROVIDER_CATEGORIES = ["official", "custom"];
+
+// Apps a universal provider (cc-switch's UniversalProvider) can project into.
+// The fork's other agent tabs are outside upstream's universal scope.
+const UNIVERSAL_APPS = ["claude", "codex", "gemini"];
+const UNIVERSAL_PROVIDER_TYPES = ["newapi", "custom_gateway", "custom"];
 
 function emptyApp() {
   return { current: null, providers: [] };
@@ -42,7 +51,7 @@ function defaultVisibleApps() {
 function defaultStore() {
   const apps = {};
   for (const app of SUPPORTED_APPS) apps[app] = emptyApp();
-  return { version: 1, apps, settings: { visibleApps: defaultVisibleApps() } };
+  return { version: 1, apps, universalProviders: [], settings: { visibleApps: defaultVisibleApps() } };
 }
 
 function normalizeVisibleApps(value) {
@@ -90,6 +99,9 @@ async function readStore() {
         : [],
     };
   }
+  next.universalProviders = Array.isArray(store.universalProviders)
+    ? store.universalProviders.filter((p) => p && typeof p === "object")
+    : [];
   next.settings = { visibleApps: normalizeVisibleApps(store.settings && store.settings.visibleApps) };
   return next;
 }
@@ -110,6 +122,9 @@ async function mutateStore(update) {
         };
       }
     }
+    normalized.universalProviders = Array.isArray(store.universalProviders)
+      ? store.universalProviders.filter((p) => p && typeof p === "object")
+      : [];
     normalized.settings = { visibleApps: normalizeVisibleApps(store.settings && store.settings.visibleApps) };
     const next = update(normalized);
     return next === undefined ? normalized : next;
@@ -366,8 +381,147 @@ async function updateVisibleApps(visibleApps) {
   return next;
 }
 
+// ---------------------------------------------------------------------------
+// Universal providers (cc-switch's universal_providers blob, kept in the same
+// JSON SSOT): one shared credential projected into per-app child providers by
+// syncUniversalToApps (see universal.js). The store only owns persistence.
+// ---------------------------------------------------------------------------
+
+function sanitizeUniversalModels(value) {
+  const models = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const out = {};
+  if (models.claude && typeof models.claude === "object" && !Array.isArray(models.claude)) {
+    const c = models.claude;
+    out.claude = {
+      model: String(c.model || "").slice(0, 200),
+      haikuModel: String(c.haikuModel || "").slice(0, 200),
+      sonnetModel: String(c.sonnetModel || "").slice(0, 200),
+      opusModel: String(c.opusModel || "").slice(0, 200),
+    };
+  }
+  if (models.codex && typeof models.codex === "object" && !Array.isArray(models.codex)) {
+    out.codex = {
+      model: String(models.codex.model || "").slice(0, 200),
+      reasoningEffort: String(models.codex.reasoningEffort || "").slice(0, 32),
+    };
+  }
+  if (models.gemini && typeof models.gemini === "object" && !Array.isArray(models.gemini)) {
+    out.gemini = { model: String(models.gemini.model || "").slice(0, 200) };
+  }
+  return out;
+}
+
+function sanitizeUniversalFields({ name, providerType, apps, baseUrl, apiKey, models, websiteUrl, notes, icon, iconColor, meta }) {
+  const trimmedName = String(name || "").trim();
+  if (!trimmedName) throw new Error("Provider name is required");
+  if (trimmedName.length > 100) throw new Error("Provider name is too long");
+  const normalizedApps = {};
+  for (const app of UNIVERSAL_APPS) normalizedApps[app] = Boolean(apps?.[app]);
+  return {
+    name: trimmedName,
+    providerType: UNIVERSAL_PROVIDER_TYPES.includes(providerType) ? providerType : "custom",
+    apps: normalizedApps,
+    baseUrl: String(baseUrl || "").trim().slice(0, 500),
+    apiKey: String(apiKey || "").slice(0, 2000),
+    models: sanitizeUniversalModels(models),
+    websiteUrl: sanitizeWebsiteUrl(websiteUrl),
+    notes: String(notes || "").slice(0, 2000),
+    icon: sanitizeIcon(icon),
+    iconColor: sanitizeIconColor(iconColor),
+    meta: sanitizeMeta(meta),
+  };
+}
+
+async function listUniversalProviders() {
+  const store = await readStore();
+  return store.universalProviders
+    .map((provider, index) => ({ provider, index }))
+    .sort((a, b) => {
+      const sa = Number.isFinite(a.provider.sortIndex) ? a.provider.sortIndex : a.index;
+      const sb = Number.isFinite(b.provider.sortIndex) ? b.provider.sortIndex : b.index;
+      return sa - sb;
+    })
+    .map((entry) => entry.provider);
+}
+
+async function getUniversalProvider(id) {
+  const providers = await listUniversalProviders();
+  return providers.find((p) => p.id === id) || null;
+}
+
+// Create (no id) or patch (id) one universal provider. The patch merges onto
+// the existing record before sanitizing, so partial payloads keep their other
+// fields. Position follows sortIndex like per-app providers; updates keep the
+// existing position.
+async function upsertUniversalProvider(fields) {
+  const existing = fields.id ? await getUniversalProvider(fields.id) : null;
+  const clean = sanitizeUniversalFields(existing ? { ...existing, ...fields } : fields);
+  const now = new Date().toISOString();
+  let saved = null;
+  await mutateStore((store) => {
+    const providers = store.universalProviders.slice();
+    const index = fields.id ? providers.findIndex((p) => p.id === fields.id) : -1;
+    if (index === -1) {
+      saved = {
+        id: `u_${crypto.randomUUID()}`,
+        ...clean,
+        createdAt: now,
+        updatedAt: now,
+        sortIndex: Number.isFinite(fields.sortIndex) ? fields.sortIndex : providers.length,
+      };
+      providers.push(saved);
+    } else {
+      const current = providers[index];
+      saved = { ...current, ...clean, createdAt: current.createdAt, updatedAt: now };
+      providers[index] = saved;
+    }
+    store.universalProviders = providers;
+    return store;
+  });
+  return saved;
+}
+
+async function deleteUniversalProvider(id) {
+  let removed = null;
+  await mutateStore((store) => {
+    const index = store.universalProviders.findIndex((p) => p.id === id);
+    if (index === -1) return store;
+    removed = store.universalProviders[index];
+    store.universalProviders = store.universalProviders.filter((p) => p.id !== id);
+    return store;
+  });
+  return removed;
+}
+
+// Deterministic save for a generated universal child: creates with the fixed
+// id or updates in place, preserving position (unlike createProvider, which
+// always mints an id and appends).
+async function putUniversalChildProvider(app, fields) {
+  if (!isSupportedApp(app)) throw new Error(`Unsupported app: ${app}`);
+  const clean = sanitizeProviderFields(app, fields);
+  const now = new Date().toISOString();
+  await mutateStore((store) => {
+    const providers = store.apps[app].providers;
+    const index = providers.findIndex((p) => p.id === fields.id);
+    if (index === -1) {
+      providers.push({
+        id: fields.id,
+        ...clean,
+        createdAt: fields.createdAt || now,
+        updatedAt: now,
+        sortIndex: Number.isFinite(fields.sortIndex) ? fields.sortIndex : providers.length,
+      });
+    } else {
+      providers[index] = { ...providers[index], ...clean, updatedAt: now };
+    }
+    return store;
+  });
+  return getProvider(app, fields.id);
+}
+
 module.exports = {
   SUPPORTED_APPS,
+  UNIVERSAL_APPS,
   isSupportedApp,
   readStore,
   listProviders,
@@ -382,4 +536,9 @@ module.exports = {
   sanitizeSettingsConfig,
   readVisibleApps,
   updateVisibleApps,
+  listUniversalProviders,
+  getUniversalProvider,
+  upsertUniversalProvider,
+  deleteUniversalProvider,
+  putUniversalChildProvider,
 };

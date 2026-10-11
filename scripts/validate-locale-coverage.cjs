@@ -57,6 +57,8 @@ const SOURCE_IDENTICAL_KEY_ALLOWLIST = [
   /^pswitch[.]mcp[.]tab$/,
   // Provider-switch form fields: env/protocol identifiers stay verbatim.
   /^pswitch[.]field[.]/,
+  // The universal provider's API-key label matches the per-app field's term.
+  /^pswitch[.]universal[.]api_key$/,
   // Codex editor headings are literal config-file names.
   /^pswitch[.]codex[.]/,
   // Codex reasoning-effort level names stay verbatim.

@@ -9,6 +9,7 @@ const backup = require("./backup");
 const paths = require("./paths");
 const catalog = require("./catalog");
 const editor = require("./editor");
+const universal = require("./universal");
 const additive = require("./additive");
 const mcp = require("./mcp");
 const prompts = require("./prompts");
@@ -461,6 +462,49 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
       const body = await readJsonBody(req);
       try {
         json(res, { ok: true, file: await piPromptFiles.remove(String(body.kind || ""), body.expectedRevision ?? null) });
+      } catch (error) {
+        json(res, { ok: false, error: error?.message || String(error) });
+      }
+      return true;
+    }
+
+    // Universal providers (cc-switch's 统一供应商): one shared base URL +
+    // API key projected into deterministic claude/codex/gemini child rows.
+    // Upsert stays separate from sync (upstream interaction: create auto-
+    // syncs, edits save until the user asks for 保存并同步); sync re-projects
+    // the live files of apps whose current provider is a generated child.
+    if (p === `${prefix}/universal` && method === "GET") {
+      json(res, { ok: true, providers: await store.listUniversalProviders() });
+      return true;
+    }
+    if (p === `${prefix}/universal` && (method === "PUT" || method === "POST")) {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      try {
+        const provider = await store.upsertUniversalProvider(body.provider || {});
+        json(res, { ok: true, provider });
+      } catch (error) {
+        json(res, { ok: false, error: error?.message || String(error) });
+      }
+      return true;
+    }
+    if (p === `${prefix}/universal/sync` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      try {
+        await universal.syncUniversalToApps({ id: String(body.id || ""), applyCurrent: switchProvider });
+        json(res, { ok: true });
+      } catch (error) {
+        json(res, { ok: false, error: error?.message || String(error) });
+      }
+      return true;
+    }
+    if (p === `${prefix}/universal/delete` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      try {
+        const removed = await universal.deleteUniversalAndChildren(String(body.id || ""));
+        json(res, { ok: true, removed });
       } catch (error) {
         json(res, { ok: false, error: error?.message || String(error) });
       }

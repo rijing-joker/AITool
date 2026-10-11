@@ -42,6 +42,7 @@ import { useVisiblePolling } from "../hooks/use-visible-polling";
 import { PresetIcon, providerTileClass, ProviderEditDialog } from "./provider-edit-dialog";
 import { ProviderMcpPanel } from "./provider-mcp-panel";
 import { ProviderPromptsPanel } from "./provider-prompts-panel";
+import { ProviderUniversalPanel } from "./provider-universal-panel";
 import { ProviderQuotaLine } from "./provider-quota-line";
 import { ProviderEnvBanner } from "./provider-env-banner";
 import { ProviderSkillsPanel } from "./provider-skills-panel";
@@ -972,6 +973,11 @@ export function ProviderSwitchPage() {
             </SortableContext>
           </DndContext>
         )}
+      </section>
+
+      <section className="mb-8">
+        <SectionTitle>{copy("pswitch.universal.section")}</SectionTitle>
+        <ProviderUniversalPanel onNotice={setNotice} onChanged={refreshStatus} />
       </section>
 
       <section className="mb-8">

@@ -2895,3 +2895,31 @@ sessions.storage.tooltip,dashboard,SessionsPage,SessionRow,storage,"Session file
 sessions.storage.allocated,dashboard,SessionsPage,SessionRow,storage,"allocated bytes",,active
 sessions.storage.logical,dashboard,SessionsPage,SessionRow,storage,"logical file size",,active
 sessions.storage.size,dashboard,SessionsPage,SessionRow,storage_size,"{{value}} MiB",,active
+pswitch.universal.section,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_section,Universal providers,,active
+pswitch.universal.title,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_title,Universal providers,,active
+pswitch.universal.subtitle,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_subtitle,"One base URL and API key shared by Claude Code, Codex CLI and Gemini CLI; generated entries appear as ordinary providers on each enabled app's tab.",,active
+pswitch.universal.add,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_add,Add universal provider,,active
+pswitch.universal.edit,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_edit,Edit universal provider,,active
+pswitch.universal.select_preset,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_select_preset,Preset,,active
+pswitch.universal.name_placeholder,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_name_placeholder,e.g. My Gateway,,active
+pswitch.universal.base_url,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_base_url,API base URL,,active
+pswitch.universal.api_key,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_api_key,API Key,,active
+pswitch.universal.enabled_apps,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_enabled_apps,Enabled apps,,active
+pswitch.universal.model_config,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_model_config,Per-app model config,,active
+pswitch.universal.model,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_model,Model,,active
+pswitch.universal.reasoning_effort,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_reasoning_effort,Reasoning effort,,active
+pswitch.universal.form_hint,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_form_hint,Creating a provider syncs it immediately; edits apply on save-and-sync.,,active
+pswitch.universal.save_and_sync,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_save_and_sync,Save and sync,,active
+pswitch.universal.loading,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_loading,Loading universal providers…,,active
+pswitch.universal.empty,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_empty,No universal providers yet.,,active
+pswitch.universal.no_apps,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_no_apps,No apps enabled,,active
+pswitch.universal.sync,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_sync,Sync to apps,,active
+pswitch.universal.synced,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_synced,Synced to enabled apps.,,active
+pswitch.universal.saved,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_saved,Universal provider saved.,,active
+pswitch.universal.saved_and_synced,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_saved_and_synced,Saved and synced to all enabled apps.,,active
+pswitch.universal.added_and_synced,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_added_and_synced,Universal provider added and synced.,,active
+pswitch.universal.deleted,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_deleted,Universal provider deleted.,,active
+pswitch.universal.sync_confirm_title,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_sync_confirm_title,Sync to apps?,,active
+pswitch.universal.sync_confirm_desc,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_sync_confirm_desc,Rewrite {{name}}'s generated provider entries and re-project the live config of any app currently using them?,,active
+pswitch.universal.delete_confirm_title,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_delete_confirm_title,Delete universal provider,,active
+pswitch.universal.delete_confirm_desc,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_delete_confirm_desc,Delete '{{name}}'? Its generated entries are removed from every enabled app's provider list (live files are not rewritten).,,active

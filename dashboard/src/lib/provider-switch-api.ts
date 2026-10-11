@@ -207,6 +207,45 @@ export interface ProviderSwitchEditorView {
   codexOfficialModelsReason?: "noCli" | "failed" | null;
 }
 
+// Universal provider (cc-switch's 统一供应商): one shared base URL + API key
+// synced into deterministic claude/codex/gemini child providers.
+export interface ProviderSwitchUniversalProvider {
+  id: string;
+  name: string;
+  providerType: string;
+  apps: { claude: boolean; codex: boolean; gemini: boolean };
+  baseUrl: string;
+  apiKey: string;
+  models?: {
+    claude?: { model?: string; haikuModel?: string; sonnetModel?: string; opusModel?: string };
+    codex?: { model?: string; reasoningEffort?: string };
+    gemini?: { model?: string };
+  };
+  websiteUrl?: string;
+  notes?: string;
+  icon?: string;
+  iconColor?: string;
+  meta?: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  sortIndex?: number;
+}
+
+export const universalProvidersApi = {
+  list(): Promise<{ ok: true; providers: ProviderSwitchUniversalProvider[] }> {
+    return get("/api/provider-switch/universal");
+  },
+  upsert(provider: Partial<ProviderSwitchUniversalProvider> & { id?: string }): Promise<{ ok: true; provider: ProviderSwitchUniversalProvider }> {
+    return mutate("/api/provider-switch/universal", "PUT", { provider });
+  },
+  sync(id: string): Promise<{ ok: true }> {
+    return mutate("/api/provider-switch/universal/sync", "POST", { id });
+  },
+  remove(id: string): Promise<{ ok: true; removed: boolean }> {
+    return mutate("/api/provider-switch/universal/delete", "POST", { id });
+  },
+};
+
 export const piPromptFilesApi = {
   get(kind: PiPromptFileKind) {
     return providerSwitchApi.getPiPromptFile(kind);

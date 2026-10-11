@@ -345,7 +345,7 @@ test("prompts: deleting an enabled prompt is refused; disabled ones delete fine"
 
   const refused = await post("/api/provider-switch/prompts/delete", { app: "hermes", id: "soul-a" });
   assert.equal(refused.status, 400);
-  assert.match(refused.body.error, /已启用/);
+  assert.match(refused.body.error, /Cannot delete an enabled prompt/);
 
   const ok = await post("/api/provider-switch/prompts/delete", { app: "hermes", id: "soul-b" });
   assert.equal(ok.status, 200);
@@ -372,7 +372,7 @@ test("prompts: import captures the live file as a disabled prompt without writin
   // Missing file → clean error.
   const missing = await post("/api/provider-switch/prompts/import", { app: "pi" });
   assert.equal(missing.status, 400);
-  assert.match(missing.body.error, /不存在/);
+  assert.match(missing.body.error, /Prompt file not found/);
 });
 
 test("prompts: sync projects the first enabled prompt per app and leaves no-enabled files alone", async () => {

@@ -31,8 +31,9 @@ function createCoreInstallService({ manager, bridge, fetchCoreModule }) {
   }
 
   async function coreRunning() {
-    const pid = manager.readPid();
-    return manager.pidAlive(pid);
+    // Identity-verified: a recycled PID holding the pid file must not pause
+    // installs (or count as "running") when our core is actually down.
+    return manager.managedCoreAlive(manager.readPid());
   }
 
   // The task stays active until the proxy is usable again. A restart failure

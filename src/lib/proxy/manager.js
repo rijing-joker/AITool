@@ -46,6 +46,33 @@ function pidAlive(pid) {
   }
 }
 
+// A recycled PID must never let us signal an unrelated process, so before
+// killing (or adopting) a pid-file PID its identity is verified like the
+// original does by executable path (EasyCLIProxyAPI core_runtime.rs). Our
+// core always runs as `<binPath> -config <configPath>`, and matching the
+// config path keeps hands off same-binary cores pointed at another config
+// (e.g. a separate install on this machine).
+async function managedCoreAlive(pid) {
+  if (!pid || !pidAlive(pid)) return false;
+  let command = await new Promise((resolve) => {
+    execFile("ps", ["-p", String(pid), "-o", "command="], (error, stdout) => {
+      if (!error) resolve(String(stdout || "").trim());
+      // ENOENT → ps itself is missing; any other error → no such process.
+      else resolve(error.code === "ENOENT" ? null : "");
+    });
+  });
+  if (command === null) {
+    // ps is missing (minimal containers): Linux exposes the same data in /proc.
+    try {
+      command = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").filter(Boolean).join(" ");
+    } catch {}
+  }
+  // Unverifiable (no ps, no /proc): keep the existence-only behavior rather
+  // than bricking stop() on exotic platforms.
+  if (!command) return true;
+  return command.includes(String(paths.configPath));
+}
+
 let versionCache = null;
 
 async function readBinaryVersion() {
@@ -136,7 +163,7 @@ async function start() {
   }
 
   const existingPid = readPid();
-  if (pidAlive(existingPid)) {
+  if (await managedCoreAlive(existingPid)) {
     return { started: false, alreadyRunning: true, pid: existingPid };
   }
   clearPid();
@@ -149,11 +176,12 @@ async function start() {
     return { started: false, alreadyRunning: true, pid: null, external: true };
   }
   if (probe.reachable && probe.authError) {
-    // Our own stale instance (pid file still alive) was started with an older
-    // key — recycle it so the reconciled config takes effect. A foreign core
-    // (no pid file) is not ours to kill.
+    // Our own stale instance (verified by command line) was started with an
+    // older key — recycle it so the reconciled config takes effect. A foreign
+    // core (no pid file, or a recycled PID we cannot identify) is not ours to
+    // kill.
     const stalePid = readPid();
-    if (stalePid && pidAlive(stalePid)) {
+    if (await managedCoreAlive(stalePid)) {
       await stop();
       await new Promise((resolve) => setTimeout(resolve, 500));
     } else {
@@ -192,7 +220,9 @@ async function start() {
 
 async function stop() {
   const pid = readPid();
-  if (!pid || !pidAlive(pid)) {
+  if (!(await managedCoreAlive(pid))) {
+    // Nothing to stop, or the PID was recycled by a process that is not our
+    // core — drop the stale pid file and never signal it.
     clearPid();
     return { stopped: false, running: false };
   }
@@ -215,7 +245,7 @@ async function stop() {
 async function status() {
   const binaryVersion = await readBinaryVersion();
   const pid = readPid();
-  const running = pidAlive(pid);
+  const running = await managedCoreAlive(pid);
   const probe = running ? await management.ping() : { reachable: false };
   const settings = config.readSettings();
   return {
@@ -244,5 +274,6 @@ module.exports = {
   status,
   readPid,
   pidAlive,
+  managedCoreAlive,
   readBinaryVersion,
 };

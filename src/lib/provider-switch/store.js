@@ -24,6 +24,7 @@ const paths = require("./paths");
 //             createdAt, updatedAt }
 
 const additive = require("./additive");
+const floor = require("./floor");
 
 const SUPPORTED_APPS = ["claude", "codex", "gemini", "opencode", "openclaw", "mcode", "hermes", "pi", "grokbuild"];
 const PROVIDER_CATEGORIES = ["official", "custom"];
@@ -62,6 +63,19 @@ function newProviderId() {
   return `p_${crypto.randomUUID()}`;
 }
 
+// Legacy Codex rows (top-level base_url/openai_base_url with no route
+// selector) are folded into [model_providers.custom] on every read/write so
+// the editor, model fetch and switch projection all see the modern shape
+// (cc-switch 84457b510). Idempotent; prev rows converge on the next mutation.
+function normalizeProviderRow(app, provider) {
+  if (app !== "codex" || !provider || typeof provider !== "object") return provider;
+  const settingsConfig = provider.settingsConfig;
+  if (!settingsConfig || typeof settingsConfig !== "object") return provider;
+  const config = floor.normalizeCodexConfig(settingsConfig.config);
+  if (config === settingsConfig.config) return provider;
+  return { ...provider, settingsConfig: { ...settingsConfig, config } };
+}
+
 async function readStore() {
   const store = await readJson(paths.storePath());
   if (!store || typeof store !== "object" || !store.apps) return defaultStore();
@@ -71,7 +85,9 @@ async function readStore() {
     if (!saved || typeof saved !== "object") continue;
     next.apps[app] = {
       current: typeof saved.current === "string" ? saved.current : null,
-      providers: Array.isArray(saved.providers) ? saved.providers.filter((p) => p && typeof p === "object") : [],
+      providers: Array.isArray(saved.providers)
+        ? saved.providers.filter((p) => p && typeof p === "object").map((p) => normalizeProviderRow(app, p))
+        : [],
     };
   }
   next.settings = { visibleApps: normalizeVisibleApps(store.settings && store.settings.visibleApps) };
@@ -90,7 +106,7 @@ async function mutateStore(update) {
       if (saved && typeof saved === "object") {
         normalized.apps[app] = {
           current: typeof saved.current === "string" ? saved.current : null,
-          providers: Array.isArray(saved.providers) ? saved.providers : [],
+          providers: Array.isArray(saved.providers) ? saved.providers.map((p) => normalizeProviderRow(app, p)) : [],
         };
       }
     }
@@ -120,7 +136,7 @@ function sanitizeSettingsConfig(app, settingsConfig, name) {
     if (config !== undefined && (typeof config !== "object" || config === null || Array.isArray(config))) {
       throw new Error("settingsConfig.config must be an object");
     }
-    return { auth: auth || null, config: config || {} };
+    return { auth: auth || null, config: floor.normalizeCodexConfig(config || {}) };
   }
   if (additive.isAdditiveApp(app)) {
     // Wrapper shape { slotKey, provider, modelId? } — see additive.js. The

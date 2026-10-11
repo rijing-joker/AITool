@@ -80,7 +80,10 @@ function projectCodex({ prev, target, liveToml, liveAuth, stash }) {
     throw new Error("Live ~/.codex/config.toml is missing (create it or run Codex once)");
   }
   const prevConfig = { ...((prev && prev.settingsConfig && prev.settingsConfig.config) || {}) };
-  const targetConfig = { ...((target && target.settingsConfig && target.settingsConfig.config) || {}) };
+  // Legacy top-level base_url/openai_base_url rows are folded into the custom
+  // route table here too (cc-switch 84457b510): the store boundary normalizes
+  // on read, this covers direct projection callers.
+  const targetConfig = floor.normalizeCodexConfig({ ...((target && target.settingsConfig && target.settingsConfig.config) || {}) });
 
   // The model catalog sidecar rides on provider meta; inject its config.toml
   // pointer as a virtual floor key so the generic residue logic below manages

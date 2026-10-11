@@ -352,6 +352,126 @@ test("provider-switch codex projection: table replaced/removed, managed keys res
   assert.match(outEnvKey.configToml, /env_key = "RELAY_KEY"/);
 });
 
+test("provider-switch codex legacy base_url rows normalize into the custom route table (cc-switch 84457b510)", async () => {
+  const targets = require("../src/lib/provider-switch/targets");
+  const store = require("../src/lib/provider-switch/store");
+
+  // Selector-less row with a top-level base_url: Codex ignores that key, so
+  // the projection must fold it into [model_providers.custom] and select it.
+  const liveToml = 'model = "gpt-5"\nnotify = ["bash", "/hooks/notify.sh"]\n';
+  const legacy = {
+    category: "custom",
+    settingsConfig: {
+      auth: { OPENAI_API_KEY: "sk-relay" },
+      config: {
+        model: "gpt-5",
+        base_url: "https://relay.example.com/v1",
+        wire_api: "chat",
+      },
+    },
+  };
+  const out = targets.projectCodex({ prev: null, target: legacy, liveToml, liveAuth: {} });
+  assert.match(out.configToml, /model_provider = "custom"/);
+  assert.match(out.configToml, /\[model_providers\.custom\]/);
+  assert.match(out.configToml, /base_url = "https:\/\/relay\.example\.com\/v1"/);
+  assert.match(out.configToml, /wire_api = "chat"/, "the row's own protocol rides along");
+  const topLevelPart = out.configToml.split("[model_providers.custom]")[0];
+  assert.doesNotMatch(topLevelPart, /base_url/, "the dead top-level key is gone");
+  assert.doesNotMatch(topLevelPart, /wire_api/);
+
+  // openai_base_url is the older shape and wins over base_url.
+  const outOld = targets.projectCodex({
+    prev: null,
+    target: {
+      category: "custom",
+      settingsConfig: {
+        auth: null,
+        config: { openai_base_url: "https://old-shape.example.com/v1", base_url: "https://new-shape.example.com/v1" },
+      },
+    },
+    liveToml,
+    liveAuth: {},
+  });
+  assert.match(outOld.configToml, /base_url = "https:\/\/old-shape\.example\.com\/v1"/);
+  assert.doesNotMatch(outOld.configToml, /new-shape\.example\.com/);
+
+  // A real selector wins: the legacy keys stay untouched (upstream parity —
+  // Codex ignores them either way and the selector picks the route).
+  const floor = require("../src/lib/provider-switch/floor");
+  const selected = { model_provider: "custom", base_url: "https://ignored.example.com/v1" };
+  assert.deepEqual(floor.normalizeCodexConfig(selected), selected);
+  const openaiSelector = { model_provider: "openai", base_url: "https://ignored.example.com/v1" };
+  assert.deepEqual(floor.normalizeCodexConfig(openaiSelector), openaiSelector);
+
+  // Reserved "openai" selector carrying its own table: rewritten as custom.
+  const reserved = targets.projectCodex({
+    prev: null,
+    target: {
+      category: "custom",
+      settingsConfig: {
+        auth: null,
+        config: {
+          model_provider: "openai",
+          model_providers: { openai: { name: "Legacy", base_url: "https://legacy.example.com/v1" } },
+        },
+      },
+    },
+    liveToml,
+    liveAuth: {},
+  });
+  assert.match(reserved.configToml, /model_provider = "custom"/);
+  assert.match(reserved.configToml, /base_url = "https:\/\/legacy\.example\.com\/v1"/);
+  assert.match(reserved.configToml, /wire_api = "responses"/);
+  assert.doesNotMatch(reserved.configToml, /\[model_providers\.openai\]/);
+
+  // Store boundary: a legacy row hand-written into the store file converges
+  // on read, and the normalized shape persists after a mutation.
+  const storePath = require("../src/lib/provider-switch/paths").storePath();
+  fs.mkdirSync(path.dirname(storePath), { recursive: true });
+  fs.writeFileSync(
+    storePath,
+    JSON.stringify({
+      version: 1,
+      apps: {
+        codex: {
+          current: null,
+          providers: [
+            {
+              id: "p_legacy",
+              name: "Legacy Relay",
+              category: "custom",
+              settingsConfig: { auth: null, config: { base_url: "https://relay.example.com/v1", wire_api: "chat" } },
+              notes: "",
+              createdAt: "2026-01-01T00:00:00.000Z",
+              updatedAt: "2026-01-01T00:00:00.000Z",
+            },
+          ],
+        },
+      },
+      settings: {},
+    })
+  );
+  const listed = await store.listProviders("codex");
+  const config = listed.providers[0].settingsConfig.config;
+  assert.equal(config.model_provider, "custom");
+  assert.equal(config.model_providers.custom.base_url, "https://relay.example.com/v1");
+  assert.equal(config.model_providers.custom.wire_api, "chat");
+  assert.equal(config.base_url, undefined);
+  await store.updateProvider("codex", "p_legacy", { name: "Legacy Relay 2" });
+  const persisted = JSON.parse(fs.readFileSync(storePath, "utf8"));
+  const savedConfig = persisted.apps.codex.providers[0].settingsConfig.config;
+  assert.equal(savedConfig.model_provider, "custom", "normalization is persisted on the next mutation");
+  assert.equal(savedConfig.base_url, undefined);
+
+  // Creating with a legacy shape sanitizes immediately.
+  const created = await store.createProvider("codex", {
+    name: "Created Legacy",
+    settingsConfig: { auth: null, config: { base_url: "https://created.example.com/v1" } },
+  });
+  assert.equal(created.settingsConfig.config.model_provider, "custom");
+  assert.equal(created.settingsConfig.config.model_providers.custom.wire_api, "responses");
+});
+
 test("provider-switch codex auth: stashed when leaving official, restored when switching back", async () => {
   const targets = require("../src/lib/provider-switch/targets");
 

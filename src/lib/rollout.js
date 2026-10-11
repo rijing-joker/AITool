@@ -194,27 +194,27 @@ function isCompressedRolloutFilePath(filePath) {
   return typeof filePath === "string" && filePath.endsWith(COMPRESSED_ROLLOUT_SUFFIX);
 }
 
-// The logical rollout path strips the compression suffix: cursors, event keys
-// and day-shard identity must treat rollout-X.jsonl.zst as the same file that
-// was already counted in its plain form, never as a new session.
-function rolloutLogicalPath(filePath) {
-  if (!isCompressedRolloutFilePath(filePath)) return filePath;
-  return filePath.slice(0, -".zst".length);
-}
-
-async function decompressZstdBuffer(data) {
+async function decompressZstdBuffer(data, { maxOutputLength = null } = {}) {
   const zlib = require("node:zlib");
-  if (typeof zlib.zstdDecompressSync === "function") return zlib.zstdDecompressSync(data);
+  // maxOutputLength aborts the native decompress at the cap instead of
+  // materializing the full output first (the @mongodb-js/zstd fallback has no
+  // such option — its callers' post-decompress size check still applies).
+  if (typeof zlib.zstdDecompressSync === "function") {
+    return maxOutputLength != null
+      ? zlib.zstdDecompressSync(data, { maxOutputLength })
+      : zlib.zstdDecompressSync(data);
+  }
   return Buffer.from(await require("@mongodb-js/zstd").decompress(data));
 }
 
 // Decompress a rollout-*.jsonl.zst into a temp file so the byte-stream readers
 // keep working unchanged; the caller owns cleanup(). Compressed rollouts are
-// frozen (Codex only compresses sessions untouched for 7 days), so the view is
-// materialized fresh on every scan and no byte cursor is persisted for it.
+// frozen (Codex only compresses sessions untouched for 7 days); a skip marker
+// cursor (see parseRolloutIncremental) keeps warm syncs from decompressing an
+// archive that was already parsed.
 async function materializeCompressedRolloutView(filePath) {
   const compressed = await fs.readFile(filePath);
-  const data = await decompressZstdBuffer(compressed);
+  const data = await decompressZstdBuffer(compressed, { maxOutputLength: MAX_COMPRESSED_ROLLOUT_BYTES });
   if (data.length > MAX_COMPRESSED_ROLLOUT_BYTES) {
     const error = new Error(
       `compressed rollout decompresses to ${data.length} bytes, over the ${MAX_COMPRESSED_ROLLOUT_BYTES} cap`,
@@ -536,10 +536,31 @@ async function parseRolloutIncremental({
     const st = rolloutStats[idx];
     if (!st || !st.isFile()) continue;
 
-    // A compressed rollout is re-parsed from a fresh decompressed view on
-    // every sync and persists no byte cursor: compressed files are frozen, so
-    // the only cost is the decompress, and the persisted codex event dedup
-    // (keyed by the logical sessionUUID) keeps the re-parse a no-op.
+    // A frozen compressed rollout that was already parsed once (marker cursor
+    // below) is skipped entirely on warm syncs — the persisted codex event
+    // dedup holds every event, so the decompress would be a pure no-op.
+    const existingCursor = cursors.files[filePath] || null;
+    if (
+      isCompressedRolloutFilePath(filePath) &&
+      existingCursor?.compressed === true &&
+      existingCursor.inode === (st.ino || 0) &&
+      existingCursor.offset === st.size
+    ) {
+      if (cb) {
+        cb({
+          index: idx + 1,
+          total: totalFiles,
+          filePath,
+          filesProcessed,
+          eventsAggregated,
+          bucketsQueued: touchedBuckets.size,
+        });
+      }
+      continue;
+    }
+    // First encounter or a changed archive: parse the fresh decompressed view
+    // in full; the persisted event dedup (keyed by the logical sessionUUID)
+    // keeps any replay a no-op.
     let compressedView = null;
     if (isCompressedRolloutFilePath(filePath)) {
       try {
@@ -736,9 +757,24 @@ async function parseRolloutIncremental({
       }
     }
     if (compressedView) {
-      // No byte cursor for a compressed rollout — the view is rematerialized
-      // and re-parsed (deduped) on every sync.
-      delete cursors.files[key];
+      // Skip marker, not a byte cursor: the archive is frozen and was parsed
+      // in full this sync, so the compressed check above skips warm syncs
+      // (cc-switch persists the compressed size for the same reason). The
+      // project fields let the day-complete metadata treat the file as
+      // covered, same as a fully-read plain file.
+      cursors.files[key] = {
+        compressed: true,
+        inode: st.ino || 0,
+        offset: st.size,
+        ...(codexProjectFastPath ? {
+          projectOffset: st.size,
+          projectFileContext: buildProjectFileContext(
+            result.projectFileContexts,
+            projectFreshnessNowMs,
+          ),
+        } : {}),
+        updatedAt: new Date().toISOString(),
+      };
     } else {
       if (codexProjectFastPath) {
         nextCursor.projectOffset = result.endOffset;
@@ -12349,7 +12385,7 @@ async function decodeZedThreadBlob({ dataType, data }) {
     return data.toString("utf8");
   }
   if (type === "zstd") {
-    const out = await decompressZstdBuffer(data);
+    const out = await decompressZstdBuffer(data, { maxOutputLength: MAX_ZED_THREAD_JSON_BYTES });
     if (out.length > MAX_ZED_THREAD_JSON_BYTES) {
       throw new Error(`decoded zstd blob exceeds ${MAX_ZED_THREAD_JSON_BYTES} bytes`);
     }
@@ -24459,7 +24495,6 @@ module.exports = {
   codexSessionIdFromPath,
   isRolloutFileName,
   isCompressedRolloutFilePath,
-  rolloutLogicalPath,
   materializeCompressedRolloutView,
   decompressZstdBuffer,
   MAX_COMPRESSED_ROLLOUT_BYTES,

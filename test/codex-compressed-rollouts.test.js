@@ -16,7 +16,6 @@ const {
   codexSessionIdFromPath,
   listRolloutFilesDeep,
   isRolloutFileName,
-  rolloutLogicalPath,
 } = require("../src/lib/rollout");
 const { parseCodexRolloutFile, rolloutSessionIdFromPath } = require("../src/lib/codex-rollout-parser");
 const { listSessions, readSession } = require("../src/lib/sessions");
@@ -125,8 +124,6 @@ test("compressed rollout path helpers keep the logical session identity", () => 
   const zstPath = `/tmp/x/sessions/2026/09/20/rollout-2026-09-20T12-00-00-${SESSION}.jsonl.zst`;
   assert.equal(codexSessionIdFromPath(zstPath), SESSION);
   assert.equal(rolloutSessionIdFromPath(zstPath), SESSION);
-  assert.equal(codexSessionIdFromPath(rolloutLogicalPath(zstPath)), SESSION);
-  assert.equal(rolloutLogicalPath(zstPath), zstPath.slice(0, -4));
   assert.equal(isRolloutFileName(`rollout-2026-09-20T12-00-00-${SESSION}.jsonl.zst`), true);
   assert.equal(isRolloutFileName(`rollout-2026-09-20T12-00-00-${SESSION}.jsonl`), true);
   assert.equal(isRolloutFileName(`rollout-2026-09-20T12-00-00-${SESSION}.jsonl.gz`), false);
@@ -147,7 +144,9 @@ test("sync parses a compressed rollout fully and a resync adds nothing", async (
     await ctx.sync([ctx.zstPath]);
     const second = await queueTotals(ctx.queuePath);
     assert.deepEqual(second, first);
-    assert.equal(Object.keys(ctx.cursors.files).length, 0, "compressed rollouts persist no byte cursor");
+    const marker = ctx.cursors.files[ctx.zstPath];
+    assert.equal(marker?.compressed, true, "a skip marker persists after the first full parse");
+    assert.equal(marker?.offset, (await fs.stat(ctx.zstPath)).size);
   });
 });
 
@@ -273,4 +272,51 @@ test("compressed listing reads only the head, not the whole decompressed file", 
     assert.equal(sessions.length, 1);
     assert.equal(sessions[0].sessionId, SESSION);
   });
+});
+
+test("warm syncs skip the decompress of an already-parsed compressed rollout", async () => {
+  await withTmp(async (ctx) => {
+    const lines = rolloutLines();
+    await fs.writeFile(ctx.zstPath, await zstdCompress(Buffer.from(lines.map((l) => l + "\n").join(""))));
+
+    // Count decompress-source reads for the archive across syncs.
+    const fsp = require("node:fs/promises");
+    const origReadFile = fsp.readFile;
+    let zstReads = 0;
+    fsp.readFile = async function countingRead(file, ...args) {
+      if (String(file) === ctx.zstPath) zstReads += 1;
+      return origReadFile.call(fsp, file, ...args);
+    };
+    try {
+      await ctx.sync([ctx.zstPath]);
+      const first = await queueTotals(ctx.queuePath);
+      const readsAfterFirst = zstReads;
+      assert.ok(readsAfterFirst >= 1, "the first sync must read the archive");
+
+      await ctx.sync([ctx.zstPath]);
+      assert.equal(zstReads, readsAfterFirst, "the warm sync must not decompress again");
+      assert.deepEqual(await queueTotals(ctx.queuePath), first);
+    } finally {
+      fsp.readFile = origReadFile;
+    }
+  });
+});
+
+test("the decompress cap aborts during decompression, not after", async () => {
+  const { decompressZstdBuffer } = require("../src/lib/rollout");
+  // 1 MiB of zeros compresses to a few KB — a bomb relative to a 4 KiB cap.
+  const bomb = await zstdCompress(Buffer.alloc(1024 * 1024, 0));
+  await assert.rejects(
+    () => decompressZstdBuffer(bomb, { maxOutputLength: 4096 }),
+    (error) => error.code === "ERR_BUFFER_TOO_LARGE",
+    "the native decompress must abort at the cap",
+  );
+  // Without a cap the same payload decompresses fine.
+  const whole = await decompressZstdBuffer(bomb);
+  assert.equal(whole.length, 1024 * 1024);
+  // Zed blob decoding rides the same cap path.
+  assert.equal(
+    (await decompressZstdBuffer(bomb, { maxOutputLength: 1024 * 1024 })).length,
+    1024 * 1024,
+  );
 });

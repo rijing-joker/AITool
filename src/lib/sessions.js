@@ -294,7 +294,7 @@ async function readCompressedRolloutHeadLines(filePath, headN) {
 async function readSessionText(filePath) {
   if (filePath.endsWith(".jsonl.zst")) {
     const compressed = await fsp.readFile(filePath);
-    const data = await decompressZstdBuffer(compressed);
+    const data = await decompressZstdBuffer(compressed, { maxOutputLength: MAX_COMPRESSED_ROLLOUT_BYTES });
     if (data.length > MAX_COMPRESSED_ROLLOUT_BYTES) {
       throw new Error(`compressed session decompresses to ${data.length} bytes, over the cap`);
     }

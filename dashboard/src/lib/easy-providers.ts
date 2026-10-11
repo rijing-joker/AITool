@@ -573,6 +573,7 @@ export async function fetchModels(
   authIndex?: string,
   customHeaders: Record<string, string> = {},
   timeoutMs?: number,
+  proxyUrl?: string,
 ): Promise<ModelOption[]> {
   const normalized = baseUrl.trim() ? normalizeBaseUrl(baseUrl) : "";
   const candidates = modelEndpointCandidates(provider, normalized);
@@ -613,6 +614,9 @@ export async function fetchModels(
           method: "GET",
           url: pageUrl.toString(),
           header: Object.keys(headers).length ? headers : undefined,
+          // easy parity (modelService.ts): model discovery traverses the
+          // provider's proxy-url inside the core, like real requests do.
+          ...(proxyUrl?.trim() ? { proxy_url: proxyUrl.trim() } : {}),
         }, { timeoutMs });
         const status = Number(response.status_code ?? response.statusCode ?? 0);
         if (status < 200 || status >= 300) {
@@ -648,6 +652,7 @@ export async function fetchModels(
         const response = await managementApi.post<Record<string, unknown>>("/api-call", {
           method: "GET",
           url,
+          ...(proxyUrl?.trim() ? { proxy_url: proxyUrl.trim() } : {}),
         }, { timeoutMs });
         const status = Number(response.status_code ?? response.statusCode ?? 0);
         if (status >= 200 && status < 300) {
@@ -662,6 +667,7 @@ export async function fetchModels(
           const response = await managementApi.post<Record<string, unknown>>("/api-call", {
             method: "GET",
             url,
+            ...(proxyUrl?.trim() ? { proxy_url: proxyUrl.trim() } : {}),
           }, { timeoutMs });
           const status = Number(response.status_code ?? response.statusCode ?? 0);
           if (status >= 200 && status < 300) {
@@ -714,6 +720,9 @@ export type ProviderHealthCheckOptions = {
   authIndex?: string;
   customHeaders?: Record<string, string>;
   timeoutMs?: number;
+  // easy parity (providerHealthCheck.ts): the record's proxy-url rides along
+  // so probes traverse the same route the real requests will.
+  proxyUrl?: string;
 };
 
 const defaultBaseUrl = (provider: ModelProvider) => {
@@ -874,6 +883,7 @@ async function checkProviderHealthProbe(
   authIndex = "",
   customHeaders: Record<string, string> = {},
   timeoutMs = PROVIDER_HEALTH_TIMEOUT_MS,
+  proxyUrl = "",
 ): Promise<ProviderHealthProbeResult> {
   try {
     const probe = buildProviderHealthProbe(provider, baseUrl, model, apiKey, authIndex, customHeaders);
@@ -884,7 +894,7 @@ async function checkProviderHealthProbe(
     const response = await fetch("/api/proxy/provider-health-probe", {
       method: "POST",
       headers: { ...headers, "content-type": "application/json" },
-      body: JSON.stringify({ request: { protocol: probe.protocol, timeoutMs, data: probe.data, header: probe.header, url: probe.url, model: probe.model, source: probe.source, authIndex: probe.authIndex } }),
+      body: JSON.stringify({ request: { protocol: probe.protocol, timeoutMs, data: probe.data, header: probe.header, url: probe.url, model: probe.model, source: probe.source, authIndex: probe.authIndex, proxyUrl } }),
     });
     const payload = (await response.json().catch(() => null)) as
       | { ok: boolean; result?: { firstTokenLatencyMs?: number; responseLatencyMs: number }; error?: string }
@@ -920,6 +930,7 @@ export async function checkProviderModelHealth(
     options.authIndex,
     options.customHeaders,
     options.timeoutMs,
+    options.proxyUrl,
   );
   return {
     model,

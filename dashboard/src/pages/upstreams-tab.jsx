@@ -357,6 +357,7 @@ export function UpstreamsTab() {
             authIndex: row.authIndex,
             customHeaders: providerHeadersFromRecord(row.record),
             timeoutMs: PROVIDER_HEALTH_TIMEOUT_MS,
+            proxyUrl: readString(row.record, "proxy-url"),
           }, model);
           if (controller.signal.aborted) return;
           let balance = null;
@@ -552,6 +553,8 @@ export function UpstreamsTab() {
             firstKey
               ? providerHeadersFromRecord(effectiveProviderKey({ headers: providerHeaders }, serializeProviderKey(firstKey)))
               : providerHeaders,
+            undefined,
+            proxyUrl,
           );
           if (fetchedModels.length === 0) {
             throw new Error(copy("proxy.upstream.error.noModels"));
@@ -1413,6 +1416,8 @@ function UpstreamFormDialog({
         connection
           ? providerHeadersFromRecord(connection)
           : parseProviderHeaders(draft.headersText ?? ""),
+        undefined,
+        draft.proxyUrl,
       );
       if (requestId !== discoveryRequestRef.current) return;
       const models = applyProviderPreset(
@@ -2044,6 +2049,7 @@ function UpstreamHealthDialog({ row, onClose, keySelector }) {
     authIndex: row.authIndex,
     customHeaders: providerHeadersFromRecord(row.record),
     timeoutMs: PROVIDER_HEALTH_TIMEOUT_MS,
+    proxyUrl: readString(row.record, "proxy-url"),
   }), [row]);
 
   useEffect(() => {
@@ -2057,6 +2063,7 @@ function UpstreamHealthDialog({ row, onClose, keySelector }) {
       healthOptions.authIndex,
       healthOptions.customHeaders,
       healthOptions.timeoutMs,
+      healthOptions.proxyUrl,
     ).then((discovered) => {
       if (!disposed) setModels(mergeProviderHealthModels(discovered, row.models));
     }).catch((requestError) => {

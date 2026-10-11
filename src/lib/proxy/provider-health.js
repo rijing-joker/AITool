@@ -111,7 +111,8 @@ function isStreamingContentType(contentType) {
     || lowered.includes("application/json-seq");
 }
 
-// request: { url, header, data, protocol, timeoutMs } (EasyCLIProxyAPI shape).
+// request: { url, header, data, protocol, timeoutMs, proxyUrl } (EasyCLIProxyAPI
+// shape).
 // `model`/`source`/`authIndex` are accepted for shape parity; they only feed
 // the Rust side's local usage log, which AiTool does not keep.
 async function probe(request) {
@@ -134,6 +135,20 @@ async function probe(request) {
     throw new Error("Health check request body is too large");
   }
   const timeoutMs = Math.min(120_000, Math.max(1_000, Number(request?.timeoutMs) || 15_000));
+  // easy parity (provider_health.rs): probes traverse the provider's
+  // proxy-url so the result reflects the route real requests take. undici's
+  // ProxyAgent speaks HTTP(S) proxies only — a socks5 record fails loudly
+  // instead of silently probing around the proxy (model discovery via the
+  // core's api-call still handles socks).
+  const proxyUrl = String(request?.proxyUrl || "").trim();
+  let dispatcher = null;
+  if (proxyUrl && !/^https?:/i.test(proxyUrl)) {
+    throw new Error(`Health checks support only http(s) proxy URLs, got: ${proxyUrl}`);
+  }
+  if (proxyUrl) {
+    const { ProxyAgent } = require("undici");
+    dispatcher = new ProxyAgent(proxyUrl);
+  }
 
   await acquireSlot();
   const controller = new AbortController();
@@ -148,6 +163,7 @@ async function probe(request) {
         headers: { ...(request?.header || {}) },
         body: data,
         signal: controller.signal,
+        ...(dispatcher ? { dispatcher } : {}),
       });
     } catch (error) {
       throw new Error(`Health check request failed: ${error?.cause?.code || error?.message || error}`);

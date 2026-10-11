@@ -268,6 +268,35 @@ test("universal HTTP surface: upsert / sync / delete via the provider-switch rou
   assert.equal(after.payload.providers.length, 0);
 });
 
+test("universal HTTP surface: sync re-projects the current child through the real projection", async () => {
+  const { handleProviderSwitchApiRequest } = require("../src/lib/provider-switch/api");
+  const store = require("../src/lib/provider-switch/store");
+  const ctx = { isAuthorizedLocalMutation: () => true };
+
+  async function call(req, url) {
+    let status;
+    let payload;
+    await handleProviderSwitchApiRequest(req, {
+      writeHead(s) { status = s; },
+      end(b) { payload = JSON.parse(b); },
+    }, new URL(url), ctx);
+    return { status, payload };
+  }
+
+  const upsert = await call(post("x", { provider: universalPayload }), "http://localhost/api/provider-switch/universal");
+  assert.equal(upsert.payload.ok, true);
+  const id = upsert.payload.provider.id;
+  assert.equal((await call(post("x", { id }), "http://localhost/api/provider-switch/universal/sync")).payload.ok, true);
+
+  // Make the generated child the app's current provider, then re-sync: the
+  // live files must re-project through the router-injected switch projection
+  // (a single { app, id } payload) instead of failing the whole sync.
+  await store.setCurrentProvider("claude", `universal-claude-${id}`);
+  const resync = await call(post("x", { id }), "http://localhost/api/provider-switch/universal/sync");
+  assert.equal(resync.payload.ok, true);
+  if (resync.payload.error) throw new Error(resync.payload.error);
+});
+
 test("universal HTTP surface: mutations require local auth", async () => {
   const { handleProviderSwitchApiRequest } = require("../src/lib/provider-switch/api");
   let status;

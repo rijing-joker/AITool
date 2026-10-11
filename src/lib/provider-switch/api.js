@@ -273,6 +273,12 @@ async function switchProvider({ app, id }) {
   return { app, current: id, wrote, backups };
 }
 
+// profiles/universal inject the switch projection positionally as (app, id);
+// adapt to switchProvider's single { app, id } payload.
+function switchProviderPositional(app, id) {
+  return switchProvider({ app, id });
+}
+
 // ---------------------------------------------------------------------------
 // Editor save (cc-switch's update_from_editor / add_from_editor): the dialog
 // edits the full projected config; floor/exclusive keys go back into the
@@ -493,7 +499,7 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
       if (!requireMutation()) return true;
       const body = await readJsonBody(req);
       try {
-        await universal.syncUniversalToApps({ id: String(body.id || ""), applyCurrent: switchProvider });
+        await universal.syncUniversalToApps({ id: String(body.id || ""), applyCurrent: switchProviderPositional });
         json(res, { ok: true });
       } catch (error) {
         json(res, { ok: false, error: error?.message || String(error) });
@@ -559,7 +565,7 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
       if (!requireMutation()) return true;
       const body = await readJsonBody(req);
       try {
-        json(res, await profiles.applyProfile({ id: String(body.id || ""), app: String(body.app || ""), applyProvider: switchProvider }));
+        json(res, await profiles.applyProfile({ id: String(body.id || ""), app: String(body.app || ""), applyProvider: switchProviderPositional }));
       } catch (error) {
         json(res, { ok: false, error: error?.message || String(error) });
       }

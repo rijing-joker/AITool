@@ -242,6 +242,37 @@ test("profiles: HTTP surface (create / list / update / apply / delete) with loca
   void profiles;
 });
 
+test("profiles: HTTP apply switches providers through the real projection", async () => {
+  const { handleProviderSwitchApiRequest } = require("../src/lib/provider-switch/api");
+  const store = require("../src/lib/provider-switch/store");
+  const { providerId } = await seedAppState("claude");
+  const ctx = { isAuthorizedLocalMutation: () => true };
+
+  async function call(req, url) {
+    let status;
+    let payload;
+    await handleProviderSwitchApiRequest(req, {
+      writeHead(s) { status = s; },
+      end(b) { payload = JSON.parse(b); },
+    }, new URL(url), ctx);
+    return { status, payload };
+  }
+
+  const created = await call(post("x", { name: "Work", app: "claude" }), "http://localhost/api/provider-switch/profiles");
+  assert.equal(created.payload.ok, true);
+  const id = created.payload.profile.id;
+
+  // Leave the snapshotted provider, so applying must switch back through the
+  // router-injected projection (which takes a single { app, id } payload).
+  const other = await store.createProvider("claude", { name: "Relay B", settingsConfig: { env: {} } });
+  await store.setCurrentProvider("claude", other.id);
+
+  const applied = await call(post("x", { id, app: "claude" }), "http://localhost/api/provider-switch/profiles/apply");
+  assert.equal(applied.payload.ok, true);
+  assert.deepEqual(applied.payload.warnings, []);
+  assert.equal((await store.listProviders("claude")).current, providerId);
+});
+
 function post(url, body) {
   const payload = JSON.stringify(body || {});
   const req = new Readable({

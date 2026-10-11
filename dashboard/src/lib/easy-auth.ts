@@ -53,6 +53,24 @@ export const setOAuthCredentialFileDisabled = async (file: AuthFileRecord, disab
   await managementApi.patch("/auth-files/status", { name: readString(file, "name"), disabled });
 };
 
+export const authFileCooldownResetIndex = (file: AuthFileRecord): string | undefined => {
+  const value = file.auth_index ?? file.authIndex;
+  if (typeof value === "string") return value.trim() || undefined;
+  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) return String(value);
+  return undefined;
+};
+
+export const resetAuthFileCooldown = async (authIndex: string): Promise<void> => {
+  const index = authFileCooldownResetIndex({ auth_index: authIndex });
+  if (!index) throw new Error(text("proxy.creds.cooldown.missingIndex"));
+  const response = await managementApi.post("/routing/cooldown/reset", { auth_index: index });
+  // Only an acknowledgement for this index confirms the operation. The caller
+  // reloads the list to obtain authoritative health and disabled state after.
+  if (!isRecord(response) || response.status !== "ok" || response.auth_index !== index) {
+    throw new Error(text("proxy.creds.cooldown.invalidResponse"));
+  }
+};
+
 export const parseAuthFilePriority = (value: unknown): number | undefined => {
   if (typeof value === "number") return Number.isSafeInteger(value) ? value : undefined;
   if (typeof value !== "string") return undefined;

@@ -75,6 +75,31 @@ it("edits without syncing unless save-and-sync is used", async () => {
   await waitFor(() => expect(universalProvidersApi.sync).toHaveBeenCalledWith("u_1"));
 });
 
+it("keeps a successful add separate from a failed post-save sync", async () => {
+  const onNotice = vi.fn();
+  const onChanged = vi.fn();
+  universalProvidersApi.sync.mockRejectedValueOnce(new Error("claude: live files could not be written"));
+  render(<ProviderUniversalPanel onNotice={onNotice} onChanged={onChanged} />);
+  await waitFor(() => expect(screen.getByText("pswitch.universal.empty")).toBeTruthy());
+
+  fireEvent.click(screen.getByRole("button", { name: "pswitch.universal.add" }));
+  const dialog = screen.getByRole("dialog");
+  const textInputs = dialog.querySelectorAll('input[type="text"], input:not([type])');
+  fireEvent.change(textInputs[0], { target: { value: "Shared Gateway" } });
+  fireEvent.change(textInputs[1], { target: { value: "https://gw.example.com" } });
+  fireEvent.change(textInputs[2], { target: { value: "sk-shared" } });
+  fireEvent.click(screen.getByRole("button", { name: "pswitch.action.save" }));
+
+  await waitFor(() => expect(universalProvidersApi.sync).toHaveBeenCalledWith("u_new"));
+  // The add succeeded, so the dialog still closes and the list reloads
+  // (upstream PR #2811) instead of reporting the add as failed.
+  await waitFor(() => expect(onChanged).toHaveBeenCalled());
+  expect(screen.queryByRole("dialog")).toBeNull();
+  await waitFor(() => expect(onNotice).toHaveBeenCalledWith(
+    "pswitch.universal.added_but_sync_failed: claude: live files could not be written",
+  ));
+});
+
 it("deletes through the confirm dialog", async () => {
   mocks.providers = [{
     id: "u_1", name: "Shared Gateway", providerType: "custom",

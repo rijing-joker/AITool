@@ -964,5 +964,6 @@
   "pswitch.profile.saved": "Profil gespeichert.",
   "pswitch.profile.deleted": "Profil gelöscht.",
   "pswitch.profile.delete_confirm_title": "Profil löschen",
-  "pswitch.profile.delete_confirm_desc": "„{{name}}“ löschen? Die aktuelle-Profil-Markierung dieser App wird entfernt; die Momentaufnahme selbst wird nicht wiederhergestellt."
+  "pswitch.profile.delete_confirm_desc": "„{{name}}“ löschen? Die aktuelle-Profil-Markierung dieser App wird entfernt; die Momentaufnahme selbst wird nicht wiederhergestellt.",
+  "pswitch.universal.added_but_sync_failed": "Universalen Anbieter hinzugefügt, aber Synchronisierung fehlgeschlagen."
 }

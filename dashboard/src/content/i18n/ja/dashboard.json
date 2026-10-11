@@ -953,5 +953,6 @@
   "pswitch.profile.saved": "プロファイルを保存しました。",
   "pswitch.profile.deleted": "プロファイルを削除しました。",
   "pswitch.profile.delete_confirm_title": "プロファイルを削除",
-  "pswitch.profile.delete_confirm_desc": "「{{name}}」を削除しますか？このアプリの現在プロファイルのマークは解除され、スナップショット自体は復元されません。"
+  "pswitch.profile.delete_confirm_desc": "「{{name}}」を削除しますか？このアプリの現在プロファイルのマークは解除され、スナップショット自体は復元されません。",
+  "pswitch.universal.added_but_sync_failed": "統一プロバイダーを追加しましたが、同期に失敗しました。"
 }

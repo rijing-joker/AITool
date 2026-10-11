@@ -2918,6 +2918,7 @@ pswitch.universal.synced,pswitch,ProviderSwitchPage,UniversalProviderPanel,unive
 pswitch.universal.saved,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_saved,Universal provider saved.,,active
 pswitch.universal.saved_and_synced,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_saved_and_synced,Saved and synced to all enabled apps.,,active
 pswitch.universal.added_and_synced,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_added_and_synced,Universal provider added and synced.,,active
+pswitch.universal.added_but_sync_failed,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_added_but_sync_failed,"Universal provider added, but sync failed.",,active
 pswitch.universal.deleted,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_deleted,Universal provider deleted.,,active
 pswitch.universal.sync_confirm_title,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_sync_confirm_title,Sync to apps?,,active
 pswitch.universal.sync_confirm_desc,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_sync_confirm_desc,Rewrite {{name}}'s generated provider entries and re-project the live config of any app currently using them?,,active

@@ -953,5 +953,6 @@
   "pswitch.profile.saved": "프로필을 저장했습니다.",
   "pswitch.profile.deleted": "프로필을 삭제했습니다.",
   "pswitch.profile.delete_confirm_title": "프로필 삭제",
-  "pswitch.profile.delete_confirm_desc": "\"{{name}}\"을(를) 삭제할까요? 이 앱의 현재 프로필 표시가 해제되며 스냅샷 자체는 복원되지 않습니다."
+  "pswitch.profile.delete_confirm_desc": "\"{{name}}\"을(를) 삭제할까요? 이 앱의 현재 프로필 표시가 해제되며 스냅샷 자체는 복원되지 않습니다.",
+  "pswitch.universal.added_but_sync_failed": "통합 공급자를 추가했지만 동기화에 실패했습니다."
 }

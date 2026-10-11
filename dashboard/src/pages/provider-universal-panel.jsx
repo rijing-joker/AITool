@@ -244,10 +244,16 @@ export function ProviderUniversalPanel({ onNotice, onChanged }) {
       };
       const res = await universalProvidersApi.upsert(payload);
       // Upstream interaction: creation auto-syncs; edits sync only on request.
+      // A failed post-save sync must not read as a failed add (upstream PR
+      // #2811): the provider is already persisted, so the dialog still closes
+      // and the sync failure surfaces as a partial-failure notice.
       if (!draft.id || alsoSync) {
-        const syncRes = await universalProvidersApi.sync(res.provider.id);
-        if (!syncRes.ok) throw new Error("sync failed");
-        onNotice?.(copy(draft.id ? "pswitch.universal.saved_and_synced" : "pswitch.universal.added_and_synced"));
+        try {
+          await universalProvidersApi.sync(res.provider.id);
+          onNotice?.(copy(draft.id ? "pswitch.universal.saved_and_synced" : "pswitch.universal.added_and_synced"));
+        } catch (error) {
+          onNotice?.(`${copy("pswitch.universal.added_but_sync_failed")}: ${error instanceof Error ? error.message : String(error)}`);
+        }
       } else {
         onNotice?.(copy("pswitch.universal.saved"));
       }

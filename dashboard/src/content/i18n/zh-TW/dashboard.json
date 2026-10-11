@@ -1858,5 +1858,9 @@
   "sessions.detail.session_id": "會話 ID",
   "sessions.detail.local_path": "本機路徑",
   "sessions.detail.resume_command": "恢復命令",
-  "sessions.performance.first_response_value_single": "{{seconds}} 秒 · {{count}} 個樣本"
+  "sessions.performance.first_response_value_single": "{{seconds}} 秒 · {{count}} 個樣本",
+  "sessions.storage.label": "轉錄檔案：{{size}}",
+  "sessions.storage.tooltip": "僅會話檔案 · {{metric}} · 每千個歷史 token {{ratio}} 位元組。不含共用資料庫、快取和專案檔案。",
+  "sessions.storage.allocated": "配置空間",
+  "sessions.storage.logical": "邏輯檔案大小"
 }

@@ -2838,3 +2838,7 @@ sessions.detail.session_id,ui,SessionsPage,UsageInsights,session_id,Session ID,,
 sessions.detail.local_path,ui,SessionsPage,UsageInsights,local_path,Local path,,active
 sessions.detail.resume_command,ui,SessionsPage,SessionDetailModal,resume_command,Resume command,,active
 sessions.performance.first_response_value_single,ui,SessionsPage,SessionDetailModal,first_response_single,{{seconds}}s · {{count}} sample,,active
+sessions.storage.label,dashboard,SessionsPage,SessionRow,storage,"Transcript: {{size}}",,active
+sessions.storage.tooltip,dashboard,SessionsPage,SessionRow,storage,"Session files only · {{metric}} · {{ratio}} bytes per 1K lifetime tokens. Shared databases, caches and project files are excluded.",,active
+sessions.storage.allocated,dashboard,SessionsPage,SessionRow,storage,"allocated bytes",,active
+sessions.storage.logical,dashboard,SessionsPage,SessionRow,storage,"logical file size",,active

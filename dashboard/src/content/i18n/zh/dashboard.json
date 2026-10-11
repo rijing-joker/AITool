@@ -1799,5 +1799,9 @@
   "sessions.detail.session_id": "会话 ID",
   "sessions.detail.local_path": "本地路径",
   "sessions.detail.resume_command": "恢复命令",
-  "sessions.performance.first_response_value_single": "{{seconds}} 秒 · {{count}} 个样本"
+  "sessions.performance.first_response_value_single": "{{seconds}} 秒 · {{count}} 个样本",
+  "sessions.storage.label": "转录文件：{{size}}",
+  "sessions.storage.tooltip": "仅会话文件 · {{metric}} · 每千个历史 token {{ratio}} 字节。不含共享数据库、缓存和项目文件。",
+  "sessions.storage.allocated": "分配空间",
+  "sessions.storage.logical": "逻辑文件大小"
 }

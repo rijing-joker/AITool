@@ -211,7 +211,7 @@ function ReasoningLevelsPicker({ levels, defaultLevel, onLevelsChange, onDefault
   );
 }
 
-export function CodexCatalogEditor({ models, onChange, fetchedModels, fetchState, onFetch, defaultModel, onAddToMapping, modelMetadata }) {
+export function CodexCatalogEditor({ models, onChange, fetchedModels, fetchState, onFetch, defaultModel, onAddToMapping, modelMetadata, officialModelsReason }) {
   const rows = Array.isArray(models) ? models : [];
   const hasFetched = Array.isArray(fetchedModels) && fetchedModels.length > 0;
 
@@ -270,6 +270,11 @@ export function CodexCatalogEditor({ models, onChange, fetchedModels, fetchState
 
   return (
     <div>
+      {officialModelsReason ? (
+        <p className="mb-2 text-xs text-oai-amber-600 dark:text-oai-amber-400">
+          {copy(officialModelsReason === "noCli" ? "pswitch.catalog.official.no_cli" : "pswitch.catalog.official.failed")}
+        </p>
+      ) : null}
       <div className="flex items-center justify-between gap-2">
         <span className="text-sm font-medium text-oai-gray-700 dark:text-oai-gray-300">
           {copy("pswitch.catalog.title")}

@@ -2372,6 +2372,7 @@ pswitch.switch.confirm_desc,pswitch,ProviderSwitchPage,ProviderSwitchPage,switch
 pswitch.action.add,pswitch,ProviderSwitchPage,ProviderSwitchPage,action_add,Add provider,,active
 pswitch.action.edit,pswitch,ProviderSwitchPage,ProviderSwitchPage,action_edit,Edit,,active
 pswitch.action.delete,pswitch,ProviderSwitchPage,ProviderSwitchPage,action_delete,Delete,,active
+pswitch.action.duplicate,pswitch,ProviderSwitchPage,ProviderSwitchPage,action_duplicate,Duplicate,,active
 pswitch.action.save,pswitch,ProviderSwitchPage,ProviderSwitchPage,action_save,Save,,active
 pswitch.action.cancel,pswitch,ProviderSwitchPage,ProviderSwitchPage,action_cancel,Cancel,,active
 pswitch.action.restore,pswitch,ProviderSwitchPage,ProviderSwitchPage,action_restore,Restore,,active
@@ -2537,6 +2538,8 @@ pswitch.codex.config_toml,pswitch,ProviderSwitchPage,ProviderEditDialog,codex_co
 pswitch.field.model,pswitch,ProviderSwitchPage,ProviderEditDialog,model,Model,,active
 pswitch.field.model_hint,pswitch,ProviderSwitchPage,ProviderEditDialog,model_hint,Leave empty to use the relay's default model.,,active
 pswitch.catalog.title,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_title,Model mapping,,active
+pswitch.catalog.official.no_cli,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_official_no_cli,"The official GPT model list is unavailable: no Codex CLI was found on this machine. GPT rows fall back to the built-in template.",,active
+pswitch.catalog.official.failed,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_official_failed,"The official GPT model list is unavailable: the Codex CLI ran but returned no usable list. GPT rows fall back to the built-in template.",,active
 pswitch.catalog.hint,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_hint,"Rows generate the Codex model catalog file (model_catalog_json): the /model menu lists these models with their display names, context windows, and reasoning levels. Leave empty to skip the catalog.",,active
 pswitch.catalog.col_instructions,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_col_instructions,"System prompt (optional)",,active
 pswitch.catalog.instructions_set,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_instructions_set,"System prompt: set",,active
@@ -2603,6 +2606,7 @@ pswitch.conflict.keep_theirs,pswitch,ProviderSwitchPage,ProviderEditDialog,confl
 pswitch.provider.created,pswitch,ProviderSwitchPage,ProviderEditDialog,created,"Added ""{{name}}"".",,active
 pswitch.provider.drag_handle,pswitch,ProviderSwitchPage,ProviderEditDialog,drag_handle,Drag to reorder {{name}},,active
 pswitch.provider.imported,pswitch,ProviderSwitchPage,ProviderEditDialog,imported,"Imported ""{{name}}"" from the live config.",,active
+pswitch.provider.duplicated,pswitch,ProviderSwitchPage,ProviderSwitchPage,provider_duplicated,"Duplicated to {{name}}",,active
 pswitch.provider.loading_live,pswitch,ProviderSwitchPage,ProviderEditDialog,loading_live,Reading the live config files…,,active
 pswitch.provider.notes,pswitch,ProviderSwitchPage,ProviderEditDialog,notes,Notes,,active
 pswitch.provider.preset_no_fields,pswitch,ProviderSwitchPage,ProviderEditDialog,preset_no_fields,This preset has no fields to fill in.,,active

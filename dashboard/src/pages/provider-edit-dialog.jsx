@@ -599,6 +599,8 @@ export function ProviderEditDialog({
   // can split the row's entry out of the edited document.
   const [editorSlotKey, setEditorSlotKey] = useState("");
   const [inactive, setInactive] = useState([]);
+  // Why the official GPT list is unavailable (catalog editor hint; null = fine).
+  const [codexOfficialModelsReason, setCodexOfficialModelsReason] = useState(null);
   const [editorFallback, setEditorFallback] = useState(null);
   const [conflictKeys, setConflictKeys] = useState(null);
   const [conflictPolicy, setConflictPolicy] = useState(null);
@@ -703,6 +705,7 @@ export function ProviderEditDialog({
           setEditorBase(JSON.parse(JSON.stringify(full)));
           setEditorSlotKey(typeof view.slotKey === "string" ? view.slotKey : "");
           setInactive(Array.isArray(view.inactive) ? view.inactive : []);
+          setCodexOfficialModelsReason(typeof view.codexOfficialModelsReason === "string" ? view.codexOfficialModelsReason : null);
           setEditorFallback(null);
         })
         .catch((err) => {
@@ -1951,6 +1954,7 @@ export function ProviderEditDialog({
                     onFetch={() => void fetchModels()}
                     defaultModel={String(getPath(draft, DEFAULT_MODEL_PATH.codex) ?? "")}
                     modelMetadata={modelMetadata}
+                    officialModelsReason={codexOfficialModelsReason}
                     onAddToMapping={() =>
                       setMeta((current) => {
                         const list = Array.isArray(current.codexCatalogModels) ? current.codexCatalogModels : [];

@@ -197,6 +197,7 @@ export interface ProviderSwitchEditorView {
   envText?: string;
   configText?: string;
   slotKey?: string;
+  codexOfficialModelsReason?: "noCli" | "failed" | null;
 }
 
 export const piPromptFilesApi = {
@@ -349,6 +350,13 @@ export const providerSwitchApi = {
       `/api/provider-switch/providers/${encodeURIComponent(id)}?app=${encodeURIComponent(app)}`,
       "DELETE",
     );
+  },
+
+  duplicateProvider(
+    app: ProviderSwitchApp,
+    id: string,
+  ): Promise<{ ok: true; provider: ProviderSwitchProvider }> {
+    return mutate("/api/provider-switch/providers/duplicate", "POST", { app, id });
   },
 
   switchProvider(

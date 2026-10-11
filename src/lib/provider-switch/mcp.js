@@ -24,9 +24,17 @@ const backup = require("./backup");
 //                                             entries are never removed by
 //                                             projections, only by explicit
 //                                             disable/delete)
+//   pi         ~/.pi/agent/mcp.json           `mcpServers` map (Pi 1.0+ built-in
+//                                             MCP, cc-switch #7862) with
+//                                             per-entry `enabled` flags; writes
+//                                             replace transport fields only and
+//                                             a disable just marks
+//                                             `enabled: false`, so Pi-owned
+//                                             settings (timeout, exposure,
+//                                             oauth, …) survive round-trips
 //
-// openclaw and pi have no MCP registry (cc-switch: OpenClaw support is WIP,
-// pi core has none) and are excluded, matching their additive specs.
+// openclaw has no MCP registry yet (cc-switch: support is WIP) and is
+// excluded, matching its additive spec.
 //
 // Codex's `[mcp_servers.*]` entries deliberately never get a `type` key —
 // Codex infers the transport from `command` (stdio) vs `url` (streamable
@@ -38,7 +46,7 @@ const backup = require("./backup");
 // abort the batch — live files are independent, and the caller sees every
 // failure aggregated (cc-switch 81c0ff2).
 
-const MCP_APPS = ["claude", "codex", "gemini", "grokbuild", "opencode", "hermes", "mcode"];
+const MCP_APPS = ["claude", "codex", "gemini", "grokbuild", "opencode", "hermes", "mcode", "pi"];
 
 // The unified spec allows stdio/http/sse. Transport resolution follows
 // cc-switch's spec_transport_type: an explicit type wins, and a spec with a
@@ -346,6 +354,24 @@ function mcodeUnifiedSpec(native) {
 
 const MCODE_TRANSPORT_FIELDS = ["command", "args", "env", "url", "headers", "type"];
 
+// Pi accepts stdio and HTTP (streamable) only — an SSE spec is rejected the
+// way cc-switch's native_transport does, surfacing as a per-server failure.
+function toPiSpec(spec) {
+  const type = specTransportType(spec);
+  if (type === "sse") {
+    throw new Error("Pi does not support SSE MCP servers; use HTTP (streamable HTTP) instead");
+  }
+  if (type !== "stdio" && type !== "http") {
+    throw new Error(`Unknown MCP type: ${type}`);
+  }
+  return JSON.parse(JSON.stringify(spec));
+}
+
+// Fields the Pi projection may write (cc-switch TRANSPORT_FIELDS). Everything
+// else on a live entry belongs to Pi (timeout, exposure, oauth, …) and is
+// never touched.
+const PI_TRANSPORT_FIELDS = ["command", "args", "env", "cwd", "url", "headers", "type"];
+
 // ---------------------------------------------------------------------------
 // TOML projection (codex + grokbuild)
 // ---------------------------------------------------------------------------
@@ -477,6 +503,7 @@ const HOME_SUBDIRS = {
   opencode: ".config/opencode",
   hermes: ".hermes",
   mcode: ".minimax",
+  pi: ".pi/agent",
 };
 
 function mcpLiveFiles() {
@@ -490,6 +517,7 @@ function mcpLiveFiles() {
     opencode: { path: path.join(home, ".config", "opencode", "opencode.json"), mapKey: "mcp" },
     hermes: { path: path.join(home, ".hermes", "config.yaml"), mapKey: "mcp_servers" },
     mcode: { path: path.join(home, ".minimax", "mcp.json"), mapKey: "mcpServers" },
+    pi: { path: path.join(home, ".pi", "agent", "mcp.json"), mapKey: "mcpServers" },
   };
 }
 
@@ -523,6 +551,25 @@ async function upsertServerInFile(app, file, id, spec) {
     });
     return;
   }
+  if (app === "pi") {
+    // Transport fields only flow from the spec; Pi-owned fields on an
+    // existing entry survive the merge (cc-switch native_transport retains
+    // TRANSPORT_FIELDS).
+    const clean = toPiSpec(spec);
+    await updateJsonFile(app, file.path, (doc) => {
+      const map = jsonMapGet(doc, file.mapKey);
+      if (!map) doc[file.mapKey] = { [id]: {} };
+      const servers = jsonMapGet(doc, file.mapKey);
+      const merged = servers[id] && typeof servers[id] === "object" && !Array.isArray(servers[id]) ? servers[id] : {};
+      for (const field of PI_TRANSPORT_FIELDS) delete merged[field];
+      for (const field of PI_TRANSPORT_FIELDS) {
+        if (Object.prototype.hasOwnProperty.call(clean, field)) merged[field] = clean[field];
+      }
+      merged.enabled = true;
+      servers[id] = merged;
+    });
+    return;
+  }
   if (app === "hermes") {
     await updateYamlFile(app, file.path, (doc) => {
       const servers = jsonMapGet(doc, "mcp_servers");
@@ -550,15 +597,38 @@ function stripInlineMcpEntry(text, id) {
   return toml.removeTopLevelKey(toml.removeTableKey(text, "mcp_servers", id), `mcp_servers.${id}`);
 }
 
-async function removeServerFromApp(app, id) {
+async function removeServerFromApp(app, id, { mode = "off" } = {}) {
   const file = mcpLiveFiles()[app];
   if (app !== "mcode" && !shouldSyncDir(HOME_SUBDIRS[app])) return;
-  return withFileLock(file.path, () => removeServerFromFile(app, file, id));
+  return withFileLock(file.path, () => removeServerFromFile(app, file, id, { mode }));
 }
 
-async function removeServerFromFile(app, file, id) {
+// mode "off" (default) is what toggles and projections use; "delete" is the
+// SSOT delete. They differ for entries with an inline `enabled` flag owned by
+// the app: pi keeps the entry (marked disabled) so re-enabling restores the
+// user's own settings, while a delete removes it outright.
+async function removeServerFromFile(app, file, id, { mode = "off" } = {}) {
   if (app === "claude" || app === "gemini" || app === "opencode") {
     await removeFromJsonMap(app, file.path, file.mapKey, id);
+    return;
+  }
+  if (app === "pi") {
+    if (mode === "delete") {
+      await removeFromJsonMap(app, file.path, file.mapKey, id);
+      return;
+    }
+    // Disable: mark `enabled: false` on an existing entry (cc-switch
+    // PiChange::Disable). Missing file or entry → nothing to mark.
+    const doc = await readJsonDoc(file.path);
+    const map = jsonMapGet(doc, file.mapKey);
+    const entry = map ? map[id] : null;
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return;
+    await updateJsonFile(app, file.path, (current) => {
+      const servers = jsonMapGet(current, file.mapKey);
+      if (servers && servers[id] && typeof servers[id] === "object" && !Array.isArray(servers[id])) {
+        servers[id].enabled = false;
+      }
+    });
     return;
   }
   if (app === "mcode") {
@@ -639,7 +709,7 @@ async function deleteServer(id) {
     for (const app of MCP_APPS) {
       if (server.apps?.[app] !== true) continue;
       try {
-        await removeServerFromApp(app, cleanId);
+        await removeServerFromApp(app, cleanId, { mode: "delete" });
       } catch (error) {
         failures.push(`${app}/${cleanId}: ${error?.message || String(error)}`);
       }
@@ -697,13 +767,13 @@ async function importFromApps(apps) {
 async function importFromApp(app) {
   const file = mcpLiveFiles()[app];
   let entries = null;
-  if (app === "claude" || app === "gemini" || app === "opencode" || app === "mcode") {
+  if (app === "claude" || app === "gemini" || app === "opencode" || app === "mcode" || app === "pi") {
     const doc = await readJsonDoc(file.path).catch(() => null);
     const map = doc ? jsonMapGet(doc, file.mapKey) : null;
     if (!map) return { changed: 0, skipped: [] };
-    // mcode and opencode entries carry their own `enabled` flag; claude and
-    // gemini have none, so presence means enabled.
-    const hasEnabledFlag = app === "mcode" || app === "opencode";
+    // mcode, opencode and pi entries carry their own `enabled` flag; claude
+    // and gemini have none, so presence means enabled.
+    const hasEnabledFlag = app === "mcode" || app === "opencode" || app === "pi";
     entries = Object.entries(map).map(([id, value]) => ({ id, value, enabled: hasEnabledFlag ? value?.enabled !== false : true }));
   } else if (app === "hermes") {
     const text = await readText(file.path);
@@ -736,6 +806,15 @@ async function importFromApp(app) {
       else if (app === "opencode") spec = fromOpencodeSpec(id, value);
       else if (app === "hermes") spec = fromHermesSpec(id, value);
       else if (app === "mcode") spec = mcodeUnifiedSpec(value);
+      else if (app === "pi") {
+        // Transport fields only: Pi-owned fields stay in the live file, where
+        // the merge-based projection preserves them.
+        const unified = mcodeUnifiedSpec(value);
+        spec = {};
+        for (const field of PI_TRANSPORT_FIELDS) {
+          if (Object.prototype.hasOwnProperty.call(unified, field)) spec[field] = unified[field];
+        }
+      }
       else spec = tomlEntryToSpec(value, { codexStyle: app === "codex" });
       spec = JSON.parse(JSON.stringify(spec));
       // Gemini's legacy httpUrl selects streamable HTTP ahead of url/type.
@@ -745,7 +824,7 @@ async function importFromApp(app) {
         spec.type = "http";
         delete spec.httpUrl;
       }
-      if (app === "mcode") delete spec.enabled;
+      if (app === "mcode" || app === "pi") delete spec.enabled;
       validateServerSpec(spec);
     } catch (error) {
       skipped.push(`${app}/${id}: ${error?.message || String(error)}`);
@@ -816,6 +895,7 @@ module.exports = {
   fromOpencodeSpec,
   toHermesSpec,
   fromHermesSpec,
+  toPiSpec,
   mcodeUnifiedSpec,
   specToTomlEntries,
   tomlEntryToSpec,

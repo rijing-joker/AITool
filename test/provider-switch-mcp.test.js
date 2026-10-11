@@ -133,7 +133,7 @@ async function overlapLiveMutations(t, filePath, first, second) {
 // Projections
 // ---------------------------------------------------------------------------
 
-for (const app of ["claude", "codex", "gemini", "grokbuild", "opencode", "hermes", "mcode"]) {
+for (const app of ["claude", "codex", "gemini", "grokbuild", "opencode", "hermes", "mcode", "pi"]) {
   for (const operation of ["insert", "delete"]) {
     test(`mcp: concurrent ${operation} and insert preserve ${app}'s live entries`, { timeout: 5000 }, async (t) => {
       const mcp = require("../src/lib/provider-switch/mcp");
@@ -356,6 +356,80 @@ test("mcode: entries carry enabled inline, unknown fields survive, projection ne
   doc = JSON.parse(fs.readFileSync(mcpJson, "utf8"));
   assert.equal(doc.mcpServers.fetch, undefined);
   assert.equal(doc.mcpServers.unmanaged.command, "keep-me");
+});
+
+test("pi: transport-only writes, disable keeps the entry, SSE rejected (cc-switch mcp/pi.rs #7862)", async () => {
+  const file = require("../src/lib/provider-switch/mcp").mcpLiveFiles().pi;
+  fs.mkdirSync(path.dirname(file.path), { recursive: true });
+  // A user-owned entry with Pi-only settings the projection must never touch.
+  fs.writeFileSync(file.path, JSON.stringify({
+    mcpServers: {
+      fetch: { command: "user-fetch", timeout: 30, exposure: { tools: true }, enabled: true },
+    },
+  }));
+
+  const saved = await post("/api/provider-switch/mcp", {
+    server: { id: "fetch", server: stdioSpec, apps: { pi: true } },
+  });
+  assert.equal(saved.status, 200);
+  assert.deepEqual(saved.body.servers.find((row) => row.id === "fetch").failures, undefined);
+  let doc = JSON.parse(fs.readFileSync(file.path, "utf8"));
+  assert.equal(doc.mcpServers.fetch.command, "npx");
+  assert.deepEqual(doc.mcpServers.fetch.args, ["-y", "@modelcontextprotocol/server-fetch"]);
+  assert.equal(doc.mcpServers.fetch.enabled, true);
+  assert.equal(doc.mcpServers.fetch.timeout, 30, "Pi-owned fields survive the write");
+  assert.deepEqual(doc.mcpServers.fetch.exposure, { tools: true });
+
+  // Toggle off: the entry stays, marked disabled (re-enabling restores it).
+  await post("/api/provider-switch/mcp/toggle", { id: "fetch", app: "pi", enabled: false });
+  doc = JSON.parse(fs.readFileSync(file.path, "utf8"));
+  assert.equal(doc.mcpServers.fetch.enabled, false);
+  assert.equal(doc.mcpServers.fetch.command, "npx", "connection fields stay put");
+
+  // Toggle on: transport fields refresh, Pi-owned fields still intact.
+  await post("/api/provider-switch/mcp/toggle", { id: "fetch", app: "pi", enabled: true });
+  doc = JSON.parse(fs.readFileSync(file.path, "utf8"));
+  assert.equal(doc.mcpServers.fetch.enabled, true);
+  assert.equal(doc.mcpServers.fetch.timeout, 30);
+
+  // Pi has no SSE: the spec is rejected and surfaces as a per-server failure.
+  const sse = await post("/api/provider-switch/mcp", {
+    server: { id: "legacy-sse", server: { type: "sse", url: "https://example.com/sse" }, apps: { pi: true } },
+  });
+  assert.equal(sse.status, 200);
+  assert.ok(sse.body.failures.some((line) => line.startsWith("pi/legacy-sse:")), JSON.stringify(sse.body.failures));
+  doc = JSON.parse(fs.readFileSync(file.path, "utf8"));
+  assert.equal(doc.mcpServers["legacy-sse"], undefined);
+
+  // SSOT delete removes the entry outright.
+  await post("/api/provider-switch/mcp/delete", { id: "fetch" });
+  doc = JSON.parse(fs.readFileSync(file.path, "utf8"));
+  assert.equal(doc.mcpServers.fetch, undefined);
+  assert.equal(doc.mcpServers["legacy-sse"], undefined);
+});
+
+test("pi: import mirrors the enabled flag and stores transport fields only", async () => {
+  const file = require("../src/lib/provider-switch/mcp").mcpLiveFiles().pi;
+  fs.mkdirSync(path.dirname(file.path), { recursive: true });
+  fs.writeFileSync(file.path, JSON.stringify({
+    mcpServers: {
+      "user-fetch": { command: "uvx", args: ["mcp-server-fetch"], timeout: 15, exposure: "agent", enabled: true },
+      "off-one": { url: "https://example.com/mcp", type: "streamable-http", enabled: false, oauth: { mode: "pkce" } },
+    },
+  }));
+
+  const res = await post("/api/provider-switch/mcp/import", { apps: ["pi"] });
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body.skipped, []);
+  const fetchRow = res.body.servers.find((row) => row.id === "user-fetch");
+  assert.equal(fetchRow.apps.pi, true);
+  assert.equal(fetchRow.server.command, "uvx", "the live command is imported as-is");
+  assert.equal(fetchRow.server.timeout, undefined, "Pi-owned fields stay out of the SSOT spec");
+  assert.equal(fetchRow.server.exposure, undefined);
+  const offRow = res.body.servers.find((row) => row.id === "off-one");
+  assert.equal(offRow.apps.pi, false, "a live-disabled entry is mirrored as off");
+  assert.equal(offRow.server.type, "http", "streamable-http imports as http");
+  assert.equal(offRow.server.oauth, undefined);
 });
 
 test("mcp: an inline [mcp_servers] entry is migrated, never defined twice", async () => {

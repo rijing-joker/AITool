@@ -17,6 +17,7 @@ import {
 import { CSS as DndCss } from "@dnd-kit/utilities";
 import {
   Check,
+  Copy,
   Globe,
   GripVertical,
   Import,
@@ -328,7 +329,7 @@ function EncryptedBackupDialog({ mode, onClose, onImported }) {
   );
 }
 
-function SortableProviderCard({ app, provider, isCurrent, busy, dragLabel, cooldownMs, onSwitch, onEdit, onDelete }) {
+function SortableProviderCard({ app, provider, isCurrent, busy, dragLabel, cooldownMs, onSwitch, onEdit, onDuplicate, onDelete }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: provider.id,
     disabled: busy,
@@ -421,6 +422,9 @@ function SortableProviderCard({ app, provider, isCurrent, busy, dragLabel, coold
           <Button variant="ghost" size="sm" aria-label={copy("pswitch.action.edit")} onClick={onEdit}>
             <Pencil className="h-4 w-4" />
           </Button>
+          <Button variant="ghost" size="sm" aria-label={copy("pswitch.action.duplicate")} onClick={onDuplicate}>
+            <Copy className="h-4 w-4" />
+          </Button>
           <Button variant="ghost" size="sm" aria-label={copy("pswitch.action.delete")} onClick={onDelete}>
             <Trash2 className="h-4 w-4 text-red-500 dark:text-red-400" />
           </Button>
@@ -490,7 +494,6 @@ export function ProviderSwitchPage() {
   // backups
   const [backups, setBackups] = useState([]);
   const [restoreTarget, setRestoreTarget] = useState(null);
-  const [dragOverId, setDragOverId] = useState(null);
 
   const dragSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -740,6 +743,22 @@ export function ProviderSwitchPage() {
     }
   }, [activeApp, deleteTarget, refreshStatus]);
 
+  const duplicateProvider = useCallback(
+    async (provider) => {
+      setBusy(true);
+      try {
+        const res = await providerSwitchApi.duplicateProvider(activeApp, provider.id);
+        setNotice(copy("pswitch.provider.duplicated", { name: res.provider.name }));
+        await refreshStatus();
+      } catch (error) {
+        setNotice(error instanceof Error ? error.message : String(error));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [activeApp, refreshStatus],
+  );
+
   const importFromLive = useCallback(async () => {
     setBusy(true);
     try {
@@ -755,7 +774,6 @@ export function ProviderSwitchPage() {
 
   const handleDragEnd = useCallback(
     async (event) => {
-      setDragOverId(null);
       const { active, over } = event;
       if (!over || active.id === over.id) return;
       const ids = providerRows.map((row) => row.id);
@@ -894,8 +912,6 @@ export function ProviderSwitchPage() {
             sensors={dragSensors}
             collisionDetection={closestCenter}
             onDragStart={() => setNotice(null)}
-            onDragOver={({ over }) => setDragOverId(over ? String(over.id) : null)}
-            onDragCancel={() => setDragOverId(null)}
             onDragEnd={(event) => void handleDragEnd(event)}
           >
             <SortableContext
@@ -911,10 +927,10 @@ export function ProviderSwitchPage() {
                     isCurrent={appState.current === provider.id}
                     busy={busy}
                     dragLabel={copy("pswitch.provider.drag_handle", { name: provider.name })}
-                    isDragOver={dragOverId === provider.id}
                     cooldownMs={provider.cooldownMs}
                     onSwitch={() => setSwitchTarget(provider)}
                     onEdit={() => void openDialog(provider)}
+                    onDuplicate={() => void duplicateProvider(provider)}
                     onDelete={() => setDeleteTarget(provider)}
                   />
                 ))}

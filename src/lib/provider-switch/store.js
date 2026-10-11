@@ -247,7 +247,9 @@ async function createProvider(app, fields) {
   const now = new Date().toISOString();
   const provider = { id: newProviderId(), ...clean, createdAt: now, updatedAt: now };
   await mutateStore((store) => {
-    provider.sortIndex = store.apps[app].providers.length;
+    // Duplicates pass their own position (right after the source,
+    // cc-switch's sortIndex+1); new providers append at the end.
+    provider.sortIndex = Number.isFinite(fields.sortIndex) ? fields.sortIndex : store.apps[app].providers.length;
     store.apps[app].providers.push(provider);
     return store;
   });
@@ -294,6 +296,28 @@ async function deleteProvider(app, id) {
   });
 }
 
+// Deep-copy a provider next to the original (cc-switch's duplicate): new id,
+// "<name> copy", sortIndex+1, everything else cloned. The current pointer is
+// NOT inherited; additive slot keys come from the name, so the copy gets its
+// own slot automatically.
+async function duplicateProvider(app, id) {
+  if (!isSupportedApp(app)) throw new Error(`Unsupported app: ${app}`);
+  const state = await listProviders(app);
+  const source = state.providers.find((p) => p.id === id);
+  if (!source) throw new Error(`Provider not found: ${id}`);
+  return createProvider(app, {
+    name: `${source.name} copy`,
+    category: source.category,
+    settingsConfig: JSON.parse(JSON.stringify(source.settingsConfig || {})),
+    notes: source.notes || "",
+    websiteUrl: source.websiteUrl || "",
+    icon: source.icon || "",
+    iconColor: source.iconColor || "",
+    meta: source.meta ? JSON.parse(JSON.stringify(source.meta)) : undefined,
+    ...(Number.isFinite(source.sortIndex) ? { sortIndex: source.sortIndex + 1 } : {}),
+  });
+}
+
 async function setCurrentProvider(app, id) {
   if (!isSupportedApp(app)) throw new Error(`Unsupported app: ${app}`);
   await mutateStore((store) => {
@@ -330,6 +354,7 @@ module.exports = {
   createProvider,
   updateProvider,
   deleteProvider,
+  duplicateProvider,
   reorderProviders,
   setCurrentProvider,
   sanitizeProviderFields,

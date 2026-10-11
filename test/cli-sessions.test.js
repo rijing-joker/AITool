@@ -373,9 +373,12 @@ test("session usage: claude dedupes retries, codex takes the last cumulative cou
     JSON.stringify({ timestamp: "2026-10-01T11:00:20Z", type: "event_msg", payload: { type: "token_count", info: { total_token_usage: { input_tokens: 300, cached_input_tokens: 140, output_tokens: 90, reasoning_output_tokens: 40, total_tokens: 390 } } } }),
   ].join("\n") + "\n");
   const codex = await sessions.readSession({ app: "codex", sourcePath: codexPath, home: tmpHome });
+  // Rows are pre-folded to the queue contract: fresh input = raw 300 − 140
+  // cached reads (inputInclusive false — the writes, when a rollout reports
+  // any, ride in cacheCreationTokens outside input).
   assert.deepEqual(
     { inputTokens: codex.usage.inputTokens, cacheReadTokens: codex.usage.cacheReadTokens, outputTokens: codex.usage.outputTokens, reasoningTokens: codex.usage.reasoningTokens, totalTokens: codex.usage.totalTokens, model: codex.usage.model, inputInclusive: codex.usage.inputInclusive, durationMs: codex.usage.durationMs },
-    { inputTokens: 300, cacheReadTokens: 140, outputTokens: 90, reasoningTokens: 40, totalTokens: 390, model: "gpt-5.2", inputInclusive: true, durationMs: 20000 },
+    { inputTokens: 160, cacheReadTokens: 140, outputTokens: 90, reasoningTokens: 40, totalTokens: 390, model: "gpt-5.2", inputInclusive: false, durationMs: 20000 },
   );
 
   // Gemini: per-message tokens are summed; input includes cached tokens.
@@ -425,8 +428,8 @@ test("codex attributes cumulative deltas to each model without billing duplicate
   const { usage } = await sessions.readSession({ app: "codex", sourcePath, home: tmpHome });
   assert.equal(usage.totalTokens, 390);
   assert.deepEqual(usage.perModel, [
-    { model: "gpt-b", inputTokens: 200, cacheReadTokens: 100, outputTokens: 40, reasoningTokens: 20, cacheCreationTokens: 0, cacheCreation1hTokens: 0 },
-    { model: "gpt-a", inputTokens: 100, cacheReadTokens: 40, outputTokens: 50, reasoningTokens: 20, cacheCreationTokens: 0, cacheCreation1hTokens: 0 },
+    { model: "gpt-b", inputTokens: 100, cacheReadTokens: 100, outputTokens: 40, reasoningTokens: 20, cacheCreationTokens: 0, cacheCreation1hTokens: 0 },
+    { model: "gpt-a", inputTokens: 60, cacheReadTokens: 40, outputTokens: 50, reasoningTokens: 20, cacheCreationTokens: 0, cacheCreation1hTokens: 0 },
   ]);
   const { estimateCostUsd } = require("../src/lib/proxy/pricing");
   const prices = { "gpt-a": { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 0 }, "gpt-b": { input: 3, output: 6, cacheRead: 0.3, cacheWrite: 0 } };
@@ -738,9 +741,22 @@ test("Codex session usage imports cache writes and falls through stub-zero cache
   ].join("\n") + "\n");
 
   const { usage } = await sessions.readSession({ app: "codex", sourcePath: codexPath, home: tmpHome });
+  // Rows are pre-folded to the queue contract: fresh input = raw 1000 − 400
+  // reads; the writes ride in cacheCreationTokens, outside input.
   assert.deepEqual(
     { inputTokens: usage.inputTokens, cacheReadTokens: usage.cacheReadTokens, outputTokens: usage.outputTokens, cacheCreationTokens: usage.cacheCreationTokens, model: usage.model, inputInclusive: usage.inputInclusive },
-    { inputTokens: 1000, cacheReadTokens: 400, outputTokens: 50, cacheCreationTokens: 300, model: "gpt-5.6", inputInclusive: true },
+    { inputTokens: 600, cacheReadTokens: 400, outputTokens: 50, cacheCreationTokens: 300, model: "gpt-5.6", inputInclusive: false },
   );
   assert.equal(usage.perModel[0].cacheCreationTokens, 300);
+  // The reader-header cost must bill the full fresh input at the input rate
+  // and the writes at the write rate — the inclusive branch (mirror of the
+  // Go core's subset accounting) would zero those 300 fresh-input tokens.
+  const pricing = require("../src/lib/proxy/pricing");
+  const cost = pricing.estimateCostUsd(
+    { "gpt-5.6": { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1.25 } },
+    "gpt-5.6",
+    usage.perModel[0],
+    { inputInclusive: usage.inputInclusive },
+  );
+  assert.equal(cost, (600 * 1 + 50 * 2 + 400 * 0.1 + 300 * 1.25) / 1e6);
 });

@@ -689,8 +689,14 @@ async function codexReadMessages(filePath) {
   const raw = await readSessionText(filePath);
   const messages = [];
   // Attribute cumulative increments to the model active for each event.
-  // Input includes cache reads; reasoning is already included in output.
-  const usage = emptyUsage(true);
+  // Codex reports input inclusive of cache READS only — writes ride outside
+  // it (normalizeUsage: total = fresh + reads + writes + output). Rows are
+  // pre-folded to the queue contract (input_tokens = non-cached only) so
+  // they price and display like every other app's reader; marking them
+  // inclusive instead would subtract the writes from billable input in
+  // estimateCostUsd (that branch mirrors the Go core's subset accounting,
+  // where relays do fold writes into input).
+  const usage = emptyUsage(false);
   const usageState = createUsageDeltaState();
   const snapshot = (value) => value && typeof value === "object" && !Array.isArray(value) ? {
     ...value,
@@ -718,7 +724,7 @@ async function codexReadMessages(filePath) {
       const delta = consumeUsageDelta(usageState, snapshot(info?.last_token_usage), snapshot(info?.total_token_usage));
       if (delta) {
         const row = {
-          inputTokens: delta.input_tokens,
+          inputTokens: Math.max(0, delta.input_tokens - (delta.cached_input_tokens || 0)),
           outputTokens: delta.output_tokens,
           reasoningTokens: delta.reasoning_output_tokens,
           cacheReadTokens: delta.cached_input_tokens,

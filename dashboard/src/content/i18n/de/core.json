@@ -104,6 +104,12 @@
   "limits.codex_credits_balance.line": "Codex-Credits-Guthaben: {{count}} · ca. {{usd}}",
   "limits.panel.title": "Nutzungslimits",
   "limits.panel.mode_separator": " · ",
+  "limits.page.refresh": "Limits aktualisieren",
+  "limits.page.refresh_loading": "Limits werden aktualisiert…",
+  "limits.page.refreshed_at": "Limits aktualisiert: {{time}}",
+  "limits.page.refresh_failed": "Limits konnten nicht aktualisiert werden.",
+  "limits.page.refresh_partial": "Limits um {{time}} aktualisiert, aber einige Daten stammen noch aus dem Cache oder konnten nicht aktualisiert werden.",
+  "limits.page.refresh_stale": "Aktualisierung abgeschlossen, aber alle Anbieter melden weiterhin Cache- oder Fehlerdaten.",
   "limits.label.cursor_plan": "Plan",
   "limits.label.cursor_grok_bot": "Grok-Bot",
   "limits.label.cursor_auto": "Auto",
@@ -575,5 +581,14 @@
   "settings.appearance.token_grouping.label": "Zahlengruppierung",
   "settings.appearance.token_grouping.hint": "Genaue Zahlen verwenden 3- oder chinesische 4-Ziffer-Gruppen. Tooltips folgen dieser Einstellung.",
   "settings.appearance.token_grouping.thousand": "3er",
-  "settings.appearance.token_grouping.wan": "4er"
+  "settings.appearance.token_grouping.wan": "4er",
+  "settings.appearance.quota_display.label": "Quota-Anzeige",
+  "settings.appearance.quota_display.hint": "Zeigt im Plan-Quota-Fenster den Rest oder den Verbrauch. Farben und Warnungen richten sich immer nach dem Rest.",
+  "settings.appearance.quota_display.left": "Rest",
+  "settings.appearance.quota_display.used": "Verbraucht",
+  "pswitch.quota.used": "{{value}}% verbraucht",
+  "pswitch.search.toggle_aria": "Anbieter durchsuchen",
+  "pswitch.search.placeholder": "Nach Name, Notizen oder API-Adresse suchen…",
+  "pswitch.search.aria": "Anbieter filtern",
+  "pswitch.search.empty": "Kein Anbieter passt zu dieser Suche."
 }

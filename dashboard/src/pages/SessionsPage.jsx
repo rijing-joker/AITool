@@ -16,7 +16,7 @@ import { useCurrency } from "../hooks/useCurrency";
 import { useLocale } from "../hooks/useLocale";
 import { isLocalDashboardHost } from "../lib/host-mode";
 import { isMockEnabled } from "../lib/mock-data";
-import { groupSessions, overlapsSessionDates, parseSessionFilters, sessionDayKey, sessionModels, sortSessions, summarizeSessions } from "../lib/sessions-insights";
+import { groupSessions, overlapsSessionDates, parseSessionFilters, scopeSessionsToRange, sessionDayKey, sessionModels, sortSessions, summarizeSessions } from "../lib/sessions-insights";
 import { SessionDetailModal } from "../ui/dashboard/components/SessionDetailModal.jsx";
 import { SessionPerformance } from "../ui/dashboard/components/SessionPerformance.jsx";
 import "./sessions-layout.css";
@@ -200,6 +200,16 @@ const SessionRow = React.memo(function SessionRow({
             <span className="sessions-meta-item min-w-0 max-w-full truncate" title={modelUsageLabel(session)}>{modelUsageLabel(session)}</span>
             <span className="sessions-meta-item tabular-nums">{formatWhen(session.started_at, locale, { timeOnly: timeOnly && startsOnGroupDay(session) })}</span>
             {duration ? <span className="sessions-meta-item tabular-nums">{duration}</span> : null}
+            {Number.isFinite(session.session_store_bytes) ? (
+              <span className="sessions-meta-item tabular-nums" title={copy("sessions.storage.tooltip", {
+                metric: copy(session.session_store_metric === "allocated" ? "sessions.storage.allocated" : "sessions.storage.logical"),
+                ratio: Math.round(session.bytes_per_1k_tokens || 0).toLocaleString(locale),
+              })}>
+                {copy("sessions.storage.label", { size: copy("sessions.storage.size", {
+                  value: (session.session_store_bytes / 1024 / 1024).toLocaleString(locale, { maximumFractionDigits: 2 }),
+                }) })}
+              </span>
+            ) : null}
             {isSubagent ? <span className="sessions-meta-item">{copy("sessions.badge.subagent")}{session.agent_role ? ` · ${session.agent_role}` : ""}</span> : null}
             {session.first_pass ? <span className="sessions-meta-item text-emerald-700 dark:text-emerald-300">{copy("sessions.badge.first_pass")}</span> : null}
             {costBadge ? <span className="sessions-meta-item text-amber-700 dark:text-amber-300">{costBadge}</span> : null}
@@ -402,10 +412,24 @@ export function SessionsPage() {
   // copy of the query, so keystrokes paint before the list re-filters.
   const deferredQuery = useDeferredValue(searchQuery);
 
+  const scopedSessions = useMemo(() => {
+    const startMs = rangeStartMs(rangeFilter);
+    let fromMs = startMs, toMs = Infinity;
+    if (rangeFilter === "custom") {
+      fromMs = customFrom ? new Date(`${customFrom}T00:00:00`).getTime() : 0;
+      toMs = customTo ? new Date(`${customTo}T23:59:59.999`).getTime() : Infinity;
+      if (fromMs > toMs) {
+        fromMs = new Date(`${customTo}T00:00:00`).getTime();
+        toMs = new Date(`${customFrom}T23:59:59.999`).getTime();
+      }
+    }
+    return scopeSessionsToRange(allSessions, fromMs, toMs);
+  }, [allSessions, rangeFilter, customFrom, customTo]);
+
   const filtered = useMemo(() => {
     const q = deferredQuery.trim().toLowerCase();
     const startMs = rangeStartMs(rangeFilter);
-    return allSessions.filter((row) => {
+    return scopedSessions.filter((row) => {
       if (sourceFilter !== "all" && row.source !== sourceFilter) return false;
       if (projectFilter !== "all" && row.project_key !== projectFilter) return false;
       if (modelFilter !== "all" && !sessionModels(row).some((usage) => usage.model === modelFilter)) return false;
@@ -417,7 +441,7 @@ export function SessionsPage() {
       const haystack = `${row.title || ""} ${row.project_key || ""} ${models} ${row.agent_nickname || ""} ${row.agent_role || ""} ${row.project_ref || ""} ${row.session_id || ""}`.toLowerCase();
       return haystack.includes(q);
     });
-  }, [allSessions, sourceFilter, projectFilter, modelFilter, rangeFilter, customFrom, customTo, deferredQuery]);
+  }, [scopedSessions, sourceFilter, projectFilter, modelFilter, rangeFilter, customFrom, customTo, deferredQuery]);
 
   const summary = useMemo(() => summarizeSessions(filtered), [filtered]);
 
@@ -459,9 +483,9 @@ export function SessionsPage() {
   const visible = useMemo(() => grouped.roots.slice(0, visibleCount), [grouped.roots, visibleCount]);
   const visibleGroups = useMemo(() => groupSessions(visible, groupMode), [visible, groupMode]);
   const detailSubagents = useMemo(() => detailSession
-    ? allSessions.filter((session) => session.session_hash !== detailSession.session_hash
+    ? scopedSessions.filter((session) => session.session_hash !== detailSession.session_hash
       && (session.root_session_hash === detailSession.session_hash || session.parent_session_hash === detailSession.session_hash))
-    : NO_SESSIONS, [allSessions, detailSession]);
+    : NO_SESSIONS, [scopedSessions, detailSession]);
   const closeDetail = useCallback(() => setDetailSession(null), []);
   const setDateRange = useCallback((range) => {
     setRangeFilter(range);
@@ -551,14 +575,13 @@ export function SessionsPage() {
     <div className="flex flex-col flex-1 text-oai-black dark:text-oai-white font-oai antialiased">
       <main className="flex-1 pt-6 sm:pt-8 pb-12 sm:pb-16">
         <div className="mx-auto max-w-6xl px-4 sm:px-6">
+          {/* A plain div, not a header element: the macOS app injects
+              `.native-app header { padding-top: 36px }`, which pushed this
+              title below every other page's. */}
           <div className="mb-8 flex flex-row items-start justify-between gap-4">
             <div className="min-w-0">
-              <h1 className="mb-3 text-3xl font-semibold tracking-tight text-oai-black dark:text-white sm:text-4xl">
-                {copy("nav.sessions")}
-              </h1>
-              <p className="text-sm text-oai-gray-500 dark:text-oai-gray-400 sm:text-base">
-                {copy("sessions.page.summary")}
-              </p>
+              <h1 className="mb-3 text-3xl font-semibold tracking-tight text-oai-black dark:text-white sm:text-4xl">{copy("nav.sessions")}</h1>
+              <p className="text-sm text-oai-gray-500 dark:text-oai-gray-400 sm:text-base">{copy("sessions.page.summary")}</p>
             </div>
             <button
               type="button"

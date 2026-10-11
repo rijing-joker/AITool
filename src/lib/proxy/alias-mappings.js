@@ -125,19 +125,29 @@ function createMappingService(h) {
     return result;
   }
 
-  function resolveMapping(root, native, payload, alias, requireRevision = false) {
+  function resolveMapping(root, native, payload, alias, requireRevision = false, strictPosition = false) {
     const nodes = inventory(root, native).filter(isAlias);
     let candidates;
     if (payload.mappingId) candidates = nodes.filter((node) => node.mappingId === payload.mappingId);
     else {
       candidates = nodes.filter((node) => lower(node.identity.client) === lower(alias));
       if (payload.oauthChannel) candidates = candidates.filter((node) => node.location.channel === payload.oauthChannel);
-      if (payload.section != null || payload.providerIndex != null) {
-        candidates = candidates.filter((node) => node.location.section === payload.section && node.legacyTargets.includes(Number(payload.providerIndex)) && node.modelIndex === Number(payload.modelIndex));
+      if (payload.sourceModel) candidates = candidates.filter((node) => lower(node.identity.source) === lower(payload.sourceModel));
+      if (payload.section === "oauth-model-alias") {
+        candidates = candidates.filter((node) => node.location.type === "oauth");
+      } else if (payload.section != null || payload.providerIndex != null) {
+        candidates = candidates.filter((node) => node.location.section === payload.section && node.legacyTargets.includes(Number(payload.providerIndex)));
+      }
+      if (payload.modelIndex != null && (strictPosition || !payload.sourceModel)) {
+        candidates = candidates.filter((node) => node.modelIndex === Number(payload.modelIndex));
       }
     }
     if (candidates.length > 1) throw conflict("Alias name is ambiguous. Select a specific mapping");
-    if (candidates.length !== 1 || lower(candidates[0].identity.client) !== lower(alias)) throw conflict();
+    if (candidates.length !== 1 || lower(candidates[0].identity.client) !== lower(alias)) {
+      throw payload.mappingId ? conflict() : conflict(strictPosition
+        ? "Alias mapping does not exist at the saved position. Refresh and try again"
+        : "Alias row moved or changed. Refresh and try again");
+    }
     const node = candidates[0];
     const revision = payload.expectedRevision ?? payload.revision;
     if (payload.mappingId && requireRevision && revision == null) throw conflict("Mapping revision is required. Refresh and try again");
@@ -180,7 +190,7 @@ function createMappingService(h) {
   function mutate(snapshot, payload, definitions, available, deleting = false) {
     const root = snapshot.legacy, native = snapshot.nativeApiKeys;
     const originalAlias = deleting ? payload.alias : payload.originalAlias;
-    const original = originalAlias ? resolveMapping(root, native, payload, h.existingAliasModelId(originalAlias, "Alias model"), true) : null;
+    const original = originalAlias ? resolveMapping(root, native, payload, h.existingAliasModelId(originalAlias, "Alias model"), true, deleting) : null;
     if (deleting) {
       original.owner.models.splice(original.modelIndex, 1);
       if (!protocols(root, native, original.identity.client).has(original.protocol)) clearOptions(root, native, original.identity.client, original.protocol);
@@ -190,7 +200,11 @@ function createMappingService(h) {
       ? h.existingAliasModelId(payload.alias, "Alias model") : h.validateAliasModelId(payload.alias, "Alias model");
     const effort = String(payload.effort || "").trim() ? h.validateAliasEffort(payload.effort) : "";
     const fast = Boolean(payload.fast);
-    const selected = resolveSelection(root, native, definitions, available, payload.sourceId, original);
+    // Positional clients use this marker for an unchanged source. Resolve it
+    // only after verifying the row's source/alias pair above.
+    const sourceId = original && !payload.mappingId && payload.sourceId === `alias-edit:${lower(originalAlias)}`
+      ? original.sourceId : payload.sourceId;
+    const selected = resolveSelection(root, native, definitions, available, sourceId, original);
     const source = selected.source;
     if (fast && !selected.fast) throw new Error("Fast is not supported by this model source");
     if (effort && !source.reasoningLevels.some((level) => lower(level) === lower(effort))) throw new Error("Reasoning effort is not supported by this model source");

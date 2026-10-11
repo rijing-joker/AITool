@@ -91,6 +91,43 @@ test("estimateCostUsd bills fresh input for Claude and cache-inclusive input for
   assert.equal(explicitInclusive, ((100 - 60) * 3 + 50 * 15 + 60 * 0.3) / 1e6);
 });
 
+test("inclusive rows mirror the core's subset accounting: reads AND writes inside input", () => {
+  // The Go core's NewSubsetTokenBreakdown derives UncachedTokens =
+  // input − cacheRead − cacheWrite for OpenAI-style rows (relays fold both
+  // cache shares into prompt_tokens). Only the Codex CLI-session reader
+  // differs — sessions.js pre-folds its rows to the queue contract (writes
+  // additive) before estimateCostUsd ever sees them.
+  const tokens = {
+    inputTokens: 1000, outputTokens: 50, cacheReadTokens: 400, cacheCreationTokens: 300,
+  };
+  const cost = pricing.estimateCostUsd(MODELS, "claude-sonnet-5", tokens, { inputInclusive: true });
+  assert.equal(cost, ((1000 - 400 - 300) * 3 + 50 * 15 + 400 * 0.3 + 300 * 3.75) / 1e6);
+  assert.equal(pricing.freshInputTokens(tokens, { inputInclusive: true }), 300);
+});
+
+test("estimateCostUsd bills the 1h cache-write share at 1.6x the cache-write rate", () => {
+  // cc-switch 533055b: the pricing table's cache_write is the 5m rate; 1h
+  // writes cost 2x input vs 1.25x, i.e. 1.6x the cache-write rate.
+  const mixed = pricing.estimateCostUsd(MODELS, "claude-sonnet-5", {
+    inputTokens: 100, outputTokens: 50, cacheReadTokens: 0,
+    cacheCreationTokens: 1000, cacheCreation1hTokens: 600,
+  });
+  assert.equal(mixed, (100 * 3 + 50 * 15 + 400 * 3.75 + 600 * 3.75 * 1.6) / 1e6);
+
+  // The 1h share is a subset — clamped to the cache-write total, so here the
+  // whole 100 rides the 1h multiplier.
+  const clamped = pricing.estimateCostUsd(MODELS, "claude-sonnet-5", {
+    inputTokens: 0, outputTokens: 0, cacheCreationTokens: 100, cacheCreation1hTokens: 999,
+  });
+  assert.equal(clamped, (100 * 3.75 * 1.6) / 1e6);
+
+  // Rows without the split (proxy core payloads) bill exactly as before.
+  const plain = pricing.estimateCostUsd(MODELS, "claude-sonnet-5", {
+    inputTokens: 100, outputTokens: 50, cacheReadTokens: 900, cacheCreationTokens: 10,
+  });
+  assert.equal(plain, (100 * 3 + 50 * 15 + 900 * 0.3 + 10 * 3.75) / 1e6);
+});
+
 test("estimateCostUsd returns null for unpriced models and tokenless rows", () => {
   assert.equal(pricing.estimateCostUsd(MODELS, "unknown-model", { inputTokens: 10, outputTokens: 5 }), null);
   assert.equal(pricing.estimateCostUsd(MODELS, "claude-sonnet-5", { inputTokens: 0, outputTokens: 0 }), null);

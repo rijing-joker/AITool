@@ -22,6 +22,9 @@ const fs = require("node:fs");
 const fsp = require("node:fs/promises");
 const path = require("node:path");
 const { createUsageDeltaState, consumeUsageDelta } = require("./codex-token-usage");
+const {
+  codexSessionIdFromPath,
+} = require("./rollout");
 
 const TITLE_MAX_CHARS = 80;
 const SUMMARY_MAX_CHARS = 160;
@@ -197,7 +200,7 @@ function trackModelUsage(usage, model, row) {
   const key = model || "unknown";
   let entry = perModel.get(key);
   if (!entry) {
-    entry = { model: key, inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 };
+    entry = { model: key, inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, cacheCreation1hTokens: 0 };
     perModel.set(key, entry);
   }
   entry.inputTokens += row.inputTokens;
@@ -205,26 +208,89 @@ function trackModelUsage(usage, model, row) {
   entry.reasoningTokens += row.reasoningTokens;
   entry.cacheReadTokens += row.cacheReadTokens;
   entry.cacheCreationTokens += row.cacheCreationTokens;
-  if (row.cacheCreation1hTokens) entry.cacheCreation1hTokens = (entry.cacheCreation1hTokens || 0) + row.cacheCreation1hTokens;
+  entry.cacheCreation1hTokens = (entry.cacheCreation1hTokens || 0) + (row.cacheCreation1hTokens || 0);
 }
 
-async function collectJsonlFiles(root, files = [], compressed = false) {
+async function collectJsonlFiles(root, files = [], { compressed = false } = {}) {
   let entries;
   try {
     entries = await fsp.readdir(root, { withFileTypes: true });
   } catch {
     return files;
   }
+  const plainNames = compressed
+    ? new Set(entries.filter((e) => e.isFile() && e.name.endsWith(".jsonl")).map((e) => e.name))
+    : null;
   for (const entry of entries) {
     const fullPath = path.join(root, entry.name);
     if (entry.isDirectory()) {
-      await collectJsonlFiles(fullPath, files, compressed);
-    } else if (entry.isFile() && (entry.name.endsWith(".jsonl") || (compressed && codexFiles.isCompressed(entry.name)))) {
+      await collectJsonlFiles(fullPath, files, { compressed });
+    } else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
+      files.push(fullPath);
+    } else if (
+      compressed &&
+      entry.isFile() &&
+      entry.name.endsWith(".jsonl.zst") &&
+      // When Codex compression briefly leaves both forms in place, the plain
+      // file is the source of truth (cc-switch 8641cd1).
+      !plainNames.has(entry.name.slice(0, -".zst".length))
+    ) {
       files.push(fullPath);
     }
   }
   return files;
 }
+
+// cc-switch 8641cd1 lists compressed sessions by decompressing only the head
+// ("so scanning tens of GB stays fast"): the zstd transform stream stops once
+// the head budget is collected, instead of materializing the whole file per
+// listed row. Runtimes without the stream API (Node < 24) fall back to the
+// capped full decompress.
+const COMPRESSED_HEAD_BUDGET_BYTES = 1024 * 1024;
+
+async function readCompressedRolloutHeadText(filePath) {
+  const zlib = require("node:zlib");
+  if (typeof zlib.createZstdDecompress !== "function") {
+    return { text: await codexFiles.readText(filePath), truncated: false };
+  }
+  return await new Promise((resolve, reject) => {
+    const source = fs.createReadStream(filePath);
+    const zstd = zlib.createZstdDecompress();
+    const chunks = [];
+    let total = 0;
+    let settled = false;
+    const finish = (error, truncated = false) => {
+      if (settled) return;
+      settled = true;
+      source.destroy();
+      zstd.destroy();
+      if (error) reject(error);
+      else resolve({ text: Buffer.concat(chunks, total).toString("utf8"), truncated });
+    };
+    source.on("error", finish);
+    zstd.on("error", finish);
+    zstd.on("end", () => finish());
+    zstd.on("data", (chunk) => {
+      chunks.push(chunk);
+      total += chunk.length;
+      if (total >= COMPRESSED_HEAD_BUDGET_BYTES) finish(null, true);
+    });
+    source.pipe(zstd);
+  });
+}
+
+async function readCompressedRolloutHeadLines(filePath, headN) {
+  const { text, truncated } = await readCompressedRolloutHeadText(filePath);
+  let lines = text.split("\n").filter((line) => line !== "");
+  // The budget cut can land mid-line; drop the partial tail line so callers
+  // only ever see complete JSONL rows.
+  if (truncated) lines = lines.slice(0, -1);
+  return lines.slice(0, headN);
+}
+
+// Codex compresses 7-day-old rollouts to rollout-*.jsonl.zst (cc-switch
+// 8641cd1 adaptation); decompress transparently so transcript readers stay
+// byte-identical for both forms.
 
 // ---------------------------------------------------------------------------
 // Provider: claude — ~/.claude/projects/**/*.jsonl
@@ -408,7 +474,7 @@ async function claudeReadMessages(filePath) {
     usage.outputTokens += row.outputTokens;
     usage.cacheReadTokens += row.cacheReadTokens;
     usage.cacheCreationTokens += row.cacheCreationTokens;
-    if (row.cacheCreation1hTokens) usage.cacheCreation1hTokens = (usage.cacheCreation1hTokens || 0) + row.cacheCreation1hTokens;
+    usage.cacheCreation1hTokens = (usage.cacheCreation1hTokens || 0) + (row.cacheCreation1hTokens || 0);
     trackModelUsage(usage, row.model, row);
   }
   usage.totalTokens = usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheCreationTokens;
@@ -448,6 +514,7 @@ function codexExtractPromptFromIdeContext(text) {
 }
 
 async function codexParseSession(filePath) {
+  if (codexFiles.isCompressed(filePath)) return codexParseCompressedSession(filePath);
   let headTail;
   try {
     headTail = await readHeadTailLines(filePath);
@@ -502,6 +569,61 @@ async function codexParseSession(filePath) {
     projectDir,
     createdAt,
     lastActiveAt,
+    sourcePath: filePath,
+    resumeCommand: `codex resume ${sessionId}`,
+  };
+}
+
+// Compressed rollouts list from the decompressed head only (cc-switch
+// 8641cd1): the file's mtime — which Codex preserves through compression —
+// stands in for last-active, and there is no last-reply preview. A head
+// decompression failure must not vanish the session: fall back to the
+// filename's rollout UUID and the mtime.
+async function codexParseCompressedSession(filePath) {
+  let head = [];
+  try {
+    head = await readCompressedRolloutHeadLines(filePath, HEAD_LINES);
+  } catch {
+    head = [];
+  }
+
+  let sessionId = null;
+  let projectDir = null;
+  let createdAt = null;
+  let firstUserMessage = null;
+
+  for (const line of head) {
+    const value = parseJsonLine(line);
+    if (!value) continue;
+    if (createdAt === null) createdAt = parseTimestampToMs(value.timestamp);
+    if (value.type === "session_meta") {
+      const payload = value.payload ?? {};
+      if (sessionId === null && typeof payload.id === "string") sessionId = payload.id;
+      if (projectDir === null && typeof payload.cwd === "string") projectDir = payload.cwd;
+    }
+    if (firstUserMessage === null && value.type === "response_item" && value.payload?.type === "message" && value.payload?.role === "user") {
+      const text = codexExtractPromptFromIdeContext(extractText(value.payload.content));
+      if (text !== "" && !text.includes("<user_instructions>") && !text.startsWith("<environment_context>")) {
+        firstUserMessage = text;
+      }
+    }
+  }
+
+  if (!sessionId) sessionId = codexSessionIdFromPath(filePath);
+  if (!sessionId) return null;
+
+  const stat = await fsp.stat(filePath).catch(() => null);
+  const title = (firstUserMessage ? truncateSummary(firstUserMessage, TITLE_MAX_CHARS) : null)
+    ?? (projectDir ? path.basename(projectDir) : null);
+
+  return {
+    appId: "codex",
+    sessionId,
+    title,
+    summary: null,
+    projectDir,
+    createdAt,
+    lastActiveAt: stat ? Math.round(stat.mtimeMs) : null,
     sourcePath: filePath,
     resumeCommand: `codex resume ${sessionId}`,
   };
@@ -564,12 +686,17 @@ async function codexReadMessages(filePath) {
   // Ordinary tool results must not scan the transcript for a patch they lack.
   const patchesByCallId = new Map();
   // Attribute cumulative increments to the model active for each event.
-  // Input includes cache reads; reasoning is already included in output.
-  const usage = emptyUsage(true);
+  // Fold both relay cache-write conventions into the queue contract before
+  // returning usage. The explicit flag keeps pricing from subtracting cache
+  // a second time, independent of the model-id heuristic.
+  const usage = emptyUsage(false);
   const usageState = createUsageDeltaState();
   const snapshot = (value) => value && typeof value === "object" && !Array.isArray(value) ? {
     ...value,
-    cached_input_tokens: value.cached_input_tokens ?? value.cache_read_input_tokens,
+    // Explicit-zero stubs fall through to the documented alternates
+    // (cc-switch 5667b28): some relays hardcode the leading cache field to 0
+    // and only report the real count in the other one.
+    cached_input_tokens: value.cached_input_tokens || value.cache_read_input_tokens || 0,
     total_tokens: value.total_tokens ?? ((Number(value.input_tokens) || 0) + (Number(value.output_tokens) || 0)),
   } : null;
   let usageSeen = false;
@@ -591,7 +718,7 @@ async function codexReadMessages(filePath) {
       if (delta) {
         const normalized = normalizeCodexUsage(delta);
         const row = {
-          inputTokens: normalized.input_tokens + normalized.cached_input_tokens + normalized.cache_creation_input_tokens,
+          inputTokens: normalized.input_tokens,
           outputTokens: delta.output_tokens,
           reasoningTokens: delta.reasoning_output_tokens,
           cacheReadTokens: normalized.cached_input_tokens,
@@ -941,7 +1068,7 @@ async function listSessions({ app, home, env = process.env } = {}) {
 
   const files = [];
   for (const root of rootsForApp(app, resolvedHome)) {
-    await collectJsonlFiles(root, files, app === "codex");
+    await collectJsonlFiles(root, files, { compressed: app === "codex" });
   }
   const sessions = [];
   for (const filePath of codexFiles.dedupeSiblings(files)) {

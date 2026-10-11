@@ -16,6 +16,7 @@ const { physicalJsonlRecords } = require("./jsonl-lines");
 const { readSqliteJsonRows, readSqliteJsonRowsAsync } = require("./sqlite-reader");
 const wsl = require("./wsl-probe");
 const { resolveInstallPaths } = require("./install-resolver");
+const { expandHome } = require("./scan-roots");
 const {
   consumeUsageDelta,
   createUsageDeltaState,
@@ -184,6 +185,14 @@ function isRolloutFileName(name) {
   if (name.includes("/") || name.includes("\\")) return false;
   if (name !== path.basename(name)) return false;
   return name.startsWith("rollout-") && codexFiles.isRollout(name);
+}
+
+// Share the bounded in-memory decoder with Codex and Zed. Frame sizes are
+// checked before allocating output, including on Node 20's native fallback.
+async function decompressZstdBuffer(data, { maxOutputLength } = {}) {
+  return require("./zstd").decodeDshZstd(data, {
+    ...(maxOutputLength != null ? { maxOutputBytes: maxOutputLength } : {}),
+  });
 }
 
 function directoryInventoryStatKey(st) {
@@ -633,7 +642,7 @@ async function parseRolloutIncremental({
         });
 
     const nextCursor = {
-      ...(codexFiles.isCompressed(filePath) ? { compressedSignature: codexFiles.signature(st) } : {}),
+      ...(codexFiles.isCompressed(filePath) ? { compressed: true, compressedSignature: codexFiles.signature(st) } : {}),
       inode,
       offset: result.endOffset,
       lastTotal: result.lastTotal,
@@ -1642,9 +1651,19 @@ async function resolveOpenclawSessionFiles(env = process.env, deps = {}) {
           out.push(full);
         }
       }
+      for (const dbPath of [
+        path.join(agentsDir, agent.name, "agent", "openclaw-agent.sqlite"),
+        path.join(agentsDir, agent.name, "openclaw-agent.sqlite"),
+      ]) {
+        if ((await fs.stat(dbPath).catch(() => null))?.isFile()) {
+          out.push(dbPath);
+          break; // alternate layouts of one agent database, not two sources
+        }
+      }
     }
   }
-  out.sort((a, b) => a.localeCompare(b));
+  // Import archives must seed dedup before the corresponding SQLite history.
+  out.sort((a, b) => Number(a.endsWith(".sqlite")) - Number(b.endsWith(".sqlite")) || a.localeCompare(b));
   return out;
 }
 
@@ -1707,6 +1726,67 @@ async function parseOpenclawIncremental({
     const previousOffset = Number(prev?.offset || 0);
     let accepted = null;
     let openedRegularFile = false;
+    if (filePath.endsWith(".sqlite")) {
+      const sessionFilter = typeof entry?.sessionId === "string"
+        ? ` AND e.session_id = '${entry.sessionId.replace(/'/g, "''")}'` : "";
+      const rows = await readSqliteJsonRowsAsync(filePath, `
+        SELECT e.session_id, json_object(
+          'type', json_extract(e.event_json, '$.type'),
+          'id', json_extract(e.event_json, '$.id'),
+          'timestamp', json_extract(e.event_json, '$.timestamp'),
+          'message', json_object(
+            'role', json_extract(e.event_json, '$.message.role'),
+            'model', json_extract(e.event_json, '$.message.model'),
+            'provider', json_extract(e.event_json, '$.message.provider'),
+            'api', json_extract(e.event_json, '$.message.api'),
+            'timestamp', json_extract(e.event_json, '$.message.timestamp'),
+            'responseId', json_extract(e.event_json, '$.message.responseId'),
+            'usage', json_extract(e.event_json, '$.message.usage')
+          )) AS event
+        FROM transcript_events e JOIN session_windows w ON w.session_id = e.session_id
+        WHERE json_valid(e.event_json) AND COALESCE(w.reason, '') != 'compaction'
+          AND json_extract(e.event_json, '$.message.role') = 'assistant'
+          AND json_extract(e.event_json, '$.message.usage') IS NOT NULL
+          ${sessionFilter}
+        ORDER BY e.session_id, e.seq
+      `, { readOnly: true, throwOnReadFailure: true, label: "OpenClaw" });
+      const sessions = new Map();
+      for (const row of rows) {
+        if (!sessions.has(row.session_id)) sessions.set(row.session_id, []);
+        sessions.get(row.session_id).push(row.event);
+      }
+      for (const [sessionId, lines] of sessions) {
+        const sessionCursorKey = `${key}#${sessionId}`;
+        const prior = { ...(stagedFiles[sessionCursorKey]?.usageEvents || {}) };
+        const dbDir = path.dirname(filePath);
+        const agentDir = path.basename(dbDir) === "agent" && path.basename(path.dirname(path.dirname(dbDir))) === "agents"
+          ? path.dirname(dbDir) : dbDir;
+        const agentPrefix = openclawCursorKey(`${agentDir}${path.sep}`);
+        // SQLite imports retain transcript identities. Carry forward counts
+        // from this session's legacy transcript, including reset archives.
+        for (const [legacyPath, cursor] of Object.entries(stagedFiles)) {
+          const basename = path.basename(legacyPath);
+          if (cursor.provider !== "openclaw" || !openclawCursorKey(legacyPath).startsWith(agentPrefix)) continue;
+          if (!basename.startsWith(`${sessionId}.jsonl`) &&
+              !(basename.startsWith(`${sessionId}-topic-`) && basename.includes(".jsonl"))) continue;
+          for (const [identity, count] of Object.entries(cursor.usageEvents || {})) {
+            prior[identity] = Math.max(prior[identity] || 0, count);
+          }
+        }
+        const result = await parseOpenclawSessionFile({
+          lines, previousUsageEvents: prior, appendOnly: false,
+          hourlyState, touchedBuckets, source: fileSource,
+        });
+        stagedFiles[sessionCursorKey] = {
+          provider: "openclaw", usageEvents: result.usageEvents,
+          hasRealUsage: Object.keys(result.usageEvents).length > 0,
+          updatedAt: new Date().toISOString(),
+        };
+        eventsAggregated += result.eventsAggregated;
+      }
+      filesProcessed += 1;
+      continue;
+    }
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const fileHandle = await fs.open(filePath, "r").catch(() => null);
       if (!fileHandle) break;
@@ -1921,6 +2001,7 @@ function mergeOpenclawAttemptBuckets(
 }
 
 async function parseOpenclawSessionFile({
+  lines,
   filePath,
   fileHandle,
   startOffset,
@@ -1936,7 +2017,8 @@ async function parseOpenclawSessionFile({
   projectState,
   projectTouchedBuckets,
 }) {
-  const st = fileHandle ? await fileHandle.stat() : await fs.stat(filePath);
+  const st = lines ? { size: lines.length } : fileHandle ? await fileHandle.stat() : await fs.stat(filePath);
+  startOffset = startOffset || 0;
   const endOffset =
     Number.isFinite(endOffsetLimit) && endOffsetLimit >= 0
       ? Math.min(st.size, endOffsetLimit)
@@ -1971,14 +2053,14 @@ async function parseOpenclawSessionFile({
     };
   }
 
-  const stream = fssync.createReadStream(filePath, {
+  const stream = lines ? null : fssync.createReadStream(filePath, {
     fd: fileHandle?.fd,
     autoClose: !fileHandle,
     encoding: "utf8",
     start: startOffset,
     end: endOffset - 1,
   });
-  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+  const rl = lines || readline.createInterface({ input: stream, crlfDelay: Infinity });
 
   let eventsAggregated = 0;
   const scanCounts = appendOnly ? { ...priorCounts } : {};
@@ -2077,8 +2159,8 @@ async function parseOpenclawSessionFile({
     if (!collectOnly) eventsAggregated += 1;
   }
 
-  rl.close();
-  if (!fileHandle) stream.close?.();
+  if (!lines) rl.close();
+  if (!fileHandle) stream?.close?.();
   return {
     endOffset,
     eventsAggregated,
@@ -10395,23 +10477,43 @@ async function parseCodebuddyIncremental({
 //      is accepted by workbuddySqliteUsageSnapshot.
 // ─────────────────────────────────────────────────────────────────────────────
 
-function resolveWorkbuddyHome(env = process.env) {
-  const home = env.HOME || require("node:os").homedir();
-  if (env.WORKBUDDY_HOME) return env.WORKBUDDY_HOME;
+// WorkBuddy ships two regional builds that keep their data in sibling homes:
+//   ~/.workbuddy     — Tencent CN build (models: hy*/glm*/deepseek-*/auto)
+//   ~/.workbuddy-ai  — international build (models: gpt-5.6-*, gpt-6-*)
+// Both write byte-identical JSONL, so every reader below is shared and only
+// the home directory (and the bucket source key) differs. `variant` is also
+// the source key written into hourly buckets, so the two builds stay
+// separable in the dashboard and never share dedup state.
+const WORKBUDDY_VARIANTS = {
+  workbuddy: { dir: ".workbuddy", envVar: "WORKBUDDY_HOME" },
+  "workbuddy-ai": { dir: ".workbuddy-ai", envVar: "WORKBUDDY_AI_HOME" },
+};
+
+function resolveWorkbuddyVariant(variant) {
+  return Object.prototype.hasOwnProperty.call(WORKBUDDY_VARIANTS, variant)
+    ? variant
+    : "workbuddy";
+}
+
+function resolveWorkbuddyHome(env = process.env, variant = "workbuddy") {
+  const spec = WORKBUDDY_VARIANTS[resolveWorkbuddyVariant(variant)];
+  const home = env.HOME || env.USERPROFILE || require("node:os").homedir();
+  const configured = expandHome(env[spec.envVar], home);
+  if (configured) return configured;
   if (process.platform === "win32") {
     return pickWin32ProviderPath({
       env,
-      nativeValue: path.join(home, ".workbuddy"),
-      wslProviderDir: ".workbuddy",
+      nativeValue: path.join(home, spec.dir),
+      wslProviderDir: spec.dir,
     });
   }
-  return path.join(home, ".workbuddy");
+  return path.join(home, spec.dir);
 }
 
-function resolveWorkbuddyDefaultModel(env = process.env) {
+function resolveWorkbuddyDefaultModel(env = process.env, variant = "workbuddy") {
   const fallback = "auto";
   try {
-    const workbuddyHome = resolveWorkbuddyHome(env);
+    const workbuddyHome = resolveWorkbuddyHome(env, variant);
     if (!workbuddyHome) return fallback;
     const settingsPath = path.join(workbuddyHome, "settings.json");
     const raw = fssync.readFileSync(settingsPath, "utf8");
@@ -10431,8 +10533,8 @@ function resolveWorkbuddyDefaultModel(env = process.env) {
 // ~/.workbuddy/traces/<pid>/trace_*.json. Those summaries are useful only when
 // the detailed JSONL for a session is absent, so they are returned as typed
 // entries and parsed after JSONL (JSONL remains authoritative when both exist).
-function resolveWorkbuddyProjectFiles(env = process.env) {
-  const workbuddyHome = resolveWorkbuddyHome(env);
+function resolveWorkbuddyProjectFiles(env = process.env, variant = "workbuddy") {
+  const workbuddyHome = resolveWorkbuddyHome(env, variant);
   if (!workbuddyHome) return [];
   const projectsDir = path.join(workbuddyHome, "projects");
   const files = [];
@@ -10541,10 +10643,15 @@ async function parseWorkbuddyIncremental({
   onProgress,
   env,
   defaultModel,
+  source = "workbuddy",
 } = {}) {
   await ensureDir(path.dirname(queuePath));
+  // `source` doubles as the variant selector and the bucket source key, so the
+  // CN install (~/.workbuddy) and the international install (~/.workbuddy-ai)
+  // get independent cursor namespaces and never share dedup state.
+  const variant = resolveWorkbuddyVariant(source);
   const workbuddyState =
-    cursors.workbuddy && typeof cursors.workbuddy === "object" ? cursors.workbuddy : {};
+    cursors[variant] && typeof cursors[variant] === "object" ? cursors[variant] : {};
   const seenIds = new Set(
     Array.isArray(workbuddyState.seenIds) ? workbuddyState.seenIds : [],
   );
@@ -10570,20 +10677,20 @@ async function parseWorkbuddyIncremental({
 
   const allFiles = Array.isArray(projectFiles)
     ? projectFiles
-    : resolveWorkbuddyProjectFiles(env || process.env);
+    : resolveWorkbuddyProjectFiles(env || process.env, variant);
   const jsonlFiles = allFiles.filter((entry) => typeof entry === "string");
   const traceFiles = allFiles.filter(
     (entry) => entry && typeof entry === "object" && typeof entry.path === "string" && entry.kind === "trace",
   );
   const files = [...jsonlFiles, ...traceFiles];
-  const fallbackModel = defaultModel || resolveWorkbuddyDefaultModel(env || process.env);
+  const fallbackModel = defaultModel || resolveWorkbuddyDefaultModel(env || process.env, variant);
 
-  const workbuddyHome = resolveWorkbuddyHome(env || process.env);
+  const workbuddyHome = resolveWorkbuddyHome(env || process.env, variant);
   const dbPath = workbuddyHome ? path.join(workbuddyHome, "workbuddy.db") : null;
   const dbExists = Boolean(dbPath && fssync.existsSync(dbPath));
 
   if (files.length === 0 && !dbExists) {
-    cursors.workbuddy = {
+    cursors[variant] = {
       ...workbuddyState,
       seenIds: Array.from(seenIds),
       seenTraceIds: Array.from(seenTraceIds),
@@ -10730,9 +10837,9 @@ async function parseWorkbuddyIncremental({
         conversation_count: 1,
       };
 
-      const bucket = getHourlyBucket(hourlyState, "workbuddy", model, bucketStart);
+      const bucket = getHourlyBucket(hourlyState, variant, model, bucketStart);
       addTotals(bucket.totals, delta);
-      touchedBuckets.add(bucketKey("workbuddy", model, bucketStart));
+      touchedBuckets.add(bucketKey(variant, model, bucketStart));
       seenIds.add(messageId);
       // Keep legacy entry-id keys alongside the response id so upgrading a
       // cursor cannot replay a row that an older build already counted.
@@ -10773,19 +10880,23 @@ async function parseWorkbuddyIncremental({
     const entry = traceFiles[fileIdx];
     const filePath = entry.path;
     let stat;
-    try { stat = fssync.statSync(filePath); } catch { continue; }
-    const prevEntry = fileOffsets[filePath] || {};
-    const prevSize = Number(prevEntry.size) || 0;
-    const prevIno = prevEntry.ino;
-    const inodeChanged = typeof prevIno === "number" && prevIno !== stat.ino;
-    const startOffset = stat.size < prevSize || inodeChanged ? 0 : prevSize;
-    if (stat.size <= startOffset) continue;
-
     let traceDoc;
+    let traceFd;
     try {
-      traceDoc = JSON.parse(fssync.readFileSync(filePath, "utf8"));
+      traceFd = fssync.openSync(filePath, "r");
+      stat = fssync.fstatSync(traceFd);
+      if (!stat.isFile()) continue;
+      const prevEntry = fileOffsets[filePath] || {};
+      const prevSize = Number(prevEntry.size) || 0;
+      const prevIno = prevEntry.ino;
+      const inodeChanged = typeof prevIno === "number" && prevIno !== stat.ino;
+      const startOffset = stat.size < prevSize || inodeChanged ? 0 : prevSize;
+      if (stat.size <= startOffset) continue;
+      traceDoc = JSON.parse(fssync.readFileSync(traceFd, "utf8"));
     } catch {
       continue;
+    } finally {
+      if (traceFd !== undefined) fssync.closeSync(traceFd);
     }
     const trace = traceDoc && typeof traceDoc === "object" && traceDoc.trace && typeof traceDoc.trace === "object"
       ? traceDoc.trace
@@ -10837,9 +10948,9 @@ async function parseWorkbuddyIncremental({
       total_tokens: inputTokens + totalCached + totalOutput,
       conversation_count: 1,
     };
-    const bucket = getHourlyBucket(hourlyState, "workbuddy", model, bucketStart);
+    const bucket = getHourlyBucket(hourlyState, variant, model, bucketStart);
     addTotals(bucket.totals, delta);
-    touchedBuckets.add(bucketKey("workbuddy", model, bucketStart));
+    touchedBuckets.add(bucketKey(variant, model, bucketStart));
     seenTraceIds.add(traceId);
     tracedSessionIds.add(sessionId);
     recordsProcessed++;
@@ -10973,9 +11084,9 @@ async function parseWorkbuddyIncremental({
           conversation_count: Object.keys(previousTokens).every((key) => toNonNegativeInt(previousTokens[key]) === 0) || isReset ? 1 : 0,
         };
 
-        const bucket = getHourlyBucket(hourlyState, "workbuddy", model, bucketStart);
+        const bucket = getHourlyBucket(hourlyState, variant, model, bucketStart);
         addTotals(bucket.totals, delta);
-        touchedBuckets.add(bucketKey("workbuddy", model, bucketStart));
+        touchedBuckets.add(bucketKey(variant, model, bucketStart));
         sqliteSessions[sessionId] = {
           used: usedNow,
           updatedAt: updatedAtRaw,
@@ -11026,7 +11137,7 @@ async function parseWorkbuddyIncremental({
   const updatedAt = new Date().toISOString();
   hourlyState.updatedAt = updatedAt;
   cursors.hourly = hourlyState;
-  cursors.workbuddy = {
+  cursors[variant] = {
     ...workbuddyState,
     seenIds: cappedSeen,
     seenTraceIds: cappedSeenTraceIds,
@@ -11372,7 +11483,8 @@ async function resolveOmoFileCwd(filePath) {
 
 function resolveKilocodeRoots(env = process.env) {
   if (typeof env.TOKENTRACKER_KILOCODE_ROOTS === "string" && env.TOKENTRACKER_KILOCODE_ROOTS.trim()) {
-    return env.TOKENTRACKER_KILOCODE_ROOTS.split(":")
+    // Use the host's PATH delimiter so a Windows drive colon stays intact.
+    return env.TOKENTRACKER_KILOCODE_ROOTS.split(path.delimiter)
       .map((r) => r.trim())
       .filter(Boolean);
   }
@@ -12249,11 +12361,7 @@ async function decodeZedThreadBlob({ dataType, data }) {
     return data.toString("utf8");
   }
   if (type === "zstd") {
-    const zlib = require("node:zlib");
-    const out =
-      typeof zlib.zstdDecompressSync === "function"
-        ? zlib.zstdDecompressSync(data)
-        : Buffer.from(await require("@mongodb-js/zstd").decompress(data));
+    const out = await decompressZstdBuffer(data, { maxOutputLength: MAX_ZED_THREAD_JSON_BYTES });
     if (out.length > MAX_ZED_THREAD_JSON_BYTES) {
       throw new Error(`decoded zstd blob exceeds ${MAX_ZED_THREAD_JSON_BYTES} bytes`);
     }
@@ -15868,7 +15976,6 @@ function resolvePiSessionFiles(env = process.env) {
   const agentDir = resolvePiAgentDir(env);
   if (!agentDir) return [];
   const sessionsDir = path.join(agentDir, "sessions");
-  if (!fssync.existsSync(sessionsDir)) return [];
   const files = [];
   const walk = (dir) => {
     let entries;
@@ -15882,16 +15989,41 @@ function resolvePiSessionFiles(env = process.env) {
       }
     }
   };
+  // A headless-only install (Multica orchestrated runs) never creates the TUI
+  // sessions dir; skip only the TUI scan so the Multica scan below still runs.
+  if (fssync.existsSync(sessionsDir)) {
+    try {
+      for (const cwdDir of fssync.readdirSync(sessionsDir)) {
+        const cwdPath = path.join(sessionsDir, cwdDir);
+        let stat;
+        try { stat = fssync.statSync(cwdPath); } catch { continue; }
+        if (!stat.isDirectory()) continue;
+        walk(cwdPath);
+      }
+    } catch {
+      // ignore — return what we have
+    }
+  }
+  // Multica launches pi headless with a dedicated flat session dir:
+  //   ~/.multica/pi-sessions/<session-id>.jsonl
+  // Scan it too so orchestrated runs are counted alongside TUI sessions.
   try {
-    for (const cwdDir of fssync.readdirSync(sessionsDir)) {
-      const cwdPath = path.join(sessionsDir, cwdDir);
-      let stat;
-      try { stat = fssync.statSync(cwdPath); } catch { continue; }
-      if (!stat.isDirectory()) continue;
-      walk(cwdPath);
+    const seen = new Set(files);
+    const multicaSessionsDir = path.join(
+      env.HOME || require("node:os").homedir(),
+      ".multica",
+      "pi-sessions",
+    );
+    for (const entry of fssync.readdirSync(multicaSessionsDir, { withFileTypes: true })) {
+      if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue;
+      const full = path.join(multicaSessionsDir, entry.name);
+      if (!seen.has(full)) {
+        seen.add(full);
+        files.push(full);
+      }
     }
   } catch {
-    // ignore — return what we have
+    // ignore — no Multica install
   }
   files.sort((a, b) => a.localeCompare(b));
   return files;
@@ -24206,6 +24338,8 @@ function withCursorTransaction(parse) {
 module.exports = {
   parseTraeIncremental: withCursorTransaction(parseTraeIncremental),
   listRolloutFiles,
+  isRolloutFileName,
+  decompressZstdBuffer,
   listRolloutFilesDeep,
   codexSessionIdFromPath,
   filterColdCodexRolloutFiles,
@@ -24287,6 +24421,7 @@ module.exports = {
   resolveCodebuddyProjectFiles,
   resolveCodebuddyDefaultModel,
   parseCodebuddyIncremental: withCursorTransaction(parseCodebuddyIncremental),
+  resolveWorkbuddyVariant,
   resolveWorkbuddyHome,
   resolveWorkbuddyProjectFiles,
   resolveWorkbuddyDefaultModel,

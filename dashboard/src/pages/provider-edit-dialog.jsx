@@ -600,6 +600,8 @@ export function ProviderEditDialog({
   // can split the row's entry out of the edited document.
   const [editorSlotKey, setEditorSlotKey] = useState("");
   const [inactive, setInactive] = useState([]);
+  // Why the official GPT list is unavailable (catalog editor hint; null = fine).
+  const [codexOfficialModelsReason, setCodexOfficialModelsReason] = useState(null);
   const [editorFallback, setEditorFallback] = useState(null);
   const [conflictKeys, setConflictKeys] = useState(null);
   const [conflictPolicy, setConflictPolicy] = useState(null);
@@ -704,6 +706,7 @@ export function ProviderEditDialog({
           setEditorBase(JSON.parse(JSON.stringify(full)));
           setEditorSlotKey(typeof view.slotKey === "string" ? view.slotKey : "");
           setInactive(Array.isArray(view.inactive) ? view.inactive : []);
+          setCodexOfficialModelsReason(typeof view.codexOfficialModelsReason === "string" ? view.codexOfficialModelsReason : null);
           setEditorFallback(null);
         })
         .catch((err) => {
@@ -923,8 +926,22 @@ export function ProviderEditDialog({
       .catch(() => setModelMetadata({}));
   }, []);
 
+  // Fetch sequence: any request-identity input (endpoint / key / full-URL
+  // flag / header override) changes which models the gateway returns — /models
+  // results may be keyed per identity (cc-switch 3703306d) — so a change bumps
+  // the sequence, clears the stale list, and voids an in-flight response for
+  // the old identity.
+  const fetchModelsSeqRef = useRef(0);
+  useEffect(() => {
+    if (!open) return;
+    fetchModelsSeqRef.current += 1;
+    setFetchedModels(null);
+    setFetchState("idle");
+  }, [open, currentEndpoint, currentApiKey, meta.isFullUrl, meta.localProxyRequestOverrides?.headers]);
+
   const fetchModels = useCallback(async () => {
     if (fetchState === "loading") return;
+    const seq = fetchModelsSeqRef.current;
     setFetchState("loading");
     try {
       const res = await providerSwitchApi.fetchModels({
@@ -932,7 +949,11 @@ export function ProviderEditDialog({
         apiKey: currentApiKey,
         modelsUrl: selectedPreset?.modelsUrl,
         isFullUrl: !!meta.isFullUrl,
+        // cc-switch 315aeda: gateways behind header overrides need them on the
+        // /v1/models probe too; invalid JSON falls back server-side.
+        requestHeaders: meta.localProxyRequestOverrides?.headers,
       });
+      if (seq !== fetchModelsSeqRef.current) return; // identity changed mid-flight
       setFetchedModels(res.models);
       setFetchState("done");
       void ensureModelMetadata();
@@ -942,6 +963,7 @@ export function ProviderEditDialog({
         showToast({ title: copy("pswitch.models.fetch_empty") });
       }
     } catch (err) {
+      if (seq !== fetchModelsSeqRef.current) return;
       setFetchState("idle");
       showToast({
         title: copy("pswitch.models.fetch_failed", {
@@ -949,7 +971,7 @@ export function ProviderEditDialog({
         }),
       });
     }
-  }, [currentApiKey, currentEndpoint, ensureModelMetadata, fetchState, meta.isFullUrl, selectedPreset]);
+  }, [currentApiKey, currentEndpoint, ensureModelMetadata, fetchState, meta.isFullUrl, meta.localProxyRequestOverrides, selectedPreset]);
 
   // --- claude model roles helpers ---
   const oneMOn = (role) => String(getPath(draft, role.modelPath) ?? "").endsWith("[1m]");
@@ -1934,6 +1956,7 @@ export function ProviderEditDialog({
                     onFetch={() => void fetchModels()}
                     defaultModel={String(getPath(draft, DEFAULT_MODEL_PATH.codex) ?? "")}
                     modelMetadata={modelMetadata}
+                    officialModelsReason={codexOfficialModelsReason}
                     onAddToMapping={() =>
                       setMeta((current) => {
                         const list = Array.isArray(current.codexCatalogModels) ? current.codexCatalogModels : [];

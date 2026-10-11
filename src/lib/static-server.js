@@ -1,4 +1,3 @@
-const fs = require("node:fs");
 const fsPromises = require("node:fs/promises");
 const path = require("node:path");
 
@@ -53,8 +52,13 @@ async function serveStaticFile(baseDir, pathname, res, req = {}) {
   // prevent directory traversal
   if (!filePath.startsWith(baseDir)) return false;
 
+  // Bind the stat and the read to one checked descriptor (cc-switch-free
+  // upstream d9c0226f): a stat-then-open race could swap the file for
+  // something outside baseDir after the traversal check passed.
+  let handle;
   try {
-    const stat = await fsPromises.stat(filePath);
+    handle = await fsPromises.open(filePath, "r");
+    const stat = await handle.stat();
     if (!stat.isFile()) return false;
 
     const ext = path.extname(filePath).toLowerCase();
@@ -87,6 +91,28 @@ async function serveStaticFile(baseDir, pathname, res, req = {}) {
       return true;
     }
 
+    // The selected path may be a sibling pre-compressed variant, re-opened
+    // under the same checked-descriptor rule — BEFORE the headers are
+    // committed, so an open failure (variant deleted between stat and open)
+    // still falls back to the caller's 404/SPA path instead of leaving a
+    // half-committed response. The size is re-statted from the opened
+    // descriptor: the pre-open variant stat raced any atomic rewrite (old
+    // Content-Length + new body → keep-alive hangs / truncated tails).
+    // Whichever descriptor the stream does not consume is closed here: with
+    // a variant, the base descriptor's job (the checked stat) is done, so it
+    // must be closed explicitly — nulling it without closing leaked one fd
+    // per compressible-asset request.
+    let streamHandle;
+    if (encoding) {
+      streamHandle = await fsPromises.open(selectedPath, "r");
+      selectedStat = await streamHandle.stat();
+      await handle.close();
+      handle = null;
+    } else {
+      streamHandle = handle;
+      handle = null; // The stream owns and closes this descriptor.
+    }
+
     res.writeHead(200, {
       "Content-Type": contentType,
       "Content-Length": selectedStat.size,
@@ -96,16 +122,26 @@ async function serveStaticFile(baseDir, pathname, res, req = {}) {
     });
 
     if (req.method === "HEAD") {
+      // The descriptor was opened but will not be streamed — close it here.
+      await streamHandle.close();
       res.end();
       return true;
     }
-    const stream = fs.createReadStream(selectedPath);
+    const stream = streamHandle.createReadStream();
     stream.on("error", (error) => res.destroy(error));
     res.on("close", () => stream.destroy());
     stream.pipe(res);
     return true;
   } catch (_e) {
+    if (res.headersSent) {
+      // Nothing may fall back to the SPA path once the response is committed;
+      // tear the socket down instead of leaving the request hanging.
+      res.destroy();
+      return true;
+    }
     return false;
+  } finally {
+    if (handle) await handle.close();
   }
 }
 

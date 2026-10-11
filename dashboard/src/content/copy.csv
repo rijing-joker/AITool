@@ -275,6 +275,15 @@ leaderboard.profile.nav.back,dashboard,LeaderboardProfilePage,Header,nav_back,"L
 leaderboard.profile.nav.download,dashboard,LeaderboardProfilePage,Header,nav_download,"Download",Shown only to browser visitors without the app,active
 leaderboard.profile.hero.rank_label,dashboard,LeaderboardProfilePage,Hero,rank_label,"Rank",,active
 leaderboard.title,dashboard,LeaderboardPage,LeaderboardPage,title,"Leaderboard",,active
+limits.settings.enable_all,dashboard,SettingsPage,LimitsSettingsPanel,action,"Enable all",,active
+limits.settings.disable_all,dashboard,SettingsPage,LimitsSettingsPanel,action,"Disable all",,active
+limits.settings.bulk_visibility,dashboard,SettingsPage,LimitsSettingsPanel,label,"Provider visibility",,active
+limits.settings.enabled_count,dashboard,SettingsPage,LimitsSettingsPanel,detail,"{{enabled}} / {{total}} providers enabled",,active
+limits.zcode.start_grants,dashboard,LimitsPage,UsageLimitsPanel,label,"Start Plan",,active
+limits.zcode.grant_amount,dashboard,LimitsPage,UsageLimitsPanel,detail,"{{remaining}} / {{total}} tokens remaining",,active
+limits.zcode.reset_bank.title,dashboard,LimitsPage,UsageLimitsPanel,label,"Quota resets",,active
+limits.zcode.reset_bank.count,dashboard,LimitsPage,UsageLimitsPanel,detail,"{{count}} available",,active
+limits.zcode.reset_bank.earliest,dashboard,LimitsPage,UsageLimitsPanel,detail,"Earliest expiry: {{time}}",,active
 leaderboard.range,dashboard,LeaderboardPage,LeaderboardPage,range,"UTC {{period}} · {{from}} – {{to}}",,active
 leaderboard.range_loading,dashboard,LeaderboardPage,LeaderboardPage,range_loading,"UTC {{period}} · …",,active
 leaderboard.range.total,dashboard,LeaderboardPage,LeaderboardPage,range_total,"All time",,active
@@ -522,6 +531,15 @@ settings.appearance.token_unit.chinese,ui,SettingsPage,SettingsPage,token_unit_c
 settings.appearance.token_grouping.label,ui,SettingsPage,SettingsPage,token_grouping_label,"Number grouping",,active
 settings.appearance.token_grouping.hint,ui,SettingsPage,SettingsPage,token_grouping_hint,"Exact numbers use 3-digit or Chinese 4-digit grouping. Compact tooltips follow this setting.",,active
 settings.appearance.token_grouping.thousand,ui,SettingsPage,SettingsPage,token_grouping_thousand,"3-digit",,active
+settings.appearance.quota_display.label,ui,SettingsPage,SettingsPage,quota_display_label,"Quota display",,active
+settings.appearance.quota_display.hint,ui,SettingsPage,SettingsPage,quota_display_hint,"Show what is left or what is used in the plan quota windows. Colors and warnings always track what is left.",,active
+settings.appearance.quota_display.left,ui,SettingsPage,SettingsPage,quota_display_left,"Left",,active
+settings.appearance.quota_display.used,ui,SettingsPage,SettingsPage,quota_display_used,"Used",,active
+pswitch.quota.used,pswitch,ProviderSwitchPage,ProviderQuotaLine,quota_used,"{{value}}% used",,active
+pswitch.search.toggle_aria,pswitch,ProviderSwitchPage,ProviderSwitchPage,search_toggle,"Search providers",,active
+pswitch.search.placeholder,pswitch,ProviderSwitchPage,ProviderSwitchPage,search_placeholder,"Search by name, notes or API address…",,active
+pswitch.search.aria,pswitch,ProviderSwitchPage,ProviderSwitchPage,search_aria,"Filter providers",,active
+pswitch.search.empty,pswitch,ProviderSwitchPage,ProviderSwitchPage,search_empty,"No provider matches this search.",,active
 settings.appearance.token_grouping.wan,ui,SettingsPage,SettingsPage,token_grouping_wan,"4-digit",,active
 settings.appearance.currency.opt.usd,ui,SettingsPage,SettingsPage,currency_opt_usd,"USD ($)",,active
 settings.appearance.currency.opt.eur,ui,SettingsPage,SettingsPage,currency_opt_eur,"EUR (€)",,active
@@ -1585,6 +1603,12 @@ subscriptions.form.provider_required,ui,LimitsPage,SubscriptionSettingsCard,form
 subscriptions.form.provider_taken,ui,LimitsPage,SubscriptionSettingsCard,form_provider_taken,"This tool already has a subscription. Edit the existing record instead.",,active
 subscriptions.form.provider_taken_suffix,ui,LimitsPage,SubscriptionSettingsCard,form_provider_taken_suffix,"(already subscribed)",,active
 limits.page.openSubscriptions,ui,LimitsPage,LimitsPage,open_subscriptions,"Subscriptions",,active
+limits.page.refresh,ui,LimitsPage,LimitsPage,refresh,"Refresh limits",,active
+limits.page.refresh_loading,ui,LimitsPage,LimitsPage,refresh_loading,"Refreshing limits…",,active
+limits.page.refreshed_at,ui,LimitsPage,LimitsPage,refreshed_at,"Limits updated {{time}}",,active
+limits.page.refresh_failed,ui,LimitsPage,LimitsPage,refresh_failed,"Couldn't refresh limits.",,active
+limits.page.refresh_partial,ui,LimitsPage,LimitsPage,refresh_partial,"Limits refreshed {{time}}, but some data still comes from cache or failed to update.",,active
+limits.page.refresh_stale,ui,LimitsPage,LimitsPage,refresh_stale,"Refresh finished, but every provider still reports cached or failed data.",,active
 limits.provider.ark_coding_plan,ui,LimitsPage,UsageLimitsPanel,provider_ark_coding_plan,"Ark Coding Plan",,active
 limits.label.ark_coding_plan_5h,ui,LimitsPage,UsageLimitsPanel,ark_coding_plan_5h,"5h",,active
 limits.label.ark_coding_plan_weekly,ui,LimitsPage,UsageLimitsPanel,ark_coding_plan_weekly,"Weekly",,active
@@ -2010,6 +2034,14 @@ proxy.creds.openDirectory,proxy,ProxyPage,Proxy,creds_openDirectory,"Open Folder
 proxy.creds.import,proxy,ProxyPage,Proxy,creds_import,"Import",,active
 proxy.creds.uploaded,proxy,ProxyPage,Proxy,creds_uploaded,"Uploaded {{count}} authentication files",,active
 proxy.creds.uploadFailed,proxy,ProxyPage,Proxy,creds_uploadFailed,"{{count}} files failed to upload: {{errors}}",,active
+proxy.creds.vertex.button,proxy,ProxyPage,Proxy,creds_vertexButton,"Vertex service account",,active
+proxy.creds.vertex.description,proxy,ProxyPage,Proxy,creds_vertexDescription,"Import a Vertex service-account JSON; the core validates it and creates the auth record.",,active
+proxy.creds.vertex.location,proxy,ProxyPage,Proxy,creds_vertexLocation,"Location",,active
+proxy.creds.vertex.locationPlaceholder,proxy,ProxyPage,Proxy,creds_vertexLocationPlaceholder,"Optional region, e.g. us-central1",,active
+proxy.creds.vertex.pickFile,proxy,ProxyPage,Proxy,creds_vertexPickFile,"Pick service-account JSON",,active
+proxy.creds.vertex.hint,proxy,ProxyPage,Proxy,creds_vertexHint,"Picking a file imports it immediately.",,active
+proxy.creds.vertex.invalidFile,proxy,ProxyPage,Proxy,creds_vertexInvalidFile,"Choose a .json file containing a service-account object.",,active
+proxy.creds.vertex.imported,proxy,ProxyPage,Proxy,creds_vertexImported,"Imported {{project}}{{email}}",,active
 proxy.creds.deleted,proxy,ProxyPage,Proxy,creds_deleted,"Authentication file deleted",,active
 proxy.creds.deleteConfirm,proxy,ProxyPage,Proxy,creds_deleteConfirm,"Delete “{{name}}”?",,active
 proxy.creds.copyName,proxy,ProxyPage,Proxy,creds_copyName,"Copy file name",,active
@@ -2301,6 +2333,7 @@ quota.percent,ui,QuotaWidget,QuotaWidget,percent,"%",,active
 quota.reset_in,ui,QuotaWidget,QuotaWidget,reset_in,"Resets in {{time}}",,active
 quota.close,ui,QuotaWidget,QuotaWidget,close,"Close widget",,active
 quota.close_hint,ui,QuotaWidget,QuotaWidget,close_hint,"Close widget; reopen from the tray menu",,active
+provider.display.workbuddy_ai,shared,*,*,name,"WorkBuddy AI",,active
 nav.provider_switch,pswitch,ProviderSwitchPage,Sidebar,nav_provider_switch,Provider Configs,,active
 nav.cli_sessions,clisessions,CliSessionsPage,Sidebar,nav_cli_sessions,CLI Sessions,,active
 clisessions.title,clisessions,CliSessionsPage,CliSessionsPage,title,CLI Sessions,,active
@@ -2339,6 +2372,7 @@ pswitch.switch.confirm_desc,pswitch,ProviderSwitchPage,ProviderSwitchPage,switch
 pswitch.action.add,pswitch,ProviderSwitchPage,ProviderSwitchPage,action_add,Add provider,,active
 pswitch.action.edit,pswitch,ProviderSwitchPage,ProviderSwitchPage,action_edit,Edit,,active
 pswitch.action.delete,pswitch,ProviderSwitchPage,ProviderSwitchPage,action_delete,Delete,,active
+pswitch.action.duplicate,pswitch,ProviderSwitchPage,ProviderSwitchPage,action_duplicate,Duplicate,,active
 pswitch.action.save,pswitch,ProviderSwitchPage,ProviderSwitchPage,action_save,Save,,active
 pswitch.action.cancel,pswitch,ProviderSwitchPage,ProviderSwitchPage,action_cancel,Cancel,,active
 pswitch.action.restore,pswitch,ProviderSwitchPage,ProviderSwitchPage,action_restore,Restore,,active
@@ -2434,6 +2468,7 @@ pswitch.quota.tier.weekly,pswitch,ProviderSwitchPage,ProviderQuotaLine,quota_tie
 pswitch.quota.tier.monthly,pswitch,ProviderSwitchPage,ProviderQuotaLine,quota_tier_monthly,"Monthly",,active
 pswitch.quota.credits,pswitch,ProviderSwitchPage,ProviderQuotaLine,quota_credits,"Credits {{value}}",,active
 pswitch.quota.credits_breakdown,pswitch,ProviderSwitchPage,ProviderQuotaLine,quota_credits_breakdown,"Monthly {{monthly}} · Purchased {{purchased}} · Free {{free}}",,active
+pswitch.quota.balance,pswitch,ProviderSwitchPage,ProviderQuotaLine,quota_balance,"{{label}} balance {{value}} {{unit}}",,active
 pswitch.failover.off,pswitch,ProviderSwitchPage,FailoverBar,failover_off,"Failover monitoring is off: providers that keep failing get cooled down and a switch is suggested.",,active
 pswitch.failover.settings,pswitch,ProviderSwitchPage,FailoverBar,failover_settings,"Failover settings",,active
 pswitch.failover.health,pswitch,ProviderSwitchPage,FailoverBar,failover_health,"Last {{window}}m: {{requests}} requests · {{failed}} failed ({{ratePct}}%)",,active
@@ -2504,6 +2539,8 @@ pswitch.codex.config_toml,pswitch,ProviderSwitchPage,ProviderEditDialog,codex_co
 pswitch.field.model,pswitch,ProviderSwitchPage,ProviderEditDialog,model,Model,,active
 pswitch.field.model_hint,pswitch,ProviderSwitchPage,ProviderEditDialog,model_hint,Leave empty to use the relay's default model.,,active
 pswitch.catalog.title,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_title,Model mapping,,active
+pswitch.catalog.official.no_cli,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_official_no_cli,"The official GPT model list is unavailable: no Codex CLI was found on this machine. GPT rows fall back to the built-in template.",,active
+pswitch.catalog.official.failed,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_official_failed,"The official GPT model list is unavailable: the Codex CLI ran but returned no usable list. GPT rows fall back to the built-in template.",,active
 pswitch.catalog.hint,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_hint,"Rows generate the Codex model catalog file (model_catalog_json): the /model menu lists these models with their display names, context windows, and reasoning levels. Leave empty to skip the catalog.",,active
 pswitch.catalog.col_instructions,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_col_instructions,"System prompt (optional)",,active
 pswitch.catalog.instructions_set,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_instructions_set,"System prompt: set",,active
@@ -2570,6 +2607,27 @@ pswitch.conflict.keep_theirs,pswitch,ProviderSwitchPage,ProviderEditDialog,confl
 pswitch.provider.created,pswitch,ProviderSwitchPage,ProviderEditDialog,created,"Added ""{{name}}"".",,active
 pswitch.provider.drag_handle,pswitch,ProviderSwitchPage,ProviderEditDialog,drag_handle,Drag to reorder {{name}},,active
 pswitch.provider.imported,pswitch,ProviderSwitchPage,ProviderEditDialog,imported,"Imported ""{{name}}"" from the live config.",,active
+pswitch.provider.duplicated,pswitch,ProviderSwitchPage,ProviderSwitchPage,provider_duplicated,"Duplicated to {{name}}",,active
+pswitch.env.title,pswitch,ProviderSwitchPage,ProviderEnvBanner,env_title,"{{count}} environment variable(s) may override the switched configs",,active
+pswitch.env.hint,pswitch,ProviderSwitchPage,ProviderEnvBanner,env_hint,"These variables are exported in your shell profiles or system environment and take precedence over the config files. Remove them (a backup is created automatically) or the switch may not take effect.",,active
+pswitch.env.select,pswitch,ProviderSwitchPage,ProviderEnvBanner,env_select,"Select {{name}}",,active
+pswitch.env.remove_selected,pswitch,ProviderSwitchPage,ProviderEnvBanner,env_remove,"Remove selected ({{count}})",,active
+pswitch.env.restore,pswitch,ProviderSwitchPage,ProviderEnvBanner,env_restore,"Restore from backup",,active
+pswitch.env.deleted,pswitch,ProviderSwitchPage,ProviderEnvBanner,env_deleted,"Removed {{count}} variable(s); a backup was saved",,active
+pswitch.env.restored,pswitch,ProviderSwitchPage,ProviderEnvBanner,env_restored,"Restored {{count}} variable(s) from the backup",,active
+pswitch.env.system_hint,pswitch,ProviderSwitchPage,ProviderEnvBanner,env_system_hint,"{{count}} more come from the running process environment — restart the CLI from a fixed shell to clear them.",,active
+pswitch.env.dismiss,pswitch,ProviderSwitchPage,ProviderEnvBanner,env_dismiss,Dismiss,,active
+pswitch.env.confirm_title,pswitch,ProviderSwitchPage,ProviderEnvBanner,env_confirm_title,"Remove {{count}} environment variable(s)?",,active
+pswitch.env.confirm_message,pswitch,ProviderSwitchPage,ProviderEnvBanner,env_confirm_message,"The selected lines are deleted from your shell profiles. A JSON backup is saved first and can be restored from this banner.",,active
+pswitch.skills.tab,pswitch,ProviderSwitchPage,ProviderSkillsPanel,skills_tab,Skills,,active
+pswitch.skills.title,pswitch,ProviderSwitchPage,ProviderSkillsPanel,skills_title,"Skills ({{count}})",,active
+pswitch.skills.subtitle,pswitch,ProviderSwitchPage,ProviderSkillsPanel,skills_subtitle,"One list of skills discovered in your agents\\" skills directories; toggles link (or copy) each skill into the app\\"s skills folder.",,active
+pswitch.skills.search,pswitch,ProviderSwitchPage,ProviderSkillsPanel,skills_search,Search skills…,,active
+pswitch.skills.import,pswitch,ProviderSwitchPage,ProviderSkillsPanel,skills_import,Rescan directories,,active
+pswitch.skills.imported,pswitch,ProviderSwitchPage,ProviderSkillsPanel,skills_imported,"Discovered {{count}} skills",,active
+pswitch.skills.empty,pswitch,ProviderSwitchPage,ProviderSkillsPanel,skills_empty,"No skills found yet. Install one (e.g. under ~/.agents/skills) and rescan.",,active
+pswitch.skills.no_match,pswitch,ProviderSwitchPage,ProviderSkillsPanel,skills_no_match,No skills match the search.,,active
+pswitch.skills.loading,pswitch,ProviderSwitchPage,ProviderSkillsPanel,skills_loading,Loading skills…,,active
 pswitch.provider.loading_live,pswitch,ProviderSwitchPage,ProviderEditDialog,loading_live,Reading the live config files…,,active
 pswitch.provider.notes,pswitch,ProviderSwitchPage,ProviderEditDialog,notes,Notes,,active
 pswitch.provider.preset_no_fields,pswitch,ProviderSwitchPage,ProviderEditDialog,preset_no_fields,This preset has no fields to fill in.,,active
@@ -2809,7 +2867,7 @@ sessions.sort.recent,ui,SessionsPage,SessionInsights,recent,Recent,,active
 sessions.sort.cost,ui,SessionsPage,SessionInsights,cost,Highest cost,,active
 sessions.sort.tokens,ui,SessionsPage,SessionInsights,tokens,Most tokens,,active
 sessions.summary.count,ui,SessionsPage,SessionInsights,count,Matching sessions,,active
-sessions.summary.scope,ui,SessionsPage,SessionInsights,scope,"Full-session usage for matched sessions and subagents, each counted once. Dates select overlapping sessions; models select whole sessions.",,active
+sessions.summary.scope,ui,SessionsPage,SessionInsights,scope,"Token and cost totals use the selected dates for sessions with timestamped usage. Sessions without usage buckets retain lifetime totals. Turn, duration and performance metrics describe the full session. Each session and subagent is counted once.",,active
 sessions.summary.speed,ui,SessionsPage,SessionInsights,speed,Estimated speed,,active
 sessions.performance.speed,ui,SessionsPage,SessionInsights,speed,≈{{speed}} tok/s,,active
 sessions.performance.samples,ui,SessionsPage,SessionInsights,samples,{{count}} timed requests,,active
@@ -2871,3 +2929,8 @@ sessions.detail.resume_command,ui,SessionsPage,SessionDetailModal,resume_command
 sessions.performance.first_response_value_single,ui,SessionsPage,SessionDetailModal,first_response_single,{{seconds}}s · {{count}} sample,,active
 proxy.alias.aliasName.sharedParameters,proxy,ProxyPage,ModelAliasesTab,sharedParameters,Reasoning and Fast settings also affect {{count}} other mappings named the same on {{protocol}}.,,active
 proxy.alias.source.keyScope,proxy,ProxyPage,ModelAliasesTab,keyScope,Key {{index}},,active
+sessions.storage.label,dashboard,SessionsPage,SessionRow,storage,"Transcript: {{size}}",,active
+sessions.storage.tooltip,dashboard,SessionsPage,SessionRow,storage,"Session files only · {{metric}} · {{ratio}} bytes per 1K lifetime tokens. Shared databases, caches and project files are excluded.",,active
+sessions.storage.allocated,dashboard,SessionsPage,SessionRow,storage,"allocated bytes",,active
+sessions.storage.logical,dashboard,SessionsPage,SessionRow,storage,"logical file size",,active
+sessions.storage.size,dashboard,SessionsPage,SessionRow,storage_size,"{{value}} MiB",,active

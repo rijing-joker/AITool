@@ -83,3 +83,32 @@ it.each(["succeeds", "fails"])("auto failover can run again after an evaluation 
   fireEvent.focus(window);
   await waitFor(() => expect(providerSwitchApi.runFailoverEvaluation).toHaveBeenCalledTimes(2));
 });
+
+it("the provider search resets when the app tab changes and matches website URLs", async () => {
+  providerSwitchApi.getStatus.mockResolvedValue({
+    apps: [
+      { app: "claude", current: null, providers: [
+        { id: "p1", name: "Alpha Relay", notes: "", websiteUrl: "https://relay.example.com", settingsConfig: { env: {} } },
+      ] },
+      { app: "codex", current: null, providers: [
+        { id: "p2", name: "Beta Relay", notes: "", websiteUrl: "https://other.example.com", settingsConfig: {} },
+      ] },
+    ],
+    visibleApps: {},
+    storagePath: "/tmp/x",
+  });
+  render(<MemoryRouter><ProviderSwitchPage /></MemoryRouter>);
+  await waitFor(() => expect(screen.getByText("pswitch.section.providers")).toBeTruthy());
+
+  fireEvent.click(screen.getByRole("button", { name: "pswitch.search.toggle_aria" }));
+  const input = screen.getByLabelText("pswitch.search.aria");
+  fireEvent.change(input, { target: { value: "relay.example.com" } });
+  expect(screen.getByText("Alpha Relay")).toBeTruthy();
+  expect(screen.queryByText("Beta Relay")).toBeNull();
+
+  // Switching the app tab closes the panel and clears the filter (cc-switch
+  // behavior): the codex list renders unfiltered with the search UI gone.
+  fireEvent.click(screen.getByRole("tab", { name: "pswitch.tab.codex" }));
+  await waitFor(() => expect(screen.getByText("Beta Relay")).toBeTruthy());
+  expect(screen.queryByLabelText("pswitch.search.aria")).toBeNull();
+});

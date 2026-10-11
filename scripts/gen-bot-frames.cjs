@@ -39,28 +39,32 @@ const MENUBAR_FPS = 24;
 
 /** Bundle the TypeScript engine into something require() can load. */
 function loadEngine() {
-  const entry = path.join(os.tmpdir(), `bot-engine-entry-${process.pid}.mjs`);
-  const bundle = path.join(os.tmpdir(), `bot-engine-${process.pid}.cjs`);
-  fs.writeFileSync(
-    entry,
-    [
-      `export { BotEngine } from ${JSON.stringify(path.join(ROOT, "dashboard/src/lib/bot/engine.ts"))}`,
-      `export { STATES, STATE_BY_ID } from ${JSON.stringify(path.join(ROOT, "dashboard/src/lib/bot/states.ts"))}`,
-      `export { SHAPE_BY_ID, COLOR_BY_ID } from ${JSON.stringify(path.join(ROOT, "dashboard/src/lib/bot/skins.ts"))}`,
-      `export { EXPRESSION_BY_ID } from ${JSON.stringify(path.join(ROOT, "dashboard/src/lib/bot/expressions.ts"))}`,
-      `export { RAYON, DEMI_VIEWBOX } from ${JSON.stringify(path.join(ROOT, "dashboard/src/lib/bot/repere.ts"))}`,
-      `export * from ${JSON.stringify(path.join(ROOT, "dashboard/src/lib/bot-appearance.js"))}`,
-    ].join("\n"),
-  );
-  execFileSync(
-    path.join(ROOT, "node_modules/.bin/esbuild"),
-    [entry, "--bundle", "--platform=node", "--format=cjs", "--log-level=warning", `--outfile=${bundle}`],
-    { stdio: "inherit" },
-  );
-  const loaded = require(bundle);
-  fs.rmSync(entry, { force: true });
-  fs.rmSync(bundle, { force: true });
-  return loaded;
+  // mkdtemp instead of PID names: parallel builds must not delete each
+  // other's in-flight bundle, and the finally block removes the whole dir.
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-bot-engine-"));
+  const entry = path.join(tempDir, "entry.mjs");
+  const bundle = path.join(tempDir, "engine.cjs");
+  try {
+    fs.writeFileSync(
+      entry,
+      [
+        `export { BotEngine } from ${JSON.stringify(path.join(ROOT, "dashboard/src/lib/bot/engine.ts"))}`,
+        `export { STATES, STATE_BY_ID } from ${JSON.stringify(path.join(ROOT, "dashboard/src/lib/bot/states.ts"))}`,
+        `export { SHAPE_BY_ID, COLOR_BY_ID } from ${JSON.stringify(path.join(ROOT, "dashboard/src/lib/bot/skins.ts"))}`,
+        `export { EXPRESSION_BY_ID } from ${JSON.stringify(path.join(ROOT, "dashboard/src/lib/bot/expressions.ts"))}`,
+        `export { RAYON, DEMI_VIEWBOX } from ${JSON.stringify(path.join(ROOT, "dashboard/src/lib/bot/repere.ts"))}`,
+        `export * from ${JSON.stringify(path.join(ROOT, "dashboard/src/lib/bot-appearance.js"))}`,
+      ].join("\n"),
+    );
+    execFileSync(
+      path.join(ROOT, "node_modules/.bin/esbuild"),
+      [entry, "--bundle", "--platform=node", "--format=cjs", "--log-level=warning", `--outfile=${bundle}`],
+      { stdio: "inherit" },
+    );
+    return require(bundle);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
 }
 
 const round = (value, digits) => {

@@ -15,6 +15,7 @@ const REQUIRED_COLUMNS = ["key", "module", "page", "component", "slot", "text"];
 // and model names, protocol abbreviations, or formatting-only labels. Keep
 // this key-based so a newly added English sentence cannot silently pass.
 const SOURCE_IDENTICAL_KEY_ALLOWLIST = [
+  /^sessions[.]storage[.]size$/, // MiB is an international unit symbol.
   /^landing[.]install[.]command$/,
   /^(landing|share)[.]meta[.]/,
   /^landing[.]cta[.]secondary$/,
@@ -32,7 +33,7 @@ const SOURCE_IDENTICAL_KEY_ALLOWLIST = [
   /^limits[.]provider[.]/,
   /^limits[.]agentPlan[.]setupHint[.]snippet_install$/,
   /^limits[.]commandCode[.]setupHint[.]snippet_(?:login|login_windows|env_windows|read|export|setenv)$/,
-  /^provider[.]display[.](?:omp|omo|minimax_code|command_code|deepseek_harness|cline|trae)$/,
+  /^provider[.]display[.](?:omp|omo|minimax_code|command_code|deepseek_harness|cline|trae|workbuddy_ai)$/,
   /^limits[.]label[.](?:cursor_api|zcode_glm52|zcode_glm5t|claude_opus|codex_spark_[57][hd]|gemini_(?:pro|flash|lite)|antigravity_)/,
   /^skills[.]mode[.]skillssh$/,
   // File names and Codex's official prompt text must stay verbatim.

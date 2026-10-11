@@ -9,7 +9,8 @@ const crypto = require("node:crypto");
 const { physicalJsonlRecords } = require("./jsonl-lines");
 const codexFiles = require("./codex-rollout-file");
 const { parseRolloutIncremental, parseClaudeIncremental, codexSessionIdFromPath } = require("./rollout");
-const KEYS = { codex: "codexCacheWriteRepair_2026_10_v1", claude: "claudeCacheTtlRepair_2026_10_v1" };
+// v2 also repairs relays whose reported totals place writes outside input.
+const KEYS = { codex: "codexCacheWriteRepair_2026_10_v2", claude: "claudeCacheTtlRepair_2026_10_v1" };
 const JOURNAL = "cache-history-repair.pending.json";
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const digest = (value) => crypto.createHash("sha256").update(value).digest("hex");

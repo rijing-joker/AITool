@@ -45,6 +45,13 @@ export type ProviderSwitchApp =
   | "pi"
   | "grokbuild";
 
+export interface ProviderSwitchEnvConflict {
+  varName: string;
+  varValue: string;
+  sourceType: "system" | "file";
+  sourcePath: string;
+}
+
 export interface ProviderSwitchProvider {
   id: string;
   name: string;
@@ -198,6 +205,7 @@ export interface ProviderSwitchEditorView {
   envText?: string;
   configText?: string;
   slotKey?: string;
+  codexOfficialModelsReason?: "noCli" | "failed" | null;
 }
 
 export const piPromptFilesApi = {
@@ -340,6 +348,7 @@ export const providerSwitchApi = {
     apiKey?: string;
     modelsUrl?: string;
     isFullUrl?: boolean;
+    requestHeaders?: string;
   }): Promise<{ ok: true; url: string; models: string[] }> {
     return mutate("/api/provider-switch/fetch-models", "POST", payload);
   },
@@ -349,6 +358,32 @@ export const providerSwitchApi = {
       `/api/provider-switch/providers/${encodeURIComponent(id)}?app=${encodeURIComponent(app)}`,
       "DELETE",
     );
+  },
+
+  duplicateProvider(
+    app: ProviderSwitchApp,
+    id: string,
+  ): Promise<{ ok: true; provider: ProviderSwitchProvider }> {
+    return mutate("/api/provider-switch/providers/duplicate", "POST", { app, id });
+  },
+
+  checkEnvConflicts(): Promise<{
+    ok: true;
+    conflicts: Record<string, ProviderSwitchEnvConflict[]>;
+  }> {
+    return get("/api/provider-switch/env-conflicts");
+  },
+
+  deleteEnvConflicts(
+    conflicts: ProviderSwitchEnvConflict[],
+  ): Promise<{ ok: true; backupPath: string; deleted: number; failed: string[] }> {
+    return mutate("/api/provider-switch/env-conflicts/delete", "POST", { conflicts });
+  },
+
+  restoreEnvConflicts(
+    backupPath: string,
+  ): Promise<{ ok: true; restored: number; failed: string[] }> {
+    return mutate("/api/provider-switch/env-conflicts/restore", "POST", { backupPath });
   },
 
   switchProvider(
@@ -539,5 +574,39 @@ export const promptsApi = {
 
   import(app: PromptAppId): Promise<PromptMutationResult> {
     return mutate("/api/provider-switch/prompts/import", "POST", { app });
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Skills (cc-switch services/skill.rs, v1)
+// ---------------------------------------------------------------------------
+
+export interface ProviderSwitchSkill {
+  id: string;
+  name: string;
+  description: string;
+  sourceDir: string;
+  apps: Record<string, boolean>;
+}
+
+export const skillsApi = {
+  list(): Promise<{ ok: true; skills: ProviderSwitchSkill[]; apps: ProviderSwitchApp[] }> {
+    return get("/api/provider-switch/skills");
+  },
+
+  import(): Promise<{ ok: true; skills: ProviderSwitchSkill[]; discovered: number }> {
+    return mutate("/api/provider-switch/skills/import", "POST", {});
+  },
+
+  toggle(
+    id: string,
+    app: ProviderSwitchApp,
+    enabled: boolean,
+  ): Promise<{ ok: true; skills: ProviderSwitchSkill[]; failures: string[] }> {
+    return mutate("/api/provider-switch/skills/toggle", "POST", { id, app, enabled });
+  },
+
+  sync(apps?: ProviderSwitchApp[]): Promise<{ ok: true; failures: string[] }> {
+    return mutate("/api/provider-switch/skills/sync", "POST", { apps });
   },
 };

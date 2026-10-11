@@ -197,9 +197,9 @@ function buildLiveBackfill(store, app, liveContent) {
     kind: "backup",
     prompt: {
       id: `backup-${now.getTime()}`,
-      name: `原始提示词 ${formatStamp(now)}`,
+      name: `Original prompt ${formatStamp(now)}`,
       content: liveContent,
-      description: "自动备份的原始提示词",
+      description: "Automatically backed-up original prompt",
       enabled: false,
       createdAt: now.toISOString(),
       updatedAt: now.toISOString(),
@@ -373,7 +373,7 @@ async function deletePrompt(app, id) {
     const prompts = store.apps[app];
     const target = prompts.find((prompt) => prompt.id === cleanId);
     if (!target) return undefined;
-    if (target.enabled) throw new Error("无法删除已启用的提示词");
+    if (target.enabled) throw new Error("Cannot delete an enabled prompt");
     store.apps[app] = prompts.filter((prompt) => prompt.id !== cleanId);
     return store;
   });
@@ -387,13 +387,13 @@ async function importFromFile(app) {
   requireApp(app);
   const filePath = promptFilePath(app);
   const live = await readLiveFile(filePath);
-  if (live === null) throw new Error("提示词文件不存在");
+  if (live === null) throw new Error("Prompt file not found");
   const now = new Date();
   const record = {
     id: `imported-${now.getTime()}`,
-    name: `导入的提示词 ${formatStamp(now)}`,
+    name: `Imported prompt ${formatStamp(now)}`,
     content: live,
-    description: "从现有配置文件导入",
+    description: "Imported from the existing config file",
     enabled: false,
     createdAt: now.toISOString(),
     updatedAt: now.toISOString(),
@@ -419,7 +419,7 @@ async function projectPromptsToApp(app) {
     validateContent(app, enabled[0].content);
     await writeLiveFile(app, promptFilePath(app), enabled[0].content);
     const warning = enabled.length > 1
-      ? `多个 Prompt 同时启用，已按稳定顺序投影第一个: ${enabled.map((prompt) => prompt.id).join(", ")}`
+      ? `Multiple prompts are enabled; projecting the first in stable order: ${enabled.map((prompt) => prompt.id).join(", ")}`
       : null;
     result = { projected: true, warning };
   });

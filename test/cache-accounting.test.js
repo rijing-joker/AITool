@@ -18,14 +18,17 @@ async function fixture(t) {
 }
 const readRows = async (file) => (await fs.readFile(file, "utf8")).trim().split("\n").filter(Boolean).map(JSON.parse);
 
-test("Codex scanner and reader partition cache writes without billing reasoning twice", async (t) => {
+for (const separateWrites of [false, true]) {
+test(`Codex scanner and reader partition ${separateWrites ? "separate" : "inclusive"} cache writes without billing reasoning twice`, async (t) => {
   const home = await fixture(t);
   const root = path.join(home, ".codex", "sessions");
   await fs.mkdir(root, { recursive: true });
   const sourcePath = path.join(root, "rollout-11111111-1111-4111-8111-111111111111.jsonl");
-  const raw = { input_tokens: 1000, cached_input_tokens: 300, cache_write_input_tokens: 600, output_tokens: 50, reasoning_output_tokens: 20, total_tokens: 1050 };
-  assert.equal(normalizeCodexUsage(raw).input_tokens, 100);
-  assert.equal(normalizeCodexUsage(raw).total_tokens, 1050);
+  const freshInput = separateWrites ? 700 : 100;
+  const total = separateWrites ? 1650 : 1050;
+  const raw = { input_tokens: 1000, cached_input_tokens: 300, cache_write_input_tokens: 600, output_tokens: 50, reasoning_output_tokens: 20, total_tokens: total };
+  assert.equal(normalizeCodexUsage(raw).input_tokens, freshInput);
+  assert.equal(normalizeCodexUsage(raw).total_tokens, total);
   assert.deepEqual(normalizeCodexUsage({ ...raw, cache_write_input_tokens: undefined, cache_creation_input_tokens: 600 }), normalizeCodexUsage(raw));
   await fs.writeFile(sourcePath, [
     { type: "session_meta", payload: { id: "cache-test" } },
@@ -36,16 +39,18 @@ test("Codex scanner and reader partition cache writes without billing reasoning 
   const cursors = {};
   await parseRolloutIncremental({ rolloutFiles: [sourcePath], cursors, queuePath });
   const rows = await readRows(queuePath);
-  assert.equal(rows.at(-1).input_tokens, 100);
+  assert.equal(rows.at(-1).input_tokens, freshInput);
   assert.equal(rows.at(-1).cache_creation_input_tokens, 600);
-  assert.equal(rows.at(-1).total_tokens, 1050);
+  assert.equal(rows.at(-1).total_tokens, total);
   await parseRolloutIncremental({ rolloutFiles: [sourcePath], cursors, queuePath });
   assert.deepEqual(await readRows(queuePath), rows);
   const { usage } = await readSession({ app: "codex", home, sourcePath });
-  assert.equal(usage.inputTokens, 1000);
+  assert.equal(usage.inputTokens, freshInput);
+  assert.equal(usage.inputInclusive, false);
   assert.equal(usage.cacheCreationTokens, 600);
-  assert.equal(usage.totalTokens, 1050);
+  assert.equal(usage.totalTokens, total);
 });
+}
 
 test("Claude TTL subset survives queues, projects, sessions and ground truth without increasing totals", async (t) => {
   const home = await fixture(t);

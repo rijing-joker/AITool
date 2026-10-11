@@ -392,9 +392,12 @@ test("session usage: claude dedupes retries, codex takes the last cumulative cou
     JSON.stringify({ timestamp: "2026-10-01T11:00:20Z", type: "event_msg", payload: { type: "token_count", info: { total_token_usage: { input_tokens: 300, cached_input_tokens: 140, output_tokens: 90, reasoning_output_tokens: 40, total_tokens: 390 } } } }),
   ].join("\n") + "\n");
   const codex = await sessions.readSession({ app: "codex", sourcePath: codexPath, home: tmpHome });
+  // Rows are pre-folded to the queue contract: fresh input = raw 300 − 140
+  // cached reads (inputInclusive false — the writes, when a rollout reports
+  // any, ride in cacheCreationTokens outside input).
   assert.deepEqual(
     { inputTokens: codex.usage.inputTokens, cacheReadTokens: codex.usage.cacheReadTokens, outputTokens: codex.usage.outputTokens, reasoningTokens: codex.usage.reasoningTokens, totalTokens: codex.usage.totalTokens, model: codex.usage.model, inputInclusive: codex.usage.inputInclusive, durationMs: codex.usage.durationMs },
-    { inputTokens: 300, cacheReadTokens: 140, outputTokens: 90, reasoningTokens: 40, totalTokens: 390, model: "gpt-5.2", inputInclusive: true, durationMs: 20000 },
+    { inputTokens: 160, cacheReadTokens: 140, outputTokens: 90, reasoningTokens: 40, totalTokens: 390, model: "gpt-5.2", inputInclusive: false, durationMs: 20000 },
   );
 
   // Gemini: per-message tokens are summed; input includes cached tokens.
@@ -444,8 +447,8 @@ test("codex attributes cumulative deltas to each model without billing duplicate
   const { usage } = await sessions.readSession({ app: "codex", sourcePath, home: tmpHome });
   assert.equal(usage.totalTokens, 390);
   assert.deepEqual(usage.perModel, [
-    { model: "gpt-b", inputTokens: 200, cacheReadTokens: 100, outputTokens: 40, reasoningTokens: 20, cacheCreationTokens: 0 },
-    { model: "gpt-a", inputTokens: 100, cacheReadTokens: 40, outputTokens: 50, reasoningTokens: 20, cacheCreationTokens: 0 },
+    { model: "gpt-b", inputTokens: 100, cacheReadTokens: 100, outputTokens: 40, reasoningTokens: 20, cacheCreationTokens: 0, cacheCreation1hTokens: 0 },
+    { model: "gpt-a", inputTokens: 60, cacheReadTokens: 40, outputTokens: 50, reasoningTokens: 20, cacheCreationTokens: 0, cacheCreation1hTokens: 0 },
   ]);
   const { estimateCostUsd } = require("../src/lib/proxy/pricing");
   const prices = { "gpt-a": { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 0 }, "gpt-b": { input: 3, output: 6, cacheRead: 0.3, cacheWrite: 0 } };
@@ -483,8 +486,8 @@ test("claude session usage keeps a per-model breakdown for mixed-model sessions"
   ]);
   const { usage } = await sessions.readSession({ app: "claude", sourcePath: filePath, home: tmpHome });
   assert.deepEqual(usage.perModel, [
-    { model: "claude-opus-4-6", inputTokens: 100, outputTokens: 50, reasoningTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 },
-    { model: "claude-haiku-4-5", inputTokens: 10, outputTokens: 5, reasoningTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 },
+    { model: "claude-opus-4-6", inputTokens: 100, outputTokens: 50, reasoningTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, cacheCreation1hTokens: 0 },
+    { model: "claude-haiku-4-5", inputTokens: 10, outputTokens: 5, reasoningTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, cacheCreation1hTokens: 0 },
   ]);
   assert.equal(usage.model, "claude-opus-4-6");
 });
@@ -768,4 +771,72 @@ test("codex associates delayed patch results by call id across ordinary tool his
   assert.equal(messages.length, rows.length);
   assert.deepEqual(messages.slice(0, 4).map((row) => row.toolCalls[0].patch.status), ["success", "failed", "pending", "pending"]);
   assert.equal(messages.filter((row) => row.toolCalls?.[0].patch).length, 4);
+});
+
+test("Claude 1h cache-write split flows into per-model usage for pricing", async () => {
+  const filePath = writeClaudeSession(tmpHome, "session-1h-cache", [
+    JSON.stringify({ type: "user", message: { role: "user", content: "hi" }, timestamp: "2026-10-03T10:00:00Z" }),
+    JSON.stringify({
+      type: "assistant",
+      message: {
+        id: "msg_1", role: "assistant", model: "claude-sonnet-5",
+        content: [{ type: "text", text: "ok" }],
+        usage: {
+          input_tokens: 100, output_tokens: 50,
+          cache_read_input_tokens: 900,
+          cache_creation_input_tokens: 1000,
+          cache_creation: { ephemeral_5m_input_tokens: 400, ephemeral_1h_input_tokens: 600 },
+        },
+      },
+      timestamp: "2026-10-03T10:00:05Z",
+    }),
+  ]);
+
+  const { usage } = await sessions.readSession({ app: "claude", sourcePath: filePath, home: tmpHome });
+  assert.equal(usage.cacheCreationTokens, 1000);
+  assert.equal(usage.cacheCreation1hTokens, 600);
+  assert.equal(usage.perModel[0].cacheCreation1hTokens, 600);
+  // The 1h share must not inflate the total: it is a subset of cache writes.
+  assert.equal(usage.totalTokens, 100 + 50 + 900 + 1000);
+});
+
+test("Codex session usage imports cache writes and falls through stub-zero cache reads", async () => {
+  // token_count info carries cumulative totals; newer Codex versions report
+  // cache writes as cache_write_input_tokens (cc-switch 4bbdbcd) and some
+  // relays stub cache fields to 0 with the real count elsewhere
+  // (cc-switch 5667b28).
+  const codexRoot = path.join(tmpHome, ".codex", "sessions", "2026", "10", "02");
+  fs.mkdirSync(codexRoot, { recursive: true });
+  const codexPath = path.join(codexRoot, "rollout-cache-write.jsonl");
+  fs.writeFileSync(codexPath, [
+    JSON.stringify({ timestamp: "2026-10-02T11:00:00Z", type: "session_meta", payload: { id: "codex-cw", cwd: "/tmp/c" } }),
+    JSON.stringify({ timestamp: "2026-10-02T11:00:01Z", type: "turn_context", payload: { model: "gpt-5.6" } }),
+    JSON.stringify({
+      timestamp: "2026-10-02T11:00:02Z", type: "event_msg",
+      payload: { type: "token_count", info: { total_token_usage: {
+        input_tokens: 1000, cached_input_tokens: 0, cache_read_input_tokens: 400,
+        cache_write_input_tokens: 300, output_tokens: 50, reasoning_output_tokens: 0, total_tokens: 1350,
+      } } },
+    }),
+  ].join("\n") + "\n");
+
+  const { usage } = await sessions.readSession({ app: "codex", sourcePath: codexPath, home: tmpHome });
+  // Rows are pre-folded to the queue contract: fresh input = raw 1000 − 400
+  // reads; the writes ride in cacheCreationTokens, outside input.
+  assert.deepEqual(
+    { inputTokens: usage.inputTokens, cacheReadTokens: usage.cacheReadTokens, outputTokens: usage.outputTokens, cacheCreationTokens: usage.cacheCreationTokens, model: usage.model, inputInclusive: usage.inputInclusive },
+    { inputTokens: 600, cacheReadTokens: 400, outputTokens: 50, cacheCreationTokens: 300, model: "gpt-5.6", inputInclusive: false },
+  );
+  assert.equal(usage.perModel[0].cacheCreationTokens, 300);
+  // The reader-header cost must bill the full fresh input at the input rate
+  // and the writes at the write rate — the inclusive branch (mirror of the
+  // Go core's subset accounting) would zero those 300 fresh-input tokens.
+  const pricing = require("../src/lib/proxy/pricing");
+  const cost = pricing.estimateCostUsd(
+    { "gpt-5.6": { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1.25 } },
+    "gpt-5.6",
+    usage.perModel[0],
+    { inputInclusive: usage.inputInclusive },
+  );
+  assert.equal(cost, (600 * 1 + 50 * 2 + 400 * 0.1 + 300 * 1.25) / 1e6);
 });

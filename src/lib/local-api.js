@@ -1064,7 +1064,17 @@ function scanClaudeProjects(projectMap) {
 // ---------------------------------------------------------------------------
 
 function json(res, data, status) {
-  res.writeHead(status || 200, { "Content-Type": "application/json" });
+  // Usage and cost payloads change on every sync, and cost is re-priced on
+  // every read (pricing is applied per request, never stored in the queue) —
+  // so a cached response can pin stale costs on screen indefinitely. WebView2
+  // caches responses that carry no freshness directive, and the dashboard's
+  // local fetch path omits `cache: "no-store"` (only the cloud path sets it).
+  // Endpoints that care already set this header by hand; do it once here so
+  // every JSON response is covered.
+  res.writeHead(status || 200, {
+    "Content-Type": "application/json",
+    "Cache-Control": "no-store",
+  });
   res.end(JSON.stringify(data));
 }
 
@@ -2473,7 +2483,7 @@ function createLocalApiHandler({ queuePath, serverVersion = null }) {
         const sessions = await buildSessionAnalytics({ force: refresh });
         const wantsCsv = url.searchParams.get("format") === "csv";
         const includeSessions = wantsCsv || ["1", "true"].includes(url.searchParams.get("include_sessions"));
-        const result = summarizeSessions(sessions, { from, to, includeSessions });
+        const result = summarizeSessions(sessions, { from, to, includeSessions, ...getTimeZoneContext(url) });
         if (wantsCsv) {
           const content = sessionsToCsv(result.sessions);
           res.statusCode = 200;
@@ -2508,7 +2518,7 @@ function createLocalApiHandler({ queuePath, serverVersion = null }) {
       try {
         const { buildSessionAnalytics, listSessionsForBrowser } = require("./session-analytics");
         const sessions = await buildSessionAnalytics({ force: refresh });
-        const result = listSessionsForBrowser(sessions, { from, to, limit });
+        const result = listSessionsForBrowser(sessions, { from, to, limit, ...getTimeZoneContext(url) });
         json(res, { from, to, ...result });
       } catch (error) {
         // Node fs errors embed the absolute path ("EACCES ... open '/Users/…'").

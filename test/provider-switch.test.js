@@ -80,6 +80,42 @@ test("provider-switch store: create / list / update / delete / current pointer",
   assert.equal(state.providers.length, 0);
 });
 
+test("provider-switch store: duplicate copies a provider next to the original (cc-switch App.tsx handleDuplicateProvider)", async () => {
+  const store = require("../src/lib/provider-switch/store");
+
+  const created = await store.createProvider("claude", {
+    name: "Relay A",
+    category: "custom",
+    settingsConfig: { env: { ANTHROPIC_BASE_URL: "https://a.example.com", ANTHROPIC_AUTH_TOKEN: "sk-1" } },
+    notes: "note",
+    websiteUrl: "https://a.example.com",
+    icon: "bot",
+    iconColor: "#123456",
+    meta: { apiFormat: "anthropic" },
+  });
+  const copy = await store.duplicateProvider("claude", created.id);
+  assert.notEqual(copy.id, created.id, "the copy gets a fresh id");
+  assert.equal(copy.name, "Relay A copy");
+  assert.deepEqual(copy.settingsConfig, created.settingsConfig);
+  assert.equal(copy.meta.apiFormat, "anthropic");
+  assert.equal(copy.notes, "note");
+  assert.equal(copy.websiteUrl, "https://a.example.com");
+  assert.equal(copy.icon, "bot");
+  assert.equal(copy.iconColor, "#123456");
+  assert.equal(copy.sortIndex, created.sortIndex + 1, "inserted right after the source");
+  const listed = await store.listProviders("claude");
+  assert.equal(listed.current, null, "the current pointer is not inherited");
+
+  // The copy is a deep clone: editing it must not touch the source.
+  copy.settingsConfig.env.ANTHROPIC_AUTH_TOKEN = "sk-2";
+  copy.meta.apiFormat = "openai_chat";
+  const reread = (await store.listProviders("claude")).providers.find((p) => p.id === created.id);
+  assert.equal(reread.settingsConfig.env.ANTHROPIC_AUTH_TOKEN, "sk-1");
+  assert.equal(reread.meta.apiFormat, "anthropic");
+
+  await assert.rejects(() => store.duplicateProvider("claude", "p_missing"), /Provider not found/);
+});
+
 // ---------------------------------------------------------------------------
 // Claude projection
 // ---------------------------------------------------------------------------
@@ -352,6 +388,126 @@ test("provider-switch codex projection: table replaced/removed, managed keys res
   assert.match(outEnvKey.configToml, /env_key = "RELAY_KEY"/);
 });
 
+test("provider-switch codex legacy base_url rows normalize into the custom route table (cc-switch 84457b510)", async () => {
+  const targets = require("../src/lib/provider-switch/targets");
+  const store = require("../src/lib/provider-switch/store");
+
+  // Selector-less row with a top-level base_url: Codex ignores that key, so
+  // the projection must fold it into [model_providers.custom] and select it.
+  const liveToml = 'model = "gpt-5"\nnotify = ["bash", "/hooks/notify.sh"]\n';
+  const legacy = {
+    category: "custom",
+    settingsConfig: {
+      auth: { OPENAI_API_KEY: "sk-relay" },
+      config: {
+        model: "gpt-5",
+        base_url: "https://relay.example.com/v1",
+        wire_api: "chat",
+      },
+    },
+  };
+  const out = targets.projectCodex({ prev: null, target: legacy, liveToml, liveAuth: {} });
+  assert.match(out.configToml, /model_provider = "custom"/);
+  assert.match(out.configToml, /\[model_providers\.custom\]/);
+  assert.match(out.configToml, /base_url = "https:\/\/relay\.example\.com\/v1"/);
+  assert.match(out.configToml, /wire_api = "chat"/, "the row's own protocol rides along");
+  const topLevelPart = out.configToml.split("[model_providers.custom]")[0];
+  assert.doesNotMatch(topLevelPart, /base_url/, "the dead top-level key is gone");
+  assert.doesNotMatch(topLevelPart, /wire_api/);
+
+  // openai_base_url is the older shape and wins over base_url.
+  const outOld = targets.projectCodex({
+    prev: null,
+    target: {
+      category: "custom",
+      settingsConfig: {
+        auth: null,
+        config: { openai_base_url: "https://old-shape.example.com/v1", base_url: "https://new-shape.example.com/v1" },
+      },
+    },
+    liveToml,
+    liveAuth: {},
+  });
+  assert.match(outOld.configToml, /base_url = "https:\/\/old-shape\.example\.com\/v1"/);
+  assert.doesNotMatch(outOld.configToml, /new-shape\.example\.com/);
+
+  // A real selector wins: the legacy keys stay untouched (upstream parity —
+  // Codex ignores them either way and the selector picks the route).
+  const floor = require("../src/lib/provider-switch/floor");
+  const selected = { model_provider: "custom", base_url: "https://ignored.example.com/v1" };
+  assert.deepEqual(floor.normalizeCodexConfig(selected), selected);
+  const openaiSelector = { model_provider: "openai", base_url: "https://ignored.example.com/v1" };
+  assert.deepEqual(floor.normalizeCodexConfig(openaiSelector), openaiSelector);
+
+  // Reserved "openai" selector carrying its own table: rewritten as custom.
+  const reserved = targets.projectCodex({
+    prev: null,
+    target: {
+      category: "custom",
+      settingsConfig: {
+        auth: null,
+        config: {
+          model_provider: "openai",
+          model_providers: { openai: { name: "Legacy", base_url: "https://legacy.example.com/v1" } },
+        },
+      },
+    },
+    liveToml,
+    liveAuth: {},
+  });
+  assert.match(reserved.configToml, /model_provider = "custom"/);
+  assert.match(reserved.configToml, /base_url = "https:\/\/legacy\.example\.com\/v1"/);
+  assert.match(reserved.configToml, /wire_api = "responses"/);
+  assert.doesNotMatch(reserved.configToml, /\[model_providers\.openai\]/);
+
+  // Store boundary: a legacy row hand-written into the store file converges
+  // on read, and the normalized shape persists after a mutation.
+  const storePath = require("../src/lib/provider-switch/paths").storePath();
+  fs.mkdirSync(path.dirname(storePath), { recursive: true });
+  fs.writeFileSync(
+    storePath,
+    JSON.stringify({
+      version: 1,
+      apps: {
+        codex: {
+          current: null,
+          providers: [
+            {
+              id: "p_legacy",
+              name: "Legacy Relay",
+              category: "custom",
+              settingsConfig: { auth: null, config: { base_url: "https://relay.example.com/v1", wire_api: "chat" } },
+              notes: "",
+              createdAt: "2026-01-01T00:00:00.000Z",
+              updatedAt: "2026-01-01T00:00:00.000Z",
+            },
+          ],
+        },
+      },
+      settings: {},
+    })
+  );
+  const listed = await store.listProviders("codex");
+  const config = listed.providers[0].settingsConfig.config;
+  assert.equal(config.model_provider, "custom");
+  assert.equal(config.model_providers.custom.base_url, "https://relay.example.com/v1");
+  assert.equal(config.model_providers.custom.wire_api, "chat");
+  assert.equal(config.base_url, undefined);
+  await store.updateProvider("codex", "p_legacy", { name: "Legacy Relay 2" });
+  const persisted = JSON.parse(fs.readFileSync(storePath, "utf8"));
+  const savedConfig = persisted.apps.codex.providers[0].settingsConfig.config;
+  assert.equal(savedConfig.model_provider, "custom", "normalization is persisted on the next mutation");
+  assert.equal(savedConfig.base_url, undefined);
+
+  // Creating with a legacy shape sanitizes immediately.
+  const created = await store.createProvider("codex", {
+    name: "Created Legacy",
+    settingsConfig: { auth: null, config: { base_url: "https://created.example.com/v1" } },
+  });
+  assert.equal(created.settingsConfig.config.model_provider, "custom");
+  assert.equal(created.settingsConfig.config.model_providers.custom.wire_api, "responses");
+});
+
 test("provider-switch codex auth: stashed when leaving official, restored when switching back", async () => {
   const targets = require("../src/lib/provider-switch/targets");
 
@@ -359,21 +515,29 @@ test("provider-switch codex auth: stashed when leaving official, restored when s
   const relay = { category: "custom", settingsConfig: { auth: null, config: {} } };
   const chatgptLogin = { tokens: { access_token: "tok", account_id: "acc" }, last_refresh: "x" };
 
-  // official -> third-party: stash + clear.
-  const away = targets.resolveCodexAuth({ prev: official, target: relay, liveAuth: chatgptLogin, stash: null });
+  // official -> third-party: stash the login under its identity + clear.
+  const away = targets.resolveCodexAuth({ prev: official, target: relay, liveAuth: chatgptLogin, stash: targets.emptyCodexStash() });
   assert.equal(away.action, "stash");
-  assert.deepEqual(away.stashContent, chatgptLogin);
-  assert.deepEqual(away.content, {});
+  assert.deepEqual(away.stashNext.logins["account:acc"], chatgptLogin);
+  assert.equal(away.stashNext.last, "account:acc");
 
-  // third-party -> official with empty auth.json: restore stash.
-  const back = targets.resolveCodexAuth({ prev: relay, target: official, liveAuth: {}, stash: chatgptLogin });
+  // third-party -> official with empty auth.json: restore the last stashed
+  // login; it becomes live, so it leaves the stash.
+  const back = targets.resolveCodexAuth({ prev: relay, target: official, liveAuth: {}, stash: away.stashNext });
   assert.equal(back.action, "write");
   assert.deepEqual(back.content, chatgptLogin);
-  assert.equal(back.restoreStash, true);
+  assert.deepEqual(back.stashNext.logins, {});
+  assert.equal(back.stashNext.last, null);
 
   // third-party -> official with a fresh live login: keep, do not clobber.
-  const freshLogin = targets.resolveCodexAuth({ prev: relay, target: official, liveAuth: chatgptLogin, stash: chatgptLogin });
+  const freshLogin = targets.resolveCodexAuth({
+    prev: relay,
+    target: official,
+    liveAuth: chatgptLogin,
+    stash: targets.codexStashPut(targets.emptyCodexStash(), chatgptLogin),
+  });
   assert.equal(freshLogin.action, "keep");
+  assert.equal(freshLogin.stashNext, null);
 
   // A third-party row's key never reaches auth.json (cc-switch's current
   // projection writes it into config.toml's route table instead).
@@ -381,25 +545,124 @@ test("provider-switch codex auth: stashed when leaving official, restored when s
     prev: null,
     target: { category: "custom", settingsConfig: { auth: { OPENAI_API_KEY: "sk-z" }, config: {} } },
     liveAuth: {},
-    stash: null,
+    stash: targets.emptyCodexStash(),
   });
   assert.equal(rowWithKey.action, "keep");
 
   // A live login is stashed on ANY third-party switch, not only when leaving
   // the official card.
-  const relayAfterRelay = targets.resolveCodexAuth({ prev: relay, target: relay, liveAuth: chatgptLogin, stash: null });
+  const relayAfterRelay = targets.resolveCodexAuth({
+    prev: relay,
+    target: relay,
+    liveAuth: chatgptLogin,
+    stash: targets.emptyCodexStash(),
+  });
   assert.equal(relayAfterRelay.action, "stash");
-  assert.deepEqual(relayAfterRelay.stashContent, chatgptLogin);
+  assert.deepEqual(relayAfterRelay.stashNext.logins["account:acc"], chatgptLogin);
 
   // auth.json holding only OPENAI_API_KEY is stale third-party residue from
   // the old projection: cleared, but never stashed as if it were a login.
-  const residue = targets.resolveCodexAuth({ prev: relay, target: relay, liveAuth: { OPENAI_API_KEY: "sk-old" }, stash: null });
-  assert.equal(residue.action, "write");
-  assert.deepEqual(residue.content, {});
+  const residue = targets.resolveCodexAuth({
+    prev: relay,
+    target: relay,
+    liveAuth: { OPENAI_API_KEY: "sk-old" },
+    stash: targets.emptyCodexStash(),
+  });
+  assert.equal(residue.action, "stash");
+  assert.equal(residue.stashNext, null, "residue is cleared without stashing");
 
   // Third-party -> third-party with a clean auth.json: untouched.
-  const relayToRelay = targets.resolveCodexAuth({ prev: relay, target: relay, liveAuth: {}, stash: null });
+  const relayToRelay = targets.resolveCodexAuth({ prev: relay, target: relay, liveAuth: {}, stash: targets.emptyCodexStash() });
   assert.equal(relayToRelay.action, "keep");
+  assert.equal(relayToRelay.stashNext, null);
+});
+
+test("provider-switch codex auth: ChatGPT workspaces of one user are separate logins (cc-switch e5b1e0966)", async () => {
+  const targets = require("../src/lib/provider-switch/targets");
+
+  const idToken = (sub) =>
+    `${Buffer.from('{"alg":"none"}').toString("base64url")}.${Buffer.from(JSON.stringify({ sub })).toString("base64url")}.`;
+  const workspaceLogin = (user, account) => ({
+    auth_mode: "chatgpt",
+    tokens: { id_token: idToken(user), access_token: `access-${account}`, refresh_token: `refresh-${account}`, account_id: account },
+  });
+  const plus = workspaceLogin("same-person", "ws-plus");
+  const team = workspaceLogin("same-person", "ws-team");
+  assert.equal(targets.codexIdentityOf(plus), "sub:same-person|account:ws-plus");
+  assert.notEqual(targets.codexIdentityOf(plus), targets.codexIdentityOf(team), "same user, different workspace");
+
+  const plusCard = { category: "official", settingsConfig: { auth: plus, config: {} } };
+  const teamCard = { category: "official", settingsConfig: { auth: team, config: {} } };
+
+  // Switching from the Plus login to the Team card swaps through the stash:
+  // the Plus login is stashed, the Team login is restored.
+  const toTeam = targets.resolveCodexAuth({
+    prev: plusCard,
+    target: teamCard,
+    liveAuth: plus,
+    stash: targets.codexStashPut(targets.emptyCodexStash(), team),
+  });
+  assert.equal(toTeam.action, "write");
+  assert.deepEqual(toTeam.content, team, "the Team card restores its own workspace login");
+  assert.deepEqual(toTeam.stashNext.logins["sub:same-person|account:ws-plus"], plus);
+
+  // Without a stashed Team login the switch keeps the live login (a card
+  // snapshot may be stale — never clobber a working login).
+  const noStash = targets.resolveCodexAuth({
+    prev: plusCard,
+    target: teamCard,
+    liveAuth: plus,
+    stash: targets.emptyCodexStash(),
+  });
+  assert.equal(noStash.action, "keep");
+
+  // An unbound official card follows the live login.
+  const unbound = targets.resolveCodexAuth({
+    prev: plusCard,
+    target: { category: "official", settingsConfig: { auth: null, config: {} } },
+    liveAuth: plus,
+    stash: targets.emptyCodexStash(),
+  });
+  assert.equal(unbound.action, "keep");
+
+  // Leaving an official card while logged out invalidates the card's stashed
+  // login so switching back cannot revive a logout.
+  const loggedOut = targets.resolveCodexAuth({
+    prev: plusCard,
+    target: { category: "custom", settingsConfig: { auth: null, config: {} } },
+    liveAuth: {},
+    stash: targets.codexStashPut(targets.emptyCodexStash(), plus),
+  });
+  assert.equal(loggedOut.action, "keep");
+  assert.equal(loggedOut.stashNext.logins["sub:same-person|account:ws-plus"], undefined);
+  assert.equal(loggedOut.stashNext.last, null);
+});
+
+test("provider-switch codex stash: legacy single-slot files upgrade to workspace identities", async () => {
+  const targets = require("../src/lib/provider-switch/targets");
+  const idToken = (sub) =>
+    `${Buffer.from('{"alg":"none"}').toString("base64url")}.${Buffer.from(JSON.stringify({ sub })).toString("base64url")}.`;
+  const workspaceLogin = (user, account) => ({
+    tokens: { id_token: idToken(user), access_token: `access-${account}`, account_id: account },
+  });
+  const plus = workspaceLogin("same-person", "ws-plus");
+  const teamCardAuth = workspaceLogin("same-person", "ws-team");
+
+  // Old AiTool files hold a raw auth object; it is rekeyed by the new identity.
+  const upgraded = targets.upgradeCodexStash({ auth: plus, stashedAt: "2026-01-01" }, [], null);
+  assert.deepEqual(upgraded.logins["sub:same-person|account:ws-plus"], plus);
+  assert.equal(upgraded.last, "sub:same-person|account:ws-plus");
+
+  // A workspace that only survives on an official card's stored login is
+  // seeded back for a user still present in the stash.
+  const seeded = targets.upgradeCodexStash({ auth: plus }, [teamCardAuth], null);
+  assert.deepEqual(seeded.logins["sub:same-person|account:ws-team"], teamCardAuth);
+
+  // A user found in neither the stash nor the live auth has logged out: their
+  // card snapshot is not revived.
+  const stranger = workspaceLogin("other-person", "ws-x");
+  const notSeeded = targets.upgradeCodexStash({ auth: plus }, [stranger], null);
+  assert.equal(notSeeded.logins["sub:other-person|account:ws-x"], undefined);
 });
 
 // ---------------------------------------------------------------------------
@@ -683,11 +946,15 @@ test("provider-switch api: codex switch stashes official login and restores it",
   assert.match(configAway, /\[model_providers\.custom\]/);
   assert.match(configAway, /notify = \["bash", "\/hooks\/notify\.sh"\]/);
   const stashFile = path.join(tmpHome, ".aitool", "provider-switch", "codex-auth-stash.json");
-  assert.deepEqual(JSON.parse(fs.readFileSync(stashFile, "utf8")).auth, login);
+  const stashed = JSON.parse(fs.readFileSync(stashFile, "utf8"));
+  assert.equal(stashed.version, 1);
+  assert.deepEqual(stashed.logins, { unknown: login }, "keyed by login identity");
+  assert.equal(stashed.last, "unknown");
   const statusAway = await call(handler, { url: `${prefix}/status` });
   assert.ok(statusAway.body.codexAuthStash, "status reports the stash");
 
-  // relay -> official: stash restored, stash file removed.
+  // relay -> official: stash restored; the login becomes live and leaves the
+  // multi-slot stash (other stashed logins would survive).
   const back = await call(handler, {
     method: "POST",
     url: `${prefix}/switch`,
@@ -695,7 +962,7 @@ test("provider-switch api: codex switch stashes official login and restores it",
   });
   assert.equal(back.status, 200);
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(codexDir, "auth.json"), "utf8")), login);
-  assert.equal(fs.existsSync(stashFile), false);
+  assert.deepEqual(JSON.parse(fs.readFileSync(stashFile, "utf8")).logins, {});
 });
 
 test("provider-switch api: codex switch injects the row key into the route table, not auth.json", async () => {
@@ -1383,6 +1650,55 @@ test("provider-switch codex catalog: build/parse round-trip and projection point
   assert.match(foreign.configToml, /model_catalog_json = "my-own-models\.json"/);
 });
 
+test("provider-switch codex catalog: bundled probe failures carry a reason (cc-switch 2e20cdcb5)", async () => {
+  const catalog = require("../src/lib/provider-switch/catalog");
+  const catalogRow = [{ model: "gpt-5.5", displayName: "GPT-5.5" }];
+  // Let the probe run: the suite-wide override pins the official list to [].
+  catalog.setCodexOfficialModelsForTests(null);
+
+  // No candidate can be launched: the machine has no Codex CLI.
+  catalog.setCodexCliCandidatesForTests([path.join(tmpHome, "missing-codex")]);
+  const content = catalog.buildCodexCatalog(catalogRow);
+  assert.match(content, /"slug"/, "the vendored template still covers GPT rows");
+  assert.equal(catalog.codexOfficialModelsReason(), "noCli");
+
+  // A CLI that exists but yields nothing usable: exit non-zero, junk output,
+  // then an empty list — the reason is "failed", and a working candidate wins.
+  const binDir = path.join(tmpHome, "codex-fixture-bin");
+  fs.mkdirSync(binDir, { recursive: true });
+  const failing = path.join(binDir, "failing-codex");
+  fs.writeFileSync(failing, "#!/bin/sh\nexit 3\n");
+  fs.chmodSync(failing, 0o755);
+  const junk = path.join(binDir, "junk-codex");
+  fs.writeFileSync(junk, "#!/bin/sh\necho 'not json'\n");
+  fs.chmodSync(junk, 0o755);
+  const empty = path.join(binDir, "empty-codex");
+  fs.writeFileSync(empty, '#!/bin/sh\necho \'{"models":[]}\'\n');
+  fs.chmodSync(empty, 0o755);
+  const working = path.join(binDir, "working-codex");
+  const officialRow = {
+    slug: "gpt-5.5",
+    display_name: "GPT-5.5",
+    base_instructions: "You are Codex.",
+    supports_reasoning_summaries: true,
+    supports_parallel_tool_calls: true,
+  };
+  fs.writeFileSync(working, `#!/bin/sh\necho '${JSON.stringify({ models: [officialRow] })}'\n`);
+  fs.chmodSync(working, 0o755);
+
+  catalog.setCodexCliCandidatesForTests([failing, junk, empty]);
+  catalog.buildCodexCatalog(catalogRow);
+  assert.equal(catalog.codexOfficialModelsReason(), "failed");
+
+  catalog.setCodexCliCandidatesForTests([failing, working]);
+  const mirrored = catalog.buildCodexCatalog(catalogRow);
+  assert.match(mirrored, /"You are Codex\."/);
+  assert.equal(catalog.codexOfficialModelsReason(), null);
+
+  catalog.setCodexCliCandidatesForTests(null);
+  catalog.setCodexOfficialModelsForTests([]);
+});
+
 test("provider-switch api: switch writes the catalog file, import reads it back", async () => {
   const { handleProviderSwitchApiRequest } = require("../src/lib/provider-switch/api");
   const handler = handleProviderSwitchApiRequest;
@@ -1732,5 +2048,109 @@ test("every codex preset uses the custom model_providers slot", () => {
       ["custom"],
       `${preset.id} must own exactly the custom table`,
     );
+  }
+});
+
+test("fetch-models forwards provider header overrides on the probe (cc-switch 315aeda)", async () => {
+  const { handleProviderSwitchApiRequest } = require("../src/lib/provider-switch/api");
+  const handler = handleProviderSwitchApiRequest;
+  const prefix = "/api/provider-switch";
+  const seen = [];
+  const server = http.createServer((req, res) => {
+    seen.push({ url: req.url, auth: req.headers.authorization, gateway: req.headers["cf-aig-authorization"] });
+    if (req.url === "/v1/models" && req.headers["cf-aig-authorization"] === "secret-gateway-token") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ data: [{ id: "gpt-5.2" }] }));
+      return;
+    }
+    res.writeHead(403);
+    res.end("gateway rejected");
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+  try {
+    // A valid override rides the probe and gets the guarded list.
+    const ok = await call(handler, {
+      method: "POST",
+      url: `${prefix}/fetch-models`,
+      body: JSON.stringify({
+        baseUrl: `http://127.0.0.1:${port}`,
+        apiKey: "sk-test",
+        requestHeaders: '{"cf-aig-authorization": "secret-gateway-token"}',
+      }),
+    });
+    assert.deepEqual(ok.body.models, ["gpt-5.2"]);
+    assert.equal(seen.at(-1).gateway, "secret-gateway-token");
+    assert.equal(seen.at(-1).auth, "Bearer sk-test", "default Authorization still sent");
+
+    // An explicit Authorization in the override wins over the key default.
+    await call(handler, {
+      method: "POST",
+      url: `${prefix}/fetch-models`,
+      body: JSON.stringify({
+        baseUrl: `http://127.0.0.1:${port}`,
+        apiKey: "sk-test",
+        requestHeaders: '{"Authorization": "Bearer override"}',
+      }),
+    });
+    assert.equal(seen.at(-1).auth, "Bearer override");
+
+    // Invalid override JSON falls back to a plain fetch (probe fails 403,
+    // the route surfaces the upstream error instead of crashing).
+    const bad = await call(handler, {
+      method: "POST",
+      url: `${prefix}/fetch-models`,
+      body: JSON.stringify({
+        baseUrl: `http://127.0.0.1:${port}`,
+        apiKey: "sk-test",
+        requestHeaders: "{not json",
+      }),
+    });
+    assert.equal(bad.status, 400);
+    assert.equal(seen.at(-1).gateway, undefined);
+  } finally {
+    server.close();
+  }
+});
+
+test("fetch-models header overrides invalidate on control chars, duplicates and protected names", async () => {
+  const { handleProviderSwitchApiRequest } = require("../src/lib/provider-switch/api");
+  const handler = handleProviderSwitchApiRequest;
+  const prefix = "/api/provider-switch";
+  const seen = [];
+  const server = http.createServer((req, res) => {
+    seen.push({ gateway: req.headers["cf-aig-authorization"], cl: req.headers["content-length"], apiKey: req.headers["x-api-key"] });
+    if (req.url === "/v1/models" && req.headers["cf-aig-authorization"] === "token") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ data: [{ id: "m1" }] }));
+      return;
+    }
+    res.writeHead(403);
+    res.end("rejected");
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+  try {
+    for (const [label, override] of [
+      ["control char in value", '{"cf-aig-authorization": "tok\\nen"}'],
+      ["case-duplicate names", '{"cf-aig-authorization": "token", "CF-AIG-Authorization": "other"}'],
+      // cc-switch's PROTECTED_LOCAL_PROXY_HEADER_NAMES (minus the documented
+      // authorization deviation): managed/hop-by-hop names never reach fetch.
+      ["protected content-length", '{"content-length": "999"}'],
+      ["protected transfer-encoding", '{"transfer-encoding": "chunked"}'],
+      ["protected x-api-key", '{"x-api-key": "sk-managed"}'],
+    ]) {
+      const response = await call(handler, {
+        method: "POST",
+        url: `${prefix}/fetch-models`,
+        body: JSON.stringify({ baseUrl: `http://127.0.0.1:${port}`, apiKey: "sk", requestHeaders: override }),
+      });
+      assert.equal(response.status, 400, `${label}: override must be dropped, not sent`);
+      assert.equal(seen.at(-1).gateway, undefined, `${label}: the override never reaches the wire`);
+    }
+    assert.equal(seen.every((row) => row.cl === undefined), true, "content-length never forwarded");
+    assert.equal(seen.every((row) => row.apiKey === undefined), true, "x-api-key never forwarded");
+  } finally {
+    server.close();
   }
 });

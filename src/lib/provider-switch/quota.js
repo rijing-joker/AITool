@@ -99,6 +99,13 @@ function resolveProviderCredential(app, provider) {
       ).trim(),
     };
   }
+  if (app === "gemini") {
+    const env = settings.env ?? {};
+    return {
+      baseUrl: String(env.GOOGLE_GEMINI_BASE_URL ?? "").trim(),
+      apiKey: String(env.GEMINI_API_KEY ?? "").trim(),
+    };
+  }
   return null;
 }
 
@@ -107,6 +114,220 @@ function quotaTimeoutFetch(fetchImpl = fetch) {
     ...options,
     signal: AbortSignal.timeout(QUOTA_TIMEOUT_MS),
   });
+}
+
+// ---------------------------------------------------------------------------
+// Balance probing (cc-switch services/balance.rs): DeepSeek, StepFun,
+// SiliconFlow (cn + en), OpenRouter and Novita AI expose a small account
+// balance endpoint keyed by the same API key the relay uses. Detection is on
+// the hostname (upstream substring-matches the whole URL; hostname matching
+// keeps the module's marker-in-path rule so a row pointing at
+// https://relay.example/api.deepseek.com/... never leaks its key).
+// ---------------------------------------------------------------------------
+
+const BALANCE_PROVIDERS = [
+  {
+    id: "deepseek",
+    label: "DeepSeek",
+    hostname: "api.deepseek.com",
+    url: "https://api.deepseek.com/user/balance",
+    unit: "CNY",
+  },
+  {
+    id: "stepfun",
+    label: "StepFun",
+    hostname: "api.stepfun.ai",
+    altHostnames: ["api.stepfun.com"],
+    url: "https://api.stepfun.com/v1/accounts",
+    unit: "CNY",
+  },
+  {
+    id: "siliconflow",
+    label: "SiliconFlow",
+    hostname: "api.siliconflow.cn",
+    url: "https://api.siliconflow.cn/v1/user/info",
+    unit: "CNY",
+  },
+  {
+    id: "siliconflow_en",
+    label: "SiliconFlow (EN)",
+    hostname: "api.siliconflow.com",
+    url: "https://api.siliconflow.com/v1/user/info",
+    unit: "USD",
+  },
+  {
+    id: "openrouter",
+    label: "OpenRouter",
+    hostname: "openrouter.ai",
+    url: "https://openrouter.ai/api/v1/credits",
+    unit: "USD",
+  },
+  {
+    id: "novita",
+    label: "Novita AI",
+    hostname: "api.novita.ai",
+    url: "https://api.novita.ai/v3/user/balance",
+    unit: "USD",
+  },
+];
+
+// JSON number or numeric string (upstream parse_f64_field).
+function balanceNumber(value) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
+function hostContains(hostname, expected) {
+  // Exact host or a subdomain of it — `api.deepseek.com.evil.example` shares
+  // the prefix but is a different registrable domain, so the dot matters
+  // (same rule as the coding-plan hostMatches).
+  return hostname === expected || hostname.endsWith(`.${expected}`);
+}
+
+function detectBalanceProvider(baseUrl) {
+  const raw = String(baseUrl || "").trim();
+  if (!raw) return null;
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    return null;
+  }
+  const hostname = url.hostname.toLowerCase();
+  return BALANCE_PROVIDERS.find((entry) =>
+    hostContains(hostname, entry.hostname) ||
+    (entry.altHostnames || []).some((alt) => hostContains(hostname, alt))) || null;
+}
+
+// Parse a vendor-specific body into the unified balance line. Returns null
+// when the shape is unrecognizable (deterministic failure).
+function parseBalanceBody(entry, body) {
+  if (entry.id === "deepseek") {
+    const infos = Array.isArray(body?.balance_infos) ? body.balance_infos : [];
+    const lines = infos.map((info) => ({
+      label: entry.label,
+      remaining: balanceNumber(info?.total_balance) ?? 0,
+      total: null,
+      used: null,
+      unit: String(info?.currency ?? entry.unit),
+      isValid: body?.is_available !== false,
+      invalidMessage: body?.is_available === false ? "Account unavailable" : null,
+    }));
+    return lines.length > 0 ? lines : null;
+  }
+  if (entry.id === "stepfun") {
+    const remaining = balanceNumber(body?.balance);
+    if (remaining === null) return null;
+    return [{ label: entry.label, remaining, total: null, used: null, unit: entry.unit, isValid: true, invalidMessage: null }];
+  }
+  if (entry.id === "siliconflow" || entry.id === "siliconflow_en") {
+    const data = body?.data && typeof body.data === "object" ? body.data : null;
+    if (!data) return null;
+    const remaining = balanceNumber(data.totalBalance);
+    if (remaining === null) return null;
+    return [{ label: entry.label, remaining, total: null, used: null, unit: entry.unit, isValid: true, invalidMessage: null }];
+  }
+  if (entry.id === "openrouter") {
+    const data = body?.data && typeof body.data === "object" ? body.data : body;
+    const total = balanceNumber(data?.total_credits);
+    const used = balanceNumber(data?.total_usage);
+    if (total === null || used === null) return null;
+    const remaining = total - used;
+    return [{
+      label: entry.label,
+      remaining,
+      total,
+      used,
+      unit: entry.unit,
+      isValid: remaining > 0,
+      invalidMessage: remaining <= 0 ? "No credits remaining" : null,
+    }];
+  }
+  if (entry.id === "novita") {
+    const available = balanceNumber(body?.availableBalance);
+    if (available === null) return null;
+    // Novita reports in 0.0001 USD units.
+    const remaining = available / 10000;
+    return [{
+      label: entry.label,
+      remaining,
+      total: null,
+      used: null,
+      unit: entry.unit,
+      isValid: remaining > 0,
+      invalidMessage: remaining <= 0 ? "No balance remaining" : null,
+    }];
+  }
+  return null;
+}
+
+async function queryBalanceProvider({ entry, apiKey, fetchImpl }) {
+  const fetcher = quotaTimeoutFetch(fetchImpl);
+  let response;
+  try {
+    response = await fetcher(entry.url, {
+      headers: { Authorization: `Bearer ${apiKey}`, Accept: "application/json" },
+    });
+  } catch (error) {
+    // Transient transport failure — surface the message, no deterministic state.
+    throw new Error(`Network error: ${error?.message || String(error)}`);
+  }
+  if (response.status === 401 || response.status === 403) {
+    const error = new Error(`Authentication failed (HTTP ${response.status})`);
+    error.code = "AUTH_EXPIRED";
+    throw error;
+  }
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`API error (HTTP ${response.status}): ${text.slice(0, 300)}`);
+  }
+  let body;
+  try {
+    body = await response.json();
+  } catch (error) {
+    throw new Error(`Failed to parse response: ${error?.message || String(error)}`);
+  }
+  const balances = parseBalanceBody(entry, body);
+  if (!balances) throw new Error("Unrecognized balance response shape");
+  return balances;
+}
+
+// Balance query with the same cache/error semantics as queryProviderQuota:
+// deterministic failures come back as ok:false with credentialStatus, and
+// successful answers are cached for the page's polling cadence.
+async function queryProviderBalance({ app, provider, fetchImpl, bypassCache = false, now = Date.now() } = {}) {
+  const credential = resolveProviderCredential(app, provider);
+  if (!credential) return { ok: false, error: "unsupported app for balance queries" };
+  const entry = detectBalanceProvider(credential.baseUrl);
+  if (!entry) return { ok: false, error: "no balance provider matches this base URL" };
+  if (!credential.apiKey) return { ok: false, error: "provider row has no API key", provider: entry.id };
+
+  const cacheKey = `balance/${app}/${provider.id}`;
+  const cached = bypassCache ? null : cache.get(cacheKey);
+  if (cached && now - cached.queriedAt < CACHE_TTL_MS) {
+    return { ...cached.quota, cached: true };
+  }
+
+  let quota;
+  try {
+    const balances = await queryBalanceProvider({ entry, apiKey: credential.apiKey, fetchImpl });
+    quota = { ok: true, kind: "balance", provider: entry.id, credentialStatus: "valid", balances };
+  } catch (error) {
+    const expired = error?.code === "AUTH_EXPIRED";
+    quota = {
+      ok: false,
+      kind: "balance",
+      provider: entry.id,
+      credentialStatus: expired ? "expired" : "error",
+      error: error?.message || String(error),
+    };
+  }
+  if (quota.ok) cache.set(cacheKey, { queriedAt: now, quota });
+  return quota;
 }
 
 // The subscription body's currentPeriodStart scopes the usage summary to the
@@ -253,6 +474,10 @@ module.exports = {
   detectQuotaProvider,
   resolveProviderCredential,
   queryProviderQuota,
+  queryProviderBalance,
+  detectBalanceProvider,
+  parseBalanceBody,
   clearQuotaCache,
   QUOTA_PROVIDERS,
+  BALANCE_PROVIDERS,
 };

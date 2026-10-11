@@ -140,6 +140,67 @@ function isGeminiFloorEnv(key) {
   );
 }
 
+// Legacy Codex row shapes that predate the managed [model_providers.custom]
+// table (cc-switch live/project/codex.rs third_party_route): a top-level
+// address key with no selector, the built-in "openai" selector, or a reserved
+// id table. Codex ignores a top-level base_url/openai_base_url, so switching
+// such a row as-is strands the CLI on the built-in OpenAI route and the
+// editor shows no request address (cc-switch 84457b510, #8039). Normalized
+// rows fold the address into model_providers.custom and select it. Idempotent
+// and pure: applied at the store boundary on every read/write.
+function isPlainObject(value) {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function nonEmptyString(value) {
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function normalizeCodexConfig(config) {
+  if (!isPlainObject(config)) return config;
+  const providers = isPlainObject(config.model_providers) ? config.model_providers : null;
+  const selector = typeof config.model_provider === "string" ? config.model_provider.trim() : "";
+
+  // A reserved built-in id carrying its own row table: Codex refuses to load
+  // the file wholesale, so the table is rewritten as custom (wire_api forced
+  // to responses, matching upstream).
+  if (selector === "openai" && providers && isPlainObject(providers.openai)) {
+    const next = { ...config, model_provider: "custom" };
+    const table = { ...providers.openai, wire_api: "responses" };
+    next.model_providers = { ...providers, custom: table };
+    delete next.model_providers.openai;
+    return next;
+  }
+
+  // A real selector wins: the legacy top-level address keys are ignored by
+  // Codex either way and stay untouched (upstream: built_in_route(id)).
+  if (selector && selector !== "openai") return config;
+
+  // openai_base_url is the older legacy shape and wins over base_url; with
+  // the "openai" selector only openai_base_url redirects (upstream keeps
+  // base_url for the selector-less shape only).
+  const legacyUrl = selector === "openai"
+    ? nonEmptyString(config.openai_base_url)
+    : nonEmptyString(config.openai_base_url) || nonEmptyString(config.base_url);
+  if (!legacyUrl) return config;
+
+  const existing = providers && isPlainObject(providers.custom) ? providers.custom : {};
+  const table = { ...existing };
+  if (!nonEmptyString(table.name)) table.name = "Custom";
+  table.base_url = legacyUrl;
+  // The row's own wire_api reflects what protocol the relay speaks; keep it
+  // when present (upstream's save path carries it), default responses.
+  if (!nonEmptyString(table.wire_api)) {
+    table.wire_api = nonEmptyString(config.wire_api) || "responses";
+  }
+  const next = { ...config, model_provider: "custom" };
+  next.model_providers = { ...(providers || {}), custom: table };
+  delete next.openai_base_url;
+  delete next.base_url;
+  delete next.wire_api;
+  return next;
+}
+
 module.exports = {
   CLAUDE_PROTOCOL_SELECTORS,
   CLAUDE_FLOOR_ENV_PREFIXES,
@@ -153,4 +214,5 @@ module.exports = {
   isClaudeFloorTop,
   isCodexFloorTop,
   isGeminiFloorEnv,
+  normalizeCodexConfig,
 };

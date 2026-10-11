@@ -17,6 +17,7 @@ import {
 import { CSS as DndCss } from "@dnd-kit/utilities";
 import {
   Check,
+  Copy,
   Globe,
   GripVertical,
   Import,
@@ -24,6 +25,7 @@ import {
   Plus,
   RefreshCw,
   RotateCcw,
+  Search,
   ShieldAlert,
   TimerReset,
   Trash2,
@@ -31,7 +33,7 @@ import {
 } from "lucide-react";
 import { copy } from "../lib/copy";
 import { providerSwitchApi } from "../lib/provider-switch-api";
-import { Button, Card, ConfirmModal } from "../ui/components";
+import { Button, Card, ConfirmModal, Input } from "../ui/components";
 import { PageHeader } from "../ui/components/PageHeader";
 import { PageTabs } from "../ui/components/PageTabs";
 import { UnsavedChangesGuard } from "../ui/components/UnsavedChangesGuard";
@@ -41,6 +43,8 @@ import { PresetIcon, providerTileClass, ProviderEditDialog } from "./provider-ed
 import { ProviderMcpPanel } from "./provider-mcp-panel";
 import { ProviderPromptsPanel } from "./provider-prompts-panel";
 import { ProviderQuotaLine } from "./provider-quota-line";
+import { ProviderEnvBanner } from "./provider-env-banner";
+import { ProviderSkillsPanel } from "./provider-skills-panel";
 
 // Provider config management — an interaction port of cc-switch's provider
 // module. Presets live in ~/.aitool/provider-switch (served by the local
@@ -327,7 +331,7 @@ function EncryptedBackupDialog({ mode, onClose, onImported }) {
   );
 }
 
-function SortableProviderCard({ app, provider, isCurrent, busy, dragLabel, cooldownMs, onSwitch, onEdit, onDelete }) {
+function SortableProviderCard({ app, provider, isCurrent, busy, dragLabel, cooldownMs, onSwitch, onEdit, onDuplicate, onDelete }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: provider.id,
     disabled: busy,
@@ -420,6 +424,9 @@ function SortableProviderCard({ app, provider, isCurrent, busy, dragLabel, coold
           <Button variant="ghost" size="sm" aria-label={copy("pswitch.action.edit")} onClick={onEdit}>
             <Pencil className="h-4 w-4" />
           </Button>
+          <Button variant="ghost" size="sm" aria-label={copy("pswitch.action.duplicate")} onClick={onDuplicate}>
+            <Copy className="h-4 w-4" />
+          </Button>
           <Button variant="ghost" size="sm" aria-label={copy("pswitch.action.delete")} onClick={onDelete}>
             <Trash2 className="h-4 w-4 text-red-500 dark:text-red-400" />
           </Button>
@@ -429,12 +436,40 @@ function SortableProviderCard({ app, provider, isCurrent, busy, dragLabel, coold
   );
 }
 
+// Base URL of a provider row across app shapes (same resolution the server's
+// quota.js uses): claude env, codex model_providers slot, gemini env, and the
+// additive wrapper's provider block (cc-switch's extractProviderBaseUrl).
+function providerBaseUrl(app, provider) {
+  const settings = provider?.settingsConfig;
+  if (!settings || typeof settings !== "object") return "";
+  if (app === "claude") return String(settings.env?.ANTHROPIC_BASE_URL ?? "").trim();
+  if (app === "codex") {
+    const config = settings.config ?? {};
+    const slot = String(config.model_provider ?? "custom").trim();
+    return String(config.model_providers?.[slot]?.base_url ?? "").trim();
+  }
+  if (app === "gemini") return String(settings.env?.GOOGLE_GEMINI_BASE_URL ?? "").trim();
+  return String(settings.provider?.baseUrl ?? "").trim();
+}
+
 export function ProviderSwitchPage() {
   const [status, setStatus] = useState(null);
   const [loadError, setLoadError] = useState(null);
   const [busy, setBusy] = useState(false);
   const [activeApp, setActiveApp] = useState("claude");
   const [notice, setNotice] = useState(null);
+  // Provider search (cc-switch 5cbb/5c5efe0b port): a header button toggles
+  // the panel; matches cover the row's name, notes and base URL.
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+
+  useEffect(() => {
+    // cc-switch closes the provider search when the app tab changes — a stale
+    // filter silently applied to another app's list is more confusing than
+    // convenient.
+    setSearchOpen(false);
+    setSearchQuery("");
+  }, [activeApp]);
 
   // dialog state
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -461,7 +496,26 @@ export function ProviderSwitchPage() {
   // backups
   const [backups, setBackups] = useState([]);
   const [restoreTarget, setRestoreTarget] = useState(null);
-  const [dragOverId, setDragOverId] = useState(null);
+
+  // env conflicts (cc-switch's EnvWarningBanner): session-scoped dismiss.
+  const [envConflicts, setEnvConflicts] = useState(null);
+  const [envBannerDismissed, setEnvBannerDismissed] = useState(
+    () => sessionStorage.getItem("pswitch.env_banner_dismissed") === "true",
+  );
+
+  const refreshEnvConflicts = useCallback(async () => {
+    try {
+      const res = await providerSwitchApi.checkEnvConflicts();
+      setEnvConflicts(res.conflicts || {});
+      return res.conflicts || {};
+    } catch {
+      return {};
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshEnvConflicts();
+  }, [refreshEnvConflicts]);
 
   const dragSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -476,7 +530,8 @@ export function ProviderSwitchPage() {
   // reads the active app's endpoint paths) don't apply to them.
   const isMcpTab = activeApp === "mcp";
   const isPromptsTab = activeApp === "prompts";
-  const isUtilityTab = isMcpTab || isPromptsTab;
+  const isSkillsTab = activeApp === "skills";
+  const isUtilityTab = isMcpTab || isPromptsTab || isSkillsTab;
 
   // Visible tabs follow the settings-page toggle (cc-switch's
   // AppVisibilitySettings); the backend guarantees at least one stays on.
@@ -487,7 +542,7 @@ export function ProviderSwitchPage() {
   useEffect(() => {
     // "mcp" and "prompts" are tool tabs — not apps, so the visible-apps
     // filter doesn't apply to them.
-    if (activeApp === "mcp" || activeApp === "prompts") return;
+    if (activeApp === "mcp" || activeApp === "prompts" || activeApp === "skills") return;
     if (!visibleApps.some(({ id }) => id === activeApp) && visibleApps.length > 0) {
       setActiveApp(visibleApps[0].id);
     }
@@ -502,6 +557,25 @@ export function ProviderSwitchPage() {
       cooldownMs: failover?.cooldowns?.find((entry) => entry.app === activeApp && entry.id === provider.id)?.remainingMs ?? null,
     }));
   }, [appState, activeApp, failover]);
+
+  const filteredProviderRows = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return providerRows;
+    return providerRows.filter((provider) => {
+      const haystack = [
+        provider.name,
+        provider.notes,
+        provider.websiteUrl,
+        providerBaseUrl(activeApp, provider),
+      ].join("\n").toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [providerRows, activeApp, searchQuery]);
+
+  const closeProviderSearch = useCallback(() => {
+    setSearchOpen(false);
+    setSearchQuery("");
+  }, []);
 
   const refreshStatus = useCallback(async () => {
     try {
@@ -629,7 +703,7 @@ export function ProviderSwitchPage() {
 
   useEffect(() => {
     // The tool tabs have no per-app backup list; skip the doomed request.
-    if (activeApp === "mcp" || activeApp === "prompts") return;
+    if (activeApp === "mcp" || activeApp === "prompts" || activeApp === "skills") return;
     void refreshBackups(activeApp);
   }, [activeApp, refreshBackups]);
 
@@ -692,6 +766,22 @@ export function ProviderSwitchPage() {
     }
   }, [activeApp, deleteTarget, refreshStatus]);
 
+  const duplicateProvider = useCallback(
+    async (provider) => {
+      setBusy(true);
+      try {
+        const res = await providerSwitchApi.duplicateProvider(activeApp, provider.id);
+        setNotice(copy("pswitch.provider.duplicated", { name: res.provider.name }));
+        await refreshStatus();
+      } catch (error) {
+        setNotice(error instanceof Error ? error.message : String(error));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [activeApp, refreshStatus],
+  );
+
   const importFromLive = useCallback(async () => {
     setBusy(true);
     try {
@@ -707,7 +797,6 @@ export function ProviderSwitchPage() {
 
   const handleDragEnd = useCallback(
     async (event) => {
-      setDragOverId(null);
       const { active, over } = event;
       if (!over || active.id === over.id) return;
       const ids = providerRows.map((row) => row.id);
@@ -767,6 +856,16 @@ export function ProviderSwitchPage() {
           </button>
         </div>
       ) : null}
+      {!envBannerDismissed && envConflicts ? (
+        <ProviderEnvBanner
+          conflicts={envConflicts}
+          onDismiss={() => {
+            setEnvBannerDismissed(true);
+            sessionStorage.setItem("pswitch.env_banner_dismissed", "true");
+          }}
+          onChanged={refreshEnvConflicts}
+        />
+      ) : null}
 
       {!utilityEditor.open ? <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <PageTabs
@@ -774,6 +873,7 @@ export function ProviderSwitchPage() {
             ...visibleApps.map((item) => ({ ...item, label: copy(item.labelKey) })),
             { id: "mcp", label: copy("pswitch.mcp.tab") },
             { id: "prompts", label: copy("pswitch.prompts.tab") },
+            { id: "skills", label: copy("pswitch.skills.tab") },
           ]}
           value={activeApp}
           onChange={setActiveApp}
@@ -782,6 +882,16 @@ export function ProviderSwitchPage() {
         />
         {!isUtilityTab ? (
           <div className="flex items-center gap-2">
+            <Button
+              variant={searchOpen ? "primary" : "secondary"}
+              size="sm"
+              aria-label={copy("pswitch.search.toggle_aria")}
+              aria-expanded={searchOpen}
+              title={copy("pswitch.search.toggle_aria")}
+              onClick={() => (searchOpen ? closeProviderSearch() : setSearchOpen(true))}
+            >
+              <Search className="h-4 w-4" />
+            </Button>
             <Button variant="secondary" size="sm" disabled={busy} onClick={() => void importFromLive()}>
               <Import className="h-4 w-4" />
               {copy("pswitch.action.import_live")}
@@ -796,7 +906,7 @@ export function ProviderSwitchPage() {
 
       <div role="tabpanel" id="provider-panel" aria-labelledby={utilityEditor.open ? undefined : `provider-panel-${activeApp}`} aria-label={utilityEditor.open ? copy(isMcpTab ? "pswitch.mcp.tab" : "pswitch.prompts.tab") : undefined} className={utilityEditor.open ? "flex min-w-0 flex-1 flex-col" : undefined}>
       {isUtilityTab ? (
-        isMcpTab ? <ProviderMcpPanel onEditorStateChange={onUtilityEditorState} /> : <ProviderPromptsPanel onEditorStateChange={onUtilityEditorState} />
+        isMcpTab ? <ProviderMcpPanel onEditorStateChange={onUtilityEditorState} /> : isSkillsTab ? <ProviderSkillsPanel onEditorStateChange={onUtilityEditorState} /> : <ProviderPromptsPanel onEditorStateChange={onUtilityEditorState} />
       ) : (
       <>
       <FailoverBar
@@ -806,19 +916,36 @@ export function ProviderSwitchPage() {
         onEdit={openFailoverEdit}
         onSwitchTo={(suggestion) => void switchToSuggestion(suggestion)}
       />
+      {searchOpen ? (
+        <div className="mb-4">
+          <Input
+            autoFocus
+            type="search"
+            value={searchQuery}
+            onChange={(event) => setSearchQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") closeProviderSearch();
+            }}
+            placeholder={copy("pswitch.search.placeholder")}
+            aria-label={copy("pswitch.search.aria")}
+          />
+        </div>
+      ) : null}
       <section className="mb-8">
         <SectionTitle>{copy("pswitch.section.providers")}</SectionTitle>
         {!appState || appState.providers.length === 0 ? (
           <Card>
             <p className="text-sm text-oai-gray-500 dark:text-oai-gray-400">{loadError || copy(!status ? "proxy.loading" : "pswitch.providers.empty")}</p>
           </Card>
+        ) : filteredProviderRows.length === 0 && searchQuery.trim() ? (
+          <Card>
+            <p className="text-sm text-oai-gray-500 dark:text-oai-gray-400">{copy("pswitch.search.empty")}</p>
+          </Card>
         ) : (
           <DndContext
             sensors={dragSensors}
             collisionDetection={closestCenter}
             onDragStart={() => setNotice(null)}
-            onDragOver={({ over }) => setDragOverId(over ? String(over.id) : null)}
-            onDragCancel={() => setDragOverId(null)}
             onDragEnd={(event) => void handleDragEnd(event)}
           >
             <SortableContext
@@ -826,7 +953,7 @@ export function ProviderSwitchPage() {
               strategy={verticalListSortingStrategy}
             >
               <div className="flex flex-col gap-2.5">
-                {providerRows.map((provider) => (
+                {filteredProviderRows.map((provider) => (
                   <SortableProviderCard
                     key={provider.id}
                     app={activeApp}
@@ -834,10 +961,10 @@ export function ProviderSwitchPage() {
                     isCurrent={appState.current === provider.id}
                     busy={busy}
                     dragLabel={copy("pswitch.provider.drag_handle", { name: provider.name })}
-                    isDragOver={dragOverId === provider.id}
                     cooldownMs={provider.cooldownMs}
                     onSwitch={() => setSwitchTarget(provider)}
                     onEdit={() => void openDialog(provider)}
+                    onDuplicate={() => void duplicateProvider(provider)}
                     onDelete={() => setDeleteTarget(provider)}
                   />
                 ))}

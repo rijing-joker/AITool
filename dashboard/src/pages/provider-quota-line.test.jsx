@@ -90,3 +90,30 @@ it("shows a cross when the clicked refresh fails again", async () => {
   fireEvent.click(refreshButton(container));
   await waitFor(() => expect(container.querySelector(".lucide-x")).toBeInTheDocument(), { timeout: 2500 });
 });
+
+it("the used display mode flips the percentage but warnings still key off left", async () => {
+  providerSwitchApi.getQuota.mockResolvedValue({
+    quota: { ok: true, tiers: [{ id: "five_hour", used_percent: 85, reset_at: null }] },
+  });
+  localStorage.setItem("aitool.quota-display", "used");
+  try {
+    render(<ProviderQuotaLine app="claude" provider={provider} />);
+    // 15% left renders as 85% used…
+    expect(await screen.findByText(/pswitch\.quota\.used/)).toHaveTextContent("85");
+    expect(screen.queryByText(/pswitch\.quota\.left/)).toBeNull();
+    // …but the number keeps the low-remaining amber tone, not healthy green.
+    const value = screen.getByText(/pswitch\.quota\.used/);
+    expect(value.className).toContain("text-amber-600");
+  } finally {
+    localStorage.removeItem("aitool.quota-display");
+  }
+});
+
+it("quota numbers turn red only when the window is used up", async () => {
+  providerSwitchApi.getQuota.mockResolvedValue({
+    quota: { ok: true, tiers: [{ id: "five_hour", used_percent: 100, reset_at: null }] },
+  });
+  render(<ProviderQuotaLine app="claude" provider={provider} />);
+  const value = await screen.findByText(/pswitch\.quota\.left/);
+  expect(value.className).toContain("text-red-600");
+});

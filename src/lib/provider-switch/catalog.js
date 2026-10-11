@@ -61,15 +61,79 @@ const CODEX_REASONING_LEVELS = ["none", "minimal", "low", "medium", "high", "xhi
 
 const CODEX_PARSER_REQUIRED_FIELDS = ["supports_reasoning_summaries", "supports_parallel_tool_calls"];
 
+// Desktop-bundled CLI candidates (cc-switch 979ce6a60, #8087), appended last:
+// a PATH install keeps using its standalone CLI, and a desktop-only install
+// gets the bundled one as the only working `debug models --bundled` probe.
+// Bundle order is newest first — the renamed app can leave both installed
+// (openai/codex#48052) and ChatGPT.app is the current one.
+const CODEX_DESKTOP_APP_BUNDLES = ["ChatGPT.app", "Codex.app"];
+const CODEX_DESKTOP_CLI_IN_BUNDLE = [
+  "Contents/Resources/codex-cli/bin/codex",
+  "Contents/Resources/codex",
+];
+
+function codexDesktopCliCandidates() {
+  const os = require("node:os");
+  const home = os.homedir();
+  const candidates = [];
+  for (const bundle of CODEX_DESKTOP_APP_BUNDLES) {
+    for (const applicationsDir of ["/Applications", path.join(home, "Applications")]) {
+      for (const layout of CODEX_DESKTOP_CLI_IN_BUNDLE) {
+        candidates.push(path.join(applicationsDir, bundle, layout));
+      }
+    }
+  }
+  if (process.platform === "win32" && process.env.LOCALAPPDATA) {
+    // %LOCALAPPDATA%\OpenAI\Codex\bin\<version>\codex.exe — version dirs
+    // change with desktop updates; probe newest by mtime (string order lies:
+    // 0.99.0 sorts after 0.153.4).
+    const versionsDir = path.join(process.env.LOCALAPPDATA, "OpenAI", "Codex", "bin");
+    try {
+      const entries = fs
+        .readdirSync(versionsDir, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => {
+          const dir = path.join(versionsDir, entry.name);
+          let mtime = 0;
+          try {
+            mtime = fs.statSync(dir).mtimeMs || 0;
+          } catch {
+            /* raced removal */
+          }
+          return { name: entry.name, dir, mtime };
+        })
+        .sort((a, b) => b.mtime - a.mtime || (a.name < b.name ? -1 : 1));
+      for (const entry of entries) candidates.push(path.join(entry.dir, "codex.exe"));
+    } catch {
+      /* no desktop install */
+    }
+  }
+  return candidates;
+}
+
 const CODEX_CLI_CANDIDATES = [
   "codex",
   "/opt/homebrew/bin/codex",
   "/usr/local/bin/codex",
   "/home/linuxbrew/.linuxbrew/bin/codex",
+  ...codexDesktopCliCandidates(),
 ];
 
 let officialModelsCache = null;
 let officialModelsOverride = null;
+let officialModelsCandidatesOverride = null;
+// Why the bundled probe produced nothing, surfaced so the UI can explain a
+// fallback to the vendored template (cc-switch 2e20cdcb5's CodexBundledModelsError):
+// "noCli" — no candidate could be launched; "failed" — a CLI ran but the list
+// was unusable (non-zero exit, not JSON, empty/unusable rows).
+let officialModelsReason = null;
+
+// Tests: point the probe at fixture scripts instead of the machine's CLI.
+function setCodexCliCandidatesForTests(candidates) {
+  officialModelsCandidatesOverride = Array.isArray(candidates) ? candidates : null;
+  officialModelsCache = null;
+  officialModelsReason = null;
+}
 
 // The vendored fallback: the real gpt-5.5 entry with its harness prompt.
 function staticOfficialModel() {
@@ -110,16 +174,21 @@ function normalizeOfficialRows(rows) {
 }
 
 function bundledOfficialModels() {
-  for (const candidate of CODEX_CLI_CANDIDATES) {
+  const candidates = officialModelsCandidatesOverride || CODEX_CLI_CANDIDATES;
+  let launched = false; // a candidate existed and ran (exit code or output inspected)
+  for (const candidate of candidates) {
     let stdout;
     try {
       stdout = execFileSync(candidate, ["debug", "models", "--bundled"], {
         timeout: 5000,
         stdio: ["ignore", "pipe", "ignore"],
       });
-    } catch {
+    } catch (error) {
+      if (error && (error.code === "ENOENT" || error.code === "EACCES")) continue;
+      launched = true;
       continue;
     }
+    launched = true;
     let catalog = null;
     try {
       catalog = JSON.parse(stdout.toString("utf8"));
@@ -129,8 +198,12 @@ function bundledOfficialModels() {
     const models = catalog && typeof catalog === "object" ? catalog.models : null;
     if (!Array.isArray(models) || models.length === 0) continue;
     const rows = normalizeOfficialRows(models);
-    if (rows.length > 0) return rows;
+    if (rows.length > 0) {
+      officialModelsReason = null;
+      return rows;
+    }
   }
+  officialModelsReason = launched ? "failed" : "noCli";
   return null;
 }
 
@@ -149,6 +222,16 @@ function codexOpenaiOfficialModels() {
 // Tests: pass [] to disable mirroring deterministically, or fixture rows.
 function setCodexOfficialModelsForTests(rows) {
   officialModelsOverride = Array.isArray(rows) ? rows : null;
+  officialModelsReason = null;
+}
+
+// Why the bundled list is unavailable, for UI surfacing (null = the list came
+// from a CLI probe or an override). Resolved once per process together with
+// the model cache.
+function codexOfficialModelsReason() {
+  if (officialModelsOverride !== null) return null;
+  if (!officialModelsCache) codexOpenaiOfficialModels();
+  return officialModelsReason;
 }
 
 // Codex's own lookup rule (codex-rs models-manager): longest case-sensitive
@@ -356,5 +439,7 @@ module.exports = {
   parseCodexCatalog,
   findCodexOfficialModel,
   codexOpenaiOfficialModels,
+  codexOfficialModelsReason,
   setCodexOfficialModelsForTests,
+  setCodexCliCandidatesForTests,
 };

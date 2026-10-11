@@ -14,6 +14,8 @@ const mcp = require("./mcp");
 const prompts = require("./prompts");
 const piPromptFiles = require("./pi-prompt-files");
 const backupExport = require("./backup-export");
+const envConflict = require("./env-conflict");
+const skills = require("./skills");
 const quota = require("./quota");
 const failover = require("./failover");
 
@@ -113,9 +115,19 @@ async function readLives(app) {
   return lives;
 }
 
-async function readCodexStash() {
-  const stash = await readJson(paths.codexAuthStashPath());
-  return stash && typeof stash === "object" ? stash.auth || null : null;
+// Load the codex login stash, upgrading older shapes once per read: a
+// pre-workspace single-slot file (or a user-keyed map) is rekeyed by identity
+// and seeded from the official cards' stored logins (cc-switch 84457b510-era
+// stash vs e5b1e0966's multi-slot LoginStash). `rowAuths` are the official
+// codex cards' settingsConfig.auth values; `liveAuth` is the live auth.json.
+async function readCodexStash(rowAuths, liveAuth) {
+  const raw = await readJson(paths.codexAuthStashPath());
+  if (!raw || typeof raw !== "object") {
+    return targets.emptyCodexStash();
+  }
+  const current = targets.normalizeCodexStash(raw);
+  if (current) return current;
+  return targets.upgradeCodexStash(raw, rowAuths, liveAuth);
 }
 
 // Compute every live patch for a switch in memory (cc-switch's transaction
@@ -125,8 +137,7 @@ async function readCodexStash() {
 function computeSwitchPlan(app, prev, target, lives, stash) {
   const files = paths.targetFiles(app);
   const writes = []; // { file, content, parsedBackup? }
-  let stashWrite = null; // { content } to persist before clearing auth.json
-  let stashRestore = false;
+  let stashNext = null; // { version, logins, last } — new multi-slot stash state
   let catalogAction = { action: "keep" };
 
   if (app === "claude") {
@@ -138,7 +149,7 @@ function computeSwitchPlan(app, prev, target, lives, stash) {
     const configFile = files.find((f) => f.id === "config");
     const authFile = files.find((f) => f.id === "auth");
     const liveAuth = lives.auth.exists ? JSON.parse(lives.auth.content) : {};
-    const { configToml, auth, catalog: sidecar } = targets.projectCodex({
+    const { configToml, auth, catalog: sidecar, stashNext: next } = targets.projectCodex({
       prev,
       target,
       liveToml: lives.config.exists ? lives.config.content : "",
@@ -153,11 +164,10 @@ function computeSwitchPlan(app, prev, target, lives, stash) {
         content: `${JSON.stringify(auth.content, null, 2)}\n`,
         skipBackupIfMissing: true,
       });
-      stashRestore = !!auth.restoreStash;
     } else if (auth.action === "stash") {
-      stashWrite = auth.stashContent;
       writes.push({ file: authFile, content: `{}\n`, skipBackupIfMissing: true });
     }
+    stashNext = next;
   } else if (app === "gemini") {
     const envFile = files.find((f) => f.id === "env");
     const next = targets.projectGemini({
@@ -175,7 +185,7 @@ function computeSwitchPlan(app, prev, target, lives, stash) {
     writes.push({ file: configFile, content: additive.serializeLive(app, next), skipBackupIfMissing: true });
   }
 
-  return { writes, stashWrite, stashRestore, catalogAction };
+  return { writes, stashNext, catalogAction };
 }
 
 // Backup each existing live file, persist the auth stash, then publish all
@@ -189,11 +199,11 @@ async function persistSwitchPlan(app, plan) {
     }
   }
 
-  if (plan.stashWrite) {
+  if (plan.stashNext) {
     await ensureDir(paths.providerSwitchRoot());
     await writeFileAtomic(
       paths.codexAuthStashPath(),
-      `${JSON.stringify({ auth: plan.stashWrite, stashedAt: new Date().toISOString() }, null, 2)}\n`,
+      `${JSON.stringify({ ...plan.stashNext, stashedAt: new Date().toISOString() }, null, 2)}\n`,
       { mode: 0o600 },
     );
   }
@@ -217,14 +227,6 @@ async function persistSwitchPlan(app, plan) {
     }
   }
 
-  if (plan.stashRestore) {
-    try {
-      await fs.unlink(paths.codexAuthStashPath());
-    } catch {
-      /* stash may be gone already */
-    }
-  }
-
   return { wrote, backups };
 }
 
@@ -237,6 +239,16 @@ async function liveExists(file) {
   }
 }
 
+// The official codex cards' stored logins seed the stash upgrade (cc-switch
+// seeds LoginStash from row auths); unbound cards carry none.
+async function officialCodexRowAuths() {
+  const state = await store.listProviders("codex");
+  return state.providers
+    .filter((provider) => provider.category === "official")
+    .map((provider) => provider.settingsConfig && provider.settingsConfig.auth)
+    .filter((auth) => auth && typeof auth === "object" && !Array.isArray(auth));
+}
+
 async function switchProvider({ app, id }) {
   if (!store.isSupportedApp(app)) throw new Error(`Unsupported app: ${app}`);
   const state = await store.listProviders(app);
@@ -247,7 +259,10 @@ async function switchProvider({ app, id }) {
     : null;
 
   const lives = await readLives(app);
-  const stash = app === "codex" ? await readCodexStash() : null;
+  const stash =
+    app === "codex"
+      ? await readCodexStash(await officialCodexRowAuths(), lives.auth.exists ? JSON.parse(lives.auth.content) : {})
+      : null;
   const plan = computeSwitchPlan(app, prev, target, lives, stash);
   const { wrote, backups } = await persistSwitchPlan(app, plan);
 
@@ -332,7 +347,10 @@ async function saveProvider({ app, id, body }) {
       meta: body.meta !== undefined ? body.meta : existing.meta,
     });
     const target = { ...existing, ...clean };
-    const stash = app === "codex" ? await readCodexStash() : null;
+    const stash =
+      app === "codex"
+        ? await readCodexStash(await officialCodexRowAuths(), lives.auth.exists ? JSON.parse(lives.auth.content) : {})
+        : null;
     const switchPlan = computeSwitchPlan(app, existing, target, patchedLives, stash);
     ({ wrote, backups } = await persistSwitchPlan(app, switchPlan));
     applied = { wrote: wrote.slice(), backups };
@@ -584,20 +602,22 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
       return true;
     }
 
-    // Provider quota (cc-switch's coding_plan service): detects a supported
-    // plan provider from the row's base URL and queries its balance/rolling
-    // windows with the row's own key. Read-only, so no mutation guard.
+    // Provider quota (cc-switch's coding_plan + balance services): detects a
+    // supported plan or balance provider from the row's base URL and queries
+    // it with the row's own key. Read-only, so no mutation guard.
     if (p === `${prefix}/quota` && method === "GET") {
       const app = url.searchParams.get("app") || "claude";
       const id = url.searchParams.get("id") || "";
       if (!store.isSupportedApp(app)) throw new Error(`Unsupported app: ${app}`);
       const provider = await store.getProvider(app, id);
       if (!provider) throw new Error(`Unknown provider: ${id}`);
-      const quotaResult = await quota.queryProviderQuota({
-        app,
-        provider,
-        bypassCache: url.searchParams.get("nocache") === "1",
-      });
+      const bypassCache = url.searchParams.get("nocache") === "1";
+      let quotaResult = await quota.queryProviderQuota({ app, provider, bypassCache });
+      if (!quotaResult.ok && !quotaResult.provider) {
+        // No plan provider on this base URL: try the generic balance probes
+        // (DeepSeek/StepFun/SiliconFlow/OpenRouter/Novita — cc-switch balance.rs).
+        quotaResult = await quota.queryProviderBalance({ app, provider, bypassCache });
+      }
       json(res, { ok: true, app, id, quota: quotaResult });
       return true;
     }
@@ -694,6 +714,14 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
       return true;
     }
 
+    if (p === `${prefix}/providers/duplicate` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      const provider = await store.duplicateProvider(body.app, body.id);
+      json(res, { ok: true, provider });
+      return true;
+    }
+
     const providersMatch = p.match(new RegExp(`^${prefix}/providers(?:/([\\w-]+))?$`));
     if (providersMatch) {
       const providerId = providersMatch[1] || null;
@@ -740,7 +768,37 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
     if (p === `${prefix}/editor-view` && method === "POST") {
       const body = await readJsonBody(req);
       const app = body.app || "claude";
-      json(res, await editor.buildEditorView(app, { settingsConfig: body.settingsConfig, id: body.id, category: body.category }));
+      const view = await editor.buildEditorView(app, { settingsConfig: body.settingsConfig, id: body.id, category: body.category });
+      // Why the official GPT list is unavailable, when it is — the catalog
+      // editor hints at the vendored-template fallback (cc-switch 2e20cdcb5).
+      if (app === "codex") view.codexOfficialModelsReason = catalog.codexOfficialModelsReason();
+      json(res, view);
+      return true;
+    }
+
+    // Skills (cc-switch services/skill.rs, v1): SSOT list discovered from
+    // the agents' skills directories, projected per app via symlink-or-copy.
+    if (p === `${prefix}/skills` && method === "GET") {
+      json(res, { ok: true, skills: await skills.listSkills(), apps: skills.SKILL_APPS });
+      return true;
+    }
+    if (p === `${prefix}/skills/import` && method === "POST") {
+      if (!requireMutation()) return true;
+      json(res, { ok: true, ...(await skills.importSkills()) });
+      return true;
+    }
+    if (p === `${prefix}/skills/toggle` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      const result = await skills.toggleSkill(String(body.id || ""), String(body.app || ""), body.enabled === true);
+      json(res, { ok: true, ...result });
+      return true;
+    }
+    if (p === `${prefix}/skills/sync` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      const result = await skills.syncSkills(Array.isArray(body.apps) ? body.apps : null);
+      json(res, { ok: true, ...result });
       return true;
     }
 
@@ -749,6 +807,33 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
       const body = await readJsonBody(req);
       const results = await speedTestEndpoints(body.urls || [], body.timeoutMs);
       json(res, { ok: true, results });
+      return true;
+    }
+
+    // Env conflicts (cc-switch's check_env_conflicts / delete_env_vars /
+    // restore_env_backup): shell profiles and the process environment can
+    // override what switching writes, so the page warns and offers removal
+    // with an automatic backup. Read is open; delete/restore mutate files
+    // beyond the live configs and require mutation auth.
+    if (p === `${prefix}/env-conflicts` && method === "GET") {
+      const apps = store.SUPPORTED_APPS.filter((app) => envConflict.keywordsForApp(app).length > 0);
+      json(res, { ok: true, conflicts: envConflict.checkAllConflicts(apps) });
+      return true;
+    }
+
+    if (p === `${prefix}/env-conflicts/delete` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      const result = await envConflict.deleteConflicts(body.conflicts || []);
+      json(res, { ok: true, ...result });
+      return true;
+    }
+
+    if (p === `${prefix}/env-conflicts/restore` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      const result = await envConflict.restoreFromBackup(String(body.backupPath || ""));
+      json(res, { ok: true, ...result });
       return true;
     }
 
@@ -890,10 +975,72 @@ function extractModelIds(payload) {
   return null;
 }
 
-async function fetchModelList({ baseUrl, apiKey, modelsUrl, isFullUrl }) {
+// cc-switch 315aeda: gateways like Cloudflare AI Gateway require extra
+// headers (cf-aig-authorization) on GET /v1/models. The provider's Header
+// override JSON is parsed leniently — invalid or empty overrides fall back
+// to a plain fetch with no error surfaced (cc-switch's form shows a
+// validation error for the same input; this port carries no override
+// validation, so the silent fallback is the only signal); valid ones are
+// applied after the defaults, so an explicit Authorization in the override
+// wins.
+const MODEL_FETCH_HEADER_VALUE_CONTROL_CHARS = /[\u0000-\u0008\u000a-\u001f\u007f]/;
+
+// cc-switch's PROTECTED_LOCAL_PROXY_HEADER_NAMES (requestOverrides.ts):
+// managed, hop-by-hop, identity and CDN/tracing headers never ride the
+// model-list request — forwarding content-length/transfer-encoding breaks
+// fetch outright (undici rejects them, the auth-relay outage class), and
+// the rest would smuggle a proxy-managed identity. authorization is the one
+// documented deviation: an explicit Authorization in the override wins.
+const PROTECTED_MODEL_FETCH_HEADER_NAMES = new Set([
+  "host", "content-length", "transfer-encoding", "connection",
+  "proxy-authorization", "proxy-authenticate", "te", "trailer", "upgrade",
+  "accept-encoding", "content-type", "x-api-key", "x-goog-api-key",
+  "chatgpt-account-id", "session_id", "x-client-request-id",
+  "x-codex-window-id", "x-forwarded-host", "x-forwarded-port",
+  "x-forwarded-proto", "forwarded", "cf-connecting-ip", "cf-ipcountry",
+  "cf-ray", "cf-visitor", "true-client-ip", "fastly-client-ip",
+  "x-azure-clientip", "x-azure-fdid", "x-azure-ref", "akamai-origin-hop",
+  "x-akamai-config-log-detail", "x-request-id", "x-correlation-id",
+  "x-trace-id", "x-amzn-trace-id", "x-b3-traceid", "x-b3-spanid",
+  "x-b3-parentspanid", "x-b3-sampled", "traceparent", "tracestate",
+]);
+
+function parseModelFetchHeaders(raw) {
+  const text = String(raw || "").trim();
+  if (!text) return null;
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  const headers = {};
+  const seenNames = new Set();
+  for (const [name, value] of Object.entries(parsed)) {
+    const headerName = String(name).trim();
+    if (!headerName || !/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(headerName)) return null;
+    if (typeof value !== "string") return null;
+    // The remaining cc-switch parseHeaderOverrideJson rules: a value carrying
+    // control characters, a duplicate name after case normalization, and a
+    // protected/managed name all invalidate the whole override (silent
+    // plain-fetch fallback) instead of reaching fetch() and surfacing as a
+    // request error.
+    if (MODEL_FETCH_HEADER_VALUE_CONTROL_CHARS.test(value)) return null;
+    const normalizedName = headerName.toLowerCase();
+    if (seenNames.has(normalizedName)) return null;
+    if (PROTECTED_MODEL_FETCH_HEADER_NAMES.has(normalizedName)) return null;
+    seenNames.add(normalizedName);
+    headers[headerName] = value;
+  }
+  return Object.keys(headers).length ? headers : null;
+}
+
+async function fetchModelList({ baseUrl, apiKey, modelsUrl, isFullUrl, requestHeaders }) {
   const base = String(baseUrl || "").trim().replace(/\/+$/, "");
   const explicit = String(modelsUrl || "").trim();
   if (!base && !explicit) throw new Error("Base URL is required");
+  const overrideHeaders = parseModelFetchHeaders(requestHeaders);
   const candidates = [];
   if (explicit && /^https?:\/\//.test(explicit)) {
     candidates.push(explicit);
@@ -911,6 +1058,7 @@ async function fetchModelList({ baseUrl, apiKey, modelsUrl, isFullUrl }) {
     try {
       const headers = { Accept: "application/json" };
       if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+      if (overrideHeaders) Object.assign(headers, overrideHeaders);
       const response = await fetch(url, { headers, signal: controller.signal });
       if (!response.ok) {
         errors.push(`HTTP ${response.status} for ${url}`);
@@ -929,18 +1077,21 @@ async function fetchModelList({ baseUrl, apiKey, modelsUrl, isFullUrl }) {
   throw new Error(errors.join("; ") || "No model list found");
 }
 
-// Rows that carry a supported plan provider get `quotaProvider` set so the
-// dashboard only renders quota lines where a query can actually succeed.
-// Applied on every provider-listing surface (/status, /providers) since the
-// page's initial data comes from the status snapshot.
+// Rows that carry a supported plan or balance provider get `quotaProvider`
+// set so the dashboard only renders quota lines where a query can actually
+// succeed. Applied on every provider-listing surface (/status, /providers)
+// since the page's initial data comes from the status snapshot.
 function annotateQuotaProviders(app, providers) {
-  return (Array.isArray(providers) ? providers : []).map((provider) => ({
-    ...provider,
-    quotaProvider: quota.detectQuotaProvider(
-      quota.resolveProviderCredential(app, provider)?.baseUrl,
-      app,
-    )?.id ?? null,
-  }));
+  return (Array.isArray(providers) ? providers : []).map((provider) => {
+    const credential = quota.resolveProviderCredential(app, provider);
+    const plan = quota.detectQuotaProvider(credential?.baseUrl, app)?.id ?? null;
+    const balance = plan ? null : quota.detectBalanceProvider(credential?.baseUrl)?.id ?? null;
+    return {
+      ...provider,
+      quotaProvider: plan ?? balance,
+      quotaKind: plan ? "plan" : balance ? "balance" : null,
+    };
+  });
 }
 
 async function buildStatus() {
@@ -961,11 +1112,15 @@ async function buildStatus() {
     });
   }
   const stash = await readJson(paths.codexAuthStashPath());
+  const stashPresent =
+    stash &&
+    typeof stash === "object" &&
+    ((stash.logins && typeof stash.logins === "object" && Object.keys(stash.logins).length > 0) || stash.auth);
   return {
     ok: true,
     storagePath: paths.providerSwitchRoot(),
     visibleApps: state.settings.visibleApps,
-    codexAuthStash: stash && typeof stash === "object" && stash.auth ? { stashedAt: stash.stashedAt || null } : null,
+    codexAuthStash: stashPresent ? { stashedAt: stash.stashedAt || null } : null,
     apps,
   };
 }

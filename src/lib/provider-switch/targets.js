@@ -152,7 +152,7 @@ function projectCodex({ prev, target, liveToml, liveAuth, stash }) {
       ? { action: "remove" }
       : { action: "keep" };
 
-  return { configToml: text, auth, catalog: catalogAction };
+  return { configToml: text, auth, catalog: catalogAction, stashNext: auth.stashNext || null };
 }
 
 function normalizeTable(entries) {
@@ -224,32 +224,261 @@ function isCodexThirdPartyAuthResidue(auth) {
   return Object.keys(auth).every((key) => key === "OPENAI_API_KEY");
 }
 
-// Decision: "keep" | { action: "write", content } — stash file handling is
-// done by the caller (it is a separate 0600 file).
+// ---------------------------------------------------------------------------
+// Codex login identity (cc-switch codex_login.rs, #8054): a login is the
+// id_token user plus the ChatGPT workspace (tokens.account_id). The Plus and
+// Team workspaces of one OpenAI user share the subject and differ only in
+// account_id, so user-only identities collapsed their cards into one login.
+// ---------------------------------------------------------------------------
+
+// The `sub` claim of the id_token JWT: exactly three dot segments, the header
+// decoding to JSON with a non-empty alg, the payload to JSON with a sub.
+function codexIdTokenSubject(idToken) {
+  if (typeof idToken !== "string") return null;
+  const segments = idToken.split(".");
+  if (segments.length !== 3) return null;
+  const decode = (segment) => {
+    try {
+      return JSON.parse(Buffer.from(segment, "base64url").toString("utf8"));
+    } catch {
+      return null;
+    }
+  };
+  const header = decode(segments[0]);
+  const alg = header && typeof header.alg === "string" ? header.alg.trim() : "";
+  if (!alg) return null;
+  const claims = decode(segments[1]);
+  const sub = claims && typeof claims.sub === "string" ? claims.sub.trim() : "";
+  return sub || null;
+}
+
+function codexAuthUser(auth) {
+  const idToken = auth && auth.tokens && typeof auth.tokens === "object" ? auth.tokens.id_token : null;
+  const subject = codexIdTokenSubject(idToken);
+  return subject ? `sub:${subject}` : null;
+}
+
+function codexAuthApiKey(auth) {
+  const key = auth && typeof auth.OPENAI_API_KEY === "string" ? auth.OPENAI_API_KEY.trim() : "";
+  return key || null;
+}
+
+function valuePresent(value) {
+  if (value === null || value === undefined) return false;
+  if (typeof value === "string") return value.trim() !== "";
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === "object") return Object.keys(value).length > 0;
+  return true;
+}
+
+// Anything Codex would treat as a login: any key (auth_mode excepted) with a
+// present value — the OAuth token triple, a managed credential, or a bare API
+// key (an OPENAI_API_KEY-only file is residue, handled before this check).
+function codexAuthHasLoginMaterial(auth) {
+  if (!auth || typeof auth !== "object" || Array.isArray(auth)) return false;
+  return Object.keys(auth).some((key) => key !== "auth_mode" && valuePresent(auth[key]));
+}
+
+function codexAuthHasCredentialLoginMaterial(auth) {
+  if (!auth || typeof auth !== "object" || Array.isArray(auth)) return false;
+  for (const key of ["personal_access_token", "agent_identity", "bedrock_api_key"]) {
+    if (valuePresent(auth[key])) return true;
+  }
+  const tokens = auth.tokens && typeof auth.tokens === "object" && !Array.isArray(auth.tokens) ? auth.tokens : null;
+  return !!tokens && ["id_token", "access_token", "refresh_token"].some((key) => valuePresent(tokens[key]));
+}
+
+// Identity key: user + workspace when both, either when one is missing,
+// "api-key" for key logins, "unknown" as the fallback (cc-switch identity()).
+function codexIdentityOf(auth) {
+  if (!auth || typeof auth !== "object") return "unknown";
+  const user = codexAuthUser(auth);
+  const account = auth.tokens && typeof auth.tokens === "object" && typeof auth.tokens.account_id === "string"
+    ? auth.tokens.account_id.trim() || null
+    : null;
+  if (user && account) return `${user}|account:${account}`;
+  if (user) return user;
+  if (account) return `account:${account}`;
+  if (codexAuthApiKey(auth)) return "api-key";
+  return "unknown";
+}
+
+// Identity of a row that stores a real login (upstream oauth_identity).
+function codexOauthIdentityOf(auth) {
+  return codexAuthHasCredentialLoginMaterial(auth) ? codexIdentityOf(auth) : null;
+}
+
+function isCodexApiKeyCredential(auth) {
+  return !!codexAuthApiKey(auth) && !codexAuthHasCredentialLoginMaterial(auth);
+}
+
+// ---------------------------------------------------------------------------
+// Codex login stash (cc-switch LoginStash): a 0600 file holding every login
+// seen on this machine keyed by identity, plus `last` — the most recently
+// stashed one, restored for official cards that carry no login of their own.
+// ---------------------------------------------------------------------------
+
+const CODEX_STASH_VERSION = 1;
+
+function emptyCodexStash() {
+  return { version: CODEX_STASH_VERSION, logins: {}, last: null };
+}
+
+function normalizeCodexStash(raw) {
+  if (raw && typeof raw === "object" && raw.logins && typeof raw.logins === "object" && !Array.isArray(raw.logins)) {
+    const logins = {};
+    for (const [id, auth] of Object.entries(raw.logins)) {
+      if (auth && typeof auth === "object" && !Array.isArray(auth)) logins[id] = auth;
+    }
+    return { version: CODEX_STASH_VERSION, logins, last: typeof raw.last === "string" ? raw.last : null };
+  }
+  return null;
+}
+
+function codexStashPut(stash, auth) {
+  const id = codexIdentityOf(auth);
+  return { ...stash, logins: { ...stash.logins, [id]: auth }, last: id };
+}
+
+function codexStashTake(stash, id) {
+  if (!stash.logins || !Object.prototype.hasOwnProperty.call(stash.logins, id)) {
+    return { stash, auth: null };
+  }
+  const logins = { ...stash.logins };
+  const auth = logins[id];
+  delete logins[id];
+  return { stash: { ...stash, logins, last: stash.last === id ? null : stash.last }, auth };
+}
+
+function codexStashChanged(before, after) {
+  return JSON.stringify(before) !== JSON.stringify(after);
+}
+
+// Older stash files predate workspace-aware identities (AiTool stored a
+// single raw auth object; cc-switch 4.0.7 keyed by user only). Rekey by the
+// current identity and restore workspaces merged away, seeded from the
+// official cards' stored logins — but only for users still present in the
+// stash or the live auth.json; a user found in neither has logged out and is
+// not revived (cc-switch LoginStash::upgraded).
+function upgradeCodexStash(raw, rowAuths, liveAuth) {
+  const source = normalizeCodexStash(raw);
+  const legacyAuths = [];
+  if (source) {
+    legacyAuths.push(...Object.values(source.logins));
+  } else if (raw && typeof raw === "object" && raw.auth && typeof raw.auth === "object") {
+    legacyAuths.push(raw.auth);
+  }
+  const live = liveAuth && codexAuthHasCredentialLoginMaterial(liveAuth) ? liveAuth : null;
+  const users = new Set(
+    [...legacyAuths, ...(live ? [live] : [])].map(codexAuthUser).filter(Boolean),
+  );
+  const logins = {};
+  let last = null;
+  for (const auth of legacyAuths) {
+    logins[codexIdentityOf(auth)] = auth;
+  }
+  if (source && source.last && logins[source.last]) last = source.last;
+  else if (legacyAuths.length === 1) last = codexIdentityOf(legacyAuths[0]);
+  const liveIdentity = live ? codexIdentityOf(live) : null;
+  for (const rowAuth of Array.isArray(rowAuths) ? rowAuths : []) {
+    const id = codexOauthIdentityOf(rowAuth);
+    if (!id || logins[id]) continue;
+    const sameUser = codexAuthUser(rowAuth) && users.has(codexAuthUser(rowAuth));
+    if (sameUser && liveIdentity !== id) logins[id] = rowAuth;
+  }
+  return { version: CODEX_STASH_VERSION, logins, last };
+}
+
+// Decision: "keep" | { action: "write", content } | { action: "stash" } —
 // auth.json belongs to the official ChatGPT login only: the target row's
 // OPENAI_API_KEY is projected into config.toml's route table instead (see
-// applyCodexRouteAuth), and any live login is stashed on a third-party switch.
-function resolveCodexAuth({ target, liveAuth, stash }) {
+// applyCodexRouteAuth). `stashNext` carries the new multi-slot stash (null =
+// unchanged); the caller persists it as a separate 0600 file.
+// Port of cc-switch codex_login::plan: an official card with a stored login
+// swaps logins through the stash, an unbound card follows the live login, and
+// a third-party switch stashes the live login under its identity.
+function resolveCodexAuth({ prev, target, liveAuth, stash }) {
   const targetOfficial = !!target && target.category === "official";
+  const base = normalizeCodexStash(stash) || emptyCodexStash();
   const liveAuthObject = liveAuth && typeof liveAuth === "object" && Object.keys(liveAuth).length > 0 ? liveAuth : null;
+  const residue = liveAuthObject && isCodexThirdPartyAuthResidue(liveAuthObject);
+  const native = liveAuthObject && !residue && codexAuthHasLoginMaterial(liveAuthObject) ? liveAuthObject : null;
+  let next = base;
 
-  if (targetOfficial) {
-    // Switching back to the official provider: restore the stashed login if
-    // the live auth file is empty; never clobber a fresh login.
-    if (stash && typeof stash === "object" && Object.keys(stash).length > 0 && !liveAuthObject) {
-      return { action: "write", content: stash, restoreStash: true };
+  // Leaving an unbound official card while Codex is logged out: the login is
+  // gone, so its stash entry is stale too — invalidate it and forget `last`
+  // so switching back cannot revive a logout (cc-switch leaving_official).
+  // Applies for any target, before the branch on it.
+  const prevOfficial = !!prev && prev.category === "official";
+  if (prevOfficial && !native) {
+    const prevRow =
+      prev.settingsConfig && prev.settingsConfig.auth && typeof prev.settingsConfig.auth === "object"
+        ? prev.settingsConfig.auth
+        : null;
+    const prevId = codexOauthIdentityOf(prevRow);
+    if (prevId) {
+      next = codexStashTake(next, prevId).stash;
+    } else if (next.last) {
+      next = codexStashTake(next, next.last).stash;
     }
-    return { action: "keep" };
+    next = { ...next, last: null };
   }
-  // Third-party: clear the live login (stash it for the official card), and
-  // drop stale third-party key residue without stashing it.
-  if (liveAuthObject) {
-    if (isCodexThirdPartyAuthResidue(liveAuthObject)) {
-      return { action: "write", content: {} };
+
+  if (!targetOfficial) {
+    // Third-party: stash the live login under its identity for the official
+    // cards; stale third-party key residue is cleared without stashing, and
+    // no auth.json is left beside a third-party route.
+    if (native) next = codexStashPut(next, native);
+    if (liveAuthObject) return { action: "stash", stashNext: codexStashChanged(base, next) ? next : null };
+    return { action: "keep", stashNext: codexStashChanged(base, next) ? next : null };
+  }
+
+  const rowAuth =
+    target.settingsConfig && target.settingsConfig.auth && typeof target.settingsConfig.auth === "object"
+      ? target.settingsConfig.auth
+      : null;
+
+  // An official card whose credential is an API key writes it wholesale
+  // (rare: relay keys normally ride the config.toml route table).
+  if (rowAuth && isCodexApiKeyCredential(rowAuth)) {
+    if (native && JSON.stringify(native) !== JSON.stringify(rowAuth)) {
+      next = codexStashPut(next, native);
     }
-    return { action: "stash", content: {}, stashContent: liveAuthObject };
+    return { action: "write", content: rowAuth, stashNext: codexStashChanged(base, next) ? next : null };
   }
-  return { action: "keep" };
+
+  const wanted = codexOauthIdentityOf(rowAuth);
+  if (native) {
+    const liveIdentity = codexIdentityOf(native);
+    // No stored login (or it is the live one): follow Codex's current login.
+    if (!wanted || wanted === liveIdentity) {
+      return { action: "keep", stashNext: codexStashChanged(base, next) ? next : null };
+    }
+    // Another identity on the card: swap through the stash, but only if that
+    // login was stashed — a card snapshot may be stale or logged out.
+    const taken = codexStashTake(next, wanted);
+    if (!taken.auth) {
+      return { action: "keep", stashNext: codexStashChanged(base, next) ? next : null };
+    }
+    return {
+      action: "write",
+      content: taken.auth,
+      stashNext: codexStashPut(taken.stash, native),
+    };
+  }
+
+  // No live login: restore the card's own login, or the most recently
+  // stashed one for unbound cards. With nothing to restore there is nothing
+  // to clear either (the file is already empty).
+  const restored = wanted
+    ? codexStashTake(next, wanted)
+    : next.last
+      ? codexStashTake(next, next.last)
+      : { stash: next, auth: null };
+  if (restored.auth) {
+    return { action: "write", content: restored.auth, stashNext: restored.stash };
+  }
+  return { action: "keep", stashNext: codexStashChanged(base, next) ? next : null };
 }
 
 // ---------------------------------------------------------------------------
@@ -393,4 +622,13 @@ module.exports = {
   extractCodexConfig,
   extractGeminiConfig,
   mergeLiveIntoSettingsConfig,
+  // exported for tests
+  codexIdentityOf,
+  codexAuthHasLoginMaterial,
+  codexAuthHasCredentialLoginMaterial,
+  emptyCodexStash,
+  normalizeCodexStash,
+  codexStashPut,
+  codexStashTake,
+  upgradeCodexStash,
 };

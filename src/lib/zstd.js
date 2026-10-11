@@ -65,7 +65,7 @@ function inspectDshZstdFrames(data, maxOutputBytes = DEFAULT_MAX_OUTPUT_BYTES) {
       declaredContentBytes = readUnsignedLE(contentSizeBytes);
       if (contentSizeBytes === 2) declaredContentBytes += 256n;
       if (declaredContentBytes > BigInt(limit)) {
-        throw new Error(`DeepSeek Harness decompressed session log exceeds ${limit} bytes`);
+        throw Object.assign(new Error(`DeepSeek Harness decompressed session log exceeds ${limit} bytes`), { code: "ERR_BUFFER_TOO_LARGE" });
       }
       if (singleSegment) windowSize = Number(declaredContentBytes);
     } else {
@@ -93,7 +93,7 @@ function inspectDshZstdFrames(data, maxOutputBytes = DEFAULT_MAX_OUTPUT_BYTES) {
         ? Math.min(Number(windowSize) || 128 * 1024, 128 * 1024)
         : blockSize;
       if (declaredContentBytes == null && frameUpperBound > limit) {
-        throw new Error(`DeepSeek Harness decompressed session log exceeds ${limit} bytes`);
+        throw Object.assign(new Error(`DeepSeek Harness decompressed session log exceeds ${limit} bytes`), { code: "ERR_BUFFER_TOO_LARGE" });
       }
     }
     if (hasChecksum) {
@@ -105,7 +105,7 @@ function inspectDshZstdFrames(data, maxOutputBytes = DEFAULT_MAX_OUTPUT_BYTES) {
       : Number(declaredContentBytes);
     totalContentBytes += boundedFrameBytes;
     if (allContentSizesDeclared && totalContentBytes > limit) {
-      throw new Error(`DeepSeek Harness decompressed session log exceeds ${limit} bytes`);
+      throw Object.assign(new Error(`DeepSeek Harness decompressed session log exceeds ${limit} bytes`), { code: "ERR_BUFFER_TOO_LARGE" });
     }
     frameRanges.push({ start: frameStart, end: offset, maxContentBytes: boundedFrameBytes });
     frames += 1;
@@ -149,7 +149,7 @@ async function decodeDshZstd(
     const decoded = await decodeDshZstdFrame(input.subarray(frame.start, frame.end));
     total += decoded.length;
     if (total > maxOutputBytes) {
-      throw new Error(`DeepSeek Harness decompressed session log exceeds ${maxOutputBytes} bytes`);
+      throw Object.assign(new Error(`DeepSeek Harness decompressed session log exceeds ${maxOutputBytes} bytes`), { code: "ERR_BUFFER_TOO_LARGE" });
     }
     parts.push(decoded);
   }

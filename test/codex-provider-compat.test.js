@@ -20,7 +20,7 @@ for (const endpointKey of ["base_url", "openai_base_url"]) {
     const config = parse(projection.configToml);
     assert.equal(config.model_provider, "custom");
     assert.equal(config.model_providers.custom.base_url, "https://relay.test/v1");
-    assert.equal(config.model_providers.custom.wire_api, "responses");
+    assert.equal(config.model_providers.custom.wire_api, "chat");
     assert.equal(config.model_providers.custom.experimental_bearer_token, "fixture-key");
     assert.equal(config[endpointKey], undefined);
     assert.equal(config.wire_api, undefined);
@@ -79,7 +79,7 @@ test("legacy relay switching still stashes and restores official login", () => {
   const outgoing = project(relay, "", { liveAuth: login });
   assert.equal(outgoing.auth.action, "stash");
   const official = { name: "Official", category: "official", settingsConfig: { auth: null, config: { model_provider: "openai" } } };
-  const incoming = project(official, outgoing.configToml, { prev: relay, stash: login });
+  const incoming = project(official, outgoing.configToml, { prev: relay, stash: outgoing.auth.stashNext });
   assert.equal(incoming.auth.action, "write");
   assert.deepEqual(incoming.auth.content, login);
   assert.equal(parse(incoming.configToml).model_provider, "openai");

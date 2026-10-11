@@ -62,6 +62,21 @@ function newProviderId() {
   return `p_${crypto.randomUUID()}`;
 }
 
+// Legacy Codex rows (top-level base_url/openai_base_url with no route
+// selector) are folded into [model_providers.custom] on every read/write so
+// the editor, model fetch and switch projection all see the modern shape
+// (cc-switch 84457b510). Idempotent; prev rows converge on the next mutation.
+function normalizeProviderRow(app, provider) {
+  if (app !== "codex" || !provider || typeof provider !== "object") return provider;
+  const settingsConfig = provider.settingsConfig;
+  if (!settingsConfig || typeof settingsConfig !== "object") return provider;
+  const config = require("./codex-provider-config").normalizeCodexProviderConfig(
+    settingsConfig.config, { official: provider.category === "official" },
+  );
+  if (config === settingsConfig.config) return provider;
+  return { ...provider, settingsConfig: { ...settingsConfig, config } };
+}
+
 async function readStore() {
   const store = await readJson(paths.storePath());
   if (!store || typeof store !== "object" || !store.apps) return defaultStore();
@@ -71,7 +86,9 @@ async function readStore() {
     if (!saved || typeof saved !== "object") continue;
     next.apps[app] = {
       current: typeof saved.current === "string" ? saved.current : null,
-      providers: Array.isArray(saved.providers) ? saved.providers.filter((p) => p && typeof p === "object") : [],
+      providers: Array.isArray(saved.providers)
+        ? saved.providers.filter((p) => p && typeof p === "object").map((p) => normalizeProviderRow(app, p))
+        : [],
     };
   }
   next.settings = { visibleApps: normalizeVisibleApps(store.settings && store.settings.visibleApps) };
@@ -90,7 +107,7 @@ async function mutateStore(update) {
       if (saved && typeof saved === "object") {
         normalized.apps[app] = {
           current: typeof saved.current === "string" ? saved.current : null,
-          providers: Array.isArray(saved.providers) ? saved.providers : [],
+          providers: Array.isArray(saved.providers) ? saved.providers.map((p) => normalizeProviderRow(app, p)) : [],
         };
       }
     }
@@ -237,7 +254,9 @@ async function createProvider(app, fields) {
   const now = new Date().toISOString();
   const provider = { id: newProviderId(), ...clean, createdAt: now, updatedAt: now };
   await mutateStore((store) => {
-    provider.sortIndex = store.apps[app].providers.length;
+    // Duplicates pass their own position (right after the source,
+    // cc-switch's sortIndex+1); new providers append at the end.
+    provider.sortIndex = Number.isFinite(fields.sortIndex) ? fields.sortIndex : store.apps[app].providers.length;
     store.apps[app].providers.push(provider);
     return store;
   });
@@ -284,6 +303,28 @@ async function deleteProvider(app, id) {
   });
 }
 
+// Deep-copy a provider next to the original (cc-switch's duplicate): new id,
+// "<name> copy", sortIndex+1, everything else cloned. The current pointer is
+// NOT inherited; additive slot keys come from the name, so the copy gets its
+// own slot automatically.
+async function duplicateProvider(app, id) {
+  if (!isSupportedApp(app)) throw new Error(`Unsupported app: ${app}`);
+  const state = await listProviders(app);
+  const source = state.providers.find((p) => p.id === id);
+  if (!source) throw new Error(`Provider not found: ${id}`);
+  return createProvider(app, {
+    name: `${source.name} copy`,
+    category: source.category,
+    settingsConfig: JSON.parse(JSON.stringify(source.settingsConfig || {})),
+    notes: source.notes || "",
+    websiteUrl: source.websiteUrl || "",
+    icon: source.icon || "",
+    iconColor: source.iconColor || "",
+    meta: source.meta ? JSON.parse(JSON.stringify(source.meta)) : undefined,
+    ...(Number.isFinite(source.sortIndex) ? { sortIndex: source.sortIndex + 1 } : {}),
+  });
+}
+
 async function setCurrentProvider(app, id) {
   if (!isSupportedApp(app)) throw new Error(`Unsupported app: ${app}`);
   await mutateStore((store) => {
@@ -320,6 +361,7 @@ module.exports = {
   createProvider,
   updateProvider,
   deleteProvider,
+  duplicateProvider,
   reorderProviders,
   setCurrentProvider,
   sanitizeProviderFields,

@@ -2,9 +2,11 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Check, RefreshCw, X } from "lucide-react";
 import { copy } from "../lib/copy";
 import { providerSwitchApi } from "../lib/provider-switch-api";
+import { useQuotaDisplayMode, QUOTA_DISPLAY_MODES } from "../lib/quota-display";
 
 // Per-provider quota line (cc-switch's QuotaLines / quotaRules): renders what
-// is LEFT per window, quiet gray while healthy, bold under 10%, red when used
+// is LEFT per window (or what is used under the "used" display mode), colored
+// on the number only — green while healthy, orange under 20%, red when used
 // up; a click re-queries through the server's cache. Only providers whose
 // base URL matches a supported plan provider (row.quotaProvider) render.
 
@@ -13,6 +15,8 @@ import { providerSwitchApi } from "../lib/provider-switch-api";
 // shows a check or a cross for REFRESH_RESULT_MS before going back to idle.
 const MIN_REFRESH_SPIN_MS = 600;
 const REFRESH_RESULT_MS = 1000;
+// Background quota refresh cadence: the server caches each answer for 60s.
+const QUOTA_AUTO_REFRESH_MS = 60_000;
 
 const TIER_LABEL_KEYS = {
   five_hour: "pswitch.quota.tier.five_hour",
@@ -61,6 +65,7 @@ export function ProviderQuotaLine({ app, provider }) {
   // background/mount loads keep the plain dim behavior.
   const [refreshPhase, setRefreshPhase] = useState("idle");
   const [now, setNow] = useState(() => Date.now());
+  const [quotaDisplayMode] = useQuotaDisplayMode();
   const refreshTimerRef = useRef(null);
   const providerId = provider.id;
 
@@ -104,6 +109,24 @@ export function ProviderQuotaLine({ app, provider }) {
     if (provider.quotaProvider) void load();
   }, [load, provider.quotaProvider]);
 
+  // Auto-refresh while the tab is visible (cc-switch's per-provider
+  // auto-query interval, adapted to the dashboard's shared cache: the server
+  // holds each quota for 60s, so polling faster only burns requests). Cached
+  // loads are cheap and never trip the click-refresh phase machine.
+  const autoLoadRef = useRef(false);
+  useEffect(() => {
+    if (!provider.quotaProvider) return undefined;
+    const timer = setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      if (autoLoadRef.current || refreshPhaseRef.current === "spinning") return;
+      autoLoadRef.current = true;
+      void load().finally(() => {
+        autoLoadRef.current = false;
+      });
+    }, QUOTA_AUTO_REFRESH_MS);
+    return () => clearInterval(timer);
+  }, [load, provider.quotaProvider]);
+
   // Keep the reset countdowns live without re-querying the server.
   useEffect(() => {
     if (!quota?.ok) return undefined;
@@ -114,10 +137,12 @@ export function ProviderQuotaLine({ app, provider }) {
   if (!provider.quotaProvider) return null;
 
   const tiers = quota?.ok ? quota.tiers ?? [] : [];
+  // Colored on the number only (cc-switch 0be33a8): the label stays quiet and
+  // the warning threshold keys off what is LEFT even in "used" display mode.
   const tierTone = (left) => {
     if (left <= 0) return "font-medium text-red-600 dark:text-red-400";
-    if (left < 10) return "font-medium text-oai-black dark:text-white";
-    return "text-oai-gray-500 dark:text-oai-gray-400";
+    if (left < 20) return "font-medium text-amber-600 dark:text-amber-400";
+    return "font-medium text-emerald-600 dark:text-emerald-400";
   };
 
   let content;
@@ -153,15 +178,19 @@ export function ProviderQuotaLine({ app, provider }) {
       <>
         {tiers.map((tier) => {
           const left = Math.max(0, Math.round(100 - (tier.used_percent ?? 0)));
+          const showUsed = quotaDisplayMode === QUOTA_DISPLAY_MODES.USED;
+          const shown = showUsed ? 100 - left : left;
           const reset = countdown(tier.reset_at, now);
           return (
             <span
               key={tier.id}
-              className={`inline-flex items-center gap-1 tabular-nums ${tierTone(left)}`}
+              className="inline-flex items-center gap-1 tabular-nums text-oai-gray-500 dark:text-oai-gray-400"
               title={tier.reset_at ? `${copy("pswitch.quota.reset_in", { time: reset ?? "—" })} (${new Date(tier.reset_at).toLocaleString()})` : undefined}
             >
               {copy(TIER_LABEL_KEYS[tier.id] ?? "pswitch.quota.tier.monthly")}
-              {copy("pswitch.quota.left", { value: left })}
+              <span className={tierTone(left)}>
+                {copy(showUsed ? "pswitch.quota.used" : "pswitch.quota.left", { value: shown })}
+              </span>
               {reset ? (
                 <span className="text-oai-gray-400 dark:text-oai-gray-500">
                   · {copy("pswitch.quota.reset_in", { time: reset })}
@@ -182,6 +211,17 @@ export function ProviderQuotaLine({ app, provider }) {
             {copy("pswitch.quota.credits", { value: creditsRemaining(quota.credits) })}
           </span>
         ) : null}
+        {Array.isArray(quota.balances)
+          ? quota.balances.map((line, index) => (
+            <span
+              key={`${line.label}-${index}`}
+              className={`inline-flex items-center gap-1 tabular-nums ${line.isValid ? "text-oai-gray-500 dark:text-oai-gray-400" : "font-medium text-red-600 dark:text-red-400"}`}
+              title={line.invalidMessage || undefined}
+            >
+              {copy("pswitch.quota.balance", { label: line.label, value: line.remaining, unit: line.unit })}
+            </span>
+          ))
+          : null}
         {quota.plan ? (
           <span className="text-oai-gray-400" title={quota.status || undefined}>{quota.plan}</span>
         ) : null}

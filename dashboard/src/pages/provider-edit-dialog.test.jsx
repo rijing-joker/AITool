@@ -17,7 +17,7 @@ import { prefillProviderMeta } from "./provider-preset-meta";
 
 vi.mock("../lib/copy", () => ({ copy: (key) => key }));
 vi.mock("../lib/provider-switch-api", () => ({
-  providerSwitchApi: { getEditorView: vi.fn(), updateProvider: vi.fn() },
+  providerSwitchApi: { getEditorView: vi.fn(), updateProvider: vi.fn(), fetchModels: vi.fn() },
 }));
 
 function deferred() {
@@ -291,4 +291,40 @@ it("writes pi's model field back as a models list when the entry had none", asyn
   expect(plan.rowSettings.provider.models).toEqual([{ id: "new-model" }]);
   expect(plan.rowSettings.modelId).toBe("new-model");
   expect(plan.changes).toEqual([]);
+});
+
+it("clears fetched models and voids an in-flight fetch when the header override changes", async () => {
+  // cc-switch 3703306d: /models results may be keyed per request identity, so
+  // editing the Header override after (or during) a fetch must drop the stale
+  // list instead of offering models the new identity cannot access.
+  const callbacks = props();
+  callbacks.editing.meta = { localProxyRequestOverrides: { headers: '{"X-Tenant": "tenant-1"}' } };
+  const first = deferred();
+  providerSwitchApi.fetchModels.mockReturnValueOnce(first.promise);
+  render(<ProviderEditDialog {...callbacks} />);
+  // The model input rows carry an icon-only fetch action with the same name;
+  // the advanced section's text button is the one to drive.
+  const fetchButtons = await screen.findAllByRole("button", { name: "pswitch.models.fetch" });
+  const fetchButton = fetchButtons.find((button) => button.textContent.includes("pswitch.models.fetch"));
+  fireEvent.click(fetchButton);
+
+  // The override changes mid-flight: the response for the old identity is
+  // voided, the list stays empty, and the button is usable again.
+  fireEvent.change(screen.getByRole("textbox", { name: "pswitch.advanced.override_headers" }), {
+    target: { value: '{"X-Tenant": "tenant-2"}' },
+  });
+  await act(async () => first.resolve({ models: ["m-old"] }));
+  expect(screen.queryAllByRole("button", { name: "pswitch.models.dropdown_aria" })).toHaveLength(0);
+  expect(fetchButton).toBeEnabled();
+  expect(providerSwitchApi.fetchModels.mock.calls[0][0].requestHeaders).toBe('{"X-Tenant": "tenant-1"}');
+
+  // A completed fetch is cleared as soon as the override changes again.
+  providerSwitchApi.fetchModels.mockResolvedValueOnce({ models: ["m-a", "m-b"] });
+  fireEvent.click(fetchButton);
+  await screen.findAllByRole("button", { name: "pswitch.models.dropdown_aria" });
+  fireEvent.change(screen.getByRole("textbox", { name: "pswitch.advanced.override_headers" }), {
+    target: { value: '{"X-Tenant": "tenant-3"}' },
+  });
+  expect(screen.queryAllByRole("button", { name: "pswitch.models.dropdown_aria" })).toHaveLength(0);
+  expect(fetchButton).toBeEnabled();
 });

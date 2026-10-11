@@ -122,6 +122,12 @@
   "limits.codex_credits_balance.line": "Codex Credits 残高：{{count}} · 約 {{usd}}",
   "limits.panel.title": "使用制限",
   "limits.panel.mode_separator": " · ",
+  "limits.page.refresh": "制限を更新",
+  "limits.page.refresh_loading": "制限を更新中…",
+  "limits.page.refreshed_at": "制限を更新しました：{{time}}",
+  "limits.page.refresh_failed": "制限を更新できませんでした。",
+  "limits.page.refresh_partial": "{{time}} に限度を更新しましたが、一部のデータはキャッシュ由来または更新に失敗しています。",
+  "limits.page.refresh_stale": "更新は完了しましたが、すべてのプロバイダーがキャッシュまたは失敗データを表示しています。",
   "limits.label.cursor_plan": "プラン",
   "limits.label.cursor_grok_bot": "Grokボット",
   "limits.label.cursor_auto": "自動",
@@ -578,5 +584,14 @@
   "settings.appearance.token_grouping.label": "数値の区切り",
   "settings.appearance.token_grouping.hint": "正確な数値は 3 桁または中国語の 4 桁区切りを使用します。コンパクト表示のツールチップにも適用されます。",
   "settings.appearance.token_grouping.thousand": "3桁",
-  "settings.appearance.token_grouping.wan": "4桁"
+  "settings.appearance.token_grouping.wan": "4桁",
+  "settings.appearance.quota_display.label": "クォータ表示",
+  "settings.appearance.quota_display.hint": "プランのクォータ枠の残量または使用量を表示します。色と警告は常に残量に基づきます。",
+  "settings.appearance.quota_display.left": "残り",
+  "settings.appearance.quota_display.used": "使用済み",
+  "pswitch.quota.used": "使用済み {{value}}%",
+  "pswitch.search.toggle_aria": "プロバイダーを検索",
+  "pswitch.search.placeholder": "名前・メモ・APIアドレスで検索…",
+  "pswitch.search.aria": "プロバイダーを絞り込む",
+  "pswitch.search.empty": "一致するプロバイダーがありません。"
 }

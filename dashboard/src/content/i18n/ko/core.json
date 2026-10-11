@@ -122,6 +122,12 @@
   "limits.codex_credits_balance.line": "Codex Credits 잔액: {{count}} · 약 {{usd}}",
   "limits.panel.title": "사용 한도",
   "limits.panel.mode_separator": " · ",
+  "limits.page.refresh": "한도 새로고침",
+  "limits.page.refresh_loading": "한도를 새로고침하는 중…",
+  "limits.page.refreshed_at": "한도 업데이트됨: {{time}}",
+  "limits.page.refresh_failed": "한도를 새로고침하지 못했습니다.",
+  "limits.page.refresh_partial": "{{time}}에 한도를 새로 고쳤지만 일부 데이터는 캐시이거나 업데이트에 실패했습니다.",
+  "limits.page.refresh_stale": "새로 고침이 완료되었지만 모든 공급자가 캐시 또는 실패 데이터를 표시합니다.",
   "limits.label.cursor_plan": "플랜",
   "limits.label.cursor_grok_bot": "Grok 봇",
   "limits.label.cursor_auto": "자동",
@@ -578,5 +584,14 @@
   "settings.appearance.token_grouping.label": "숫자 그룹화",
   "settings.appearance.token_grouping.hint": "정확한 숫자는 3자리 또는 중국어 4자리 그룹을 사용합니다. 간단히 표시한 값의 툴팁에도 적용됩니다.",
   "settings.appearance.token_grouping.thousand": "3자리",
-  "settings.appearance.token_grouping.wan": "4자리"
+  "settings.appearance.token_grouping.wan": "4자리",
+  "settings.appearance.quota_display.label": "할당 표시",
+  "settings.appearance.quota_display.hint": "플랜 할당 창에 남은 용량 또는 사용량을 표시합니다. 색상과 경고는 항상 남은 용량을 기준으로 합니다.",
+  "settings.appearance.quota_display.left": "남음",
+  "settings.appearance.quota_display.used": "사용됨",
+  "pswitch.quota.used": "사용됨 {{value}}%",
+  "pswitch.search.toggle_aria": "공급자 검색",
+  "pswitch.search.placeholder": "이름, 메모 또는 API 주소로 검색…",
+  "pswitch.search.aria": "공급자 필터",
+  "pswitch.search.empty": "일치하는 공급자가 없습니다."
 }

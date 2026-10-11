@@ -17,14 +17,19 @@ const USAGE_FIELDS = [
 ];
 const MAX_USAGE_BASELINES = 32;
 
-// Codex input contains both disjoint cache subsets; output already includes
-// reasoning. Keep raw cumulative counters in the lineage state, normalize only
-// the accepted delta at the consumer boundary.
+// Codex input includes cache reads; relays differ on whether writes are also
+// included. A total of input + output + writes explicitly identifies separate
+// writes. Otherwise retain the inclusive convention. Normalize accepted deltas
+// only; cumulative counters in the lineage state must remain raw.
 function normalizeCodexUsage(value, { preserveTotal = false } = {}) {
   const out = canonicalUsage(value) || Object.fromEntries(USAGE_FIELDS.map((field) => [field, 0]));
+  const separateWrites = out.cache_creation_input_tokens > 0 &&
+    out.total_tokens === out.input_tokens + out.output_tokens + out.cache_creation_input_tokens;
   out.cached_input_tokens = Math.min(out.input_tokens, out.cached_input_tokens);
-  out.cache_creation_input_tokens = Math.min(out.input_tokens - out.cached_input_tokens, out.cache_creation_input_tokens);
-  out.input_tokens -= out.cached_input_tokens + out.cache_creation_input_tokens;
+  if (!separateWrites) {
+    out.cache_creation_input_tokens = Math.min(out.input_tokens - out.cached_input_tokens, out.cache_creation_input_tokens);
+  }
+  out.input_tokens -= out.cached_input_tokens + (separateWrites ? 0 : out.cache_creation_input_tokens);
   if (!preserveTotal) out.total_tokens = out.input_tokens + out.cached_input_tokens + out.cache_creation_input_tokens + out.output_tokens;
   return out;
 }
@@ -35,8 +40,10 @@ function canonicalUsage(value) {
   let sawNumber = false;
   for (const field of USAGE_FIELDS) {
     const raw = field === "cache_creation_input_tokens"
-      ? value.cache_creation_input_tokens ?? value.cache_write_input_tokens
-      : value[field];
+      ? value.cache_creation_input_tokens || value.cache_write_input_tokens
+      : field === "cached_input_tokens"
+        ? value.cached_input_tokens || value.cache_read_input_tokens
+        : value[field];
     const number = Number(raw);
     if (Number.isFinite(number) && number >= 0) {
       out[field] = Math.floor(number);

@@ -369,3 +369,134 @@ test("codex_commandcode preset projects end-to-end through the custom slot pipel
   assert.match(out.configToml, /experimental_bearer_token = "sk-relay-key"/, "the relay key lands in the custom route table");
   assert.match(out.configToml, /notify = \["bash", "\/hooks\/notify\.sh"\]/, "user content survives");
 });
+
+// ---------------------------------------------------------------------------
+// Balance probing (cc-switch services/balance.rs): DeepSeek, StepFun,
+// SiliconFlow, OpenRouter, Novita
+// ---------------------------------------------------------------------------
+
+function stubBalanceFetch(responses) {
+  const calls = [];
+  const fetchImpl = async (url, options) => {
+    calls.push({ url, options });
+    const response = responses(url, options);
+    return {
+      status: response.status || 200,
+      ok: (response.status || 200) >= 200 && (response.status || 200) < 300,
+      text: async () => response.text ?? "",
+      json: async () => response.json,
+    };
+  };
+  return { fetchImpl, calls };
+}
+
+test("balance: vendor detection matches cc-switch balance.rs, path markers never leak the key", () => {
+  assert.equal(quota.detectBalanceProvider("https://api.deepseek.com").id, "deepseek");
+  assert.equal(quota.detectBalanceProvider("https://api.stepfun.com/v1").id, "stepfun");
+  assert.equal(quota.detectBalanceProvider("https://api.siliconflow.cn/v1").id, "siliconflow");
+  assert.equal(quota.detectBalanceProvider("https://api.siliconflow.com/v1").id, "siliconflow_en");
+  assert.equal(quota.detectBalanceProvider("https://openrouter.ai/api/v1").id, "openrouter");
+  assert.equal(quota.detectBalanceProvider("https://api.novita.ai/v3").id, "novita");
+  assert.equal(quota.detectBalanceProvider("https://relay.example/api.deepseek.com/provider"), null, "marker in the path does not match");
+  assert.equal(quota.detectBalanceProvider("https://api.deepseek.com.evil.example/v1"), null, "lookalike domains stay unmatched");
+});
+
+test("balance: each vendor shape parses per upstream semantics", () => {
+  const deepseek = quota.parseBalanceBody(quota.BALANCE_PROVIDERS[0], {
+    is_available: true,
+    balance_infos: [{ currency: "CNY", total_balance: "110.50" }],
+  });
+  assert.deepEqual(deepseek, [{ label: "DeepSeek", remaining: 110.5, total: null, used: null, unit: "CNY", isValid: true, invalidMessage: null }]);
+
+  const openrouter = quota.parseBalanceBody(quota.BALANCE_PROVIDERS.find((e) => e.id === "openrouter"), {
+    data: { total_credits: 50, total_usage: 42.5 },
+  });
+  assert.equal(openrouter[0].remaining, 7.5);
+  assert.equal(openrouter[0].isValid, true);
+
+  const exhausted = quota.parseBalanceBody(quota.BALANCE_PROVIDERS.find((e) => e.id === "openrouter"), {
+    data: { total_credits: 10, total_usage: 10 },
+  });
+  assert.equal(exhausted[0].isValid, false);
+  assert.equal(exhausted[0].invalidMessage, "No credits remaining");
+
+  // Novita reports 0.0001 USD units.
+  const novita = quota.parseBalanceBody(quota.BALANCE_PROVIDERS.find((e) => e.id === "novita"), { availableBalance: 123456 });
+  assert.equal(novita[0].remaining, 12.3456);
+
+  assert.equal(quota.parseBalanceBody(quota.BALANCE_PROVIDERS[0], {}), null, "unrecognized shapes fail deterministically");
+});
+
+test("balance: query uses the row's key, caches, and maps 401 to expired", async () => {
+  const provider = {
+    id: "p_ds",
+    category: "custom",
+    settingsConfig: { env: { ANTHROPIC_BASE_URL: "https://api.deepseek.com", ANTHROPIC_AUTH_TOKEN: "sk-ds" } },
+  };
+
+  const fetch1 = stubBalanceFetch(() => ({ json: { is_available: true, balance_infos: [{ currency: "CNY", total_balance: 42 }] } }));
+  const first = await quota.queryProviderBalance({ app: "claude", provider, fetchImpl: fetch1.fetchImpl });
+  assert.equal(first.ok, true);
+  assert.equal(first.kind, "balance");
+  assert.equal(first.balances[0].remaining, 42);
+  assert.equal(fetch1.calls[0].url, "https://api.deepseek.com/user/balance");
+  assert.equal(fetch1.calls[0].options.headers.Authorization, "Bearer sk-ds");
+
+  const fetch2 = stubBalanceFetch(() => { throw new Error("should not be called"); });
+  const cached = await quota.queryProviderBalance({ app: "claude", provider, fetchImpl: fetch2.fetchImpl });
+  assert.equal(cached.cached, true);
+
+  const expired = { ...provider, id: "p_ds2" };
+  const fetch3 = stubBalanceFetch(() => ({ status: 401 }));
+  const denied = await quota.queryProviderBalance({ app: "claude", provider: expired, fetchImpl: fetch3.fetchImpl });
+  assert.equal(denied.ok, false);
+  assert.equal(denied.credentialStatus, "expired");
+
+  // Gemini rows probe through their own credential slot.
+  const geminiRow = {
+    id: "p_g",
+    category: "custom",
+    settingsConfig: { env: { GOOGLE_GEMINI_BASE_URL: "https://api.siliconflow.cn/v1", GEMINI_API_KEY: "sk-sf" } },
+  };
+  const fetch4 = stubBalanceFetch(() => ({ json: { code: 200, data: { totalBalance: "88.8" } } }));
+  const geminiBalance = await quota.queryProviderBalance({ app: "gemini", provider: geminiRow, fetchImpl: fetch4.fetchImpl });
+  assert.equal(geminiBalance.ok, true);
+  assert.equal(geminiBalance.balances[0].remaining, 88.8);
+  assert.equal(geminiBalance.balances[0].unit, "CNY");
+});
+
+test("GET /quota falls back to balance when no plan provider matches", async () => {
+  const prefix = "/api/provider-switch";
+  const created = await call(`${prefix}/providers`, {
+    method: "POST",
+    body: JSON.stringify({
+      app: "claude",
+      name: "DeepSeek",
+      category: "custom",
+      settingsConfig: { env: { ANTHROPIC_BASE_URL: "https://api.deepseek.com", ANTHROPIC_AUTH_TOKEN: "sk-ds" } },
+    }),
+  });
+  assert.equal(created.status, 200);
+
+  const calls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url, options) => {
+    calls.push(String(url));
+    return {
+      status: 200,
+      ok: true,
+      text: async () => "",
+      json: async () => ({ is_available: true, balance_infos: [{ currency: "CNY", total_balance: 7.5 }] }),
+    };
+  };
+  try {
+    const res = await call(`${prefix}/quota?app=claude&id=${created.body.provider.id}`);
+    assert.equal(res.status, 200);
+    assert.equal(res.body.quota.ok, true);
+    assert.equal(res.body.quota.kind, "balance");
+    assert.equal(res.body.quota.balances[0].remaining, 7.5);
+    assert.deepEqual(calls, ["https://api.deepseek.com/user/balance"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

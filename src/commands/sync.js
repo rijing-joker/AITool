@@ -357,6 +357,7 @@ const AUTO_SYNC_SOURCES = new Set([
   "trae",
   "unsloth",
   "workbuddy",
+  "workbuddy-ai",
   "zcode",
   "zed",
 ]);
@@ -1047,12 +1048,22 @@ async function cmdSync(argv, context = {}) {
         path: openclawSignal.sessionFile,
         source: "openclaw",
       });
+      for (const dbPath of [
+        path.join(openclawSignal.openclawHome, "agents", openclawSignal.agentId, "agent", "openclaw-agent.sqlite"),
+        path.join(openclawSignal.openclawHome, "agents", openclawSignal.agentId, "openclaw-agent.sqlite"),
+      ]) {
+        if (!(await fs.stat(dbPath).catch(() => null))?.isFile()) continue;
+        openclawSessionFiles.set(openclawCursorKey(dbPath), {
+          path: dbPath, source: "openclaw", sessionId: openclawSignal.sessionId,
+        });
+        break;
+      }
     }
-    if (isFullSourceScan && sourceAllowed("openclaw")) {
+    if ((isFullSourceScan || (opts.fromOpenclaw && !openclawSignal)) && sourceAllowed("openclaw")) {
       try {
         for (const f of await resolveOpenclawSessionFiles(process.env)) {
           const key = openclawCursorKey(f);
-          if (!openclawSessionFiles.has(key)) {
+          if (!openclawSessionFiles.has(key) || f.endsWith(".sqlite")) {
             openclawSessionFiles.set(key, { path: f, source: "openclaw" });
           }
         }
@@ -2646,6 +2657,42 @@ async function cmdSync(argv, context = {}) {
       }
     }
 
+    // ── WorkBuddy AI — international build (~/.workbuddy-ai/projects/**/*.jsonl) ──
+    // Same Claude-fork family and byte-identical JSONL as the CN build above;
+    // only the home directory differs, so it reuses the WorkBuddy parser and
+    // gets its own source key (and cursor namespace) so the two builds stay
+    // separable instead of merging into one provider row.
+    let workbuddyAiResult = { recordsProcessed: 0, eventsAggregated: 0, bucketsQueued: 0 };
+    const workbuddyAiFiles = sourceAllowed("workbuddy-ai")
+      ? mergeBothFileSources({
+          resolveFiles: (resolveEnv) => resolveWorkbuddyProjectFiles(resolveEnv, "workbuddy-ai"),
+          env: process.env,
+        })
+      : [];
+    if (sourceAllowed("workbuddy-ai")) {
+      if (progress?.enabled) {
+        progress.start(`Parsing WorkBuddy AI ${renderBar(0)} | buckets 0`);
+      }
+      try {
+        workbuddyAiResult = await parseWorkbuddyIncremental({
+          projectFiles: workbuddyAiFiles,
+          cursors,
+          queuePath,
+          env: process.env,
+          source: "workbuddy-ai",
+          onProgress: (p) => {
+            if (!progress?.enabled) return;
+            const pct = p.total > 0 ? p.index / p.total : 1;
+            progress.update(
+              `Parsing WorkBuddy AI ${renderBar(pct)} ${formatNumber(p.index)}/${formatNumber(p.total)} files | buckets ${formatNumber(p.bucketsQueued)}`,
+            );
+          },
+        });
+      } catch (err) {
+        warnProviderParseFailure("WorkBuddy AI", err, opts);
+      }
+    }
+
     // ── oh-my-pi (passive ~/.omp/agent/sessions/**/*.jsonl reader) ──
     // Task-subagent transcripts (nested below the cwd level) are scanned too,
     // so their usage counts toward the omp totals.
@@ -3305,6 +3352,7 @@ async function cmdSync(argv, context = {}) {
       kimiCodeResult.recordsProcessed +
       codebuddyResult.recordsProcessed +
       workbuddyResult.recordsProcessed +
+      workbuddyAiResult.recordsProcessed +
       ompResult.recordsProcessed +
       omoResult.recordsProcessed +
       piResult.recordsProcessed +
@@ -3349,6 +3397,7 @@ async function cmdSync(argv, context = {}) {
       kimiCodeResult.bucketsQueued +
       codebuddyResult.bucketsQueued +
       workbuddyResult.bucketsQueued +
+      workbuddyAiResult.bucketsQueued +
       ompResult.bucketsQueued +
       omoResult.bucketsQueued +
       piResult.bucketsQueued +

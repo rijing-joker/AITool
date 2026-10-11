@@ -6,6 +6,7 @@ const path = require("node:path");
 const { once } = require("node:events");
 const zlib = require("node:zlib");
 const { test } = require("node:test");
+const { EventEmitter } = require("node:events");
 const { serveStaticFile } = require("../src/lib/static-server");
 
 test("precompressed assets negotiate encodings, preserve MIME/cache headers and fall back safely", async (t) => {
@@ -58,4 +59,126 @@ test("precompressed assets negotiate encodings, preserve MIME/cache headers and 
   await fs.utimes(path.join(dir, "app.js.gz"), new Date(0), new Date(0));
   assert.equal((await get("/app.js", "gzip")).body.toString(), source, "stale variants are ignored");
   assert.equal((await get("/missing.js", "br")).status, 404);
+});
+
+test("serving a precompressed variant closes the checked base descriptor (no fd leak)", async (t) => {
+  // Regression guard: when a .br/.gz sibling wins negotiation, the base-file
+  // descriptor opened for the checked stat must be closed explicitly — it is
+  // not the one the stream owns. Patch fs/promises.open to count close() calls
+  // per path (the variant fd's close is driven by the stream internals; the
+  // base file has a distinct path, so the two are separable).
+  const fsSync = require("node:fs");
+  const fsp = require("node:fs/promises");
+  const { EventEmitter } = require("node:events");
+  const origOpen = fsp.open;
+  const closesByPath = new Map();
+  fsp.open = async function patchedOpen(file, ...args) {
+    const handle = await origOpen.call(fsp, file, ...args);
+    const key = String(file);
+    const origClose = handle.close.bind(handle);
+    handle.close = async function patchedClose(...cargs) {
+      closesByPath.set(key, (closesByPath.get(key) || 0) + 1);
+      return origClose(...cargs);
+    };
+    return handle;
+  };
+  t.after(() => { fsp.open = origOpen; });
+
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "aitool-fdleak-"));
+  const source = 'console.log("fd leak test");\n'.repeat(200);
+  const basePath = path.join(dir, "app.js");
+  await fs.writeFile(basePath, source);
+  const { precompressAssets } = await import("../dashboard/scripts/precompress-assets.mjs");
+  await precompressAssets(dir);
+
+  const serve = async () => {
+    const req = { method: "GET", headers: { "accept-encoding": "gzip" } };
+    const res = new EventEmitter();
+    res.write = () => true;
+    res.end = () => {};
+    res.writeHead = () => res;
+    res.destroy = () => {};
+    const served = await serveStaticFile(dir, "/app.js", res, req);
+    assert.equal(served, true);
+    // Give the base-handle close (awaited inside serveStaticFile) its tick.
+    await new Promise((resolve) => setImmediate(resolve));
+    return closesByPath.get(basePath) || 0;
+  };
+
+  const first = await serve();
+  assert.equal(first, 1, "base descriptor must be closed after the first variant request");
+  const second = await serve();
+  assert.equal(second, 2, "…and after the second");
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test("a variant open failure falls back before the response is committed", async (t) => {
+  // The variant is re-opened BEFORE writeHead, so a stat→open race (variant
+  // deleted in between) returns false while headers are still uncommitted and
+  // the caller's 404/SPA fallback proceeds — instead of hanging a
+  // half-committed response (the catch also destroys the socket if headers
+  // ever did go out).
+  const fsp = require("node:fs/promises");
+  const origOpen = fsp.open;
+  fsp.open = async function failingVariantOpen(file, ...args) {
+    if (String(file).endsWith(".gz")) throw new Error("variant vanished between stat and open");
+    return origOpen.call(fsp, file, ...args);
+  };
+  t.after(() => { fsp.open = origOpen; });
+
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "aitool-openfail-"));
+  await fs.writeFile(path.join(dir, "app.js"), 'console.log("open failure test");\n'.repeat(200));
+  const { precompressAssets } = await import("../dashboard/scripts/precompress-assets.mjs");
+  await precompressAssets(dir);
+
+  const res = new EventEmitter();
+  res.headersSent = false;
+  res.write = () => true;
+  res.end = () => {};
+  res.writeHead = () => { res.headersSent = true; return res; };
+  res.destroy = () => {};
+  const served = await serveStaticFile(dir, "/app.js", res, { method: "GET", headers: { "accept-encoding": "gzip" } });
+  assert.equal(served, false, "the caller must get the fallback signal");
+  assert.equal(res.headersSent, false, "no headers may be committed on the failure path");
+  await fs.rm(dir, { recursive: true, force: true });
+});
+
+test("a variant's Content-Length is re-statted from the opened descriptor", async (t) => {
+  // The pre-open variant stat races an atomic rewrite (deploy replaces
+  // app.js.gz between stat and open): committing the raced size with the
+  // body the opened descriptor serves hangs keep-alive clients / truncates
+  // the tail. The size must come from a stat bound to the opened handle.
+  const fsp = require("node:fs/promises");
+  const origStat = fsp.stat;
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "aitool-stalestat-"));
+  const source = 'console.log("stale stat test");\n'.repeat(200);
+  await fs.writeFile(path.join(dir, "app.js"), source);
+  const { precompressAssets } = await import("../dashboard/scripts/precompress-assets.mjs");
+  await precompressAssets(dir);
+  const variantPath = path.join(dir, "app.js.gz");
+  const realSize = (await origStat.call(fsp, variantPath)).size;
+  fsp.stat = async function staleVariantStat(file, ...args) {
+    const stat = await origStat.call(fsp, file, ...args);
+    if (String(file) === variantPath) return { ...stat, size: realSize + 999, isFile: () => true };
+    return stat;
+  };
+  t.after(() => { fsp.stat = origStat; });
+
+  const written = [];
+  let committedHeaders = null;
+  const res = new EventEmitter();
+  res.write = (chunk) => { written.push(chunk); return true; };
+  res.writeHead = (status, headers) => { committedHeaders = headers; return res; };
+  res.destroy = () => {};
+  const done = new Promise((resolve) => {
+    res.end = (chunk) => { if (chunk) written.push(chunk); resolve(); };
+  });
+  const served = await serveStaticFile(dir, "/app.js", res, { method: "GET", headers: { "accept-encoding": "gzip" } });
+  assert.equal(served, true);
+  assert.equal(committedHeaders["Content-Encoding"], "gzip");
+  await done;
+  assert.equal(committedHeaders["Content-Length"], realSize, "size is bound to the opened descriptor, not the raced stat");
+  const body = Buffer.concat(written);
+  assert.equal(body.length, realSize);
+  await fs.rm(dir, { recursive: true, force: true });
 });

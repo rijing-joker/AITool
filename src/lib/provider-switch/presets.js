@@ -1070,6 +1070,52 @@ const PI_MOARK = {
   formFields: PI_FORM_FIELDS,
 };
 
+// Volcengine Agent / Coding Plans on Pi — separate plan endpoints
+// (cc-switch 3e566a3: Agent Plan used to point at the Coding Plan URL).
+const PI_VOLCENGINE_AGENT_PLAN = {
+  id: "pi_volcengine_agentplan",
+  name: "Volcengine Agent Plan",
+  group: "official",
+  icon: "cloud",
+  color: "blue",
+  websiteUrl: "https://www.volcengine.com/activity/agentplan",
+  endpointCandidates: ["https://ark.cn-beijing.volces.com/api/plan/v3"],
+  settingsConfig: {
+    slotKey: "volcengine-agentplan",
+    modelId: "ark-code-latest",
+    provider: {
+      name: "Volcengine Agent Plan",
+      baseUrl: "https://ark.cn-beijing.volces.com/api/plan/v3",
+      api: "openai-completions",
+      apiKey: "",
+      models: [{ id: "ark-code-latest", name: "Ark Code Latest", reasoning: true }],
+    },
+  },
+  formFields: PI_FORM_FIELDS,
+};
+
+const PI_VOLCENGINE_CODING_PLAN = {
+  id: "pi_volcengine_codingplan",
+  name: "Volcengine Coding Plan",
+  group: "official",
+  icon: "cloud",
+  color: "blue",
+  websiteUrl: "https://www.volcengine.com/activity/codingplan",
+  endpointCandidates: ["https://ark.cn-beijing.volces.com/api/coding/v3"],
+  settingsConfig: {
+    slotKey: "volcengine-codingplan",
+    modelId: "ark-code-latest",
+    provider: {
+      name: "Volcengine Coding Plan",
+      baseUrl: "https://ark.cn-beijing.volces.com/api/coding/v3",
+      api: "openai-completions",
+      apiKey: "",
+      models: [{ id: "ark-code-latest", name: "Ark Code Latest", reasoning: true }],
+    },
+  },
+  formFields: PI_FORM_FIELDS,
+};
+
 const PI_CUSTOM = {
   id: "pi_custom",
   name: "Custom Relay",
@@ -1212,7 +1258,7 @@ const PRESETS = {
   openclaw: [OPENCLAW_KIMI, OPENCLAW_DEEPSEEK, OPENCLAW_MOARK, OPENCLAW_CUSTOM],
   mcode: [MCODE_MINIMAX, MCODE_CUSTOM],
   hermes: [HERMES_NOUS, HERMES_KIMI, HERMES_DEEPSEEK, HERMES_MODELSCOPE, HERMES_CUSTOM],
-  pi: [PI_KIMI, PI_DEEPSEEK, PI_MODELSCOPE, PI_MOARK, PI_CUSTOM],
+  pi: [PI_KIMI, PI_DEEPSEEK, PI_MODELSCOPE, PI_VOLCENGINE_AGENT_PLAN, PI_VOLCENGINE_CODING_PLAN, PI_MOARK, PI_CUSTOM],
   grokbuild: [GROKBUILD_XAI, GROKBUILD_OPENROUTER, GROKBUILD_CUSTOM],
 };
 

@@ -1009,6 +1009,11 @@ export function AuthFilesTab({ onDirty }) {
   const [deleteFile, setDeleteFile] = useState(null);
   const [copied, setCopied] = useState("");
   const fileInputRef = useRef(null);
+  const vertexInputRef = useRef(null);
+  const [vertexImportOpen, setVertexImportOpen] = useState(false);
+  const [vertexLocation, setVertexLocation] = useState("");
+  const [vertexFileName, setVertexFileName] = useState("");
+  const [vertexBusy, setVertexBusy] = useState(false);
 
   const { files, receivedAtMs, observedAt } = snapshot;
 
@@ -1094,6 +1099,58 @@ export function AuthFilesTab({ onDirty }) {
       setError(String(requestError));
     } finally {
       setBusy(false);
+    }
+  };
+
+  // Vertex service-account import (EasyCLIProxyAPI c6af303 parity): the core
+  // normalizes and validates the account, then creates the auth record.
+  const handleVertexImport = async (event) => {
+    const file = event.currentTarget.files?.[0] ?? null;
+    event.currentTarget.value = "";
+    if (!file) return;
+    const fail = (message) => {
+      setError(message);
+      setVertexBusy(false);
+    };
+    if (!file.name.toLowerCase().endsWith(".json")) {
+      fail(copy("proxy.creds.vertex.invalidFile"));
+      return;
+    }
+    setVertexFileName(file.name);
+    setVertexBusy(true);
+    setError("");
+    try {
+      const content = await file.text();
+      let parsed = null;
+      try {
+        parsed = JSON.parse(content);
+      } catch {
+        parsed = null;
+      }
+      if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+        fail(copy("proxy.creds.vertex.invalidFile"));
+        return;
+      }
+      const headers = await getLocalApiAuthHeaders();
+      const response = await fetch("/api/proxy/auth-files/vertex-import", {
+        method: "POST",
+        headers: { ...headers, "content-type": "application/json" },
+        body: JSON.stringify({ name: file.name, content, location: vertexLocation.trim() }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!payload?.ok) throw new Error(payload?.error || `HTTP ${response.status}`);
+      showToast(copy("proxy.creds.vertex.imported", {
+        project: payload.result?.projectId || file.name,
+        email: payload.result?.email || "",
+      }), "success");
+      setVertexImportOpen(false);
+      setVertexFileName("");
+      setVertexLocation("");
+      await loadFiles(false);
+    } catch (requestError) {
+      setError(String(requestError?.message || requestError));
+    } finally {
+      setVertexBusy(false);
     }
   };
 
@@ -1186,6 +1243,10 @@ export function AuthFilesTab({ onDirty }) {
             <FolderOpen className="h-4 w-4" />
             {copy("proxy.creds.openDirectory")}
           </Button>
+          <Button variant="secondary" size="sm" onClick={() => setVertexImportOpen(true)} disabled={busy}>
+            <Sparkles className="h-4 w-4" />
+            {copy("proxy.creds.vertex.button")}
+          </Button>
           <Button size="sm" onClick={() => fileInputRef.current?.click()} disabled={busy}>
             <Import className="h-4 w-4" />
             {copy("proxy.creds.import")}
@@ -1197,6 +1258,13 @@ export function AuthFilesTab({ onDirty }) {
             multiple
             hidden
             onChange={(event) => void handleUpload(event)}
+          />
+          <input
+            ref={vertexInputRef}
+            type="file"
+            accept=".json,application/json"
+            hidden
+            onChange={(event) => void handleVertexImport(event)}
           />
         </div>
       </div>
@@ -1393,6 +1461,33 @@ export function AuthFilesTab({ onDirty }) {
       {oauthModelTarget ? (
         <OauthModelsDialog target={oauthModelTarget} onClose={() => setOauthModelTarget(null)} />
       ) : null}
+
+      <CredsModal
+        open={vertexImportOpen}
+        onClose={() => { if (!vertexBusy) setVertexImportOpen(false); }}
+        busy={vertexBusy}
+        title={copy("proxy.creds.vertex.button")}
+        subtitle={copy("proxy.creds.vertex.description")}
+        width="max-w-lg"
+      >
+        <div className="flex min-h-0 flex-1 flex-col gap-3 px-5 py-4">
+          <label className="text-sm font-medium text-oai-gray-700 dark:text-oai-gray-200" htmlFor="vertex-import-location">
+            {copy("proxy.creds.vertex.location")}
+          </label>
+          <input
+            id="vertex-import-location"
+            value={vertexLocation}
+            onChange={(event) => setVertexLocation(event.currentTarget.value)}
+            placeholder={copy("proxy.creds.vertex.locationPlaceholder")}
+            className="h-9 rounded-lg border border-oai-gray-200 bg-transparent px-2.5 text-sm placeholder:text-oai-gray-400 focus:outline-none focus:ring-2 focus:ring-oai-brand-500 dark:border-oai-gray-700"
+          />
+          <Button size="sm" onClick={() => vertexInputRef.current?.click()} disabled={vertexBusy}>
+            <Import className="h-4 w-4" />
+            {vertexFileName || copy("proxy.creds.vertex.pickFile")}
+          </Button>
+          <p className="text-xs text-oai-gray-500 dark:text-oai-gray-400">{copy("proxy.creds.vertex.hint")}</p>
+        </div>
+      </CredsModal>
 
       <ConfirmModal
         open={deleteFile !== null}

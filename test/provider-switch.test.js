@@ -654,6 +654,23 @@ test("provider-switch codex auth: ChatGPT workspaces of one user are separate lo
   assert.equal(loggedOut.action, "keep");
   assert.equal(loggedOut.stashNext.logins["sub:same-person|account:ws-plus"], undefined);
   assert.equal(loggedOut.stashNext.last, null);
+
+  // Leaving an official API-key card keeps foreign stash entries: the key row
+  // carries no identity of its own, so there is nothing of the card's to
+  // invalidate, and `last` may point at a login another card still owns.
+  const fromApiKeyCard = targets.resolveCodexAuth({
+    prev: { category: "official", settingsConfig: { auth: { OPENAI_API_KEY: "sk-relay" }, config: {} } },
+    target: { category: "custom", settingsConfig: { auth: null, config: {} } },
+    liveAuth: { OPENAI_API_KEY: "sk-relay" },
+    stash: targets.codexStashPut(targets.emptyCodexStash(), plus),
+  });
+  assert.equal(fromApiKeyCard.action, "stash", "the residue key is cleared on the relay switch");
+  assert.deepEqual(
+    fromApiKeyCard.stashNext.logins["sub:same-person|account:ws-plus"],
+    plus,
+    "the stashed login is not the leaving card's to delete",
+  );
+  assert.equal(fromApiKeyCard.stashNext.last, null);
 });
 
 test("provider-switch codex stash: legacy single-slot files upgrade to workspace identities", async () => {

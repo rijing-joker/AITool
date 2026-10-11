@@ -73,4 +73,5 @@ export const AGENT_LOGOS = [
     nameKey: "provider.display.trae",
     provider: "trae",
   },
+  { id: 44, nameKey: "provider.display.workbuddy_ai", provider: "workbuddy-ai" },
 ];

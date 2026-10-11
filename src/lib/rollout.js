@@ -16099,7 +16099,6 @@ function resolvePiSessionFiles(env = process.env) {
   const agentDir = resolvePiAgentDir(env);
   if (!agentDir) return [];
   const sessionsDir = path.join(agentDir, "sessions");
-  if (!fssync.existsSync(sessionsDir)) return [];
   const files = [];
   const walk = (dir) => {
     let entries;
@@ -16113,16 +16112,20 @@ function resolvePiSessionFiles(env = process.env) {
       }
     }
   };
-  try {
-    for (const cwdDir of fssync.readdirSync(sessionsDir)) {
-      const cwdPath = path.join(sessionsDir, cwdDir);
-      let stat;
-      try { stat = fssync.statSync(cwdPath); } catch { continue; }
-      if (!stat.isDirectory()) continue;
-      walk(cwdPath);
+  // A headless-only install (Multica orchestrated runs) never creates the TUI
+  // sessions dir; skip only the TUI scan so the Multica scan below still runs.
+  if (fssync.existsSync(sessionsDir)) {
+    try {
+      for (const cwdDir of fssync.readdirSync(sessionsDir)) {
+        const cwdPath = path.join(sessionsDir, cwdDir);
+        let stat;
+        try { stat = fssync.statSync(cwdPath); } catch { continue; }
+        if (!stat.isDirectory()) continue;
+        walk(cwdPath);
+      }
+    } catch {
+      // ignore — return what we have
     }
-  } catch {
-    // ignore — return what we have
   }
   // Multica launches pi headless with a dedicated flat session dir:
   //   ~/.multica/pi-sessions/<session-id>.jsonl

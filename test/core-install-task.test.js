@@ -207,6 +207,27 @@ test("restart failure is a failed task instead of a completed update", async () 
   assert.match(service.snapshot().error, /restart failed.*port in use/);
 });
 
+test("an unusable new core restores the previous binary and service", async () => {
+  const fakes = makeFakes({ running: true });
+  let restored = false, cleaned = false, starts = 0;
+  fakes.fetchCoreModule.backupInstallation = () => ({
+    restore: () => { restored = true; }, cleanup: () => { cleaned = true; },
+  });
+  fakes.manager.start = async () => {
+    starts++;
+    if (!restored) throw new Error("new binary incompatible");
+  };
+  const service = createCoreInstallService(fakes);
+  service.startInstall();
+  assert.ok(await waitFor(() => service.snapshot()?.running === false));
+  assert.equal(restored, true);
+  assert.equal(cleaned, true);
+  assert.equal(starts, 2);
+  assert.equal(service.snapshot().phase, "failed");
+  assert.match(service.snapshot().error, /new binary incompatible/);
+  assert.equal(fakes.log.at(-1), "bridge-start");
+});
+
 test("a status failure settles the task and allows retry", async () => {
   const fakes = makeFakes();
   fakes.manager.readPid = () => { throw new Error("unreadable pid file"); };

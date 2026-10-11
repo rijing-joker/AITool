@@ -43,15 +43,18 @@ function createCoreInstallService({ manager, bridge, fetchCoreModule }) {
       await manager.start();
       bridge.startBridge();
       applyProgress({ phase: terminalPhase });
+      return true;
     } catch (error) {
       const message = `automatic core restart failed: ${error?.message || error}`;
       task.error = task.error ? `${task.error}; ${message}` : message;
       applyProgress({ phase: "failed" });
+      return false;
     }
   }
 
   async function run(signal, force) {
     let stoppedForInstall = false;
+    let previousInstallation = null;
     try {
       const wasRunning = await coreRunning();
       const release = await fetchCoreModule.resolveRelease({ signal });
@@ -69,10 +72,15 @@ function createCoreInstallService({ manager, bridge, fetchCoreModule }) {
           await manager.stop();
           if (await coreRunning()) throw new Error("failed to stop the running core");
         }
+        previousInstallation = fetchCoreModule.backupInstallation?.();
         const result = await fetchCoreModule.downloadAndInstall(release, { signal, onProgress: applyProgress });
         task.result = result;
         applyProgress({ phase: "complete" });
-        if (stoppedForInstall) await restartCoreAfterInstall("complete");
+        if (stoppedForInstall && !await restartCoreAfterInstall("complete") && previousInstallation) {
+          await manager.stop();
+          await previousInstallation.restore();
+          await restartCoreAfterInstall("failed");
+        }
       }
     } catch (error) {
       const terminalPhase = isAbort(error) ? "canceled" : "failed";
@@ -85,8 +93,14 @@ function createCoreInstallService({ manager, bridge, fetchCoreModule }) {
       // The core was stopped to make way for the install — bring it back
       // whatever the outcome (install failure, cancel), or the proxy dies
       // silently.
+      if (previousInstallation) {
+        try { await previousInstallation.restore(); }
+        catch (restoreError) { task.error = `${task.error || terminalPhase}; restore failed: ${restoreError.message}`; }
+      }
       if (stoppedForInstall) await restartCoreAfterInstall(terminalPhase);
     } finally {
+      try { previousInstallation?.cleanup(); }
+      catch (error) { task.error = `${task.error || ""}; backup cleanup failed: ${error.message}`; }
       task.running = false;
       task.cancellable = false;
       task.finishedAt = new Date().toISOString();

@@ -278,7 +278,7 @@ function handleUsagePayload(payloadText) {
   // Reasoning is a subset of output_tokens for Claude/OpenAI upstreams (their
   // cost already rides in output); only Gemini-family upstreams report it
   // separately, so only those keep the reasoning bucket non-zero.
-  bucket.reasoning_output_tokens += pricing.isReasoningSeparate(executorType, model) ? Number(tokens.reasoningTokens) || 0 : 0;
+  bucket.reasoning_output_tokens += tokens.accountingVersion !== 2 && pricing.isReasoningSeparate(executorType, model) ? Number(tokens.reasoningTokens) || 0 : 0;
   bucket.total_tokens += Number(tokens.totalTokens) || 0;
   bucket.conversation_count += 1;
   buckets.set(key, bucket);

@@ -63,6 +63,15 @@ function platformAsset(version) {
 // release first (fast, proxy-free in CN, and the only version it carries);
 // the repo-pinned version is the offline fallback (downloaded from GitHub).
 async function resolveRelease({ signal, fetchImpl = fetch } = {}) {
+  const pin = pinnedVersion();
+  const stable = (value) => /^\d+\.\d+\.\d+$/.test(value || "") && value.split(".").every((part) => Number.isSafeInteger(Number(part)));
+  const atLeastPin = (version) => {
+    if (!stable(version)) return false;
+    if (!stable(pin)) return true;
+    const left = version.split(".").map(Number), right = pin.split(".").map(Number);
+    for (let i = 0; i < 3; i++) if (left[i] !== right[i]) return left[i] > right[i];
+    return true;
+  };
   if (GITCODE_CORE_REPO) {
     try {
       const response = await fetchImpl(`${GITCODE_API_PREFIX}/${GITCODE_CORE_REPO}/releases/latest`, {
@@ -72,15 +81,14 @@ async function resolveRelease({ signal, fetchImpl = fetch } = {}) {
       if (response.ok) {
         const body = await response.json().catch(() => null);
         const version = String(body?.tag_name || "").trim().replace(/^v/, "");
-        if (version) return { version, source: "gitcode" };
+        if (atLeastPin(version)) return { version, source: "gitcode" };
       }
     } catch (error) {
       if (isAbort(error)) throw error;
       // fall through to the pinned version
     }
   }
-  const version = pinnedVersion();
-  if (version) return { version, source: "pinned" };
+  if (stable(pin)) return { version: pin, source: "pinned" };
   throw new Error("unable to resolve a core version — GitCode mirror unreachable and no core-version.txt pin");
 }
 
@@ -179,6 +187,29 @@ function findBinary(dir) {
   return null;
 }
 
+function backupInstallation() {
+  fs.mkdirSync(paths.binDir, { recursive: true });
+  const directory = fs.mkdtempSync(path.join(paths.binDir, ".previous-"));
+  const originals = [paths.binPath, paths.coreVersionPath].map((target, index) => {
+    const backup = path.join(directory, String(index));
+    const exists = fs.existsSync(target);
+    if (exists) fs.copyFileSync(target, backup);
+    return { target, backup, exists };
+  });
+  return {
+    restore() {
+      for (const { target, backup, exists } of originals) {
+        if (exists) {
+          const staged = `${target}.restore-${crypto.randomUUID()}`;
+          fs.copyFileSync(backup, staged);
+          fs.renameSync(staged, target);
+        } else fs.rmSync(target, { force: true });
+      }
+    },
+    cleanup() { fs.rmSync(directory, { recursive: true, force: true }); },
+  };
+}
+
 // Download + install a resolved release. Reports progress events:
 //   { phase: "downloading", source, downloaded, total }
 //   { phase: "switching", source, message }   (source failed, moving on)
@@ -224,8 +255,15 @@ async function downloadAndInstall(release, { onProgress = null, signal, fetchImp
     // intact so the orchestration can restart the previous version.
     fs.copyFileSync(binary, stagedBinary);
     fs.chmodSync(stagedBinary, 0o755);
-    fs.renameSync(stagedBinary, paths.binPath);
-    fs.writeFileSync(paths.coreVersionPath, `v${version}\n`);
+    const previous = backupInstallation();
+    try {
+      signal?.throwIfAborted();
+      fs.renameSync(stagedBinary, paths.binPath);
+      fs.writeFileSync(paths.coreVersionPath, `v${version}\n`);
+    } catch (error) {
+      previous.restore();
+      throw error;
+    } finally { previous.cleanup(); }
     return { skipped: false, version, path: paths.binPath, source: downloadedFrom };
   } finally {
     fs.rmSync(stagedBinary, { force: true });
@@ -287,4 +325,5 @@ module.exports = {
   downloadAndInstall,
   fetchCore,
   isAbort,
+  backupInstallation,
 };

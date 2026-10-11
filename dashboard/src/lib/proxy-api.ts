@@ -101,6 +101,7 @@ export interface ProxyRecord {
     cacheReadTokens?: number;
     cacheCreationTokens?: number;
     cacheCreation1hTokens?: number;
+    accountingVersion?: number;
     totalTokens?: number;
   };
 }

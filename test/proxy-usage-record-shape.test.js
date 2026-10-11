@@ -8,6 +8,36 @@ const { normalizeRecord, maskApiKey } = require("../src/lib/proxy/usage-record")
 const { createUsageRecordStore } = require("../src/lib/proxy/usage-records");
 const paths = require("../src/lib/proxy/paths");
 const localApi = require("../src/lib/local-api");
+const v2 = require("./fixtures/core-usage-v8.0.23.json");
+const pricing = require("../src/lib/proxy/pricing");
+
+test("complete v8.0.23 accounting overrides flat counters independent of executor", () => {
+  for (const executor_type of ["claude", "codex", "gemini"]) {
+    const row = normalizeRecord({ ...v2, executor_type });
+    assert.equal(row.tokens.totalTokens, 1050);
+    assert.equal(row.ttftMs, 250);
+    assert.equal(pricing.freshInputTokens(row.tokens, { executorType: executor_type }), 100);
+    const prices = { [v2.model]: { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 } };
+    assert.equal(pricing.estimateCostUsd(prices, v2.model, row.tokens, { executorType: executor_type }), (100 * 5 + 300 * 0.5 + 600 * 6.25 + 50 * 25) / 1e6);
+    assert.deepEqual(normalizeRecord(row), row);
+  }
+});
+
+test("incomplete, inconsistent or unsafe breakdowns keep the old event contract", () => {
+  for (const mutate of [
+    (b) => { b.quality = "inconsistent"; },
+    (b) => { b.quality = "unclassified"; },
+    (b) => { b.input.uncached_tokens = 101; },
+    (b) => { b.output.reasoning_tokens = -1; },
+    (b) => { b.total_tokens = Number.MAX_SAFE_INTEGER + 1; },
+    (b) => { delete b.input.cache_write_tokens; },
+  ]) {
+    const raw = structuredClone(v2);
+    mutate(raw.token_breakdown);
+    assert.equal(normalizeRecord(raw).tokens.inputTokens, 9999);
+    assert.equal(normalizeRecord(raw).tokens.accountingVersion, undefined);
+  }
+});
 
 // The core publishes snake_case payloads (internal/redisqueue/plugin.go).
 // Until the normalize layer existed, every camelCase read in the bridge, the

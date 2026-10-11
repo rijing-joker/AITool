@@ -60,6 +60,29 @@ function deriveCanceled(row) {
   return body.includes("context canceled") || body.includes("client closed request");
 }
 
+// v8.0.23 publishes disjoint input/output accounting. Only a complete,
+// internally consistent v2 can override legacy executor-specific counters.
+function completeTokenBreakdown(record) {
+  const value = record?.token_breakdown;
+  if (value?.schema_version !== 2 || value.quality !== "complete") return null;
+  const input = value.input, output = value.output;
+  if (!input || !output) return null;
+  const counts = [value.total_tokens, value.unclassified_tokens, input.total_tokens,
+    input.uncached_tokens, input.cache_read_tokens, input.cache_write_tokens,
+    output.total_tokens, output.non_reasoning_tokens, output.reasoning_tokens];
+  if (!counts.every((count) => Number.isSafeInteger(count) && count >= 0)) return null;
+  if (value.unclassified_tokens !== 0 ||
+      input.total_tokens !== input.uncached_tokens + input.cache_read_tokens + input.cache_write_tokens ||
+      output.total_tokens !== output.non_reasoning_tokens + output.reasoning_tokens ||
+      value.total_tokens !== input.total_tokens + output.total_tokens) return null;
+  return {
+    inputTokens: input.total_tokens, outputTokens: output.total_tokens,
+    reasoningTokens: output.reasoning_tokens, cachedTokens: input.cache_read_tokens,
+    cacheReadTokens: input.cache_read_tokens, cacheCreationTokens: input.cache_write_tokens,
+    totalTokens: value.total_tokens, accountingVersion: 2,
+  };
+}
+
 function normalizeRecord(record) {
   if (!isUsageRecord(record)) return null;
   const rawTokens = record.tokens && typeof record.tokens === "object" ? record.tokens : {};
@@ -80,7 +103,7 @@ function normalizeRecord(record) {
     timestamp: pickString(record, "timestamp", "timestamp"),
     latencyMs,
     ttftMs: Number.isFinite(ttftRaw) && ttftRaw > 0 ? ttftRaw : null,
-    tokens: {
+    tokens: completeTokenBreakdown(record) || {
       inputTokens: pickNumber(rawTokens, "inputTokens", "input_tokens"),
       outputTokens: pickNumber(rawTokens, "outputTokens", "output_tokens"),
       reasoningTokens: pickNumber(rawTokens, "reasoningTokens", "reasoning_tokens"),
@@ -113,4 +136,4 @@ function normalizeRecord(record) {
   return row;
 }
 
-module.exports = { isControlNotification, isUsageRecord, normalizeRecord, maskApiKey, sha256Hex };
+module.exports = { isControlNotification, isUsageRecord, normalizeRecord, completeTokenBreakdown, maskApiKey, sha256Hex };

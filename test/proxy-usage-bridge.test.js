@@ -16,6 +16,24 @@ const hour = "2026-10-01T08:00:00.000Z";
 const control = { support_refresh: true, received_at: timestamp };
 const zeroRequest = { timestamp, model: "unknown", tokens: { totalTokens: 0 } };
 
+test("v2 stream tail usage survives bridge restart; canceled requests remain out of buckets", (t) => {
+  const { queuePath } = fixture(t);
+  const record = require("./fixtures/core-usage-v8.0.23.json");
+  bridge.handleUsagePayload(JSON.stringify(record));
+  const first = jsonl(queuePath).at(-1);
+  assert.equal(first.input_tokens, 100);
+  assert.equal(first.total_tokens, 1050);
+  assert.equal(first.reasoning_output_tokens, 0);
+  bridge.stopBridge();
+  bridge.handleUsagePayload(JSON.stringify({ ...record, request_id: "next", executor_type: "gemini" }));
+  const next = jsonl(queuePath).at(-1);
+  assert.equal(next.total_tokens, 2100);
+  assert.equal(next.input_tokens, 200);
+  assert.equal(next.reasoning_output_tokens, 0);
+  bridge.handleUsagePayload(JSON.stringify({ ...record, request_id: "cancel", failed: true, fail: { status_code: 499, body: "context canceled" } }));
+  assert.deepEqual(jsonl(queuePath).at(-1), next);
+});
+
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "aitool-usage-test-"));
   const previous = { usageDir: paths.usageDir, bucketsStatePath: paths.bucketsStatePath, pricingPath: paths.pricingPath };

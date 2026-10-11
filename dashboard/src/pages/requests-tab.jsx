@@ -74,7 +74,7 @@ function formatCacheRate(record) {
     ? /claude|anthropic/i.test(record.executor_type)
     : /^claude/i.test(String(record.model ?? ""));
   const cacheWrites = Number.isFinite(cacheCreationTokens) ? Math.max(0, cacheCreationTokens) : 0;
-  const totalInput = freshInput ? inputTokens + cacheReadTokens + cacheWrites : inputTokens;
+  const totalInput = freshInput && record.tokens?.accountingVersion !== 2 ? inputTokens + cacheReadTokens + cacheWrites : inputTokens;
   if (totalInput <= 0) return "—";
   return `${(Math.min(cacheReadTokens, totalInput) / totalInput * 100).toFixed(2)}%`;
 }

@@ -320,7 +320,7 @@ function cacheReadTokensFor(tokens, { executorType, model, inputInclusive } = {}
 
 /** Fresh (billable) input for a normalized token row. */
 function freshInputTokens(tokens, { executorType, model, inputInclusive } = {}) {
-  const inclusive = typeof inputInclusive === "boolean" ? inputInclusive : isInputInclusive(executorType, model);
+  const inclusive = tokens?.accountingVersion === 2 || (typeof inputInclusive === "boolean" ? inputInclusive : isInputInclusive(executorType, model));
   const input = tokenNumber(tokens?.inputTokens);
   if (!inclusive) return input;
   const cacheRead = cacheReadTokensFor(tokens, { executorType, model, inputInclusive: inclusive });
@@ -368,7 +368,7 @@ function findPricing(models, model) {
 function estimateCostUsd(models, model, tokens, { inputInclusive, executorType } = {}) {
   const pricing = findPricing(models, model);
   if (!pricing) return null;
-  const inclusive = typeof inputInclusive === "boolean" ? inputInclusive : isInputInclusive(executorType, model);
+  const inclusive = tokens?.accountingVersion === 2 || (typeof inputInclusive === "boolean" ? inputInclusive : isInputInclusive(executorType, model));
   const inputTokens = tokenNumber(tokens?.inputTokens);
   const outputTokens = tokenNumber(tokens?.outputTokens);
   const reasoningTokens = tokenNumber(tokens?.reasoningTokens);
@@ -380,7 +380,7 @@ function estimateCostUsd(models, model, tokens, { inputInclusive, executorType }
   const billableInput = inclusive
     ? Math.max(0, inputTokens - cacheReadTokens - cacheCreationTokens)
     : inputTokens;
-  const billableReasoning = isReasoningSeparate(executorType, model) ? reasoningTokens : 0;
+  const billableReasoning = tokens?.accountingVersion !== 2 && isReasoningSeparate(executorType, model) ? reasoningTokens : 0;
   const oneHourWrites = /claude|anthropic/i.test(String(model || "")) ? cacheCreation1h(tokens) : 0;
   const cost = (billableInput * pricing.input
     + (outputTokens + billableReasoning) * pricing.output

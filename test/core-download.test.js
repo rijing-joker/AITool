@@ -79,10 +79,10 @@ test("resolveRelease prefers the GitCode mirror's latest release", async () => {
   const urls = [];
   const fetchImpl = async (url) => {
     urls.push(String(url));
-    return jsonResponse({ tag_name: "v8.0.9" });
+    return jsonResponse({ tag_name: "v8.0.23" });
   };
   const release = await core.resolveRelease({ fetchImpl });
-  assert.equal(release.version, "8.0.9");
+  assert.equal(release.version, "8.0.23");
   assert.equal(release.source, "gitcode");
   assert.match(urls[0], /api\.gitcode\.com\/api\/v5\/repos\/lzt404\/CLIProxyAPI\/releases\/latest/);
 });
@@ -92,6 +92,14 @@ test("resolveRelease falls back to the repo pin when the mirror is unreachable",
   const release = await core.resolveRelease({ fetchImpl });
   assert.equal(release.version, core.pinnedVersion());
   assert.equal(release.source, "pinned");
+});
+
+test("resolveRelease rejects stale, prerelease and malformed mirror tags", async () => {
+  for (const tag_name of ["v8.0.18", "v8.0.23-rc.1", "../8.0.99", "latest", "v8.0", ""]) {
+    const release = await core.resolveRelease({ fetchImpl: async () => jsonResponse({ tag_name }) });
+    assert.deepEqual(release, { version: core.pinnedVersion(), source: "pinned" });
+  }
+  assert.deepEqual(await core.resolveRelease({ fetchImpl: async () => jsonResponse({ tag_name: "v8.1.0" }) }), { version: "8.1.0", source: "gitcode" });
 });
 
 test("resolveRelease rethrows aborts instead of falling back", async () => {
@@ -144,16 +152,16 @@ test("fetchCore reuses the installed binary when it already matches the latest r
   try {
     fs.mkdirSync(paths.binDir, { recursive: true });
     fs.writeFileSync(paths.binPath, "#!/bin/sh\nexit 0\n");
-    fs.writeFileSync(paths.coreVersionPath, "v8.0.9\n");
+    fs.writeFileSync(paths.coreVersionPath, "v8.0.23\n");
     let downloads = 0;
     const fetchImpl = async (url) => {
-      if (String(url).includes("releases/latest")) return jsonResponse({ tag_name: "v8.0.9" });
+      if (String(url).includes("releases/latest")) return jsonResponse({ tag_name: "v8.0.23" });
       downloads += 1;
       throw new Error(`should not download: ${url}`);
     };
     const result = await core.fetchCore({ fetchImpl });
     assert.equal(result.skipped, true);
-    assert.equal(result.version, "8.0.9");
+    assert.equal(result.version, "8.0.23");
     assert.equal(downloads, 0);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -244,7 +252,8 @@ test("overlapping downloads use independent temporary files and clean them up", 
       core.downloadAndInstall({ version: "8.0.9", source: "gitcode" }, { fetchImpl }),
       core.downloadAndInstall({ version: "8.0.9", source: "gitcode" }, { fetchImpl }),
     ]);
-    assert.equal(new Set(dirs).size, 2);
+    assert.equal(new Set(dirs).size, dirs.length);
+    assert.equal(dirs.filter((dir) => path.basename(dir).startsWith("aitool-core-")).length, 2);
     assert.ok(dirs.every((dir) => !fs.existsSync(dir)));
     assert.match(fs.readFileSync(paths.binPath, "utf8"), /8\.0\.9/);
   } finally {

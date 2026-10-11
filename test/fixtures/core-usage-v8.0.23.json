@@ -1,0 +1,18 @@
+{
+  "accounting_version": 2,
+  "timestamp": "2026-10-10T01:00:00Z",
+  "request_id": "contract-v2",
+  "executor_type": "claude",
+  "model": "claude-opus-4-6",
+  "latency_ms": 3000,
+  "ttft_ms": 250,
+  "tokens": { "input_tokens": 9999, "output_tokens": 8888, "total_tokens": 18887 },
+  "token_breakdown": {
+    "schema_version": 2,
+    "quality": "complete",
+    "total_tokens": 1050,
+    "input": { "total_tokens": 1000, "uncached_tokens": 100, "cache_read_tokens": 300, "cache_write_tokens": 600 },
+    "output": { "total_tokens": 50, "non_reasoning_tokens": 30, "reasoning_tokens": 20 },
+    "unclassified_tokens": 0
+  }
+}

@@ -532,5 +532,8 @@
   "sessions.detail.session_id": "세션 ID",
   "sessions.detail.local_path": "로컬 경로",
   "sessions.detail.resume_command": "재개 명령",
-  "sessions.performance.first_response_value_single": "{{seconds}}초 · 표본 {{count}}개"
+  "sessions.performance.first_response_value_single": "{{seconds}}초 · 표본 {{count}}개",
+  "proxy.settings.diagnostics.logDir": "로그 디렉터리",
+  "proxy.settings.diagnostics.openLog": "로그 열기",
+  "proxy.settings.diagnostics.openLogFailed": "로그 디렉터리를 열지 못했습니다: {{error}}"
 }

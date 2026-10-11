@@ -532,5 +532,8 @@
   "sessions.detail.session_id": "セッション ID",
   "sessions.detail.local_path": "ローカルパス",
   "sessions.detail.resume_command": "再開コマンド",
-  "sessions.performance.first_response_value_single": "{{seconds}}秒 · {{count}} サンプル"
+  "sessions.performance.first_response_value_single": "{{seconds}}秒 · {{count}} サンプル",
+  "proxy.settings.diagnostics.logDir": "ログディレクトリ",
+  "proxy.settings.diagnostics.openLog": "ログを開く",
+  "proxy.settings.diagnostics.openLogFailed": "ログディレクトリを開けませんでした: {{error}}"
 }

@@ -151,6 +151,7 @@ export const proxyApi = {
   installCancel: () => mutate<{ ok: true; task: CoreInstallTask | null }>("/api/proxy/install/cancel", "POST"),
   setSettings: (settings: { autoStart?: boolean }) =>
     mutate<{ ok: true }>("/api/proxy/settings", "PUT", settings),
+  openLogs: () => mutate<{ ok: true }>("/api/proxy/logs/open", "POST"),
 
   overview: (signal?: AbortSignal) => get<{ ok: true; overview: ProxyUsageOverview; bridge: ProxyBridgeStatus }>(
     "/api/proxy/usage/overview", signal,

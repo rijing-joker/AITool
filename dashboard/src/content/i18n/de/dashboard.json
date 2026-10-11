@@ -543,5 +543,8 @@
   "sessions.detail.session_id": "Sitzungs-ID",
   "sessions.detail.local_path": "Lokaler Pfad",
   "sessions.detail.resume_command": "Fortsetzungsbefehl",
-  "sessions.performance.first_response_value_single": "{{seconds}}s · {{count}} Messung"
+  "sessions.performance.first_response_value_single": "{{seconds}}s · {{count}} Messung",
+  "proxy.settings.diagnostics.logDir": "Logverzeichnis",
+  "proxy.settings.diagnostics.openLog": "Log öffnen",
+  "proxy.settings.diagnostics.openLogFailed": "Logverzeichnis konnte nicht geöffnet werden: {{error}}"
 }

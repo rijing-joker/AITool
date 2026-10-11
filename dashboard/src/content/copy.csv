@@ -2274,6 +2274,9 @@ proxy.settings.diagnostics.usageStatistics,proxy,ProxyPage,Proxy,diagnostics_usa
 proxy.settings.diagnostics.usageStatisticsHint,proxy,ProxyPage,Proxy,diagnostics_usageStatisticsHint,"Aggregate request and token usage in memory for the usage records page.",,active
 proxy.settings.diagnostics.redisRetention,proxy,ProxyPage,Proxy,diagnostics_redisRetention,"Usage queue retention (seconds)",,active
 proxy.settings.diagnostics.redisRetentionHint,proxy,ProxyPage,Proxy,diagnostics_redisRetentionHint,"In-memory retention for Management API usage entries, from 1 to 3600 seconds.",,active
+proxy.settings.diagnostics.logDir,proxy,ProxyPage,Proxy,diagnostics_logDir,"Log directory",,active
+proxy.settings.diagnostics.openLog,proxy,ProxyPage,Proxy,diagnostics_openLog,"Open log",,active
+proxy.settings.diagnostics.openLogFailed,proxy,ProxyPage,Proxy,diagnostics_openLogFailed,"Failed to open the log directory: {{error}}",,active
 proxy.settings.codex.title,proxy,ProxyPage,Proxy,codex_title,"Codex client",,active
 proxy.settings.codex.hint,proxy,ProxyPage,Proxy,codex_hint,"Compatibility options for Codex clients (Codex Desktop, codex-tui, codex_cli_rs); applies to both OAuth and API-key credentials. Requires core 8.0.11+.",,active
 proxy.settings.codex.applyPatch,proxy,ProxyPage,Proxy,codex_applyPatch,"Advertise apply-patch catalog",,active

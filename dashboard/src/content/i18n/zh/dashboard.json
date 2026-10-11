@@ -1837,5 +1837,8 @@
   "pswitch.skills.imported": "发现 {{count}} 个技能",
   "pswitch.skills.empty": "还没有发现技能。先安装一个（例如放在 ~/.agents/skills）再重新扫描。",
   "pswitch.skills.no_match": "没有匹配的技能。",
-  "pswitch.skills.loading": "正在读取技能…"
+  "pswitch.skills.loading": "正在读取技能…",
+  "proxy.settings.diagnostics.logDir": "日志目录",
+  "proxy.settings.diagnostics.openLog": "打开日志",
+  "proxy.settings.diagnostics.openLogFailed": "打开日志目录失败：{{error}}"
 }

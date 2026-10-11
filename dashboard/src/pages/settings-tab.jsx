@@ -133,6 +133,8 @@ export function SettingsTab({ status, onRefresh, onInstallCore }) {
   const [loggingToFile, setLoggingToFile] = useState(false);
   const [usageStatistics, setUsageStatistics] = useState(true);
   const [redisRetention, setRedisRetention] = useState("");
+  const [openLogBusy, setOpenLogBusy] = useState(false);
+  const [openLogError, setOpenLogError] = useState("");
   const [codexApplyPatch, setCodexApplyPatch] = useState(false);
   const [codexOptimizeMultiAgent, setCodexOptimizeMultiAgent] = useState(false);
 
@@ -244,6 +246,22 @@ export function SettingsTab({ status, onRefresh, onInstallCore }) {
     } finally {
       busyRef.current = false;
       setBusyField("");
+    }
+  };
+
+  // cc-switch's settings.advanced.logConfig.openLog: reveal the proxy log
+  // directory. The folder opens on the machine running the CLI server; a
+  // remote browser session only sees the failure message.
+  const openLogFolder = async () => {
+    if (openLogBusy) return;
+    setOpenLogBusy(true);
+    setOpenLogError("");
+    try {
+      await proxyApi.openLogs();
+    } catch (e) {
+      setOpenLogError(copy("proxy.settings.diagnostics.openLogFailed", { error: e instanceof Error ? e.message : String(e) }));
+    } finally {
+      setOpenLogBusy(false);
     }
   };
 
@@ -506,6 +524,15 @@ export function SettingsTab({ status, onRefresh, onInstallCore }) {
             onChange={setRedisRetention}
             error={redisError}
           />
+          <div className="flex items-center justify-between gap-4">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold">{copy("proxy.settings.diagnostics.logDir")}</p>
+              {openLogError ? <p className="mt-0.5 text-xs text-red-600 dark:text-red-400">{openLogError}</p> : null}
+            </div>
+            <Button variant="ghost" size="sm" disabled={openLogBusy} onClick={() => void openLogFolder()}>
+              {copy("proxy.settings.diagnostics.openLog")}
+            </Button>
+          </div>
         </div>
       </Card>
 

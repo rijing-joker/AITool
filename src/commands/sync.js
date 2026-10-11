@@ -997,12 +997,22 @@ async function cmdSync(argv, context = {}) {
         path: openclawSignal.sessionFile,
         source: "openclaw",
       });
+      for (const dbPath of [
+        path.join(openclawSignal.openclawHome, "agents", openclawSignal.agentId, "agent", "openclaw-agent.sqlite"),
+        path.join(openclawSignal.openclawHome, "agents", openclawSignal.agentId, "openclaw-agent.sqlite"),
+      ]) {
+        if (!(await fs.stat(dbPath).catch(() => null))?.isFile()) continue;
+        openclawSessionFiles.set(openclawCursorKey(dbPath), {
+          path: dbPath, source: "openclaw", sessionId: openclawSignal.sessionId,
+        });
+        break;
+      }
     }
-    if (isFullSourceScan && sourceAllowed("openclaw")) {
+    if ((isFullSourceScan || (opts.fromOpenclaw && !openclawSignal)) && sourceAllowed("openclaw")) {
       try {
         for (const f of await resolveOpenclawSessionFiles(process.env)) {
           const key = openclawCursorKey(f);
-          if (!openclawSessionFiles.has(key)) {
+          if (!openclawSessionFiles.has(key) || f.endsWith(".sqlite")) {
             openclawSessionFiles.set(key, { path: f, source: "openclaw" });
           }
         }

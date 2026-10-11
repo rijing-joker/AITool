@@ -439,7 +439,7 @@ export type PiPromptFile = {
   content: string;
 };
 
-export type McpAppId = "claude" | "codex" | "gemini" | "grokbuild" | "opencode" | "hermes" | "mcode";
+export type McpAppId = "claude" | "codex" | "gemini" | "grokbuild" | "opencode" | "hermes" | "mcode" | "pi";
 
 export interface McpServerSpec {
   type?: "stdio" | "http" | "sse" | string;

@@ -904,7 +904,7 @@ export function ProviderSwitchPage() {
         ) : null}
       </div> : null}
 
-      <div role="tabpanel" id="provider-panel" aria-labelledby={utilityEditor.open ? undefined : `provider-panel-${activeApp}`} aria-label={utilityEditor.open ? copy(isMcpTab ? "pswitch.mcp.tab" : "pswitch.prompts.tab") : undefined} className={utilityEditor.open ? "flex min-w-0 flex-1 flex-col" : undefined}>
+      <div role="tabpanel" id="provider-panel" aria-labelledby={utilityEditor.open ? undefined : `provider-panel-${activeApp}`} aria-label={utilityEditor.open ? copy(isMcpTab ? "pswitch.mcp.tab" : isSkillsTab ? "pswitch.skills.tab" : "pswitch.prompts.tab") : undefined} className={utilityEditor.open ? "flex min-w-0 flex-1 flex-col" : undefined}>
       {isUtilityTab ? (
         isMcpTab ? <ProviderMcpPanel onEditorStateChange={onUtilityEditorState} /> : isSkillsTab ? <ProviderSkillsPanel onEditorStateChange={onUtilityEditorState} /> : <ProviderPromptsPanel onEditorStateChange={onUtilityEditorState} />
       ) : (

@@ -2621,7 +2621,7 @@ pswitch.env.confirm_title,pswitch,ProviderSwitchPage,ProviderEnvBanner,env_confi
 pswitch.env.confirm_message,pswitch,ProviderSwitchPage,ProviderEnvBanner,env_confirm_message,"The selected lines are deleted from your shell profiles. A JSON backup is saved first and can be restored from this banner.",,active
 pswitch.skills.tab,pswitch,ProviderSwitchPage,ProviderSkillsPanel,skills_tab,Skills,,active
 pswitch.skills.title,pswitch,ProviderSwitchPage,ProviderSkillsPanel,skills_title,"Skills ({{count}})",,active
-pswitch.skills.subtitle,pswitch,ProviderSwitchPage,ProviderSkillsPanel,skills_subtitle,"One list of skills discovered in your agents\\" skills directories; toggles link (or copy) each skill into the app\\"s skills folder.",,active
+pswitch.skills.subtitle,pswitch,ProviderSwitchPage,ProviderSkillsPanel,skills_subtitle,"One list of skills discovered in your agents' skills directories; toggles link (or copy) each skill into the app's skills folder.",,active
 pswitch.skills.search,pswitch,ProviderSwitchPage,ProviderSkillsPanel,skills_search,Search skills…,,active
 pswitch.skills.import,pswitch,ProviderSwitchPage,ProviderSkillsPanel,skills_import,Rescan directories,,active
 pswitch.skills.imported,pswitch,ProviderSwitchPage,ProviderSkillsPanel,skills_imported,"Discovered {{count}} skills",,active

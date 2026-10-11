@@ -1804,5 +1804,13 @@
   "sessions.storage.tooltip": "仅会话文件 · {{metric}} · 每千个历史 token {{ratio}} 字节。不含共享数据库、缓存和项目文件。",
   "sessions.storage.allocated": "分配空间",
   "sessions.storage.logical": "逻辑文件大小",
-  "sessions.storage.size": "{{value}} MiB"
+  "sessions.storage.size": "{{value}} MiB",
+  "proxy.creds.vertex.button": "Vertex 服务账号",
+  "proxy.creds.vertex.description": "导入 Vertex 服务账号 JSON；核心会校验并创建授权记录。",
+  "proxy.creds.vertex.location": "位置",
+  "proxy.creds.vertex.locationPlaceholder": "可选区域，例如 us-central1",
+  "proxy.creds.vertex.pickFile": "选择服务账号 JSON",
+  "proxy.creds.vertex.hint": "选择文件后立即导入。",
+  "proxy.creds.vertex.invalidFile": "请选择包含服务账号对象的 .json 文件。",
+  "proxy.creds.vertex.imported": "已导入 {{project}}{{email}}"
 }

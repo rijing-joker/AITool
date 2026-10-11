@@ -15,6 +15,11 @@ const coreInstall = require("./core-install").getInstance;
 // local API); mutations require the same local-mutation auth the other
 // endpoints use, passed in by local-api as `ctx.isAuthorizedLocalMutation`.
 
+function isJsonObjectString(text) {
+  const parsed = JSON.parse(text);
+  return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed);
+}
+
 function json(res, data, status) {
   res.writeHead(status || 200, { "Content-Type": "application/json" });
   res.end(JSON.stringify(data));
@@ -501,6 +506,75 @@ async function handleProxyApiRequest(req, res, url, ctx) {
         const ok = response.statusCode >= 200 && response.statusCode < 300;
         const text = await response.body.text();
         json(res, ok ? { ok: true } : { ok: false, error: text || `HTTP ${response.statusCode}` }, ok ? 200 : 502);
+      } catch (error) {
+        json(res, { ok: false, error: error?.message || String(error) }, 502);
+      } finally {
+        clearTimeout(timer);
+      }
+      return true;
+    }
+    if (p === "/api/proxy/auth-files/vertex-import" && method === "POST") {
+      if (!requireMutation()) return true;
+      // Vertex service-account import: the core normalizes and validates the
+      // account and creates the auth record (EasyCLIProxyAPI c6af303 parity).
+      // Same manual multipart translation as the auth-files upload above.
+      const body = await readJsonBody(req);
+      const name = String(body.name || "").trim();
+      const content = String(body.content || "");
+      const location = String(body.location || "").trim();
+      if (!name || !name.toLowerCase().endsWith(".json") || !content) {
+        json(res, { ok: false, error: "name (….json) and content required" }, 400);
+        return true;
+      }
+      try {
+        if (!isJsonObjectString(content)) throw new Error("not an object");
+      } catch {
+        json(res, { ok: false, error: "credential content must be a JSON object" }, 400);
+        return true;
+      }
+      const boundary = `----aitool${crypto.randomBytes(8).toString("hex")}`;
+      const partBuffers = [
+        Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${name.replace(/"/g, "")}"\r\nContent-Type: application/json\r\n\r\n`),
+        Buffer.from(content),
+      ];
+      if (location) {
+        partBuffers.push(Buffer.from(`\r\n--${boundary}\r\nContent-Disposition: form-data; name="location"\r\n\r\n${location}`));
+      }
+      partBuffers.push(Buffer.from(`\r\n--${boundary}--\r\n`));
+      const formBody = Buffer.concat(partBuffers);
+      const { request: undiciRequest } = require("undici");
+      const token = config.getManagementKey();
+      const port = config.getServerPort();
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 15_000);
+      try {
+        const response = await undiciRequest(`http://127.0.0.1:${port}/v0/management/oauth/import?provider=vertex`, {
+          method: "POST",
+          signal: controller.signal,
+          headers: {
+            authorization: `Bearer ${token}`,
+            "content-type": `multipart/form-data; boundary=${boundary}`,
+            "content-length": String(formBody.length),
+          },
+          body: formBody,
+        });
+        const text = await response.body.text();
+        const ok = response.statusCode >= 200 && response.statusCode < 300;
+        let result = null;
+        try { result = JSON.parse(text); } catch { /* non-JSON error body */ }
+        if (ok && result && (result.status === "ok" || result.project_id)) {
+          json(res, {
+            ok: true,
+            result: {
+              projectId: String(result.project_id ?? ""),
+              email: String(result.email ?? ""),
+              location: String(result.location ?? location),
+              authFile: String(result["auth-file"] ?? result.auth_file ?? ""),
+            },
+          });
+        } else {
+          json(res, { ok: false, error: text || `HTTP ${response.statusCode}` }, 502);
+        }
       } catch (error) {
         json(res, { ok: false, error: error?.message || String(error) }, 502);
       } finally {

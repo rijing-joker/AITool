@@ -1863,5 +1863,13 @@
   "sessions.storage.tooltip": "僅會話檔案 · {{metric}} · 每千個歷史 token {{ratio}} 位元組。不含共用資料庫、快取和專案檔案。",
   "sessions.storage.allocated": "配置空間",
   "sessions.storage.logical": "邏輯檔案大小",
-  "sessions.storage.size": "{{value}} MiB"
+  "sessions.storage.size": "{{value}} MiB",
+  "proxy.creds.vertex.button": "Vertex 服務帳號",
+  "proxy.creds.vertex.description": "匯入 Vertex 服務帳號 JSON；核心會校驗並建立授權記錄。",
+  "proxy.creds.vertex.location": "位置",
+  "proxy.creds.vertex.locationPlaceholder": "可選區域，例如 us-central1",
+  "proxy.creds.vertex.pickFile": "選擇服務帳號 JSON",
+  "proxy.creds.vertex.hint": "選擇檔案後立即匯入。",
+  "proxy.creds.vertex.invalidFile": "請選擇包含服務帳號物件的 .json 檔案。",
+  "proxy.creds.vertex.imported": "已匯入 {{project}}{{email}}"
 }

@@ -2034,6 +2034,14 @@ proxy.creds.openDirectory,proxy,ProxyPage,Proxy,creds_openDirectory,"Open Folder
 proxy.creds.import,proxy,ProxyPage,Proxy,creds_import,"Import",,active
 proxy.creds.uploaded,proxy,ProxyPage,Proxy,creds_uploaded,"Uploaded {{count}} authentication files",,active
 proxy.creds.uploadFailed,proxy,ProxyPage,Proxy,creds_uploadFailed,"{{count}} files failed to upload: {{errors}}",,active
+proxy.creds.vertex.button,proxy,ProxyPage,Proxy,creds_vertexButton,"Vertex service account",,active
+proxy.creds.vertex.description,proxy,ProxyPage,Proxy,creds_vertexDescription,"Import a Vertex service-account JSON; the core validates it and creates the auth record.",,active
+proxy.creds.vertex.location,proxy,ProxyPage,Proxy,creds_vertexLocation,"Location",,active
+proxy.creds.vertex.locationPlaceholder,proxy,ProxyPage,Proxy,creds_vertexLocationPlaceholder,"Optional region, e.g. us-central1",,active
+proxy.creds.vertex.pickFile,proxy,ProxyPage,Proxy,creds_vertexPickFile,"Pick service-account JSON",,active
+proxy.creds.vertex.hint,proxy,ProxyPage,Proxy,creds_vertexHint,"Picking a file imports it immediately.",,active
+proxy.creds.vertex.invalidFile,proxy,ProxyPage,Proxy,creds_vertexInvalidFile,"Choose a .json file containing a service-account object.",,active
+proxy.creds.vertex.imported,proxy,ProxyPage,Proxy,creds_vertexImported,"Imported {{project}}{{email}}",,active
 proxy.creds.deleted,proxy,ProxyPage,Proxy,creds_deleted,"Authentication file deleted",,active
 proxy.creds.deleteConfirm,proxy,ProxyPage,Proxy,creds_deleteConfirm,"Delete “{{name}}”?",,active
 proxy.creds.copyName,proxy,ProxyPage,Proxy,creds_copyName,"Copy file name",,active

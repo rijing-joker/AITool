@@ -90,12 +90,15 @@ export const fetchAliasEditContext = (entry: {
   section?: string | null;
   providerIndex?: number | null;
   modelIndex?: number | null;
+  sourceModel?: string;
 }) => aliasConfig<ModelAliasEditContext>({
   action: "edit-source",
   alias: entry.alias,
+  oauthChannel: entry.oauthChannel ?? undefined,
   section: entry.section ?? undefined,
   providerIndex: entry.providerIndex ?? undefined,
   modelIndex: entry.modelIndex ?? undefined,
+  sourceModel: entry.sourceModel ?? undefined,
 });
 
 const aliasLocationArgs = (entry: {
@@ -103,11 +106,13 @@ const aliasLocationArgs = (entry: {
   section?: string | null;
   providerIndex?: number | null;
   modelIndex?: number | null;
+  sourceModel?: string;
 }) => ({
   oauthChannel: entry.oauthChannel ?? undefined,
   section: entry.section ?? undefined,
   providerIndex: entry.providerIndex ?? undefined,
   modelIndex: entry.modelIndex ?? undefined,
+  sourceModel: entry.sourceModel ?? undefined,
 });
 
 export const submitCreateAlias = (input: {

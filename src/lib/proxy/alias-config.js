@@ -913,11 +913,17 @@ function validateAliasEffort(value) {
   return effort;
 }
 
-function configModelKeyFromParts(section, providerIndex, modelIndex) {
+function configModelKeyFromParts(section, providerIndex, modelIndex, identity = {}) {
   if (section == null && providerIndex == null && modelIndex == null) return null;
   if (section === "oauth-model-alias") {
     if (modelIndex == null) throw new Error("Invalid alias model location");
-    return { type: "oauth", section, channel: null, modelIndex: Number(modelIndex) };
+    return {
+      type: "oauth",
+      section,
+      channel: identity.channel ?? null,
+      sourceModel: identity.sourceModel ?? null,
+      modelIndex: Number(modelIndex),
+    };
   }
   if (section == null || providerIndex == null || modelIndex == null) {
     throw new Error("Invalid alias model location");
@@ -925,7 +931,13 @@ function configModelKeyFromParts(section, providerIndex, modelIndex) {
   if (!ALIAS_SECTIONS.some((entry) => entry.section === section)) {
     throw new Error("Unknown model configuration section");
   }
-  return { type: "config", section, providerIndex: Number(providerIndex), modelIndex: Number(modelIndex) };
+  return {
+    type: "config",
+    section,
+    providerIndex: Number(providerIndex),
+    modelIndex: Number(modelIndex),
+    sourceModel: identity.sourceModel ?? null,
+  };
 }
 
 // Edit contexts are addressed by the entry's configuration position plus its
@@ -1017,8 +1029,10 @@ function removeConfigModelAliasEntryAt(root, key, alias) {
   if (!Array.isArray(models)) return false;
   const model = models[key.modelIndex];
   const identity = configuredModelIdentity(model);
+  const expectedSource = key.sourceModel ? String(key.sourceModel).toLowerCase() : null;
   const isTarget = identity && identity.source !== identity.client
-    && identity.client.toLowerCase() === alias.toLowerCase();
+    && identity.client.toLowerCase() === alias.toLowerCase()
+    && (!expectedSource || identity.source.toLowerCase() === expectedSource);
   if (!isTarget) return false;
   models.splice(key.modelIndex, 1);
   return true;
@@ -1085,24 +1099,43 @@ async function resolveSourceForEdit(root, definitions, originalAlias, target) {
   const availableModels = await fetchAvailableModels();
   if (target && target.type === "oauth") {
     const oauthAliases = yamlValue(root, "oauth-model-alias");
-    const entries = target.channel && isRecord(oauthAliases) && Array.isArray(oauthAliases[target.channel])
-      ? oauthAliases[target.channel]
-      : null;
-    if (!entries) throw new Error("Alias model does not exist. Refresh and try again");
-    const at = (index) => {
-      const entry = entries[index];
-      if (!isRecord(entry)) return null;
-      if (readString(entry, "alias").toLowerCase() !== originalAlias.toLowerCase()) return null;
-      return entry;
+    // The row is addressed by its (source model, alias) pair — the alias alone
+    // is not unique when several sources map the same alias. The channel rides
+    // in from the entry's saved position; without one (legacy clients), scan
+    // every channel for the pair.
+    const expectedSource = target.sourceModel ? String(target.sourceModel).toLowerCase() : null;
+    const matchesTarget = (entry) => {
+      if (!isRecord(entry)) return false;
+      if (readString(entry, "alias").toLowerCase() !== originalAlias.toLowerCase()) return false;
+      if (expectedSource && readString(entry, "name").toLowerCase() !== expectedSource) return false;
+      return true;
     };
-    let index = at(target.modelIndex) ? target.modelIndex : entries.findIndex((_, candidate) => at(candidate) !== null);
-    if (index < 0) throw new Error("Alias row moved or changed. Refresh the list and select it again");
+    const candidates = target.channel && isRecord(oauthAliases) && Array.isArray(oauthAliases[target.channel])
+      ? [target.channel]
+      : isRecord(oauthAliases)
+        ? Object.keys(oauthAliases).filter((channel) => Array.isArray(oauthAliases[channel]))
+        : [];
+    let resolvedChannel = null;
+    let index = -1;
+    for (const channel of candidates) {
+      const channelEntries = oauthAliases[channel];
+      const found = matchesTarget(channelEntries[target.modelIndex])
+        ? target.modelIndex
+        : channelEntries.findIndex((entry) => matchesTarget(entry));
+      if (found >= 0) {
+        resolvedChannel = channel;
+        index = found;
+        break;
+      }
+    }
+    if (!resolvedChannel) throw new Error("Alias row moved or changed. Refresh the list and select it again");
+    const entries = oauthAliases[resolvedChannel];
     const entry = entries[index];
     const sourceModel = readString(entry, "name");
-    const details = oauthAliasChannelDetails(target.channel);
-    const channelDef = OAUTH_ALIAS_CHANNELS.find((candidate) => candidate.key === target.channel)
+    const details = oauthAliasChannelDetails(resolvedChannel);
+    const channelDef = OAUTH_ALIAS_CHANNELS.find((candidate) => candidate.key === resolvedChannel)
       ?? { ...details, supportsReasoning: false, supportsFast: details.protocol === "codex", forceMapping: false };
-    const definitionSet = definitions.find((candidate) => candidate.channel.key === target.channel);
+    const definitionSet = definitions.find((candidate) => candidate.channel.key === resolvedChannel);
     const definition = definitionSet?.models.find((candidate) => candidate.id.toLowerCase() === sourceModel.toLowerCase());
     return {
       source: {
@@ -1114,7 +1147,7 @@ async function resolveSourceForEdit(root, definitions, originalAlias, target) {
         protocol: channelDef.protocol,
         reasoningLevels: definition?.reasoningLevels ?? [],
       },
-      location: { type: "oauth", channel: target.channel, index, forceMapping: Boolean(readBoolean(entry, "force-mapping") || channelDef.forceMapping) },
+      location: { type: "oauth", channel: resolvedChannel, index, forceMapping: Boolean(readBoolean(entry, "force-mapping") || channelDef.forceMapping) },
       availableModels,
     };
   }
@@ -1125,9 +1158,12 @@ async function resolveSourceForEdit(root, definitions, originalAlias, target) {
     if (!isRecord(provider)) throw new Error("Model provider changed. Refresh and try again");
     const models = yamlValue(provider, "models");
     if (!Array.isArray(models)) throw new Error("Model provider changed. Refresh and try again");
+    const expectedSource = target.sourceModel ? String(target.sourceModel).toLowerCase() : null;
     const identityAt = (model) => {
       const identity = configuredModelIdentity(model);
-      return identity && identity.client.toLowerCase() === originalAlias.toLowerCase() ? identity : null;
+      if (!identity || identity.client.toLowerCase() !== originalAlias.toLowerCase()) return null;
+      if (expectedSource && identity.source.toLowerCase() !== expectedSource) return null;
+      return identity;
     };
     // Address the row by its saved position, but fall back to an identity
     // scan when rows moved — the position is a hint, not a lock.
@@ -1185,9 +1221,12 @@ async function resolveSourceForEdit(root, definitions, originalAlias, target) {
   throw new Error("Alias model does not exist. Refresh and try again");
 }
 
-async function getEditContext({ alias, section, providerIndex, modelIndex }) {
+async function getEditContext({ alias, section, providerIndex, modelIndex, oauthChannel, sourceModel }) {
   const normalizedAlias = existingAliasModelId(alias, "Alias model");
-  const target = configModelKeyFromParts(section, providerIndex, modelIndex);
+  const target = configModelKeyFromParts(section, providerIndex, modelIndex, {
+    channel: oauthChannel ?? null,
+    sourceModel: sourceModel ?? null,
+  });
   const { legacy: root } = await fetchLegacyConfig();
   const definitions = await fetchOauthDefinitions();
   const resolved = await resolveSourceForEdit(root, definitions, normalizedAlias, target);
@@ -1213,7 +1252,10 @@ async function createAlias(payload) {
   }
   const effort = String(payload.effort ?? "").trim() ? validateAliasEffort(payload.effort) : "";
   const fast = Boolean(payload.fast);
-  const target = configModelKeyFromParts(payload.section, payload.providerIndex, payload.modelIndex);
+  const target = configModelKeyFromParts(payload.section, payload.providerIndex, payload.modelIndex, {
+    channel: payload.oauthChannel ?? null,
+    sourceModel: payload.sourceModel ?? null,
+  });
 
   const { legacy: root, nativeApiKeys } = await fetchLegacyConfig();
   const availableModels = await fetchAvailableModels();
@@ -1282,15 +1324,55 @@ async function createAlias(payload) {
 // --- edit (edit_model_alias_in_yaml) ------------------------------------------
 
 function findOriginalAliasEntry(root, originalAlias, target) {
+  // Same (source model, alias) identity as resolveSourceForEdit, and — like
+  // upstream — the search stays inside the saved position's domain instead of
+  // spilling over into unrelated sections.
+  const expectedSource = target?.sourceModel ? String(target.sourceModel).toLowerCase() : null;
+  if (target && target.type === "oauth") {
+    const oauthAliases = yamlValue(root, "oauth-model-alias");
+    if (isRecord(oauthAliases)) {
+      const channels = target.channel && Array.isArray(oauthAliases[target.channel])
+        ? [target.channel]
+        : Object.keys(oauthAliases).filter((channel) => Array.isArray(oauthAliases[channel]));
+      for (const channel of channels) {
+        const entries = oauthAliases[channel];
+        for (let index = 0; index < entries.length; index += 1) {
+          const entry = entries[index];
+          if (readString(entry, "alias").toLowerCase() === originalAlias.toLowerCase()
+            && (!expectedSource || readString(entry, "name").toLowerCase() === expectedSource)) {
+            return { type: "oauth", channel, index };
+          }
+        }
+      }
+    }
+    throw new Error("Alias model does not exist. Refresh and try again");
+  }
+  const identityMatches = (identity) => Boolean(identity)
+    && identity.client.toLowerCase() === originalAlias.toLowerCase()
+    && (!expectedSource || identity.source.toLowerCase() === expectedSource);
   if (target) {
     const providers = yamlValue(root, target.section);
     const provider = Array.isArray(providers) ? providers[target.providerIndex] : null;
     const models = isRecord(provider) ? yamlValue(provider, "models") : undefined;
     const model = Array.isArray(models) ? models[target.modelIndex] : undefined;
-    const identity = configuredModelIdentity(model);
-    if (identity && identity.client.toLowerCase() === originalAlias.toLowerCase()) {
+    if (identityMatches(configuredModelIdentity(model))) {
       return { type: "config", section: target.section, providerIndex: target.providerIndex, modelIndex: target.modelIndex };
     }
+    for (const { section } of ALIAS_SECTIONS) {
+      const providers = yamlValue(root, section);
+      if (!Array.isArray(providers)) continue;
+      for (let providerIndex = 0; providerIndex < providers.length; providerIndex += 1) {
+        const provider = providers[providerIndex];
+        const models = isRecord(provider) ? yamlValue(provider, "models") : undefined;
+        if (!Array.isArray(models)) continue;
+        for (let modelIndex = 0; modelIndex < models.length; modelIndex += 1) {
+          if (identityMatches(configuredModelIdentity(models[modelIndex]))) {
+            return { type: "config", section, providerIndex, modelIndex };
+          }
+        }
+      }
+    }
+    throw new Error("Alias model does not exist. Refresh and try again");
   }
   const oauthAliases = yamlValue(root, "oauth-model-alias");
   if (isRecord(oauthAliases)) {
@@ -1465,13 +1547,14 @@ async function createSpeedAlias(payload) {
   return { thinkingEntries: thinkingEntriesFromConfig(mutated), speedEntries: speedEntriesFromConfig(mutated) };
 }
 
-function removeOauthModelAliasEntryAt(root, channel, modelIndex, alias) {
+function removeOauthModelAliasEntryAt(root, channel, modelIndex, alias, expectedSource) {
   const oauthAliases = yamlValue(root, "oauth-model-alias");
   if (!isRecord(oauthAliases)) return false;
   const entries = Array.isArray(oauthAliases[channel]) ? oauthAliases[channel] : null;
   if (!entries) return false;
   const entry = entries[modelIndex];
   if (readString(entry, "alias").toLowerCase() !== alias.toLowerCase()) return false;
+  if (expectedSource && readString(entry, "name").toLowerCase() !== String(expectedSource).toLowerCase()) return false;
   entries.splice(modelIndex, 1);
   if (entries.length === 0) {
     delete oauthAliases[channel];
@@ -1483,14 +1566,17 @@ function removeOauthModelAliasEntryAt(root, channel, modelIndex, alias) {
 async function deleteAlias(payload) {
   const alias = existingAliasModelId(payload.alias, "Alias model");
   const oauthChannel = payload.oauthChannel ? String(payload.oauthChannel) : null;
-  const target = configModelKeyFromParts(payload.section, payload.providerIndex, payload.modelIndex);
+  const target = configModelKeyFromParts(payload.section, payload.providerIndex, payload.modelIndex, {
+    channel: oauthChannel,
+    sourceModel: payload.sourceModel ?? null,
+  });
   const isSpeed = payload.kind === "speed"
     || (payload.serviceTier && !payload.effort);
   const { legacy: root, nativeApiKeys } = await fetchLegacyConfig();
   const mutated = structuredClone(root);
   let removed = false;
   if (target && target.type === "oauth") {
-    removed = removeOauthModelAliasEntryAt(mutated, oauthChannel, target.modelIndex, alias);
+    removed = removeOauthModelAliasEntryAt(mutated, oauthChannel ?? target.channel, target.modelIndex, alias, target.sourceModel);
   } else if (!target) {
     removed = removeOauthModelAlias(mutated, alias, oauthChannel);
   }

@@ -298,17 +298,38 @@ async function deleteProvider(app, id) {
 
 // Deep-copy a provider next to the original (cc-switch's duplicate): new id,
 // "<name> copy", sortIndex+1, everything else cloned. The current pointer is
-// NOT inherited; additive slot keys come from the name, so the copy gets its
-// own slot automatically.
+// NOT inherited. Additive wrappers carry their slotKey inside settingsConfig,
+// so the clone must be re-keyed — sanitizeWrapper only fills a missing
+// slotKey, and keeping the source's would make the copy write into the very
+// slot the source card still claims.
 async function duplicateProvider(app, id) {
   if (!isSupportedApp(app)) throw new Error(`Unsupported app: ${app}`);
   const state = await listProviders(app);
   const source = state.providers.find((p) => p.id === id);
   if (!source) throw new Error(`Provider not found: ${id}`);
+  const settingsConfig = JSON.parse(JSON.stringify(source.settingsConfig || {}));
+  if (additive.isAdditiveApp(app)) {
+    // Derive the copy's slot from "<name> copy", uniquified against the
+    // other cards (upstream validates the cloned key against existing and
+    // live config keys before writing).
+    const taken = new Set(
+      state.providers
+        .filter((p) => p.id !== id)
+        .map((p) => (p.settingsConfig && typeof p.settingsConfig.slotKey === "string" ? p.settingsConfig.slotKey : ""))
+        .filter(Boolean),
+    );
+    const base = additive.normalizeSlotKey(`${source.name} copy`, app);
+    let slotKey = base;
+    for (let n = 2; taken.has(slotKey); n += 1) {
+      const suffix = `-${n}`;
+      slotKey = `${base.slice(0, Math.max(1, 40 - suffix.length))}${suffix}`;
+    }
+    settingsConfig.slotKey = slotKey;
+  }
   return createProvider(app, {
     name: `${source.name} copy`,
     category: source.category,
-    settingsConfig: JSON.parse(JSON.stringify(source.settingsConfig || {})),
+    settingsConfig,
     notes: source.notes || "",
     websiteUrl: source.websiteUrl || "",
     icon: source.icon || "",

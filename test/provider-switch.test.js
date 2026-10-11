@@ -116,6 +116,24 @@ test("provider-switch store: duplicate copies a provider next to the original (c
   await assert.rejects(() => store.duplicateProvider("claude", "p_missing"), /Provider not found/);
 });
 
+test("provider-switch store: duplicate re-keys the additive slot so the copy cannot alias the source", async () => {
+  const store = require("../src/lib/provider-switch/store");
+
+  const created = await store.createProvider("opencode", {
+    name: "Relay A",
+    category: "custom",
+    settingsConfig: { provider: { npm: "@ai-sdk/openai-compatible", options: { baseURL: "https://a.example.com" } } },
+  });
+  assert.equal(created.settingsConfig.slotKey, "relay-a");
+
+  const copy = await store.duplicateProvider("opencode", created.id);
+  assert.equal(copy.settingsConfig.slotKey, "relay-a-copy", "the copy is re-keyed from '<name> copy'");
+  const copy2 = await store.duplicateProvider("opencode", created.id);
+  assert.equal(copy2.settingsConfig.slotKey, "relay-a-copy-2", "a second copy uniquifies against the first");
+  const reread = (await store.listProviders("opencode")).providers.find((p) => p.id === created.id);
+  assert.equal(reread.settingsConfig.slotKey, "relay-a", "the source keeps its own slot");
+});
+
 // ---------------------------------------------------------------------------
 // Claude projection
 // ---------------------------------------------------------------------------

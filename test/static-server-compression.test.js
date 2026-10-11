@@ -142,3 +142,43 @@ test("a variant open failure falls back before the response is committed", async
   assert.equal(res.headersSent, false, "no headers may be committed on the failure path");
   await fs.rm(dir, { recursive: true, force: true });
 });
+
+test("a variant's Content-Length is re-statted from the opened descriptor", async (t) => {
+  // The pre-open variant stat races an atomic rewrite (deploy replaces
+  // app.js.gz between stat and open): committing the raced size with the
+  // body the opened descriptor serves hangs keep-alive clients / truncates
+  // the tail. The size must come from a stat bound to the opened handle.
+  const fsp = require("node:fs/promises");
+  const origStat = fsp.stat;
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "aitool-stalestat-"));
+  const source = 'console.log("stale stat test");\n'.repeat(200);
+  await fs.writeFile(path.join(dir, "app.js"), source);
+  const { precompressAssets } = await import("../dashboard/scripts/precompress-assets.mjs");
+  await precompressAssets(dir);
+  const variantPath = path.join(dir, "app.js.gz");
+  const realSize = (await origStat.call(fsp, variantPath)).size;
+  fsp.stat = async function staleVariantStat(file, ...args) {
+    const stat = await origStat.call(fsp, file, ...args);
+    if (String(file) === variantPath) return { ...stat, size: realSize + 999, isFile: () => true };
+    return stat;
+  };
+  t.after(() => { fsp.stat = origStat; });
+
+  const written = [];
+  let committedHeaders = null;
+  const res = new EventEmitter();
+  res.write = (chunk) => { written.push(chunk); return true; };
+  res.writeHead = (status, headers) => { committedHeaders = headers; return res; };
+  res.destroy = () => {};
+  const done = new Promise((resolve) => {
+    res.end = (chunk) => { if (chunk) written.push(chunk); resolve(); };
+  });
+  const served = await serveStaticFile(dir, "/app.js", res, { method: "GET", headers: { "accept-encoding": "gzip" } });
+  assert.equal(served, true);
+  assert.equal(committedHeaders["Content-Encoding"], "gzip");
+  await done;
+  assert.equal(committedHeaders["Content-Length"], realSize, "size is bound to the opened descriptor, not the raced stat");
+  const body = Buffer.concat(written);
+  assert.equal(body.length, realSize);
+  await fs.rm(dir, { recursive: true, force: true });
+});

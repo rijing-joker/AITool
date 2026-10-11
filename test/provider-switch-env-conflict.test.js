@@ -159,6 +159,35 @@ test("env conflicts: api delete removes the lines, keeps a restorable backup", a
   assert.match(restored, /keep_me=1/);
 });
 
+test("env conflicts: deleting one of two assignments of a variable removes only the selected line", async () => {
+  const zshrc = path.join(tmpHome, ".zshrc");
+  fs.writeFileSync(zshrc, [
+    "export ANTHROPIC_API_KEY=sk-old",
+    "keep_me=1",
+    "export ANTHROPIC_API_KEY=sk-new",
+  ].join("\n"));
+
+  const h = handler();
+  const list = await call(h, { url: "/api/provider-switch/env-conflicts" });
+  const claude = list.body.conflicts.claude;
+  assert.equal(claude.length, 2, "both occurrences are listed as separate conflicts");
+  const second = claude.find((entry) => entry.sourcePath.endsWith(":3"));
+  assert.equal(second.varValue, "sk-new");
+
+  const del = await call(h, {
+    method: "POST",
+    url: "/api/provider-switch/env-conflicts/delete",
+    body: JSON.stringify({
+      conflicts: [{ varName: second.varName, varValue: second.varValue, sourceType: second.sourceType, sourcePath: second.sourcePath }],
+    }),
+  });
+  assert.equal(del.status, 200);
+  assert.equal(del.body.deleted, 1, "only the selected occurrence is removed");
+  const after = fs.readFileSync(zshrc, "utf8");
+  assert.match(after, /export ANTHROPIC_API_KEY=sk-old/, "the unselected assignment survives");
+  assert.doesNotMatch(after, /sk-new/);
+});
+
 test("env conflicts: delete without auth is rejected and empty payloads fail clean", async () => {
   const h = handler();
   const unauth = await call(h, {

@@ -125,27 +125,35 @@ async function deleteConflicts(conflicts) {
 
   let deleted = 0;
   const failed = [];
-  // Group file conflicts by file so each file is read and rewritten once.
+  // Group file conflicts by file so each file is read and rewritten once. A
+  // conflict identifies one occurrence (file:line:name — the banner selects
+  // per occurrence), so removal is keyed by line: deleting one of two
+  // assignments of the same variable must leave the other untouched.
   const byFile = new Map();
   for (const conflict of clean) {
     if (conflict.sourceType === "system") continue; // process env cannot be removed from here
-    const filePath = String(conflict.sourcePath || "").split(":").slice(0, -1).join(":");
-    if (!filePath) {
+    const parts = String(conflict.sourcePath || "").split(":");
+    const lineNo = Number(parts.pop());
+    const filePath = parts.join(":");
+    if (!filePath || !Number.isInteger(lineNo) || lineNo < 1) {
       failed.push(`${conflict.varName}: invalid source path`);
       continue;
     }
     if (!byFile.has(filePath)) byFile.set(filePath, new Set());
-    byFile.get(filePath).add(conflict.varName);
+    byFile.get(filePath).add(`${lineNo}:${conflict.varName}`);
   }
-  for (const [filePath, names] of byFile) {
+  for (const [filePath, selections] of byFile) {
     try {
       const content = await fsp.readFile(filePath, "utf8");
-      const kept = content.split("\n").filter((line) => {
+      let removed = 0;
+      const kept = content.split("\n").filter((line, index) => {
         const parsed = parseExportLine(line.trim());
-        return !(parsed && names.has(parsed.name));
+        const selected = !!parsed && selections.has(`${index + 1}:${parsed.name}`);
+        if (selected) removed += 1;
+        return !selected;
       });
-      await fsp.writeFile(filePath, kept.join("\n"));
-      deleted += names.size;
+      if (removed > 0) await fsp.writeFile(filePath, kept.join("\n"));
+      deleted += removed;
     } catch (error) {
       failed.push(`${filePath}: ${error?.message || String(error)}`);
     }

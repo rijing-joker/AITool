@@ -20,7 +20,9 @@ const fsp = require("node:fs/promises");
 const path = require("node:path");
 const { createUsageDeltaState, consumeUsageDelta } = require("./codex-token-usage");
 const {
+  codexSessionIdFromPath,
   decompressZstdBuffer,
+  isCompressedRolloutFilePath,
   MAX_COMPRESSED_ROLLOUT_BYTES,
 } = require("./rollout");
 
@@ -237,6 +239,53 @@ async function collectJsonlFiles(root, files = [], { compressed = false } = {}) 
     }
   }
   return files;
+}
+
+// cc-switch 8641cd1 lists compressed sessions by decompressing only the head
+// ("so scanning tens of GB stays fast"): the zstd transform stream stops once
+// the head budget is collected, instead of materializing the whole file per
+// listed row. Runtimes without the stream API (Node < 24) fall back to the
+// capped full decompress.
+const COMPRESSED_HEAD_BUDGET_BYTES = 1024 * 1024;
+
+async function readCompressedRolloutHeadText(filePath) {
+  const zlib = require("node:zlib");
+  if (typeof zlib.createZstdDecompressStream !== "function") {
+    return { text: await readSessionText(filePath), truncated: false };
+  }
+  return await new Promise((resolve, reject) => {
+    const source = fs.createReadStream(filePath);
+    const zstd = zlib.createZstdDecompressStream();
+    const chunks = [];
+    let total = 0;
+    let settled = false;
+    const finish = (error, truncated = false) => {
+      if (settled) return;
+      settled = true;
+      source.destroy();
+      zstd.destroy();
+      if (error) reject(error);
+      else resolve({ text: Buffer.concat(chunks, total).toString("utf8"), truncated });
+    };
+    source.on("error", finish);
+    zstd.on("error", finish);
+    zstd.on("end", () => finish());
+    zstd.on("data", (chunk) => {
+      chunks.push(chunk);
+      total += chunk.length;
+      if (total >= COMPRESSED_HEAD_BUDGET_BYTES) finish(null, true);
+    });
+    source.pipe(zstd);
+  });
+}
+
+async function readCompressedRolloutHeadLines(filePath, headN) {
+  const { text, truncated } = await readCompressedRolloutHeadText(filePath);
+  let lines = text.split("\n").filter((line) => line !== "");
+  // The budget cut can land mid-line; drop the partial tail line so callers
+  // only ever see complete JSONL rows.
+  if (truncated) lines = lines.slice(0, -1);
+  return lines.slice(0, headN);
 }
 
 // Codex compresses 7-day-old rollouts to rollout-*.jsonl.zst (cc-switch
@@ -476,6 +525,7 @@ function codexExtractPromptFromIdeContext(text) {
 }
 
 async function codexParseSession(filePath) {
+  if (isCompressedRolloutFilePath(filePath)) return codexParseCompressedSession(filePath);
   let headTail;
   try {
     headTail = await readHeadTailLines(filePath);
@@ -530,6 +580,61 @@ async function codexParseSession(filePath) {
     projectDir,
     createdAt,
     lastActiveAt,
+    sourcePath: filePath,
+    resumeCommand: `codex resume ${sessionId}`,
+  };
+}
+
+// Compressed rollouts list from the decompressed head only (cc-switch
+// 8641cd1): the file's mtime — which Codex preserves through compression —
+// stands in for last-active, and there is no last-reply preview. A head
+// decompression failure must not vanish the session: fall back to the
+// filename's rollout UUID and the mtime.
+async function codexParseCompressedSession(filePath) {
+  let head = [];
+  try {
+    head = await readCompressedRolloutHeadLines(filePath, HEAD_LINES);
+  } catch {
+    head = [];
+  }
+
+  let sessionId = null;
+  let projectDir = null;
+  let createdAt = null;
+  let firstUserMessage = null;
+
+  for (const line of head) {
+    const value = parseJsonLine(line);
+    if (!value) continue;
+    if (createdAt === null) createdAt = parseTimestampToMs(value.timestamp);
+    if (value.type === "session_meta") {
+      const payload = value.payload ?? {};
+      if (sessionId === null && typeof payload.id === "string") sessionId = payload.id;
+      if (projectDir === null && typeof payload.cwd === "string") projectDir = payload.cwd;
+    }
+    if (firstUserMessage === null && value.type === "response_item" && value.payload?.type === "message" && value.payload?.role === "user") {
+      const text = codexExtractPromptFromIdeContext(extractText(value.payload.content));
+      if (text !== "" && !text.includes("<user_instructions>") && !text.startsWith("<environment_context>")) {
+        firstUserMessage = text;
+      }
+    }
+  }
+
+  if (!sessionId) sessionId = codexSessionIdFromPath(filePath);
+  if (!sessionId) return null;
+
+  const stat = await fsp.stat(filePath).catch(() => null);
+  const title = (firstUserMessage ? truncateSummary(firstUserMessage, TITLE_MAX_CHARS) : null)
+    ?? (projectDir ? path.basename(projectDir) : null);
+
+  return {
+    appId: "codex",
+    sessionId,
+    title,
+    summary: null,
+    projectDir,
+    createdAt,
+    lastActiveAt: stat ? Math.round(stat.mtimeMs) : null,
     sourcePath: filePath,
     resumeCommand: `codex resume ${sessionId}`,
   };

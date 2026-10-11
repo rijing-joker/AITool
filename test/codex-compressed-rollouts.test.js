@@ -221,3 +221,56 @@ test("when both forms exist the plain file wins the session listing", async () =
     assert.ok(!sessions[0].sourcePath?.endsWith(".zst"), `expected the plain file, got ${sessions[0].sourcePath}`);
   });
 });
+
+test("a zero-byte plain rollout with a bounded end read does not crash the reader", async () => {
+  // cc-switch 8641cd1 adaptation follow-up: the bounded-end early return is
+  // reached by plain files too (fresh-parse callers pass endOffset = stat.size
+  // = 0 for empty rollouts); the compressed-view cleanup must be optional there.
+  await withTmp(async (ctx) => {
+    await fs.writeFile(ctx.plainPath, "");
+    const parsed = await parseCodexRolloutFile(ctx.plainPath, {
+      endOffset: 0,
+      collectBreakdowns: false,
+      collectModelUsage: false,
+    });
+    assert.ok(parsed);
+  });
+});
+
+test("listing survives an undecompressable rollout via filename identity and mtime", async () => {
+  await withTmp(async (ctx) => {
+    // Hostile/corrupt archive: the head decompress fails, but the session
+    // must not vanish from the list (that was the bug class this port fixed).
+    await fs.writeFile(ctx.zstPath, Buffer.from("definitely-not-zstd"));
+    const knownMtime = new Date("2026-09-20T12:34:56Z");
+    await fs.utimes(ctx.zstPath, knownMtime, knownMtime);
+
+    const sessions = await listSessions({ app: "codex", home: ctx.tmp });
+    assert.equal(sessions.length, 1, "a corrupt compressed rollout must still be listed");
+    assert.equal(sessions[0].sessionId, SESSION, "identity falls back to the filename UUID");
+    assert.equal(sessions[0].lastActiveAt, knownMtime.getTime(), "last-active falls back to mtime");
+    assert.equal(sessions[0].summary, null, "no last-reply preview without a readable tail");
+  });
+});
+
+test("compressed listing reads only the head, not the whole decompressed file", async () => {
+  await withTmp(async (ctx) => {
+    // Build a rollout whose head is tiny but whose tail is far beyond the
+    // head budget; listing must succeed regardless of the tail size.
+    const lines = [meta()];
+    for (let i = 0; i < 40_000; i += 1) {
+      lines.push(line({
+        timestamp: "2026-09-20T05:00:00.000Z",
+        type: "response_item",
+        payload: { type: "message", role: "assistant", content: [{ type: "output_text", text: `filler line ${i} ` .repeat(8) }] },
+      }));
+    }
+    await fs.writeFile(ctx.zstPath, await zstdCompress(Buffer.from(lines.map((l) => l + "\n").join(""))));
+    const decompressedBytes = (await fs.stat(ctx.zstPath)).size < 512 * 1024 ? lines.join("").length : -1;
+    assert.ok(decompressedBytes > 1024 * 1024, "fixture should exceed the head budget");
+
+    const sessions = await listSessions({ app: "codex", home: ctx.tmp });
+    assert.equal(sessions.length, 1);
+    assert.equal(sessions[0].sessionId, SESSION);
+  });
+});

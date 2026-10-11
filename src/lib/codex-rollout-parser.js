@@ -1215,7 +1215,9 @@ async function* readCodexObjectsIncremental(filePath, diagnostics, fileIndex, {
     Number.isFinite(requestedEnd) && requestedEnd >= 0;
   if (hasBoundedEnd && requestedEnd <= start) {
     if (readProgress) readProgress.endOffset = start;
-    compressedView.cleanup();
+    // Plain files reach this bounded-end early return too — compressedView is
+    // null there (same as the finally below).
+    compressedView?.cleanup();
     return;
   }
 

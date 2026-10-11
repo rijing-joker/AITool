@@ -113,9 +113,19 @@ async function readLives(app) {
   return lives;
 }
 
-async function readCodexStash() {
-  const stash = await readJson(paths.codexAuthStashPath());
-  return stash && typeof stash === "object" ? stash.auth || null : null;
+// Load the codex login stash, upgrading older shapes once per read: a
+// pre-workspace single-slot file (or a user-keyed map) is rekeyed by identity
+// and seeded from the official cards' stored logins (cc-switch 84457b510-era
+// stash vs e5b1e0966's multi-slot LoginStash). `rowAuths` are the official
+// codex cards' settingsConfig.auth values; `liveAuth` is the live auth.json.
+async function readCodexStash(rowAuths, liveAuth) {
+  const raw = await readJson(paths.codexAuthStashPath());
+  if (!raw || typeof raw !== "object") {
+    return targets.emptyCodexStash();
+  }
+  const current = targets.normalizeCodexStash(raw);
+  if (current) return current;
+  return targets.upgradeCodexStash(raw, rowAuths, liveAuth);
 }
 
 // Compute every live patch for a switch in memory (cc-switch's transaction
@@ -125,8 +135,7 @@ async function readCodexStash() {
 function computeSwitchPlan(app, prev, target, lives, stash) {
   const files = paths.targetFiles(app);
   const writes = []; // { file, content, parsedBackup? }
-  let stashWrite = null; // { content } to persist before clearing auth.json
-  let stashRestore = false;
+  let stashNext = null; // { version, logins, last } — new multi-slot stash state
   let catalogAction = { action: "keep" };
 
   if (app === "claude") {
@@ -138,7 +147,7 @@ function computeSwitchPlan(app, prev, target, lives, stash) {
     const configFile = files.find((f) => f.id === "config");
     const authFile = files.find((f) => f.id === "auth");
     const liveAuth = lives.auth.exists ? JSON.parse(lives.auth.content) : {};
-    const { configToml, auth, catalog: sidecar } = targets.projectCodex({
+    const { configToml, auth, catalog: sidecar, stashNext: next } = targets.projectCodex({
       prev,
       target,
       liveToml: lives.config.exists ? lives.config.content : "",
@@ -153,11 +162,10 @@ function computeSwitchPlan(app, prev, target, lives, stash) {
         content: `${JSON.stringify(auth.content, null, 2)}\n`,
         skipBackupIfMissing: true,
       });
-      stashRestore = !!auth.restoreStash;
     } else if (auth.action === "stash") {
-      stashWrite = auth.stashContent;
       writes.push({ file: authFile, content: `{}\n`, skipBackupIfMissing: true });
     }
+    stashNext = next;
   } else if (app === "gemini") {
     const envFile = files.find((f) => f.id === "env");
     const next = targets.projectGemini({
@@ -175,7 +183,7 @@ function computeSwitchPlan(app, prev, target, lives, stash) {
     writes.push({ file: configFile, content: additive.serializeLive(app, next), skipBackupIfMissing: true });
   }
 
-  return { writes, stashWrite, stashRestore, catalogAction };
+  return { writes, stashNext, catalogAction };
 }
 
 // Backup each existing live file, persist the auth stash, then publish all
@@ -189,11 +197,11 @@ async function persistSwitchPlan(app, plan) {
     }
   }
 
-  if (plan.stashWrite) {
+  if (plan.stashNext) {
     await ensureDir(paths.providerSwitchRoot());
     await writeFileAtomic(
       paths.codexAuthStashPath(),
-      `${JSON.stringify({ auth: plan.stashWrite, stashedAt: new Date().toISOString() }, null, 2)}\n`,
+      `${JSON.stringify({ ...plan.stashNext, stashedAt: new Date().toISOString() }, null, 2)}\n`,
       { mode: 0o600 },
     );
   }
@@ -217,14 +225,6 @@ async function persistSwitchPlan(app, plan) {
     }
   }
 
-  if (plan.stashRestore) {
-    try {
-      await fs.unlink(paths.codexAuthStashPath());
-    } catch {
-      /* stash may be gone already */
-    }
-  }
-
   return { wrote, backups };
 }
 
@@ -237,6 +237,16 @@ async function liveExists(file) {
   }
 }
 
+// The official codex cards' stored logins seed the stash upgrade (cc-switch
+// seeds LoginStash from row auths); unbound cards carry none.
+async function officialCodexRowAuths() {
+  const state = await store.listProviders("codex");
+  return state.providers
+    .filter((provider) => provider.category === "official")
+    .map((provider) => provider.settingsConfig && provider.settingsConfig.auth)
+    .filter((auth) => auth && typeof auth === "object" && !Array.isArray(auth));
+}
+
 async function switchProvider({ app, id }) {
   if (!store.isSupportedApp(app)) throw new Error(`Unsupported app: ${app}`);
   const state = await store.listProviders(app);
@@ -247,7 +257,10 @@ async function switchProvider({ app, id }) {
     : null;
 
   const lives = await readLives(app);
-  const stash = app === "codex" ? await readCodexStash() : null;
+  const stash =
+    app === "codex"
+      ? await readCodexStash(await officialCodexRowAuths(), lives.auth.exists ? JSON.parse(lives.auth.content) : {})
+      : null;
   const plan = computeSwitchPlan(app, prev, target, lives, stash);
   const { wrote, backups } = await persistSwitchPlan(app, plan);
 
@@ -331,7 +344,10 @@ async function saveProvider({ app, id, body }) {
       meta: body.meta !== undefined ? body.meta : existing.meta,
     });
     const target = { ...existing, ...clean };
-    const stash = app === "codex" ? await readCodexStash() : null;
+    const stash =
+      app === "codex"
+        ? await readCodexStash(await officialCodexRowAuths(), lives.auth.exists ? JSON.parse(lives.auth.content) : {})
+        : null;
     const switchPlan = computeSwitchPlan(app, existing, target, patchedLives, stash);
     ({ wrote, backups } = await persistSwitchPlan(app, switchPlan));
     applied = { wrote: wrote.slice(), backups };
@@ -693,6 +709,14 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
       return true;
     }
 
+    if (p === `${prefix}/providers/duplicate` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      const provider = await store.duplicateProvider(body.app, body.id);
+      json(res, { ok: true, provider });
+      return true;
+    }
+
     const providersMatch = p.match(new RegExp(`^${prefix}/providers(?:/([\\w-]+))?$`));
     if (providersMatch) {
       const providerId = providersMatch[1] || null;
@@ -739,7 +763,11 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
     if (p === `${prefix}/editor-view` && method === "POST") {
       const body = await readJsonBody(req);
       const app = body.app || "claude";
-      json(res, await editor.buildEditorView(app, { settingsConfig: body.settingsConfig, id: body.id }));
+      const view = await editor.buildEditorView(app, { settingsConfig: body.settingsConfig, id: body.id });
+      // Why the official GPT list is unavailable, when it is — the catalog
+      // editor hints at the vendored-template fallback (cc-switch 2e20cdcb5).
+      if (app === "codex") view.codexOfficialModelsReason = catalog.codexOfficialModelsReason();
+      json(res, view);
       return true;
     }
 
@@ -1023,11 +1051,15 @@ async function buildStatus() {
     });
   }
   const stash = await readJson(paths.codexAuthStashPath());
+  const stashPresent =
+    stash &&
+    typeof stash === "object" &&
+    ((stash.logins && typeof stash.logins === "object" && Object.keys(stash.logins).length > 0) || stash.auth);
   return {
     ok: true,
     storagePath: paths.providerSwitchRoot(),
     visibleApps: state.settings.visibleApps,
-    codexAuthStash: stash && typeof stash === "object" && stash.auth ? { stashedAt: stash.stashedAt || null } : null,
+    codexAuthStash: stashPresent ? { stashedAt: stash.stashedAt || null } : null,
     apps,
   };
 }

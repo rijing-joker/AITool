@@ -33,6 +33,22 @@ test("Claude 5.5 SKUs use official rates and Claude thinking is already billed i
   assert.deepEqual(pricing.getModelPricing("k3-256k"), pricing.getModelPricing("k3"));
 });
 
+test("Claude Haiku 5.5 seeds the standard tier (cc-switch 3da322eb3)", () => {
+  pricing.resetPricingForTests();
+  for (const model of ["claude-haiku-5-5", "claude-haiku-5.5"]) {
+    const rate = pricing.getModelPricing(model);
+    assert.ok(rate, `${model} has a curated rate`);
+    assert.equal(rate.input, 0.1);
+    assert.equal(rate.output, 0.5);
+    assert.equal(rate.cache_read, 0.01);
+    assert.equal(rate.cache_write, 0.125);
+  }
+  // A representative row: 1M in, 0.5M out, 1M cache read, 1M cache write.
+  const row = { source: "claude", model: "claude-haiku-5-5", input_tokens: 1e6, output_tokens: 5e5,
+    cached_input_tokens: 1e6, cache_creation_input_tokens: 1e6 };
+  assert.ok(Math.abs(pricing.computeRowCost(row) - (0.1 + 0.25 + 0.01 + 0.125)) < 1e-9);
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
 

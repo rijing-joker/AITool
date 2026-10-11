@@ -100,6 +100,7 @@ export interface ProxyRecord {
     reasoningTokens?: number;
     cacheReadTokens?: number;
     cacheCreationTokens?: number;
+    cacheCreation1hTokens?: number;
     totalTokens?: number;
   };
 }

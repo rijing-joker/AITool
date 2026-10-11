@@ -1,3 +1,5 @@
+const { cacheCreation1h } = require("./cache-tokens");
+const { normalizeCodexUsage } = require("./codex-token-usage");
 const codexFiles = require("./codex-rollout-file");
 // CLI session history (cc-switch session_manager port, minimal reader):
 // scan each AI CLI's on-disk session logs and read them back as a plain
@@ -203,6 +205,7 @@ function trackModelUsage(usage, model, row) {
   entry.reasoningTokens += row.reasoningTokens;
   entry.cacheReadTokens += row.cacheReadTokens;
   entry.cacheCreationTokens += row.cacheCreationTokens;
+  if (row.cacheCreation1hTokens) entry.cacheCreation1hTokens = (entry.cacheCreation1hTokens || 0) + row.cacheCreation1hTokens;
 }
 
 async function collectJsonlFiles(root, files = [], compressed = false) {
@@ -384,6 +387,7 @@ async function claudeReadMessages(filePath) {
           outputTokens: Number(message.usage.output_tokens) || 0,
           cacheReadTokens: Number(message.usage.cache_read_input_tokens) || 0,
           cacheCreationTokens: Number(message.usage.cache_creation_input_tokens) || 0,
+          ...(cacheCreation1h(message.usage) ? { cacheCreation1hTokens: cacheCreation1h(message.usage) } : {}),
           reasoningTokens: 0,
           model: typeof message.model === "string" && message.model ? message.model : null,
           stopReason: typeof message.stop_reason === "string" && message.stop_reason ? message.stop_reason : null,
@@ -404,6 +408,7 @@ async function claudeReadMessages(filePath) {
     usage.outputTokens += row.outputTokens;
     usage.cacheReadTokens += row.cacheReadTokens;
     usage.cacheCreationTokens += row.cacheCreationTokens;
+    if (row.cacheCreation1hTokens) usage.cacheCreation1hTokens = (usage.cacheCreation1hTokens || 0) + row.cacheCreation1hTokens;
     trackModelUsage(usage, row.model, row);
   }
   usage.totalTokens = usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheCreationTokens;
@@ -417,6 +422,7 @@ async function claudeReadMessages(filePath) {
         outputTokens: rowUsage.outputTokens,
         cacheReadTokens: rowUsage.cacheReadTokens,
         cacheCreationTokens: rowUsage.cacheCreationTokens,
+        ...(rowUsage.cacheCreation1hTokens ? { cacheCreation1hTokens: rowUsage.cacheCreation1hTokens } : {}),
       };
     }
   }
@@ -583,12 +589,13 @@ async function codexReadMessages(filePath) {
       else if (typeof info?.model_name === "string" && info.model_name) usage.model = info.model_name;
       const delta = consumeUsageDelta(usageState, snapshot(info?.last_token_usage), snapshot(info?.total_token_usage));
       if (delta) {
+        const normalized = normalizeCodexUsage(delta);
         const row = {
-          inputTokens: delta.input_tokens,
+          inputTokens: normalized.input_tokens + normalized.cached_input_tokens + normalized.cache_creation_input_tokens,
           outputTokens: delta.output_tokens,
           reasoningTokens: delta.reasoning_output_tokens,
-          cacheReadTokens: delta.cached_input_tokens,
-          cacheCreationTokens: 0,
+          cacheReadTokens: normalized.cached_input_tokens,
+          cacheCreationTokens: normalized.cache_creation_input_tokens,
         };
         trackModelUsage(usage, usage.model, row);
         for (const [key, count] of Object.entries(row)) usage[key] += count;

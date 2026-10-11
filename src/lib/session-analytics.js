@@ -1,3 +1,4 @@
+const { cacheSubset, addCacheSubset } = require("./cache-tokens");
 const codexFiles = require("./codex-rollout-file");
 "use strict";
 
@@ -115,10 +116,11 @@ function tokenTotals(usage) {
   const output_tokens = finite(usage?.output_tokens);
   const reasoning_output_tokens = finite(usage?.reasoning_output_tokens);
   const total_tokens = input_tokens + cached_input_tokens + cache_creation_input_tokens + output_tokens;
-  return { input_tokens, cached_input_tokens, cache_creation_input_tokens, output_tokens, reasoning_output_tokens, total_tokens };
+  return { input_tokens, cached_input_tokens, cache_creation_input_tokens, output_tokens, reasoning_output_tokens, total_tokens, ...cacheSubset(usage) };
 }
 
 function addTotals(target, delta) {
+  addCacheSubset(target, delta);
   for (const key of ["input_tokens", "cached_input_tokens", "cache_creation_input_tokens", "output_tokens", "reasoning_output_tokens", "total_tokens"]) {
     target[key] = finite(target[key]) + finite(delta?.[key]);
   }
@@ -132,6 +134,7 @@ const MODEL_USAGE_SUM_FIELDS = [
   "input_tokens",
   "cached_input_tokens",
   "cache_creation_input_tokens",
+  "cache_creation_1h_input_tokens",
   "output_tokens",
   "reasoning_output_tokens",
   "total_tokens",
@@ -1806,6 +1809,7 @@ function toSessionBrowserRow(row) {
     input_tokens: finite(tokens.input_tokens),
     cached_input_tokens: finite(tokens.cached_input_tokens),
     cache_creation_input_tokens: finite(tokens.cache_creation_input_tokens),
+    ...cacheSubset(tokens),
     output_tokens: finite(tokens.output_tokens),
     reasoning_output_tokens: finite(tokens.reasoning_output_tokens),
     direct_subagent_count: finite(row.direct_subagent_count),

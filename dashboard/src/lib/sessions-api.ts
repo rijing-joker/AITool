@@ -17,6 +17,7 @@ export interface SessionModelUsage {
   input_tokens: number;
   cached_input_tokens: number;
   cache_creation_input_tokens: number;
+  cache_creation_1h_input_tokens?: number;
   output_tokens: number;
   reasoning_output_tokens: number;
   total_tokens: number;
@@ -76,6 +77,7 @@ export interface SessionRow {
   input_tokens: number;
   cached_input_tokens: number;
   cache_creation_input_tokens: number;
+  cache_creation_1h_input_tokens?: number;
   output_tokens: number;
   reasoning_output_tokens: number;
   direct_subagent_count: number;

@@ -1,3 +1,4 @@
+const { cacheSubset, addCacheSubset } = require("./cache-tokens");
 // Shared helpers for claude-categorizer.js and codex-context-breakdown.js.
 // Extracted to eliminate copy-paste between the two files.
 
@@ -152,6 +153,7 @@ function emptyTotals() {
 }
 
 function addInto(target, source) {
+  addCacheSubset(target, source);
   target.input_tokens += source.input_tokens || 0;
   target.cached_input_tokens += source.cached_input_tokens || 0;
   target.cache_creation_input_tokens += source.cache_creation_input_tokens || 0;
@@ -165,6 +167,7 @@ function roundTotals(totals) {
     input_tokens: Math.round(totals?.input_tokens || 0),
     cached_input_tokens: Math.round(totals?.cached_input_tokens || 0),
     cache_creation_input_tokens: Math.round(totals?.cache_creation_input_tokens || 0),
+    ...cacheSubset(totals),
     output_tokens: Math.round(totals?.output_tokens || 0),
     reasoning_output_tokens: Math.round(totals?.reasoning_output_tokens || 0),
     total_tokens: Math.round(totals?.total_tokens || 0),

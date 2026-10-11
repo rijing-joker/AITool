@@ -1,3 +1,4 @@
+const { cacheCreation1h } = require("../cache-tokens");
 // Public pricing API. Replaces the hard-coded MODEL_PRICING table that used
 // to live in src/lib/local-api.js. Keeps the same synchronous shape so all
 // existing callers (computeRowCost, /functions/* handlers, tests) work
@@ -210,11 +211,13 @@ function computeRowCost(row) {
   const reasoningCost = reasoningIncludedInOutput
     ? 0
     : (row.reasoning_output_tokens || 0) * (pricing.output || 0);
+  const oneHourWrites = /claude|anthropic/i.test(String(row.model || "")) ? cacheCreation1h(row) : 0;
   const baseCost = (
     ((row.input_tokens || 0) * (pricing.input || 0) +
       (row.output_tokens || 0) * (pricing.output || 0) +
       (row.cached_input_tokens || 0) * (pricing.cache_read || 0) +
-      (row.cache_creation_input_tokens || 0) * (pricing.cache_write || 0) +
+      ((row.cache_creation_input_tokens || 0) - oneHourWrites) * (pricing.cache_write || 0) +
+      oneHourWrites * (pricing.input || 0) * 2 +
       reasoningCost) /
     1_000_000
   );

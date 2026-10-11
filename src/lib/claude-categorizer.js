@@ -1,3 +1,4 @@
+const { cacheSubset, addCacheSubset } = require("./cache-tokens");
 const { claudeUserIdentity, collectClaudeForkAliases } = require("./claude-user-identity");
 // Claude Code "Context Breakdown" categorizer.
 //
@@ -74,6 +75,7 @@ function readClaudeUsageTotals(usage) {
     input_tokens,
     cached_input_tokens,
     cache_creation_input_tokens,
+    ...cacheSubset(usage),
     output_tokens,
     reasoning_output_tokens,
     total_tokens,
@@ -404,10 +406,12 @@ function classifyOneMessage(obj, sessionState, breakdown, toolLedger = null, ski
   if (cacheCreate > 0) {
     if (!sessionState.systemPrefixSeen) {
       breakdown.system_prefix.cache_creation_input_tokens += cacheCreate;
+      addCacheSubset(breakdown.system_prefix, usage);
       breakdown.system_prefix.total_tokens += cacheCreate;
       sessionState.systemPrefixSeen = true;
     } else {
       breakdown.conversation_history.cache_creation_input_tokens += cacheCreate;
+      addCacheSubset(breakdown.conversation_history, usage);
       breakdown.conversation_history.total_tokens += cacheCreate;
     }
   }
@@ -1288,6 +1292,7 @@ async function computeClaudeGroundTruthBuckets({ rootDir = null, rootDirs = null
       acc.input_tokens += totals.input_tokens;
       acc.cached_input_tokens += totals.cached_input_tokens;
       acc.cache_creation_input_tokens += totals.cache_creation_input_tokens;
+      addCacheSubset(acc, totals);
       acc.output_tokens += totals.output_tokens;
       acc.reasoning_output_tokens += totals.reasoning_output_tokens;
       acc.total_tokens += totals.total_tokens;

@@ -1,3 +1,4 @@
+const { cacheCreation1h } = require("../cache-tokens");
 // models.dev pricing sync + per-request cost estimation (cc-switch port,
 // minimal): src/lib/modelsDev.ts / src/lib/modelsDevPricing.ts for the fetch,
 // flattening and id normalization, proxy/usage/calculator.rs for the formula.
@@ -380,10 +381,12 @@ function estimateCostUsd(models, model, tokens, { inputInclusive, executorType }
     ? Math.max(0, inputTokens - cacheReadTokens - cacheCreationTokens)
     : inputTokens;
   const billableReasoning = isReasoningSeparate(executorType, model) ? reasoningTokens : 0;
+  const oneHourWrites = /claude|anthropic/i.test(String(model || "")) ? cacheCreation1h(tokens) : 0;
   const cost = (billableInput * pricing.input
     + (outputTokens + billableReasoning) * pricing.output
     + cacheReadTokens * pricing.cacheRead
-    + cacheCreationTokens * pricing.cacheWrite) / 1_000_000;
+    + (cacheCreationTokens - oneHourWrites) * pricing.cacheWrite
+    + oneHourWrites * pricing.input * 2) / 1_000_000;
   return Number.isFinite(cost) ? cost : null;
 }
 

@@ -17,6 +17,18 @@ const USAGE_FIELDS = [
 ];
 const MAX_USAGE_BASELINES = 32;
 
+// Codex input contains both disjoint cache subsets; output already includes
+// reasoning. Keep raw cumulative counters in the lineage state, normalize only
+// the accepted delta at the consumer boundary.
+function normalizeCodexUsage(value, { preserveTotal = false } = {}) {
+  const out = canonicalUsage(value) || Object.fromEntries(USAGE_FIELDS.map((field) => [field, 0]));
+  out.cached_input_tokens = Math.min(out.input_tokens, out.cached_input_tokens);
+  out.cache_creation_input_tokens = Math.min(out.input_tokens - out.cached_input_tokens, out.cache_creation_input_tokens);
+  out.input_tokens -= out.cached_input_tokens + out.cache_creation_input_tokens;
+  if (!preserveTotal) out.total_tokens = out.input_tokens + out.cached_input_tokens + out.cache_creation_input_tokens + out.output_tokens;
+  return out;
+}
+
 function canonicalUsage(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const out = {};
@@ -184,6 +196,7 @@ function touchBaseline(state, usage) {
 module.exports = {
   MAX_USAGE_BASELINES,
   canonicalUsage,
+  normalizeCodexUsage,
   consumeUsageDelta,
   createUsageDeltaState,
   diffUsage,

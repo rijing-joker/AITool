@@ -1,3 +1,4 @@
+const { normalizeCodexUsage } = require("./codex-token-usage");
 const codexFiles = require("./codex-rollout-file");
 // Codex rollout JSONL parser — extracted from codex-context-breakdown.js.
 //
@@ -436,27 +437,7 @@ function formatToolDisplayName(name) {
 // ---------------------------------------------------------------------------
 
 function normalizeUsage(u) {
-  const out = {};
-  for (const k of [
-    "input_tokens",
-    "cached_input_tokens",
-    "cache_creation_input_tokens",
-    "output_tokens",
-    "reasoning_output_tokens",
-    "total_tokens",
-  ]) {
-    const n = Number(u?.[k] || 0);
-    out[k] = Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0;
-  }
-  // Codex reports input inclusive of cached_input_tokens; keep our schema
-  // convention: non-cached input and cached input tracked separately.
-  out.input_tokens = Math.max(0, out.input_tokens - out.cached_input_tokens);
-  out.total_tokens =
-    out.input_tokens +
-    out.cached_input_tokens +
-    out.cache_creation_input_tokens +
-    out.output_tokens;
-  return out;
+  return normalizeCodexUsage(u);
 }
 
 function pickDelta(lastUsage, totalUsage, prevTotals) {

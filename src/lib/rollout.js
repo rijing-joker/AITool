@@ -1,3 +1,5 @@
+const { cacheSubset, addCacheSubset } = require("./cache-tokens");
+const { normalizeCodexUsage } = require("./codex-token-usage");
 const codexFiles = require("./codex-rollout-file");
 const { inspectDshZstdFrames, decodeDshZstd } = require("./zstd");
 const { claudeUserIdentity, collectClaudeForkAliases } = require("./claude-user-identity");
@@ -3159,6 +3161,7 @@ async function enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets })
             input_tokens: zeroTotals.input_tokens,
             cached_input_tokens: zeroTotals.cached_input_tokens,
             cache_creation_input_tokens: zeroTotals.cache_creation_input_tokens,
+            ...cacheSubset(zeroTotals),
             output_tokens: zeroTotals.output_tokens,
             reasoning_output_tokens: zeroTotals.reasoning_output_tokens,
             total_tokens: zeroTotals.total_tokens,
@@ -3183,6 +3186,7 @@ async function enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets })
               input_tokens: zeroTotals.input_tokens,
               cached_input_tokens: zeroTotals.cached_input_tokens,
               cache_creation_input_tokens: zeroTotals.cache_creation_input_tokens,
+              ...cacheSubset(zeroTotals),
               output_tokens: zeroTotals.output_tokens,
               reasoning_output_tokens: zeroTotals.reasoning_output_tokens,
               total_tokens: zeroTotals.total_tokens,
@@ -3213,6 +3217,7 @@ async function enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets })
             input_tokens: totals.input_tokens,
             cached_input_tokens: totals.cached_input_tokens,
             cache_creation_input_tokens: totals.cache_creation_input_tokens,
+            ...cacheSubset(totals),
             output_tokens: totals.output_tokens,
             reasoning_output_tokens: totals.reasoning_output_tokens,
             total_tokens: totals.total_tokens,
@@ -3244,6 +3249,7 @@ async function enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets })
           input_tokens: zeroTotals.input_tokens,
           cached_input_tokens: zeroTotals.cached_input_tokens,
           cache_creation_input_tokens: zeroTotals.cache_creation_input_tokens,
+          ...cacheSubset(zeroTotals),
           output_tokens: zeroTotals.output_tokens,
           reasoning_output_tokens: zeroTotals.reasoning_output_tokens,
           total_tokens: zeroTotals.total_tokens,
@@ -3268,6 +3274,7 @@ async function enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets })
             input_tokens: zeroTotals.input_tokens,
             cached_input_tokens: zeroTotals.cached_input_tokens,
             cache_creation_input_tokens: zeroTotals.cache_creation_input_tokens,
+            ...cacheSubset(zeroTotals),
             output_tokens: zeroTotals.output_tokens,
             reasoning_output_tokens: zeroTotals.reasoning_output_tokens,
             total_tokens: zeroTotals.total_tokens,
@@ -3294,6 +3301,7 @@ async function enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets })
         input_tokens: unknownBucket.totals.input_tokens,
         cached_input_tokens: unknownBucket.totals.cached_input_tokens,
         cache_creation_input_tokens: unknownBucket.totals.cache_creation_input_tokens,
+        ...cacheSubset(unknownBucket.totals),
         output_tokens: unknownBucket.totals.output_tokens,
         reasoning_output_tokens: unknownBucket.totals.reasoning_output_tokens,
         total_tokens: unknownBucket.totals.total_tokens,
@@ -3344,6 +3352,7 @@ async function enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets })
           input_tokens: group.totals.input_tokens,
           cached_input_tokens: group.totals.cached_input_tokens,
           cache_creation_input_tokens: group.totals.cache_creation_input_tokens,
+          ...cacheSubset(group.totals),
           output_tokens: group.totals.output_tokens,
           reasoning_output_tokens: group.totals.reasoning_output_tokens,
           total_tokens: group.totals.total_tokens,
@@ -3401,6 +3410,7 @@ async function enqueueTouchedProjectBuckets({
         input_tokens: totals.input_tokens,
         cached_input_tokens: totals.cached_input_tokens,
         cache_creation_input_tokens: totals.cache_creation_input_tokens,
+        ...cacheSubset(totals),
         output_tokens: totals.output_tokens,
         reasoning_output_tokens: totals.reasoning_output_tokens,
         total_tokens: totals.total_tokens,
@@ -3968,7 +3978,7 @@ function addPriorityUsage(target, delta) {
 }
 
 function prioritySubsetOf(totals) {
-  const subset = {};
+  const subset = cacheSubset(totals);
   for (const [field] of PRIORITY_SUBSET_FIELDS) {
     const value = Number(totals?.[field]) || 0;
     if (value > 0) subset[field] = value;
@@ -3977,6 +3987,7 @@ function prioritySubsetOf(totals) {
 }
 
 function addTotals(target, delta) {
+  addCacheSubset(target, delta);
   for (const [field] of PRIORITY_SUBSET_FIELDS) {
     const value = Number(delta?.[field]) || 0;
     if (value > 0) target[field] = (Number(target[field]) || 0) + value;
@@ -3995,6 +4006,7 @@ function addTotals(target, delta) {
 }
 
 function subtractTotals(target, totals) {
+  if (target.cache_creation_1h_input_tokens) target.cache_creation_1h_input_tokens = Math.max(0, target.cache_creation_1h_input_tokens - (totals.cache_creation_1h_input_tokens || 0));
   for (const [field] of PRIORITY_SUBSET_FIELDS) {
     const current = Number(target[field]) || 0;
     if (current <= 0) continue;
@@ -4033,7 +4045,8 @@ function subtractTotals(target, totals) {
 }
 
 function totalsKey(totals) {
-  const base = [
+  const ttl = Number(totals.cache_creation_1h_input_tokens) || 0;
+  const base = (ttl > 0 ? `ttl:${ttl}|` : "") + [
     totals.input_tokens || 0,
     totals.cached_input_tokens || 0,
     totals.cache_creation_input_tokens || 0,
@@ -4729,33 +4742,7 @@ function extractTokenCount(obj) {
 }
 
 function normalizeUsage(u) {
-  const out = {};
-  for (const k of [
-    "input_tokens",
-    "cached_input_tokens",
-    "cache_creation_input_tokens",
-    "output_tokens",
-    "reasoning_output_tokens",
-    "total_tokens",
-  ]) {
-    const n = Number(u[k] || 0);
-    out[k] = Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0;
-  }
-  // Codex rollouts (and Every Code, which shares the format) report
-  // `input_tokens` as the TOTAL prompt, with `cached_input_tokens` as the
-  // cached subset — i.e. the cached slice is INSIDE the input count. Our
-  // queue schema (CLAUDE.md → Token Normalization Convention) stores
-  // `input_tokens` as pure non-cached input and `cached_input_tokens`
-  // separately. Without this subtraction the cost formula bills the cached
-  // bytes twice: once at the full input rate and again at the cache_read
-  // rate, producing ~6–7x cost inflation on cache-heavy Codex sessions
-  // (verified against ccusage's per-day numbers on the same rollouts).
-  // Preserve the reported total for compatibility with older Codex / Every
-  // Code shapes where output_tokens can exclude reasoning or some component
-  // fields are absent. The exact all-zero reset sentinel is rejected before
-  // normalization by isCodexTotalOnlyResetSentinel().
-  out.input_tokens = Math.max(0, out.input_tokens - out.cached_input_tokens);
-  return out;
+  return normalizeCodexUsage(u, { preserveTotal: true });
 }
 
 function isCodexTotalOnlyResetSentinel(lastUsage, totalUsage) {
@@ -4803,6 +4790,7 @@ function normalizeClaudeUsage(u) {
     input_tokens: inputTokens,
     cached_input_tokens: cacheRead,
     cache_creation_input_tokens: cacheCreation,
+    ...cacheSubset(u),
     // Claude rows price reasoning separately; it is already included in usage.output_tokens.
     output_tokens: outputTokens - reasoningTokens,
     reasoning_output_tokens: reasoningTokens,

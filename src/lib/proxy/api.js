@@ -190,7 +190,11 @@ function computeOverview(rows) {
     success_count: success.length,
     failure_count: failed.length,
     canceled_count: canceled.length,
-    success_rate: rows.length ? Number(((success.length / rows.length) * 100).toFixed(2)) : null,
+    // easy 88d5852 semantics: canceled requests are not provider failures, so
+    // they stay out of the denominator; no completed requests means no rate.
+    success_rate: success.length + failed.length
+      ? Number(((success.length / (success.length + failed.length)) * 100).toFixed(2))
+      : null,
     input_tokens: sumTokens(success, "inputTokens"),
     output_tokens: sumTokens(success, "outputTokens"),
     reasoning_tokens: sumTokens(success, "reasoningTokens"),
@@ -198,7 +202,7 @@ function computeOverview(rows) {
     cache_creation_tokens: sumTokens(success, "cacheCreationTokens"),
     total_tokens: sumTokens(success, "totalTokens"),
     rpm: Number((recentWindow.length / 5).toFixed(2)),
-    tpm: sumTokens(recentWindow, "totalTokens"),
+    tpm: Number((sumTokens(recentWindow, "totalTokens") / 5).toFixed(2)),
     average_latency_ms: latencies.length
       ? Number((latencies.reduce((a, b) => a + b, 0) / latencies.length).toFixed(1))
       : null,

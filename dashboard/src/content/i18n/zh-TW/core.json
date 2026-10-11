@@ -156,6 +156,7 @@
   "limits.provider.kiro": "Kiro",
   "limits.provider.grok": "Grok Build",
   "limits.provider.copilot": "GitHub Copilot",
+  "provider.display.workbuddy_ai": "WorkBuddy AI",
   "provider.display.omp": "oh-my-pi",
   "provider.display.omo": "OmO",
   "provider.display.minimax_code": "MiniMax Code",

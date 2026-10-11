@@ -96,7 +96,6 @@ function AliasEditorDialog({ editor, onClose, onSaved }) {
   const {
     sources,
     editingEntry,
-    editingRevision,
   } = editor;
   const [selectedSourceId, setSelectedSourceId] = useState("");
   const [effort, setEffort] = useState("");
@@ -258,7 +257,6 @@ function AliasEditorDialog({ editor, onClose, onSaved }) {
         effort: normalizedEffort,
         fast: fastEnabled,
         editingEntry,
-        editingRevision,
       });
       showToast(editingEntry
         ? copy("proxy.alias.updated", { alias })
@@ -549,7 +547,6 @@ export function ModelAliasesTab() {
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingEntry, setEditingEntry] = useState(null);
   const [editingSource, setEditingSource] = useState(null);
-  const [editingRevision, setEditingRevision] = useState(null);
   const [initialEffort, setInitialEffort] = useState("");
   const [initialFast, setInitialFast] = useState(false);
   const [deleteEntry, setDeleteEntry] = useState(null);
@@ -584,7 +581,6 @@ export function ModelAliasesTab() {
   const resetEditor = () => {
     setEditingEntry(null);
     setEditingSource(null);
-    setEditingRevision(null);
     setInitialEffort("");
     setInitialFast(false);
   };
@@ -604,7 +600,6 @@ export function ModelAliasesTab() {
       const context = await fetchAliasEditContext(entry);
       setEditingEntry(entry);
       setEditingSource(context.source);
-      setEditingRevision(context.revision);
       setInitialEffort(context.effort ?? "");
       setInitialFast(context.fast);
       setEditorOpen(true);
@@ -736,7 +731,6 @@ export function ModelAliasesTab() {
             entries,
             editingEntry,
             editingSource,
-            editingRevision,
             initialEffort,
             initialFast,
           }}

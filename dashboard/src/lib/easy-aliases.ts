@@ -52,7 +52,6 @@ export type ModelAliasSource = ThinkingAliasSource & {
 
 export type ModelAliasEditContext = {
   source: ThinkingAliasSource;
-  revision: string;
   effort: string | null;
   fast: boolean;
 };
@@ -117,7 +116,6 @@ export const submitCreateAlias = (input: {
   effort: string;
   fast: boolean;
   editingEntry: AliasListEntry | null;
-  editingRevision: string | null;
 }) => {
   if (input.editingEntry) {
     return aliasConfig<AliasState>({
@@ -127,7 +125,6 @@ export const submitCreateAlias = (input: {
       effort: input.effort,
       fast: input.fast,
       originalAlias: input.editingEntry.alias,
-      expectedRevision: input.editingRevision ?? undefined,
       ...aliasLocationArgs(input.editingEntry),
     });
   }

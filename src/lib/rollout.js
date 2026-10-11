@@ -3413,6 +3413,7 @@ async function enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets })
             total_cost_usd: totals.total_cost_usd || 0,
             usage_precision: usagePrecision || undefined,
             ...prioritySubsetOf(totals),
+            ...cacheCreation1hSubsetOf(totals),
             conversation_count: totals.conversation_count,
           }),
         );
@@ -3494,6 +3495,7 @@ async function enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets })
         total_cost_usd: unknownBucket.totals.total_cost_usd || 0,
         usage_precision: usagePrecision || undefined,
         ...prioritySubsetOf(unknownBucket.totals),
+        ...cacheCreation1hSubsetOf(unknownBucket.totals),
         conversation_count: unknownBucket.totals.conversation_count,
       }),
     );
@@ -3543,6 +3545,7 @@ async function enqueueTouchedBuckets({ queuePath, hourlyState, touchedBuckets })
           billable_total_tokens: group.totals.billable_total_tokens ?? group.totals.total_tokens,
           total_cost_usd: group.totals.total_cost_usd || 0,
           ...prioritySubsetOf(group.totals),
+          ...cacheCreation1hSubsetOf(group.totals),
           conversation_count: group.totals.conversation_count,
         }),
       );
@@ -4169,10 +4172,23 @@ function prioritySubsetOf(totals) {
   return subset;
 }
 
+// The 1h share of cache_creation_input_tokens (cc-switch 533055b: 1h cache
+// writes bill at 2x input vs 1.25x for 5m). Same observed-subset contract as
+// priority_*: an annotation on cache_creation_input_tokens, never a summand,
+// omitted entirely when zero so no other provider's queue rows change.
+function cacheCreation1hSubsetOf(totals) {
+  const value = Number(totals?.cache_creation_1h_input_tokens) || 0;
+  return value > 0 ? { cache_creation_1h_input_tokens: value } : {};
+}
+
 function addTotals(target, delta) {
   for (const [field] of PRIORITY_SUBSET_FIELDS) {
     const value = Number(delta?.[field]) || 0;
     if (value > 0) target[field] = (Number(target[field]) || 0) + value;
+  }
+  if ((Number(delta?.cache_creation_1h_input_tokens) || 0) > 0) {
+    target.cache_creation_1h_input_tokens =
+      (Number(target.cache_creation_1h_input_tokens) || 0) + delta.cache_creation_1h_input_tokens;
   }
   target.input_tokens += delta.input_tokens || 0;
   target.cached_input_tokens += delta.cached_input_tokens || 0;
@@ -4192,6 +4208,13 @@ function subtractTotals(target, totals) {
     const current = Number(target[field]) || 0;
     if (current <= 0) continue;
     target[field] = Math.max(0, current - (Number(totals?.[field]) || 0));
+  }
+  {
+    const current = Number(target.cache_creation_1h_input_tokens) || 0;
+    if (current > 0) {
+      target.cache_creation_1h_input_tokens =
+        Math.max(0, current - (Number(totals?.cache_creation_1h_input_tokens) || 0));
+    }
   }
   target.input_tokens = Math.max(0, target.input_tokens - (totals.input_tokens || 0));
   target.cached_input_tokens = Math.max(
@@ -4240,7 +4263,12 @@ function totalsKey(totals) {
   // Appended only when a priority subset exists, so buckets that never see the
   // tier keep their previously persisted queuedKey and are not re-enqueued.
   const priority = PRIORITY_SUBSET_FIELDS.map(([field]) => Number(totals[field]) || 0);
-  return priority.some((value) => value > 0) ? `${base}|p:${priority.join(",")}` : base;
+  const prioritySuffix = priority.some((value) => value > 0) ? `|p:${priority.join(",")}` : "";
+  // Same for the 1h cache-write share: a 5m↔1h move at constant cache_creation
+  // must re-queue, but buckets without the annotation keep their old key.
+  const cache1h = Number(totals.cache_creation_1h_input_tokens) || 0;
+  const cache1hSuffix = cache1h > 0 ? `|h:${cache1h}` : "";
+  return `${base}${prioritySuffix}${cache1hSuffix}`;
 }
 
 function toUtcHalfHourStart(ts) {
@@ -4991,11 +5019,21 @@ function normalizeClaudeUsage(u) {
   ));
   const cacheCreation = toNonNegativeInt(u?.cache_creation_input_tokens);
   const cacheRead = toNonNegativeInt(u?.cache_read_input_tokens);
+  // cc-switch 533055b: Anthropic bills 1h cache writes at 2x input vs 1.25x
+  // for 5m. The 1h share rides along as an observed-subset annotation (same
+  // contract as priority_*) so the pricing split in computeRowCost can bill
+  // it at 1.6x the cache-write rate; clamped to the total because the
+  // breakdown only arrives on newer rollouts.
+  const cacheCreation1h = Math.min(
+    toNonNegativeInt(u?.cache_creation?.ephemeral_1h_input_tokens),
+    cacheCreation,
+  );
   const totalTokens = inputTokens + outputTokens + cacheCreation + cacheRead;
   return {
     input_tokens: inputTokens,
     cached_input_tokens: cacheRead,
     cache_creation_input_tokens: cacheCreation,
+    ...(cacheCreation1h > 0 ? { cache_creation_1h_input_tokens: cacheCreation1h } : {}),
     // Claude rows price reasoning separately; it is already included in usage.output_tokens.
     output_tokens: outputTokens - reasoningTokens,
     reasoning_output_tokens: reasoningTokens,

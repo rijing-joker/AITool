@@ -96,6 +96,8 @@ total_tokens                  = input + output + cache_creation + cache_read (+ 
 
 UTC, half-hour buckets, append-only — readers take the latest entry per `(source, model, hour_start)`.
 
+Observed-subset annotation columns (`priority_*`, `cache_creation_1h_input_tokens`) may ride alongside on rows that have them: they mark a subset of an existing column, are never part of any sum, and are omitted entirely when zero. `cache_creation_1h_input_tokens` ⊆ `cache_creation_input_tokens` lets `computeRowCost` bill the 1h share at 1.6× the cache-write rate (cc-switch 533055b); legacy rows without it keep the blended write price.
+
 ### AI proxy (CLIProxyAPI core)
 
 - The core is an external, independently updatable process — never vendor, link, or bundle `cli-proxy-api` into any artifact. Upgrade = bump `core-version.txt`; the binary is fetched at runtime from upstream CLIProxyAPI GitHub releases (`scripts/fetch-core.cjs`), or built from a local fork via `aitool proxy install --local`.

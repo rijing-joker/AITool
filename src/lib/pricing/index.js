@@ -254,11 +254,19 @@ function computeRowCost(row) {
   const reasoningCost = reasoningIncludedInOutput
     ? 0
     : (row.reasoning_output_tokens || 0) * (pricing.output || 0);
+  // Anthropic bills 1h cache writes at 2x input vs 1.25x for 5m (cc-switch
+  // 533055b); the pricing table's cache_write is the 5m rate, so the 1h share
+  // costs 1.6x that. cache_creation_1h_input_tokens is an observed subset of
+  // cache_creation_input_tokens (same annotation contract as priority_*),
+  // omitted entirely on legacy rows — those price exactly as they did before.
+  const cacheWriteTotal = Number(row.cache_creation_input_tokens) || 0;
+  const cacheWrite1h = Math.min(Number(row.cache_creation_1h_input_tokens) || 0, cacheWriteTotal);
   const baseCost = (
     ((row.input_tokens || 0) * (pricing.input || 0) +
       (row.output_tokens || 0) * (pricing.output || 0) +
       (row.cached_input_tokens || 0) * (pricing.cache_read || 0) +
-      (row.cache_creation_input_tokens || 0) * (pricing.cache_write || 0) +
+      (cacheWriteTotal - cacheWrite1h) * (pricing.cache_write || 0) +
+      cacheWrite1h * (pricing.cache_write || 0) * 1.6 +
       reasoningCost) /
     1_000_000
   );

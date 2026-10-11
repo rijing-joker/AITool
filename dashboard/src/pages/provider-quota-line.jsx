@@ -211,6 +211,17 @@ export function ProviderQuotaLine({ app, provider }) {
             {copy("pswitch.quota.credits", { value: creditsRemaining(quota.credits) })}
           </span>
         ) : null}
+        {Array.isArray(quota.balances)
+          ? quota.balances.map((line, index) => (
+            <span
+              key={`${line.label}-${index}`}
+              className={`inline-flex items-center gap-1 tabular-nums ${line.isValid ? "text-oai-gray-500 dark:text-oai-gray-400" : "font-medium text-red-600 dark:text-red-400"}`}
+              title={line.invalidMessage || undefined}
+            >
+              {copy("pswitch.quota.balance", { label: line.label, value: line.remaining, unit: line.unit })}
+            </span>
+          ))
+          : null}
         {quota.plan ? (
           <span className="text-oai-gray-400" title={quota.status || undefined}>{quota.plan}</span>
         ) : null}

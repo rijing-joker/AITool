@@ -416,8 +416,15 @@ async function handleProxyApiRequest(req, res, url, ctx) {
     if (p === "/api/proxy/restart" && method === "POST") {
       if (!requireMutation()) return true;
       bridge.stopBridge();
-      const result = await manager.restart();
-      bridge.startBridge();
+      let result;
+      try {
+        result = await manager.restart();
+      } finally {
+        // A failed restart (install error, startup timeout, port dispute)
+        // must not leave the usage bridge down with nothing polling the
+        // core back up — same recovery contract as the install flow.
+        bridge.startBridge();
+      }
       json(res, { ok: true, result, bridge: bridge.bridgeStatus() });
       return true;
     }

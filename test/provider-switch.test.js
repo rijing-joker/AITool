@@ -1796,3 +1796,38 @@ test("fetch-models forwards provider header overrides on the probe (cc-switch 31
     server.close();
   }
 });
+
+test("fetch-models header overrides invalidate on control chars and case-duplicate names", async () => {
+  const { handleProviderSwitchApiRequest } = require("../src/lib/provider-switch/api");
+  const handler = handleProviderSwitchApiRequest;
+  const prefix = "/api/provider-switch";
+  const seen = [];
+  const server = http.createServer((req, res) => {
+    seen.push({ gateway: req.headers["cf-aig-authorization"] });
+    if (req.url === "/v1/models" && req.headers["cf-aig-authorization"] === "token") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ data: [{ id: "m1" }] }));
+      return;
+    }
+    res.writeHead(403);
+    res.end("rejected");
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = server.address().port;
+  try {
+    for (const [label, override] of [
+      ["control char in value", '{"cf-aig-authorization": "tok\\nen"}'],
+      ["case-duplicate names", '{"cf-aig-authorization": "token", "CF-AIG-Authorization": "other"}'],
+    ]) {
+      const response = await call(handler, {
+        method: "POST",
+        url: `${prefix}/fetch-models`,
+        body: JSON.stringify({ baseUrl: `http://127.0.0.1:${port}`, apiKey: "sk", requestHeaders: override }),
+      });
+      assert.equal(response.status, 400, `${label}: override must be dropped, not sent`);
+      assert.equal(seen.at(-1).gateway, undefined, `${label}: the override never reaches the wire`);
+    }
+  } finally {
+    server.close();
+  }
+});

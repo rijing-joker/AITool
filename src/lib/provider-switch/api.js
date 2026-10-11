@@ -895,6 +895,8 @@ function extractModelIds(payload) {
 // to a plain fetch (the form's own validation surfaces the error); valid
 // ones are applied after the defaults, so an explicit Authorization in the
 // override wins.
+const MODEL_FETCH_HEADER_VALUE_CONTROL_CHARS = /[\u0000-\u0008\u000a-\u001f\u007f]/;
+
 function parseModelFetchHeaders(raw) {
   const text = String(raw || "").trim();
   if (!text) return null;
@@ -906,10 +908,19 @@ function parseModelFetchHeaders(raw) {
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
   const headers = {};
+  const seenNames = new Set();
   for (const [name, value] of Object.entries(parsed)) {
     const headerName = String(name).trim();
     if (!headerName || !/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(headerName)) return null;
     if (typeof value !== "string") return null;
+    // cc-switch's remaining parseHeaderOverrideJson rules: a value carrying
+    // control characters and a duplicate name after case normalization both
+    // invalidate the whole override (silent plain-fetch fallback) instead of
+    // reaching fetch() and surfacing as a request error.
+    if (MODEL_FETCH_HEADER_VALUE_CONTROL_CHARS.test(value)) return null;
+    const normalizedName = headerName.toLowerCase();
+    if (seenNames.has(normalizedName)) return null;
+    seenNames.add(normalizedName);
     headers[headerName] = value;
   }
   return Object.keys(headers).length ? headers : null;

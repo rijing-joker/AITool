@@ -457,6 +457,14 @@ export function ProviderSwitchPage() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
 
+  useEffect(() => {
+    // cc-switch closes the provider search when the app tab changes — a stale
+    // filter silently applied to another app's list is more confusing than
+    // convenient.
+    setSearchOpen(false);
+    setSearchQuery("");
+  }, [activeApp]);
+
   // dialog state
   const [dialogOpen, setDialogOpen] = useState(false);
   const [dialogDirty, setDialogDirty] = useState(false);
@@ -531,6 +539,7 @@ export function ProviderSwitchPage() {
       const haystack = [
         provider.name,
         provider.notes,
+        provider.websiteUrl,
         providerBaseUrl(activeApp, provider),
       ].join("\n").toLowerCase();
       return haystack.includes(query);

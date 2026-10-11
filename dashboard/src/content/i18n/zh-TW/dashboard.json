@@ -1743,7 +1743,7 @@
   "proxy.requests.replay.no_credential": "憑據不在當前配置中（已刪除或為 OAuth 帳號）",
   "pswitch.encrypted.export": "匯出加密備份",
   "pswitch.encrypted.import": "匯入備份",
-  "pswitch.encrypted.export_hint": "將供應商、MCP 伺服器與提示詞打包為一個 AES-256-GCM 加密區塊（金鑰由口令派生）。口令不會保存——把匯出檔案存放在你保管 dotfiles 的地方。",
+  "pswitch.encrypted.export_hint": "將供應商、MCP 伺服器、提示詞與技能打包為一個 AES-256-GCM 加密區塊（金鑰由口令派生）。口令不會保存——把匯出檔案存放在你保管 dotfiles 的地方。",
   "pswitch.encrypted.import_hint": "從備份恢復各儲存。恢復前會先把現有檔案複製到 backups/import/。執行中的 CLI 工具可能需要重啟。",
   "pswitch.encrypted.passphrase": "口令（至少 8 位）",
   "pswitch.encrypted.confirm": "確認口令",

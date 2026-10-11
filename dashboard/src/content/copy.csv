@@ -2554,7 +2554,7 @@ proxy.requests.replay.failed,proxy,ProxyPage,RequestsTab,replay_failed,Retest fa
 proxy.requests.replay.no_credential,proxy,ProxyPage,RequestsTab,replay_no_credential,"Credential not found in the current config (deleted, or an OAuth account)",,active
 pswitch.encrypted.export,pswitch,ProviderSwitchPage,EncryptedBackupDialog,encrypted_export,Export encrypted,,active
 pswitch.encrypted.import,pswitch,ProviderSwitchPage,EncryptedBackupDialog,encrypted_import,Import backup,,active
-pswitch.encrypted.export_hint,pswitch,ProviderSwitchPage,EncryptedBackupDialog,encrypted_export_hint,"Providers, MCP servers and prompts in one AES-256-GCM blob (scrypt from the passphrase). The passphrase is never saved — store the file wherever you keep dotfiles.",,active
+pswitch.encrypted.export_hint,pswitch,ProviderSwitchPage,EncryptedBackupDialog,encrypted_export_hint,"Providers, MCP servers, prompts and skills in one AES-256-GCM blob (scrypt from the passphrase). The passphrase is never saved — store the file wherever you keep dotfiles.",,active
 pswitch.encrypted.import_hint,pswitch,ProviderSwitchPage,EncryptedBackupDialog,encrypted_import_hint,"Restores the stores from the backup. Current files are copied to backups/import/ first. A restart of running CLI tools may be needed.",,active
 pswitch.encrypted.passphrase,pswitch,ProviderSwitchPage,EncryptedBackupDialog,encrypted_passphrase,Passphrase (min 8 chars),,active
 pswitch.encrypted.confirm,pswitch,ProviderSwitchPage,EncryptedBackupDialog,encrypted_confirm,Confirm passphrase,,active

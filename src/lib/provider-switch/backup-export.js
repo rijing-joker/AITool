@@ -15,7 +15,7 @@ const { updateJsonLocked } = require("../fs");
 const FORMAT = "aitool-provider-backup";
 const VERSION = 1;
 const KDF_PARAMS = { N: 16384, r: 8, p: 1 };
-const STORE_FILES = ["providers.json", "mcp-servers.json", "prompts.json", "skills.json"];
+const STORE_FILES = ["providers.json", "mcp-servers.json", "prompts.json", "skills.json", "profiles.json"];
 
 function fail(message) {
   const error = new Error(message);

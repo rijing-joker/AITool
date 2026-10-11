@@ -246,8 +246,40 @@ export const universalProvidersApi = {
   },
 };
 
-export const piPromptFilesApi = {
-  get(kind: PiPromptFileKind) {
+// Profile (cc-switch's services/profile): a named snapshot of one app's
+// providers/MCP/skills/prompts state with a per-app current marker.
+export interface ProviderSwitchProfile {
+  id: string;
+  name: string;
+  payload: {
+    providers: Record<string, string | null>;
+    mcp: Record<string, string[] | null>;
+    skills: Record<string, string[] | null>;
+    prompts: Record<string, string | null>;
+  };
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+export const profilesApi = {
+  list(): Promise<{ ok: true; profiles: ProviderSwitchProfile[]; currentIds: Record<string, string | null> }> {
+    return get("/api/provider-switch/profiles");
+  },
+  create(body: { name: string; app: string }): Promise<{ ok: true; profile: ProviderSwitchProfile }> {
+    return mutate("/api/provider-switch/profiles", "POST", body);
+  },
+  update(body: { id: string; name?: string; resnapshot?: boolean; app?: string }): Promise<{ ok: true; profile: ProviderSwitchProfile }> {
+    return mutate("/api/provider-switch/profiles/update", "POST", body);
+  },
+  remove(id: string): Promise<{ ok: true }> {
+    return mutate("/api/provider-switch/profiles/delete", "POST", { id });
+  },
+  apply(body: { id: string; app: string }): Promise<{ ok: true; warnings: string[] }> {
+    return mutate("/api/provider-switch/profiles/apply", "POST", body);
+  },
+};
+
+export const piPromptFilesApi = {  get(kind: PiPromptFileKind) {
     return providerSwitchApi.getPiPromptFile(kind);
   },
   replace(kind: PiPromptFileKind, content: string, expectedRevision: string | null) {

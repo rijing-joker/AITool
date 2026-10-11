@@ -41,6 +41,7 @@ import { ModalFrame } from "../ui/components/ModalFrame";
 import { useVisiblePolling } from "../hooks/use-visible-polling";
 import { PresetIcon, providerTileClass, ProviderEditDialog } from "./provider-edit-dialog";
 import { ProviderMcpPanel } from "./provider-mcp-panel";
+import { ProviderProfilesBar } from "./provider-profiles-bar";
 import { ProviderPromptsPanel } from "./provider-prompts-panel";
 import { ProviderUniversalPanel } from "./provider-universal-panel";
 import { ProviderQuotaLine } from "./provider-quota-line";
@@ -932,6 +933,7 @@ export function ProviderSwitchPage() {
           />
         </div>
       ) : null}
+      <ProviderProfilesBar activeApp={activeApp} onNotice={setNotice} onChanged={refreshStatus} />
       <section className="mb-8">
         <SectionTitle>{copy("pswitch.section.providers")}</SectionTitle>
         {!appState || appState.providers.length === 0 ? (

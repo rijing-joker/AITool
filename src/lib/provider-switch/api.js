@@ -10,6 +10,7 @@ const paths = require("./paths");
 const catalog = require("./catalog");
 const editor = require("./editor");
 const universal = require("./universal");
+const profiles = require("./profiles");
 const additive = require("./additive");
 const mcp = require("./mcp");
 const prompts = require("./prompts");
@@ -505,6 +506,60 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
       try {
         const removed = await universal.deleteUniversalAndChildren(String(body.id || ""));
         json(res, { ok: true, removed });
+      } catch (error) {
+        json(res, { ok: false, error: error?.message || String(error) });
+      }
+      return true;
+    }
+
+    // Profiles (cc-switch's services/profile): per-app named snapshots of the
+    // providers/MCP/skills/prompts state. Apply autosaves the previous
+    // profile of the app and is best-effort — warnings come back to the UI.
+    if (p === `${prefix}/profiles` && method === "GET") {
+      json(res, { ok: true, ...(await profiles.listProfiles()) });
+      return true;
+    }
+    if (p === `${prefix}/profiles` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      try {
+        json(res, { ok: true, profile: await profiles.createProfile({ name: body.name, app: String(body.app || "") }) });
+      } catch (error) {
+        json(res, { ok: false, error: error?.message || String(error) });
+      }
+      return true;
+    }
+    if (p === `${prefix}/profiles/update` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      try {
+        const profile = await profiles.updateProfile({
+          id: String(body.id || ""),
+          ...(body.name !== undefined ? { name: body.name } : {}),
+          ...(body.resnapshot ? { resnapshot: true, app: String(body.app || "") } : {}),
+        });
+        json(res, { ok: true, profile });
+      } catch (error) {
+        json(res, { ok: false, error: error?.message || String(error) });
+      }
+      return true;
+    }
+    if (p === `${prefix}/profiles/delete` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      try {
+        await profiles.deleteProfile(String(body.id || ""));
+        json(res, { ok: true });
+      } catch (error) {
+        json(res, { ok: false, error: error?.message || String(error) });
+      }
+      return true;
+    }
+    if (p === `${prefix}/profiles/apply` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      try {
+        json(res, await profiles.applyProfile({ id: String(body.id || ""), app: String(body.app || ""), applyProvider: switchProvider }));
       } catch (error) {
         json(res, { ok: false, error: error?.message || String(error) });
       }

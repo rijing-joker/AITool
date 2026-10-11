@@ -39,6 +39,10 @@ vi.mock("../lib/provider-switch-api", () => ({
     list: vi.fn(async () => ({ ok: true, providers: [] })),
     upsert: vi.fn(), sync: vi.fn(), remove: vi.fn(),
   },
+  profilesApi: {
+    list: vi.fn(async () => ({ ok: true, profiles: [], currentIds: {} })),
+    create: vi.fn(), update: vi.fn(), remove: vi.fn(), apply: vi.fn(),
+  },
 }));
 
 beforeEach(() => {

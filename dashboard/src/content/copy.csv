@@ -2923,3 +2923,23 @@ pswitch.universal.sync_confirm_title,pswitch,ProviderSwitchPage,UniversalProvide
 pswitch.universal.sync_confirm_desc,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_sync_confirm_desc,Rewrite {{name}}'s generated provider entries and re-project the live config of any app currently using them?,,active
 pswitch.universal.delete_confirm_title,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_delete_confirm_title,Delete universal provider,,active
 pswitch.universal.delete_confirm_desc,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_delete_confirm_desc,Delete '{{name}}'? Its generated entries are removed from every enabled app's provider list (live files are not rewritten).,,active
+pswitch.profile.bar_label,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_bar_label,Profiles,,active
+pswitch.profile.new,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_new,New profile,,active
+pswitch.profile.name_label,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_name_label,Profile name,,active
+pswitch.profile.name_placeholder,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_name_placeholder,e.g. Work,,active
+pswitch.profile.hint,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_hint,"Creates a snapshot of this app's current providers, MCP servers, skills and active prompt.",,active
+pswitch.profile.create,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_create,Create,,active
+pswitch.profile.apply,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_apply,Apply,,active
+pswitch.profile.applied,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_applied,Profile applied.,,active
+pswitch.profile.applied_with_warnings,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_applied_with_warnings,Applied with warnings: {{warnings}},,active
+pswitch.profile.apply_confirm_title,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_apply_confirm_title,Apply profile?,,active
+pswitch.profile.apply_confirm_desc,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_apply_confirm_desc,"Apply ""{{name}}""? This app's providers, MCP, skills and active prompt are rewritten from the snapshot; the previous profile autosaves first.",,active
+pswitch.profile.manage,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_manage,Manage,,active
+pswitch.profile.manage_title,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_manage_title,Manage profiles,,active
+pswitch.profile.rename,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_rename,Rename,,active
+pswitch.profile.empty,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_empty,No profiles yet.,,active
+pswitch.profile.created,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_created,Profile created.,,active
+pswitch.profile.saved,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_saved,Profile saved.,,active
+pswitch.profile.deleted,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_deleted,Profile deleted.,,active
+pswitch.profile.delete_confirm_title,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_delete_confirm_title,Delete profile,,active
+pswitch.profile.delete_confirm_desc,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_delete_confirm_desc,"Delete ""{{name}}""? The app's current-profile marker clears; the snapshot itself is not restored.",,active

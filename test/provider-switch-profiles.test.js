@@ -138,6 +138,102 @@ test("profiles: apply autosaves the previous profile of the app", async () => {
   assert.equal(finalIds.currentIds.claude, first.id);
 });
 
+test("profiles: autosaving one app preserves every other app's snapshot", async () => {
+  const profiles = require("../src/lib/provider-switch/profiles");
+  await seedAppState("claude");
+  const work = await profiles.createProfile({ name: "Work", app: "claude" });
+  const other = await profiles.createProfile({ name: "Other", app: "claude" });
+  await profiles.applyProfile({ id: work.id, app: "claude", applyProvider: async () => {} });
+
+  await seedAppState("codex");
+  await profiles.applyProfile({ id: work.id, app: "codex", applyProvider: async () => {} });
+  await profiles.applyProfile({ id: other.id, app: "codex", applyProvider: async () => {} });
+  const saved = (await profiles.listProfiles()).profiles.find((p) => p.id === work.id);
+  for (const group of ["providers", "mcp", "skills", "prompts"]) {
+    assert.deepEqual(saved.payload[group].claude, work.payload[group].claude, `${group}: Claude snapshot survives Codex autosave`);
+    assert.notEqual(saved.payload[group].codex, null, `${group}: Codex state was captured`);
+  }
+
+  await profiles.applyProfile({ id: other.id, app: "claude", applyProvider: async () => {} });
+  const resaved = (await profiles.listProfiles()).profiles.find((p) => p.id === work.id);
+  for (const group of ["providers", "mcp", "skills", "prompts"]) {
+    assert.deepEqual(resaved.payload[group].codex, saved.payload[group].codex, `${group}: Codex snapshot survives Claude autosave`);
+  }
+});
+
+for (const legacy of [false, true]) {
+  test(`profiles: ${legacy ? "legacy" : "new"} empty prompt snapshots disable only the captured app`, async () => {
+    const profiles = require("../src/lib/provider-switch/profiles");
+    const prompts = require("../src/lib/provider-switch/prompts");
+    const paths = require("../src/lib/provider-switch/paths");
+    const profile = await profiles.createProfile({ name: "No prompt", app: "claude" });
+    if (legacy) {
+      const raw = JSON.parse(fs.readFileSync(paths.profilesStorePath(), "utf8"));
+      raw.profiles[0].payload.prompts.claude = null;
+      fs.writeFileSync(paths.profilesStorePath(), JSON.stringify(raw));
+    }
+
+    await prompts.upsertPrompt("codex", { id: "codex-rules", content: "Uncaptured app", enabled: true });
+    await profiles.applyProfile({ id: profile.id, app: "codex", applyProvider: async () => {} });
+    assert.equal((await prompts.listPrompts("codex")).find((p) => p.enabled).id, "codex-rules");
+    assert.equal(fs.readFileSync(prompts.promptFilePath("codex"), "utf8"), "Uncaptured app");
+
+    await prompts.upsertPrompt("claude", { id: "rules", content: "Original rules", enabled: true });
+    const livePath = prompts.promptFilePath("claude");
+    fs.writeFileSync(livePath, "User edited these rules");
+    const result = await profiles.applyProfile({ id: profile.id, app: "claude", applyProvider: async () => {} });
+    assert.deepEqual(result.warnings, []);
+    assert.equal(fs.readFileSync(livePath, "utf8"), "");
+    const saved = await prompts.listPrompts("claude");
+    assert.equal(saved.some((p) => p.enabled), false);
+    assert.equal(saved.find((p) => p.id === "rules").content, "User edited these rules");
+
+    // A later hand-written file has no active prompt owner and stays untouched.
+    fs.writeFileSync(livePath, "New unmanaged instructions");
+    await profiles.applyProfile({ id: profile.id, app: "claude", applyProvider: async () => {} });
+    assert.equal(fs.readFileSync(livePath, "utf8"), "New unmanaged instructions");
+  });
+}
+
+test("profiles: reports MCP and skill projection failures returned by the toggles", async () => {
+  const profiles = require("../src/lib/provider-switch/profiles");
+  const mcp = require("../src/lib/provider-switch/mcp");
+  const skills = require("../src/lib/provider-switch/skills");
+  await seedAppState("claude");
+  const profile = await profiles.createProfile({ name: "Work", app: "claude" });
+  await mcp.toggleServerApp("fetch", "claude", false);
+  await skills.toggleSkill("my-skill", "claude", false);
+  const mcpPath = path.join(tmpHome, ".claude.json");
+  fs.writeFileSync(mcpPath, "{ malformed user config");
+  const userSkill = path.join(tmpHome, ".claude", "skills", "my-skill");
+  fs.mkdirSync(userSkill, { recursive: true });
+  fs.writeFileSync(path.join(userSkill, "SKILL.md"), "# User-owned skill");
+
+  const result = await profiles.applyProfile({ id: profile.id, app: "claude", applyProvider: async () => {} });
+  assert.ok(result.warnings.some((warning) => warning.includes("fetch")), "the MCP error reaches the caller");
+  assert.ok(result.warnings.some((warning) => warning.includes("my-skill")), "the skill collision reaches the caller");
+  assert.equal(fs.readFileSync(mcpPath, "utf8"), "{ malformed user config");
+  assert.equal(fs.readFileSync(path.join(userSkill, "SKILL.md"), "utf8"), "# User-owned skill");
+});
+
+test("profiles: a failed prompt disable warns and keeps the prompt active", async (t) => {
+  const profiles = require("../src/lib/provider-switch/profiles");
+  const prompts = require("../src/lib/provider-switch/prompts");
+  const fsp = require("node:fs/promises");
+  const profile = await profiles.createProfile({ name: "No prompt", app: "claude" });
+  await prompts.upsertPrompt("claude", { id: "rules", content: "Keep these rules", enabled: true });
+  const livePath = prompts.promptFilePath("claude");
+  const rename = fsp.rename;
+  t.mock.method(fsp, "rename", async (source, destination) => {
+    if (destination === livePath) throw new Error("fixture: prompt write denied");
+    return rename(source, destination);
+  });
+  const result = await profiles.applyProfile({ id: profile.id, app: "claude", applyProvider: async () => {} });
+  assert.ok(result.warnings.some((warning) => warning.includes("prompt write denied")));
+  assert.equal(fs.readFileSync(livePath, "utf8"), "Keep these rules");
+  assert.equal((await prompts.listPrompts("claude")).find((p) => p.enabled).id, "rules");
+});
+
 test("profiles: never-snapshotted apply only marks current; dangling ids warn; delete clears markers", async () => {
   const profiles = require("../src/lib/provider-switch/profiles");
   await seedAppState("claude");

@@ -4,6 +4,8 @@
 // Payload slots are null when that side never snapshotted (apply leaves it
 // untouched) and Some(empty) when the snapshot captured an empty state
 // (apply clears it) — upstream's None-vs-empty distinction.
+// Prompt slots use an id for an active prompt, "" for no enabled prompt,
+// and null for an uncaptured app.
 //
 // Scope = one app. Upstream scopes are claude/claude-desktop/codex; the fork
 // generalizes to every app whose pswitch surface carries all four slots
@@ -34,9 +36,9 @@ function normalizeProfile(raw) {
   const payload = raw.payload && typeof raw.payload === "object" ? raw.payload : {};
   const slot = (group) => {
     const value = payload[group];
-    return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+    return value && typeof value === "object" && !Array.isArray(value) ? { ...value } : {};
   };
-  return {
+  const profile = {
     id: raw.id,
     name: raw.name,
     payload: {
@@ -48,6 +50,17 @@ function normalizeProfile(raw) {
     createdAt: typeof raw.createdAt === "string" ? raw.createdAt : null,
     updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : null,
   };
+  // Older snapshots wrote null for both "disabled" and "not captured".
+  // Their initiating app always has MCP and skill arrays, even when empty;
+  // use those to recognize a captured empty prompt without claiming other apps.
+  for (const app of PROFILE_APPS) {
+    if (profile.payload.prompts[app] === null
+      && Array.isArray(profile.payload.mcp[app])
+      && Array.isArray(profile.payload.skills[app])) {
+      profile.payload.prompts[app] = "";
+    }
+  }
+  return profile;
 }
 
 async function readProfilesStore() {
@@ -119,7 +132,7 @@ async function snapshotApp(app) {
   providers[app] = providerState.current;
   mcpSlots[app] = servers.filter((s) => s.apps?.[app] === true).map((s) => s.id);
   skillSlots[app] = allSkills.filter((s) => s.apps?.[app] === true).map((s) => s.id);
-  promptSlots[app] = (appPrompts.find((p) => p.enabled) || {}).id || null;
+  promptSlots[app] = (appPrompts.find((p) => p.enabled) || {}).id || "";
   return { providers, mcp: mcpSlots, skills: skillSlots, prompts: promptSlots };
 }
 
@@ -177,7 +190,11 @@ async function updateProfile({ id, name, resnapshot, app }) {
       const index = profileStore.profiles.findIndex((p) => p.id === id);
       if (index === -1) return profileStore;
       const profile = profileStore.profiles[index];
-      profile.payload = { ...profile.payload, ...snapshot };
+      // Merge only this app into the freshly locked profile. The snapshot's
+      // null placeholders must never replace another app's saved state.
+      for (const group of Object.keys(snapshot)) {
+        profile.payload[group][app] = snapshot[group][app];
+      }
       profile.updatedAt = new Date().toISOString();
       return profileStore;
     });
@@ -270,7 +287,8 @@ async function applyProfile({ id, app, applyProvider }) {
     for (const serverId of dangling) warnings.push(`[${app}] MCP '${serverId}' no longer exists, skipped`);
     for (const [serverId, enabled] of toggles) {
       try {
-        await mcp.toggleServerApp(serverId, app, enabled);
+        const result = await mcp.toggleServerApp(serverId, app, enabled);
+        warnings.push(...(result.failures || []));
       } catch (error) {
         warnings.push(`[${app}] toggle MCP '${serverId}' -> ${enabled} failed: ${error?.message || error}`);
       }
@@ -285,19 +303,28 @@ async function applyProfile({ id, app, applyProvider }) {
     for (const skillId of dangling) warnings.push(`[${app}] skill '${skillId}' no longer exists, skipped`);
     for (const [skillId, enabled] of toggles) {
       try {
-        await skills.toggleSkill(skillId, app, enabled);
+        const result = await skills.toggleSkill(skillId, app, enabled);
+        warnings.push(...(result.failures || []));
       } catch (error) {
         warnings.push(`[${app}] toggle skill '${skillId}' -> ${enabled} failed: ${error?.message || error}`);
       }
     }
   }
 
-  // 4. Prompts: enable the snapshot's prompt when it still exists.
+  // 4. Prompts: restore the active id or the explicitly disabled state.
   const targetPrompt = payload.prompts[app];
   if (targetPrompt != null) {
     const appPrompts = await prompts.listPrompts(app);
     const enabled = appPrompts.find((p) => p.enabled);
-    if (appPrompts.some((p) => p.id === targetPrompt)) {
+    if (targetPrompt === "") {
+      if (enabled) {
+        try {
+          await prompts.disablePrompt(app);
+        } catch (error) {
+          warnings.push(`[${app}] disable prompt failed: ${error?.message || error}`);
+        }
+      }
+    } else if (appPrompts.some((p) => p.id === targetPrompt)) {
       if (!enabled || enabled.id !== targetPrompt) {
         try {
           await prompts.enablePrompt(app, targetPrompt);

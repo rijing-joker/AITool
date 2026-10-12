@@ -332,11 +332,10 @@ async function duplicateProvider(app, id) {
   const settingsConfig = JSON.parse(JSON.stringify(source.settingsConfig || {}));
   if (additive.isAdditiveApp(app)) {
     // Derive the copy's slot from "<name> copy", uniquified against the
-    // other cards (upstream validates the cloned key against existing and
+    // existing cards (upstream validates the cloned key against existing and
     // live config keys before writing).
     const taken = new Set(
       state.providers
-        .filter((p) => p.id !== id)
         .map((p) => (p.settingsConfig && typeof p.settingsConfig.slotKey === "string" ? p.settingsConfig.slotKey : ""))
         .filter(Boolean),
     );
@@ -345,6 +344,15 @@ async function duplicateProvider(app, id) {
     for (let n = 2; taken.has(slotKey); n += 1) {
       const suffix = `-${n}`;
       slotKey = `${base.slice(0, Math.max(1, 40 - suffix.length))}${suffix}`;
+    }
+    // OpenCode/OpenClaw pointers include the owning provider key. Only
+    // re-key that prefix; model ids may themselves contain slashes, and a
+    // deliberate reference to another provider must remain unchanged.
+    const sourceSlot = settingsConfig.slotKey;
+    if ((app === "opencode" || app === "openclaw") && sourceSlot
+      && typeof settingsConfig.modelId === "string"
+      && settingsConfig.modelId.startsWith(`${sourceSlot}/`)) {
+      settingsConfig.modelId = slotKey + settingsConfig.modelId.slice(sourceSlot.length);
     }
     settingsConfig.slotKey = slotKey;
   }

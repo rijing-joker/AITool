@@ -134,6 +134,45 @@ test("provider-switch store: duplicate re-keys the additive slot so the copy can
   assert.equal(reread.settingsConfig.slotKey, "relay-a", "the source keeps its own slot");
 });
 
+for (const app of ["opencode", "openclaw"]) {
+  test(`provider-switch ${app}: a duplicate selects its own model after switching`, async () => {
+    const store = require("../src/lib/provider-switch/store");
+    const additive = require("../src/lib/provider-switch/additive");
+    const source = await store.createProvider(app, {
+      name: "Relay A",
+      settingsConfig: {
+        slotKey: "relay-a-copy",
+        provider: { name: "Relay fixture" },
+        modelId: "relay-a-copy/org/model",
+      },
+    });
+    const copy = await store.duplicateProvider(app, source.id);
+    assert.notEqual(copy.settingsConfig.slotKey, source.settingsConfig.slotKey, "a custom source key is also reserved");
+    const live = additive.projectAdditive(app, { target: source, live: {} });
+    const switched = additive.projectAdditive(app, { prev: source, target: copy, live });
+    const pointer = app === "opencode" ? switched.model : switched.agents.defaults.model.primary;
+    const providers = app === "opencode" ? switched.provider : switched.models.providers;
+    assert.equal(pointer, `${copy.settingsConfig.slotKey}/org/model`, "nested model IDs survive re-keying");
+    assert.ok(providers[copy.settingsConfig.slotKey]);
+    assert.equal(providers[source.settingsConfig.slotKey], undefined);
+    assert.equal((await store.getProvider(app, source.id)).settingsConfig.modelId, "relay-a-copy/org/model");
+  });
+}
+
+test("provider-switch duplicates preserve empty and externally-owned model references", async () => {
+  const store = require("../src/lib/provider-switch/store");
+  for (const app of ["opencode", "openclaw"]) {
+    for (const modelId of ["", "other/model", "relay-extra/model"]) {
+      const source = await store.createProvider(app, {
+        name: "Relay",
+        settingsConfig: { slotKey: "relay", provider: {}, modelId },
+      });
+      const copy = await store.duplicateProvider(app, source.id);
+      assert.equal(copy.settingsConfig.modelId, modelId);
+    }
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Claude projection
 // ---------------------------------------------------------------------------

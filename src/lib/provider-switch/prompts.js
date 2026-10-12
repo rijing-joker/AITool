@@ -366,6 +366,24 @@ async function enablePrompt(app, id) {
   return { prompts: await listPrompts(app), targetPath: filePath };
 }
 
+// Restore an explicit "no enabled prompt" profile. Capture any hand edits
+// under the activation lock before clearing the file, and keep the old active
+// state if the write fails. Files with no active owner are left alone.
+async function disablePrompt(app) {
+  requireApp(app);
+  await mutatePrompt(app, (store) => {
+    const enabled = store.apps[app].filter((prompt) => prompt.enabled);
+    if (enabled.length === 0) return undefined;
+    const nowIso = new Date().toISOString();
+    for (const prompt of enabled) {
+      prompt.enabled = false;
+      prompt.updatedAt = nowIso;
+    }
+    return "";
+  }, { captureLive: true });
+  return { prompts: await listPrompts(app), targetPath: promptFilePath(app) };
+}
+
 async function deletePrompt(app, id) {
   requireApp(app);
   const cleanId = sanitizeId(id);
@@ -451,6 +469,7 @@ module.exports = {
   listPrompts,
   upsertPrompt,
   enablePrompt,
+  disablePrompt,
   deletePrompt,
   importFromFile,
   projectPromptsToApp,

@@ -37,6 +37,12 @@ function promptsStorePath() {
   return path.join(providerSwitchRoot(), "prompts.json");
 }
 
+// Profiles (cc-switch's profiles table): named snapshots of one app's
+// providers/MCP/skills/prompts state plus the per-app current marker.
+function profilesStorePath() {
+  return path.join(providerSwitchRoot(), "profiles.json");
+}
+
 function codexAuthStashPath() {
   return path.join(providerSwitchRoot(), "codex-auth-stash.json");
 }
@@ -169,6 +175,7 @@ module.exports = {
   storePath,
   mcpStorePath,
   promptsStorePath,
+  profilesStorePath,
   codexAuthStashPath,
   codexModelCatalogPath,
   backupsDir,

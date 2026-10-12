@@ -208,8 +208,79 @@ export interface ProviderSwitchEditorView {
   codexOfficialModelsReason?: "noCli" | "failed" | null;
 }
 
-export const piPromptFilesApi = {
-  get(kind: PiPromptFileKind) {
+// Universal provider (cc-switch's 统一供应商): one shared base URL + API key
+// synced into deterministic claude/codex/gemini child providers.
+export interface ProviderSwitchUniversalProvider {
+  id: string;
+  name: string;
+  providerType: string;
+  apps: { claude: boolean; codex: boolean; gemini: boolean };
+  baseUrl: string;
+  apiKey: string;
+  models?: {
+    claude?: { model?: string; haikuModel?: string; sonnetModel?: string; opusModel?: string };
+    codex?: { model?: string; reasoningEffort?: string };
+    gemini?: { model?: string };
+  };
+  websiteUrl?: string;
+  notes?: string;
+  icon?: string;
+  iconColor?: string;
+  meta?: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  sortIndex?: number;
+}
+
+export const universalProvidersApi = {
+  list(): Promise<{ ok: true; providers: ProviderSwitchUniversalProvider[] }> {
+    return get("/api/provider-switch/universal");
+  },
+  upsert(provider: Partial<ProviderSwitchUniversalProvider> & { id?: string }): Promise<{ ok: true; provider: ProviderSwitchUniversalProvider }> {
+    return mutate("/api/provider-switch/universal", "PUT", { provider });
+  },
+  sync(id: string): Promise<{ ok: true }> {
+    return mutate("/api/provider-switch/universal/sync", "POST", { id });
+  },
+  remove(id: string): Promise<{ ok: true; removed: boolean }> {
+    return mutate("/api/provider-switch/universal/delete", "POST", { id });
+  },
+};
+
+// Profile (cc-switch's services/profile): a named snapshot of one app's
+// providers/MCP/skills/prompts state with a per-app current marker.
+export interface ProviderSwitchProfile {
+  id: string;
+  name: string;
+  payload: {
+    providers: Record<string, string | null>;
+    mcp: Record<string, string[] | null>;
+    skills: Record<string, string[] | null>;
+    prompts: Record<string, string | null>;
+  };
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+export const profilesApi = {
+  list(): Promise<{ ok: true; profiles: ProviderSwitchProfile[]; currentIds: Record<string, string | null> }> {
+    return get("/api/provider-switch/profiles");
+  },
+  create(body: { name: string; app: string }): Promise<{ ok: true; profile: ProviderSwitchProfile }> {
+    return mutate("/api/provider-switch/profiles", "POST", body);
+  },
+  update(body: { id: string; name?: string; resnapshot?: boolean; app?: string }): Promise<{ ok: true; profile: ProviderSwitchProfile }> {
+    return mutate("/api/provider-switch/profiles/update", "POST", body);
+  },
+  remove(id: string): Promise<{ ok: true }> {
+    return mutate("/api/provider-switch/profiles/delete", "POST", { id });
+  },
+  apply(body: { id: string; app: string }): Promise<{ ok: true; warnings: string[] }> {
+    return mutate("/api/provider-switch/profiles/apply", "POST", body);
+  },
+};
+
+export const piPromptFilesApi = {  get(kind: PiPromptFileKind) {
     return providerSwitchApi.getPiPromptFile(kind);
   },
   replace(kind: PiPromptFileKind, content: string, expectedRevision: string | null) {
@@ -440,7 +511,7 @@ export type PiPromptFile = {
   content: string;
 };
 
-export type McpAppId = "claude" | "codex" | "gemini" | "grokbuild" | "opencode" | "hermes" | "mcode";
+export type McpAppId = "claude" | "codex" | "gemini" | "grokbuild" | "opencode" | "hermes" | "mcode" | "pi";
 
 export interface McpServerSpec {
   type?: "stdio" | "http" | "sse" | string;

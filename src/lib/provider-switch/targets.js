@@ -405,10 +405,15 @@ function resolveCodexAuth({ prev, target, liveAuth, stash }) {
   const native = liveAuthObject && !residue && codexAuthHasLoginMaterial(liveAuthObject) ? liveAuthObject : null;
   let next = base;
 
-  // Leaving an unbound official card while Codex is logged out: the login is
-  // gone, so its stash entry is stale too — invalidate it and forget `last`
-  // so switching back cannot revive a logout (cc-switch leaving_official).
-  // Applies for any target, before the branch on it.
+  // Leaving an official card while Codex is logged out: the card's own stashed
+  // login is stale — invalidate it and forget `last` so switching back cannot
+  // revive a logout (cc-switch leaving_official). Applies for any target,
+  // before the branch on it. An unbound card (API-key rows included) carries
+  // no identity of its own, so there is nothing to take: a real logout on an
+  // unbound card leaves nothing in the stash anyway (restoring on entry
+  // consumes the entry), and the entry `last` points at may belong to another
+  // card entirely — upstream removes it here, which silently destroys a live
+  // login when the previous card was an official API-key one; diverged.
   const prevOfficial = !!prev && prev.category === "official";
   if (prevOfficial && !native) {
     const prevRow =
@@ -418,8 +423,6 @@ function resolveCodexAuth({ prev, target, liveAuth, stash }) {
     const prevId = codexOauthIdentityOf(prevRow);
     if (prevId) {
       next = codexStashTake(next, prevId).stash;
-    } else if (next.last) {
-      next = codexStashTake(next, next.last).stash;
     }
     next = { ...next, last: null };
   }

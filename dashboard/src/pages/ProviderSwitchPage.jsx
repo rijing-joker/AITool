@@ -41,7 +41,9 @@ import { ModalFrame } from "../ui/components/ModalFrame";
 import { useVisiblePolling } from "../hooks/use-visible-polling";
 import { PresetIcon, providerTileClass, ProviderEditDialog } from "./provider-edit-dialog";
 import { ProviderMcpPanel } from "./provider-mcp-panel";
+import { ProviderProfilesBar } from "./provider-profiles-bar";
 import { ProviderPromptsPanel } from "./provider-prompts-panel";
+import { ProviderUniversalPanel } from "./provider-universal-panel";
 import { ProviderQuotaLine } from "./provider-quota-line";
 import { ProviderEnvBanner } from "./provider-env-banner";
 import { ProviderSkillsPanel } from "./provider-skills-panel";
@@ -904,7 +906,7 @@ export function ProviderSwitchPage() {
         ) : null}
       </div> : null}
 
-      <div role="tabpanel" id="provider-panel" aria-labelledby={utilityEditor.open ? undefined : `provider-panel-${activeApp}`} aria-label={utilityEditor.open ? copy(isMcpTab ? "pswitch.mcp.tab" : "pswitch.prompts.tab") : undefined} className={utilityEditor.open ? "flex min-w-0 flex-1 flex-col" : undefined}>
+      <div role="tabpanel" id="provider-panel" aria-labelledby={utilityEditor.open ? undefined : `provider-panel-${activeApp}`} aria-label={utilityEditor.open ? copy(isMcpTab ? "pswitch.mcp.tab" : isSkillsTab ? "pswitch.skills.tab" : "pswitch.prompts.tab") : undefined} className={utilityEditor.open ? "flex min-w-0 flex-1 flex-col" : undefined}>
       {isUtilityTab ? (
         isMcpTab ? <ProviderMcpPanel onEditorStateChange={onUtilityEditorState} /> : isSkillsTab ? <ProviderSkillsPanel onEditorStateChange={onUtilityEditorState} /> : <ProviderPromptsPanel onEditorStateChange={onUtilityEditorState} />
       ) : (
@@ -931,6 +933,7 @@ export function ProviderSwitchPage() {
           />
         </div>
       ) : null}
+      <ProviderProfilesBar activeApp={activeApp} onNotice={setNotice} onChanged={refreshStatus} />
       <section className="mb-8">
         <SectionTitle>{copy("pswitch.section.providers")}</SectionTitle>
         {!appState || appState.providers.length === 0 ? (
@@ -972,6 +975,11 @@ export function ProviderSwitchPage() {
             </SortableContext>
           </DndContext>
         )}
+      </section>
+
+      <section className="mb-8">
+        <SectionTitle>{copy("pswitch.universal.section")}</SectionTitle>
+        <ProviderUniversalPanel onNotice={setNotice} onChanged={refreshStatus} />
       </section>
 
       <section className="mb-8">

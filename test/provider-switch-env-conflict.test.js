@@ -159,6 +159,41 @@ test("env conflicts: api delete removes the lines, keeps a restorable backup", a
   assert.match(restored, /keep_me=1/);
 });
 
+test("env conflicts: deleting one of two assignments of a variable removes only the selected line", async () => {
+  const zshrc = path.join(tmpHome, ".zshrc");
+  fs.writeFileSync(zshrc, [
+    "export ANTHROPIC_API_KEY=sk-old",
+    "keep_me=1",
+    "export ANTHROPIC_API_KEY=sk-new",
+  ].join("\n"));
+
+  const h = handler();
+  const list = await call(h, { url: "/api/provider-switch/env-conflicts" });
+  const claude = list.body.conflicts.claude;
+  assert.equal(claude.length, 2, "both occurrences are listed as separate conflicts");
+  const second = claude.find((entry) => entry.sourcePath.endsWith(":3"));
+  assert.equal(second.varValue, "sk-new");
+
+  const del = await call(h, {
+    method: "POST",
+    url: "/api/provider-switch/env-conflicts/delete",
+    body: JSON.stringify({
+      conflicts: [{ varName: second.varName, varValue: second.varValue, sourceType: second.sourceType, sourcePath: second.sourcePath }],
+    }),
+  });
+  assert.equal(del.status, 200);
+  assert.equal(del.body.deleted, 1, "only the selected occurrence is removed");
+  const after = fs.readFileSync(zshrc, "utf8");
+  assert.match(after, /export ANTHROPIC_API_KEY=sk-old/, "the unselected assignment survives");
+  assert.doesNotMatch(after, /sk-new/);
+  await call(h, {
+    method: "POST",
+    url: "/api/provider-switch/env-conflicts/restore",
+    body: JSON.stringify({ backupPath: del.body.backupPath }),
+  });
+  assert.equal(fs.readFileSync(zshrc, "utf8"), "export ANTHROPIC_API_KEY=sk-old\nkeep_me=1\nexport ANTHROPIC_API_KEY=sk-new");
+});
+
 test("env conflicts: delete without auth is rejected and empty payloads fail clean", async () => {
   const h = handler();
   const unauth = await call(h, {
@@ -185,20 +220,22 @@ test("env conflicts: delete without auth is rejected and empty payloads fail cle
 
 test("env conflicts: simultaneous deletions at the same timestamp keep independent backups", async (t) => {
   const env = require("../src/lib/provider-switch/env-conflict");
-  const profile = path.join(tmpHome, ".zshrc");
-  fs.writeFileSync(profile, "export ANTHROPIC_BASE_URL=https://first.test\nexport ANTHROPIC_API_KEY=second-fixture\n");
-  const conflicts = env.checkAppConflicts("claude").filter((entry) => entry.sourcePath.startsWith(profile + ":"));
+  const profiles = [path.join(tmpHome, ".zshrc"), path.join(tmpHome, ".bashrc")];
+  fs.writeFileSync(profiles[0], "export ANTHROPIC_BASE_URL=https://first.test\n");
+  fs.writeFileSync(profiles[1], "export ANTHROPIC_API_KEY=second-fixture\n");
+  const isFixture = (entry) => profiles.some((profile) => entry.sourcePath.startsWith(profile + ":"));
+  const conflicts = env.checkAppConflicts("claude").filter(isFixture);
   t.mock.method(Date.prototype, "toISOString", () => "2026-10-11T00:00:00.000Z");
   const backups = await Promise.all(conflicts.map((entry) => env.deleteConflicts([entry])));
   assert.notEqual(backups[0].backupPath, backups[1].backupPath);
-  assert.equal(fs.readFileSync(profile, "utf8"), "");
+  for (const profile of profiles) assert.equal(fs.readFileSync(profile, "utf8"), "");
   for (let i = 0; i < backups.length; i++) {
     const info = JSON.parse(fs.readFileSync(backups[i].backupPath, "utf8"));
     assert.deepEqual(info.conflicts.map((entry) => entry.varName), [conflicts[i].varName]);
     if (process.platform !== "win32") assert.equal(fs.statSync(backups[i].backupPath).mode & 0o777, 0o600);
   }
   for (const backup of backups) await env.restoreFromBackup(backup.backupPath);
-  const restored = env.checkAppConflicts("claude").filter((entry) => entry.sourcePath.startsWith(profile + ":"));
+  const restored = env.checkAppConflicts("claude").filter(isFixture);
   assert.deepEqual(new Set(restored.map((entry) => entry.varName)), new Set(conflicts.map((entry) => entry.varName)));
 });
 

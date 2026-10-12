@@ -1,6 +1,7 @@
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
+const { spawn } = require("node:child_process");
 const paths = require("./paths");
 const config = require("./config");
 const manager = require("./manager");
@@ -343,6 +344,35 @@ function applyProviderRemarkUpdate(update) {
 }
 
 // ---------------------------------------------------------------------------
+// Log directory opener (cc-switch's settings.advanced.logConfig.openLog)
+// ---------------------------------------------------------------------------
+
+// Resolved lazily per platform; the folder opens on the host running this
+// Node process, so a remote dashboard browser gets the failure response
+// rather than a silently useless spawn.
+async function openPathInFileManager(command) {
+  fs.mkdirSync(paths.logsDir, { recursive: true });
+  const opener = command
+    || (process.platform === "darwin" ? "open"
+      : process.platform === "win32" ? "explorer"
+      : "xdg-open");
+  await new Promise((resolve, reject) => {
+    const child = spawn(opener, [paths.logsDir], { detached: true, stdio: "ignore" });
+    child.once("spawn", () => {
+      child.unref();
+      resolve();
+    });
+    child.once("error", reject);
+  });
+}
+
+let logsDirOpener = openPathInFileManager;
+
+function setLogsDirOpenerForTests(fn) {
+  logsDirOpener = fn || openPathInFileManager;
+}
+
+// ---------------------------------------------------------------------------
 // Route table
 // ---------------------------------------------------------------------------
 
@@ -407,6 +437,16 @@ async function handleProxyApiRequest(req, res, url, ctx) {
       if (typeof body.autoStart === "boolean") settings.autoStart = body.autoStart;
       config.writeSettings(settings);
       json(res, { ok: true, settings });
+      return true;
+    }
+    if (p === "/api/proxy/logs/open" && method === "POST") {
+      if (!requireMutation()) return true;
+      try {
+        await logsDirOpener();
+        json(res, { ok: true });
+      } catch (error) {
+        json(res, { ok: false, error: error?.message || "open failed" }, 500);
+      }
       return true;
     }
 
@@ -1043,4 +1083,4 @@ function isPlainObject(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-module.exports = { handleProxyApiRequest };
+module.exports = { handleProxyApiRequest, openPathInFileManager, setLogsDirOpenerForTests };

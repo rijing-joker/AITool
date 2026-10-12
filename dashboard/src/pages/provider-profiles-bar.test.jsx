@@ -1,0 +1,104 @@
+import React from "react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { beforeEach, it, vi } from "vitest";
+import { ProviderProfilesBar } from "./provider-profiles-bar";
+import { profilesApi } from "../lib/provider-switch-api";
+
+vi.mock("../lib/copy", () => ({ copy: (key, params) => (params ? `${key}:${Object.values(params).join(":")}` : key) }));
+
+const mocks = vi.hoisted(() => ({
+  profiles: [],
+  currentIds: {},
+}));
+
+vi.mock("../lib/provider-switch-api", () => ({
+  profilesApi: {
+    list: vi.fn(async () => ({ ok: true, profiles: mocks.profiles, currentIds: mocks.currentIds })),
+    create: vi.fn(async ({ name }) => ({ ok: true, profile: { id: "pr_new", name, payload: {} } })),
+    update: vi.fn(async ({ id, name }) => ({ ok: true, profile: { id, name, payload: {} } })),
+    remove: vi.fn(async () => ({ ok: true })),
+    apply: vi.fn(async () => ({ ok: true, warnings: ["[claude] provider 'p_gone' no longer exists, skipped"] })),
+  },
+}));
+
+const aProfile = {
+  id: "pr_1",
+  name: "Work",
+  payload: { providers: { claude: "p_1" }, mcp: {}, skills: {}, prompts: {} },
+  createdAt: "2026-10-11T00:00:00Z",
+  updatedAt: "2026-10-11T00:00:00Z",
+};
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.profiles = [];
+  mocks.currentIds = {};
+});
+
+it("renders profile chips, creates with a name and applies through the confirm", async () => {
+  const onNotice = vi.fn();
+  const onChanged = vi.fn();
+  mocks.profiles = [aProfile];
+  mocks.currentIds = { claude: "pr_1" };
+  render(<ProviderProfilesBar activeApp="claude" onNotice={onNotice} onChanged={onChanged} />);
+  await waitFor(() => expect(screen.getByText("Work")).toBeTruthy());
+
+  // The current profile's chip is highlighted but clicking still applies.
+  fireEvent.click(screen.getByText("Work"));
+  await screen.findByText("pswitch.profile.apply_confirm_title");
+  const dialog = await screen.findByRole("dialog");
+  const confirm = Array.from(dialog.querySelectorAll("button")).find((b) => b.textContent === "pswitch.profile.apply");
+  fireEvent.click(confirm);
+  await waitFor(() => expect(profilesApi.apply).toHaveBeenCalledWith({ id: "pr_1", app: "claude" }));
+  // Server warnings surface through the notice (best-effort apply).
+  await waitFor(() => expect(onNotice).toHaveBeenCalledWith("pswitch.profile.applied_with_warnings:[claude] provider 'p_gone' no longer exists, skipped"));
+  await waitFor(() => expect(onChanged).toHaveBeenCalled());
+});
+
+it("stays outside profiles for apps without MCP/skills support", () => {
+  render(<ProviderProfilesBar activeApp="openclaw" onNotice={vi.fn()} onChanged={vi.fn()} />);
+  // openclaw has no MCP/skills support — the bar does not render at all.
+  expect(screen.queryByText("pswitch.profile.bar_label")).toBeNull();
+});
+
+it("creates a profile from the initiating app only", async () => {
+  const onNotice = vi.fn();
+  const onChanged = vi.fn();
+  render(<ProviderProfilesBar activeApp="claude" onNotice={onNotice} onChanged={onChanged} />);
+  await waitFor(() => expect(screen.getByText("pswitch.profile.empty")).toBeTruthy());
+
+  fireEvent.click(screen.getByRole("button", { name: "pswitch.profile.new" }));
+  const dialog = await screen.findByRole("dialog");
+  const nameInput = dialog.querySelector("input");
+  fireEvent.change(nameInput, { target: { value: "Work" } });
+  fireEvent.click(Array.from(dialog.querySelectorAll("button")).find((b) => b.textContent === "pswitch.profile.create"));
+  await waitFor(() => expect(profilesApi.create).toHaveBeenCalledWith({ name: "Work", app: "claude" }));
+  await waitFor(() => expect(onNotice).toHaveBeenCalledWith("pswitch.profile.created"));
+});
+
+it("renames and deletes profiles from the manage dialog", async () => {
+  const onNotice = vi.fn();
+  const onChanged = vi.fn();
+  mocks.profiles = [aProfile];
+  render(<ProviderProfilesBar activeApp="claude" onNotice={onNotice} onChanged={onChanged} />);
+  await waitFor(() => expect(screen.getByText("Work")).toBeTruthy());
+
+  fireEvent.click(screen.getByRole("button", { name: "pswitch.profile.manage" }));
+  const manageDialog = await screen.findByRole("dialog");
+  const del = await waitFor(() => {
+    const btn = Array.from(manageDialog.querySelectorAll("button")).find((b) => b.textContent === "pswitch.action.delete");
+    expect(btn).toBeTruthy();
+    return btn;
+  });
+  fireEvent.click(del);
+  await screen.findByText("pswitch.profile.delete_confirm_title");
+  const confirmDialog = await screen.findByRole("dialog");
+  const confirmDelete = await waitFor(() => {
+    const btn = Array.from(confirmDialog.querySelectorAll("button")).find((b) => b.textContent === "pswitch.action.delete");
+    expect(btn).toBeTruthy();
+    return btn;
+  });
+  fireEvent.click(confirmDelete);
+  await waitFor(() => expect(profilesApi.remove).toHaveBeenCalledWith("pr_1"));
+  await waitFor(() => expect(onChanged).toHaveBeenCalled());
+});

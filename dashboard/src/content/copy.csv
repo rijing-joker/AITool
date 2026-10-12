@@ -2274,6 +2274,9 @@ proxy.settings.diagnostics.usageStatistics,proxy,ProxyPage,Proxy,diagnostics_usa
 proxy.settings.diagnostics.usageStatisticsHint,proxy,ProxyPage,Proxy,diagnostics_usageStatisticsHint,"Aggregate request and token usage in memory for the usage records page.",,active
 proxy.settings.diagnostics.redisRetention,proxy,ProxyPage,Proxy,diagnostics_redisRetention,"Usage queue retention (seconds)",,active
 proxy.settings.diagnostics.redisRetentionHint,proxy,ProxyPage,Proxy,diagnostics_redisRetentionHint,"In-memory retention for Management API usage entries, from 1 to 3600 seconds.",,active
+proxy.settings.diagnostics.logDir,proxy,ProxyPage,Proxy,diagnostics_logDir,"Log directory",,active
+proxy.settings.diagnostics.openLog,proxy,ProxyPage,Proxy,diagnostics_openLog,"Open log",,active
+proxy.settings.diagnostics.openLogFailed,proxy,ProxyPage,Proxy,diagnostics_openLogFailed,"Failed to open the log directory: {{error}}",,active
 proxy.settings.codex.title,proxy,ProxyPage,Proxy,codex_title,"Codex client",,active
 proxy.settings.codex.hint,proxy,ProxyPage,Proxy,codex_hint,"Compatibility options for Codex clients (Codex Desktop, codex-tui, codex_cli_rs); applies to both OAuth and API-key credentials. Requires core 8.0.11+.",,active
 proxy.settings.codex.applyPatch,proxy,ProxyPage,Proxy,codex_applyPatch,"Advertise apply-patch catalog",,active
@@ -2554,7 +2557,7 @@ proxy.requests.replay.failed,proxy,ProxyPage,RequestsTab,replay_failed,Retest fa
 proxy.requests.replay.no_credential,proxy,ProxyPage,RequestsTab,replay_no_credential,"Credential not found in the current config (deleted, or an OAuth account)",,active
 pswitch.encrypted.export,pswitch,ProviderSwitchPage,EncryptedBackupDialog,encrypted_export,Export encrypted,,active
 pswitch.encrypted.import,pswitch,ProviderSwitchPage,EncryptedBackupDialog,encrypted_import,Import backup,,active
-pswitch.encrypted.export_hint,pswitch,ProviderSwitchPage,EncryptedBackupDialog,encrypted_export_hint,"Providers, MCP servers and prompts in one AES-256-GCM blob (scrypt from the passphrase). The passphrase is never saved — store the file wherever you keep dotfiles.",,active
+pswitch.encrypted.export_hint,pswitch,ProviderSwitchPage,EncryptedBackupDialog,encrypted_export_hint,"Providers, MCP servers, prompts and skills in one AES-256-GCM blob (scrypt from the passphrase). The passphrase is never saved — store the file wherever you keep dotfiles.",,active
 pswitch.encrypted.import_hint,pswitch,ProviderSwitchPage,EncryptedBackupDialog,encrypted_import_hint,"Restores the stores from the backup. Current files are copied to backups/import/ first. A restart of running CLI tools may be needed.",,active
 pswitch.encrypted.passphrase,pswitch,ProviderSwitchPage,EncryptedBackupDialog,encrypted_passphrase,Passphrase (min 8 chars),,active
 pswitch.encrypted.confirm,pswitch,ProviderSwitchPage,EncryptedBackupDialog,encrypted_confirm,Confirm passphrase,,active
@@ -2621,7 +2624,7 @@ pswitch.env.confirm_title,pswitch,ProviderSwitchPage,ProviderEnvBanner,env_confi
 pswitch.env.confirm_message,pswitch,ProviderSwitchPage,ProviderEnvBanner,env_confirm_message,"The selected lines are deleted from your shell profiles. A JSON backup is saved first and can be restored from this banner.",,active
 pswitch.skills.tab,pswitch,ProviderSwitchPage,ProviderSkillsPanel,skills_tab,Skills,,active
 pswitch.skills.title,pswitch,ProviderSwitchPage,ProviderSkillsPanel,skills_title,"Skills ({{count}})",,active
-pswitch.skills.subtitle,pswitch,ProviderSwitchPage,ProviderSkillsPanel,skills_subtitle,"One list of skills discovered in your agents\\" skills directories; toggles link (or copy) each skill into the app\\"s skills folder.",,active
+pswitch.skills.subtitle,pswitch,ProviderSwitchPage,ProviderSkillsPanel,skills_subtitle,"One list of skills discovered in your agents' skills directories; toggles link (or copy) each skill into the app's skills folder.",,active
 pswitch.skills.search,pswitch,ProviderSwitchPage,ProviderSkillsPanel,skills_search,Search skills…,,active
 pswitch.skills.import,pswitch,ProviderSwitchPage,ProviderSkillsPanel,skills_import,Rescan directories,,active
 pswitch.skills.imported,pswitch,ProviderSwitchPage,ProviderSkillsPanel,skills_imported,"Discovered {{count}} skills",,active
@@ -2934,3 +2937,52 @@ sessions.storage.tooltip,dashboard,SessionsPage,SessionRow,storage,"Session file
 sessions.storage.allocated,dashboard,SessionsPage,SessionRow,storage,"allocated bytes",,active
 sessions.storage.logical,dashboard,SessionsPage,SessionRow,storage,"logical file size",,active
 sessions.storage.size,dashboard,SessionsPage,SessionRow,storage_size,"{{value}} MiB",,active
+pswitch.universal.section,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_section,Universal providers,,active
+pswitch.universal.title,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_title,Universal providers,,active
+pswitch.universal.subtitle,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_subtitle,"One base URL and API key shared by Claude Code, Codex CLI and Gemini CLI; generated entries appear as ordinary providers on each enabled app's tab.",,active
+pswitch.universal.add,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_add,Add universal provider,,active
+pswitch.universal.edit,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_edit,Edit universal provider,,active
+pswitch.universal.select_preset,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_select_preset,Preset,,active
+pswitch.universal.name_placeholder,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_name_placeholder,e.g. My Gateway,,active
+pswitch.universal.base_url,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_base_url,API base URL,,active
+pswitch.universal.api_key,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_api_key,API Key,,active
+pswitch.universal.enabled_apps,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_enabled_apps,Enabled apps,,active
+pswitch.universal.model_config,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_model_config,Per-app model config,,active
+pswitch.universal.model,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_model,Model,,active
+pswitch.universal.reasoning_effort,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_reasoning_effort,Reasoning effort,,active
+pswitch.universal.form_hint,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_form_hint,Creating a provider syncs it immediately; edits apply on save-and-sync.,,active
+pswitch.universal.save_and_sync,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_save_and_sync,Save and sync,,active
+pswitch.universal.loading,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_loading,Loading universal providers…,,active
+pswitch.universal.empty,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_empty,No universal providers yet.,,active
+pswitch.universal.no_apps,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_no_apps,No apps enabled,,active
+pswitch.universal.sync,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_sync,Sync to apps,,active
+pswitch.universal.synced,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_synced,Synced to enabled apps.,,active
+pswitch.universal.saved,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_saved,Universal provider saved.,,active
+pswitch.universal.saved_and_synced,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_saved_and_synced,Saved and synced to all enabled apps.,,active
+pswitch.universal.added_and_synced,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_added_and_synced,Universal provider added and synced.,,active
+pswitch.universal.added_but_sync_failed,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_added_but_sync_failed,"Universal provider added, but sync failed.",,active
+pswitch.universal.deleted,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_deleted,Universal provider deleted.,,active
+pswitch.universal.sync_confirm_title,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_sync_confirm_title,Sync to apps?,,active
+pswitch.universal.sync_confirm_desc,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_sync_confirm_desc,Rewrite {{name}}'s generated provider entries and re-project the live config of any app currently using them?,,active
+pswitch.universal.delete_confirm_title,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_delete_confirm_title,Delete universal provider,,active
+pswitch.universal.delete_confirm_desc,pswitch,ProviderSwitchPage,UniversalProviderPanel,universal_delete_confirm_desc,Delete '{{name}}'? Its generated entries are removed from every enabled app's provider list (live files are not rewritten).,,active
+pswitch.profile.bar_label,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_bar_label,Profiles,,active
+pswitch.profile.new,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_new,New profile,,active
+pswitch.profile.name_label,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_name_label,Profile name,,active
+pswitch.profile.name_placeholder,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_name_placeholder,e.g. Work,,active
+pswitch.profile.hint,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_hint,"Creates a snapshot of this app's current providers, MCP servers, skills and active prompt.",,active
+pswitch.profile.create,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_create,Create,,active
+pswitch.profile.apply,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_apply,Apply,,active
+pswitch.profile.applied,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_applied,Profile applied.,,active
+pswitch.profile.applied_with_warnings,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_applied_with_warnings,Applied with warnings: {{warnings}},,active
+pswitch.profile.apply_confirm_title,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_apply_confirm_title,Apply profile?,,active
+pswitch.profile.apply_confirm_desc,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_apply_confirm_desc,"Apply ""{{name}}""? This app's providers, MCP, skills and active prompt are rewritten from the snapshot; the previous profile autosaves first.",,active
+pswitch.profile.manage,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_manage,Manage,,active
+pswitch.profile.manage_title,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_manage_title,Manage profiles,,active
+pswitch.profile.rename,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_rename,Rename,,active
+pswitch.profile.empty,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_empty,No profiles yet.,,active
+pswitch.profile.created,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_created,Profile created.,,active
+pswitch.profile.saved,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_saved,Profile saved.,,active
+pswitch.profile.deleted,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_deleted,Profile deleted.,,active
+pswitch.profile.delete_confirm_title,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_delete_confirm_title,Delete profile,,active
+pswitch.profile.delete_confirm_desc,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_delete_confirm_desc,"Delete ""{{name}}""? The app's current-profile marker clears; the snapshot itself is not restored.",,active

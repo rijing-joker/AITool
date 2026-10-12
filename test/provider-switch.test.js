@@ -116,6 +116,24 @@ test("provider-switch store: duplicate copies a provider next to the original (c
   await assert.rejects(() => store.duplicateProvider("claude", "p_missing"), /Provider not found/);
 });
 
+test("provider-switch store: duplicate re-keys the additive slot so the copy cannot alias the source", async () => {
+  const store = require("../src/lib/provider-switch/store");
+
+  const created = await store.createProvider("opencode", {
+    name: "Relay A",
+    category: "custom",
+    settingsConfig: { provider: { npm: "@ai-sdk/openai-compatible", options: { baseURL: "https://a.example.com" } } },
+  });
+  assert.equal(created.settingsConfig.slotKey, "relay-a");
+
+  const copy = await store.duplicateProvider("opencode", created.id);
+  assert.equal(copy.settingsConfig.slotKey, "relay-a-copy", "the copy is re-keyed from '<name> copy'");
+  const copy2 = await store.duplicateProvider("opencode", created.id);
+  assert.equal(copy2.settingsConfig.slotKey, "relay-a-copy-2", "a second copy uniquifies against the first");
+  const reread = (await store.listProviders("opencode")).providers.find((p) => p.id === created.id);
+  assert.equal(reread.settingsConfig.slotKey, "relay-a", "the source keeps its own slot");
+});
+
 // ---------------------------------------------------------------------------
 // Claude projection
 // ---------------------------------------------------------------------------
@@ -636,6 +654,23 @@ test("provider-switch codex auth: ChatGPT workspaces of one user are separate lo
   assert.equal(loggedOut.action, "keep");
   assert.equal(loggedOut.stashNext.logins["sub:same-person|account:ws-plus"], undefined);
   assert.equal(loggedOut.stashNext.last, null);
+
+  // Leaving an official API-key card keeps foreign stash entries: the key row
+  // carries no identity of its own, so there is nothing of the card's to
+  // invalidate, and `last` may point at a login another card still owns.
+  const fromApiKeyCard = targets.resolveCodexAuth({
+    prev: { category: "official", settingsConfig: { auth: { OPENAI_API_KEY: "sk-relay" }, config: {} } },
+    target: { category: "custom", settingsConfig: { auth: null, config: {} } },
+    liveAuth: { OPENAI_API_KEY: "sk-relay" },
+    stash: targets.codexStashPut(targets.emptyCodexStash(), plus),
+  });
+  assert.equal(fromApiKeyCard.action, "stash", "the residue key is cleared on the relay switch");
+  assert.deepEqual(
+    fromApiKeyCard.stashNext.logins["sub:same-person|account:ws-plus"],
+    plus,
+    "the stashed login is not the leaving card's to delete",
+  );
+  assert.equal(fromApiKeyCard.stashNext.last, null);
 });
 
 test("provider-switch codex stash: legacy single-slot files upgrade to workspace identities", async () => {

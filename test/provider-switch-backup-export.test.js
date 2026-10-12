@@ -29,13 +29,15 @@ afterEach(() => {
 });
 
 describe("provider backup export/import", () => {
-  for (const name of ["mcp-servers.json", "prompts.json"]) {
+  for (const name of ["mcp-servers.json", "prompts.json", "skills.json"]) {
     it(`round-trips a backup containing only ${name}`, async () => {
       const root = path.join(homeDir, ".aitool", "provider-switch");
       fs.unlinkSync(path.join(root, "providers.json"));
       const original = name === "mcp-servers.json"
         ? { version: 1, servers: [{ id: "fetch", server: { command: "fetch" }, apps: { codex: true } }] }
-        : { version: 1, apps: { claude: [{ id: "rules", content: "be concise", enabled: false }] } };
+        : name === "skills.json"
+          ? { version: 1, skills: [{ id: "my-skill", name: "my-skill", description: "d", sourceDir: "/skills/my-skill", apps: { claude: true } }] }
+          : { version: 1, apps: { claude: [{ id: "rules", content: "be concise", enabled: false }] } };
       fs.writeFileSync(path.join(root, name), JSON.stringify(original));
       const payload = await backupExport.exportEncrypted(PASS);
       fs.unlinkSync(path.join(root, name));

@@ -177,13 +177,20 @@ export const combineModelAliasEntries = (
   speedEntries: SpeedAliasEntry[],
 ): AliasListEntry[] => {
   const entries = new Map<string, AliasListEntry>();
+  // easy 209e159: entries merge by configuration position, not by content —
+  // a provider may legitimately carry two identical aliases at different
+  // positions, and content-keyed folding turns the losing one into an
+  // invisible-but-active ghost alias. (The original nests these under
+  // `position`; this port flattened them onto the entry.)
   const entryKey = (
-    entry: Pick<ThinkingAliasEntry, "mappingId" | "kind" | "provider" | "sourceModel" | "alias" | "oauthChannel">,
-  ) => (
-    entry.mappingId || [entry.oauthChannel ?? "", entry.kind, entry.provider, entry.sourceModel, entry.alias]
-      .map((value) => value.toLocaleLowerCase())
-      .join("\u0000")
-  );
+    entry: Pick<ThinkingAliasEntry, "mappingId" | "section" | "providerIndex" | "keyIndex" | "modelIndex" | "oauthChannel">,
+  ) => entry.mappingId || JSON.stringify([
+    entry.section ?? null,
+    entry.providerIndex ?? null,
+    entry.keyIndex ?? null,
+    entry.oauthChannel ?? null,
+    entry.modelIndex ?? null,
+  ]);
 
   thinkingEntries.forEach((entry) => {
     entries.set(entryKey(entry), { ...entry, serviceTier: null });
@@ -272,6 +279,7 @@ export const thinkingAliasSourceKindLabel = (kind: string) => {
   if (kind === "vertex-oauth") return "Vertex OAuth";
   if (kind === "kimi-oauth") return "Kimi OAuth";
   if (kind === "xai-oauth") return "xAI OAuth";
+  if (kind === "meta-oauth") return "Meta OAuth";
   if (kind === "devin-oauth") return "Devin OAuth";
   if (kind === "codex-api") return "Codex API";
   if (kind === "claude-api") return "Claude API";

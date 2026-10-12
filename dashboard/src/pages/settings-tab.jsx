@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { RefreshCw } from "lucide-react";
 import { copy } from "../lib/copy";
 import { proxyApi } from "../lib/proxy-api";
 import { Button, Card } from "../ui/components";
@@ -110,6 +111,22 @@ export function SettingsTab({ status, onRefresh, onInstallCore }) {
   useEffect(() => {
     if (typeof status?.core?.autoStart === "boolean") setAutoStart(status.core.autoStart);
   }, [status?.core?.autoStart]);
+
+  // Core update check (easy parity: VersionManagementPage checks on page
+  // entry). A failed check stays invisible — the fetch/update button keeps
+  // working regardless.
+  const [updateCheck, setUpdateCheck] = useState(null);
+  const loadUpdateCheck = useCallback(async () => {
+    try {
+      const data = await proxyApi.coreUpdateCheck();
+      setUpdateCheck(data.update ?? null);
+    } catch {
+      setUpdateCheck(null);
+    }
+  }, []);
+  useEffect(() => {
+    void loadUpdateCheck();
+  }, [loadUpdateCheck]);
   const [yaml, setYaml] = useState(null);
   const [yamlDirty, setYamlDirty] = useState(false);
   const [yamlError, setYamlError] = useState(null);
@@ -331,21 +348,39 @@ export function SettingsTab({ status, onRefresh, onInstallCore }) {
 
       <Card>
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
+          <div className="min-w-0">
             <p className="text-sm font-semibold">{copy("proxy.settings.core")}</p>
             <p className="mt-1 text-xs text-oai-gray-500 dark:text-oai-gray-400">
               {status?.core.version
                 ? copy("proxy.settings.core_version", { version: status.core.version })
                 : !status ? copy("proxy.state.unknown") : copy("proxy.core.missing_hint")}
             </p>
+            {updateCheck ? (
+              <p className={`mt-0.5 text-xs ${updateCheck.hasUpdate ? "font-medium text-amber-600 dark:text-amber-400" : "text-oai-gray-400 dark:text-oai-gray-500"}`}>
+                {updateCheck.hasUpdate
+                  ? copy("proxy.settings.update_available", { latest: updateCheck.latest })
+                  : copy("proxy.settings.up_to_date", { latest: updateCheck.latest })}
+              </p>
+            ) : null}
           </div>
-          <Button
-            variant="secondary"
-            disabled={busyField !== "" || !status}
-            onClick={onInstallCore}
-          >
-            {copy("proxy.settings.fetch_core")}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => void loadUpdateCheck()}
+              title={copy("proxy.settings.update_recheck")}
+              aria-label={copy("proxy.settings.update_recheck")}
+            >
+              <RefreshCw className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="secondary"
+              disabled={busyField !== "" || !status}
+              onClick={onInstallCore}
+            >
+              {copy("proxy.settings.fetch_core")}
+            </Button>
+          </div>
         </div>
       </Card>
 

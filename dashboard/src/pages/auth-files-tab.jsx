@@ -28,6 +28,7 @@ import { getLocalApiAuthHeaders } from "../lib/local-api-auth";
 import { managementApi } from "../lib/easy-providers";
 import {
   authFileName,
+  authFileCooldownResetIndex,
   authFileHealth,
   authFileRequestStats,
   cooldownReasonKey,
@@ -45,6 +46,7 @@ import {
   providerKeyForFile,
   providerLabelForFile,
   requestRateColor,
+  resetAuthFileCooldown,
   saveAuthFileSettings,
   saveOAuthModelSettings,
   setOAuthModelsExcluded,
@@ -179,12 +181,13 @@ function formatDuration(seconds) {
   return copy("proxy.creds.health.hours", { count: Math.ceil(seconds / 3600) });
 }
 
-function CredentialHealthStatus({ file, receivedAtMs, observedAt }) {
+function CredentialHealthStatus({ file, receivedAtMs, observedAt, onReset, resetting = false }) {
   const snapshot = useMemo(
     () => normalizeAuthFileCooldowns(file.cooldowns, receivedAtMs, observedAt),
     [file, receivedAtMs, observedAt],
   );
   const hasTimers = Boolean(snapshot?.records?.length);
+  const resetDisabled = onReset !== undefined && authFileCooldownResetIndex(file) === undefined;
   const nowMs = useSyncExternalStore(
     hasTimers ? subscribeClock : (listener) => {
       listener();
@@ -280,7 +283,8 @@ function CredentialHealthStatus({ file, receivedAtMs, observedAt }) {
     return <div className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-sm ${toneClass}`}>{summary}</div>;
   }
   return (
-    <details className={`rounded-lg border px-3 py-2 text-sm ${toneClass}`}>
+    <div className="space-y-1.5">
+      <details className={`rounded-lg border px-3 py-2 text-sm ${toneClass}`}>
       <summary className="flex cursor-pointer items-start gap-2 marker:content-none [&::-webkit-details-marker]:hidden">{summary}</summary>
       <div className="mt-2 space-y-2 border-t border-current/20 pt-2 text-xs">
         {cooldown.rows.length && !healthy ? (
@@ -324,7 +328,23 @@ function CredentialHealthStatus({ file, receivedAtMs, observedAt }) {
           <p className="text-oai-gray-500 dark:text-oai-gray-400">{copy("proxy.creds.health.note")}</p>
         ) : null}
       </div>
-    </details>
+      </details>
+      {hasTimers && onReset ? (
+        <div className="mt-1.5 flex items-center justify-between gap-2 text-xs">
+          <span className="text-oai-gray-500 dark:text-oai-gray-400">{copy("proxy.creds.cooldown.resetHint")}</span>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={onReset}
+            disabled={resetDisabled || resetting}
+            title={copy("proxy.creds.cooldown.resetHint")}
+          >
+            {resetting ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+            {copy(resetting ? "proxy.creds.cooldown.resetting" : "proxy.creds.cooldown.resetButton")}
+          </Button>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -1007,6 +1027,8 @@ export function AuthFilesTab({ onDirty }) {
   const [modelViewName, setModelViewName] = useState(null);
   const [oauthModelTarget, setOauthModelTarget] = useState(null);
   const [deleteFile, setDeleteFile] = useState(null);
+  const [cooldownResetFile, setCooldownResetFile] = useState(null);
+  const [cooldownResetting, setCooldownResetting] = useState(false);
   const [copied, setCopied] = useState("");
   const fileInputRef = useRef(null);
   const vertexInputRef = useRef(null);
@@ -1184,6 +1206,31 @@ export function AuthFilesTab({ onDirty }) {
     }
   };
 
+  // Cooldown reset (easy parity: AuthFileManagementPage resetCooldown). The
+  // core acknowledges by auth_index; the card's timers clear optimistically
+  // and the list reload restores authoritative health afterwards.
+  const confirmCooldownReset = async (file) => {
+    const index = authFileCooldownResetIndex(file);
+    if (!index) return;
+    const name = authFileName(file);
+    setCooldownResetting(true);
+    setError("");
+    try {
+      await resetAuthFileCooldown(index);
+      setSnapshot((current) => ({
+        ...current,
+        files: current.files.map((item) => (authFileCooldownResetIndex(item) === index ? { ...item, cooldowns: [] } : item)),
+      }));
+      showToast(copy("proxy.creds.cooldown.resetSuccess", { name }), "success");
+      await loadFiles(false);
+    } catch (requestError) {
+      setError(String(requestError));
+    } finally {
+      setCooldownResetting(false);
+      setCooldownResetFile(null);
+    }
+  };
+
   const openAuthFilesDirectory = async () => {
     setBusy(true);
     setError("");
@@ -1357,7 +1404,13 @@ export function AuthFilesTab({ onDirty }) {
                     <p className="mt-1 truncate font-mono text-xs text-oai-gray-400 dark:text-oai-gray-500" title={name}>{name}</p>
                   ) : null}
                   <div className="mt-2.5">
-                    <CredentialHealthStatus file={file} receivedAtMs={receivedAtMs} observedAt={observedAt} />
+                    <CredentialHealthStatus
+                      file={file}
+                      receivedAtMs={receivedAtMs}
+                      observedAt={observedAt}
+                      onReset={busy ? undefined : () => setCooldownResetFile(file)}
+                      resetting={cooldownResetting}
+                    />
                   </div>
                   <div className="mt-2.5">
                     <CredentialRequestTimeline file={file} />
@@ -1498,6 +1551,16 @@ export function AuthFilesTab({ onDirty }) {
         busy={busy}
         onConfirm={() => void confirmDelete(deleteFile)}
         onCancel={() => setDeleteFile(null)}
+      />
+
+      <ConfirmModal
+        open={cooldownResetFile !== null}
+        title={copy("proxy.creds.cooldown.resetTitle")}
+        description={copy("proxy.creds.cooldown.resetConfirm", { name: cooldownResetFile ? authFileName(cooldownResetFile) : "" })}
+        confirmLabel={copy("proxy.creds.cooldown.resetButton")}
+        busy={cooldownResetting}
+        onConfirm={() => void confirmCooldownReset(cooldownResetFile)}
+        onCancel={() => setCooldownResetFile(null)}
       />
     </div>
   );

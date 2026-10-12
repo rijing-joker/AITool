@@ -190,7 +190,11 @@ function computeOverview(rows) {
     success_count: success.length,
     failure_count: failed.length,
     canceled_count: canceled.length,
-    success_rate: rows.length ? Number(((success.length / rows.length) * 100).toFixed(2)) : null,
+    // easy 88d5852 semantics: canceled requests are not provider failures, so
+    // they stay out of the denominator; no completed requests means no rate.
+    success_rate: success.length + failed.length
+      ? Number(((success.length / (success.length + failed.length)) * 100).toFixed(2))
+      : null,
     input_tokens: sumTokens(success, "inputTokens"),
     output_tokens: sumTokens(success, "outputTokens"),
     reasoning_tokens: sumTokens(success, "reasoningTokens"),
@@ -198,7 +202,7 @@ function computeOverview(rows) {
     cache_creation_tokens: sumTokens(success, "cacheCreationTokens"),
     total_tokens: sumTokens(success, "totalTokens"),
     rpm: Number((recentWindow.length / 5).toFixed(2)),
-    tpm: sumTokens(recentWindow, "totalTokens"),
+    tpm: Number((sumTokens(recentWindow, "totalTokens") / 5).toFixed(2)),
     average_latency_ms: latencies.length
       ? Number((latencies.reduce((a, b) => a + b, 0) / latencies.length).toFixed(1))
       : null,
@@ -216,7 +220,10 @@ const providerHealth = require("./provider-health");
 const balance = require("./balance");
 const budget = require("./budget");
 
-const REMARK_SECTIONS = new Set(["gemini-api-key", "codex-api-key", "claude-api-key", "openai-compatibility"]);
+const REMARK_SECTIONS = new Set([
+  "gemini-api-key", "interactions-api-key", "vertex-api-key", "codex-api-key",
+  "claude-api-key", "xai-api-key", "meta-api-key", "openai-compatibility",
+]);
 
 function truncateForError(text) {
   const trimmed = String(text ?? "").trim();
@@ -409,6 +416,21 @@ async function handleProxyApiRequest(req, res, url, ctx) {
       json(res, { ok: true, result });
       return true;
     }
+    if (p === "/api/proxy/restart" && method === "POST") {
+      if (!requireMutation()) return true;
+      bridge.stopBridge();
+      let result;
+      try {
+        result = await manager.restart();
+      } finally {
+        // A failed restart (install error, startup timeout, port dispute)
+        // must not leave the usage bridge down with nothing polling the
+        // core back up — same recovery contract as the install flow.
+        bridge.startBridge();
+      }
+      json(res, { ok: true, result, bridge: bridge.bridgeStatus() });
+      return true;
+    }
     if (p === "/api/proxy/install" && method === "POST") {
       if (!requireMutation()) return true;
       // Starts the background install task (EasyCLIProxyAPI's stop-and-update
@@ -423,6 +445,20 @@ async function handleProxyApiRequest(req, res, url, ctx) {
     }
     if (p === "/api/proxy/install" && method === "GET") {
       json(res, { ok: true, task: coreInstall().snapshot() });
+      return true;
+    }
+    if (p === "/api/proxy/core-update" && method === "GET") {
+      // Update check for the settings page (original: checks on page entry +
+      // a manual button). Resolves GitCode → GitHub latest and compares with
+      // the installed version; failures surface as ok:false, the page stays
+      // quiet about them.
+      try {
+        const fetchCoreModule = require("../../../scripts/fetch-core.cjs");
+        const update = await fetchCoreModule.checkUpdate({ signal: AbortSignal.timeout(15_000) });
+        json(res, { ok: true, update });
+      } catch (error) {
+        json(res, { ok: false, error: error?.message || String(error) });
+      }
       return true;
     }
     if (p === "/api/proxy/install/cancel" && method === "POST") {

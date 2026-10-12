@@ -1,7 +1,7 @@
 import React from "react";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { providerGroupsApi } from "../lib/easy-providers";
+import { checkProviderModelHealth, fetchModels, providerGroupsApi } from "../lib/easy-providers";
 import { UpstreamsTab } from "./upstreams-tab";
 
 // Smoke render for the upstreams tab: the batch-health runner references
@@ -23,6 +23,7 @@ vi.mock("../lib/easy-providers", async (importOriginal) => {
     resolveApiAccessRemarks: vi.fn(async () => []),
     managementApi: { request: vi.fn(async () => ({})), put: vi.fn(async () => ({})) },
     fetchModels: vi.fn(async () => MODEL_CATALOG),
+    checkProviderModelHealth: vi.fn(async () => ({ success: true, firstTokenLatencyMs: 10 })),
   };
 });
 
@@ -127,4 +128,57 @@ it("keeps the model-name field a plain input before any catalog was fetched", as
   fireEvent.change(inputs[0], { target: { value: "custom-name" } });
   expect(inputs[0]).toHaveValue("custom-name");
   expect(screen.queryByRole("listbox", { name: NAME_LABEL })).toBeNull();
+});
+
+async function openProviderEditDialog(section, label, record) {
+  providerGroupsApi.get.mockImplementation(async (query) => {
+    return query === section ? [record] : [];
+  });
+  render(<UpstreamsTab />);
+  fireEvent.click(await screen.findByRole("button", { name: new RegExp(`proxy\\.upstream\\.provider\\.${label}`) }));
+  fireEvent.click(await screen.findByRole("button", { name: "proxy.upstream.common.edit" }));
+}
+
+it.each(["interactions", "vertex", "xai", "meta"])("discovers models using the %s protocol", async (provider) => {
+  await openProviderEditDialog(`${provider}-api-key`, provider, {
+    name: "New provider", keys: [{ "api-key": "fixture-key" }], models: [{ name: "fixture-model" }],
+  });
+  fireEvent.click(await screen.findByRole("button", { name: "proxy.upstream.models.fetch" }));
+  await waitFor(() => expect(fetchModels).toHaveBeenCalledWith(provider, "", "fixture-key", undefined, {}, undefined, ""));
+});
+
+it.each([
+  ["http://key.test:8001", "http://key.test:8001"],
+  [null, "http://group.test:8000"],
+  ["", ""],
+])("discovers models with the selected key's proxy override %s", async (override, expected) => {
+  await openProviderEditDialog("openai-compatibility", "openaiCompat", {
+    name: "Proxy group", "base-url": "https://example.test/v1", "proxy-url": "http://group.test:8000",
+    keys: [{ "api-key": "first-key", "proxy-url": "http://first.test:8002" }, { "api-key": "selected-key", "proxy-url": override }],
+    models: [{ name: "fixture-model" }],
+  });
+  const keySelect = await screen.findByLabelText("proxy.upstream.groups.discoveryKey");
+  fireEvent.change(keySelect, { target: { value: keySelect.options[1].value } });
+  fireEvent.click(screen.getByRole("button", { name: "proxy.upstream.models.fetch" }));
+  await waitFor(() => expect(fetchModels).toHaveBeenCalledWith("openai", "https://example.test/v1", "selected-key", undefined, {}, undefined, expected));
+});
+
+it("uses the chosen credential's proxy, headers and models for batch health checks", async () => {
+  const record = {
+    name: "Proxy group", "base-url": "https://example.test/v1", "proxy-url": "http://group.test:8000",
+    models: [{ name: "group-model" }], headers: { "x-group": "group" },
+    keys: [{ "api-key": "selected-key", "proxy-url": "http://key.test:8001", "auth-index": "key-index",
+      headers: { "x-key": "key" }, models: [{ name: "key-model" }] }],
+  };
+  providerGroupsApi.get.mockImplementation(async (section) => {
+    return section === "codex-api-key" ? [record] : [];
+  });
+  render(<UpstreamsTab />);
+  const check = await screen.findByRole("button", { name: "proxy.upstream.batch.action" });
+  await waitFor(() => expect(check).not.toBeDisabled());
+  fireEvent.click(check);
+  await waitFor(() => expect(checkProviderModelHealth).toHaveBeenCalledWith(expect.objectContaining({
+    provider: "codex", apiKeys: ["selected-key"], authIndex: "key-index", customHeaders: { "x-key": "key" },
+    proxyUrl: "http://key.test:8001",
+  }), "key-model"));
 });

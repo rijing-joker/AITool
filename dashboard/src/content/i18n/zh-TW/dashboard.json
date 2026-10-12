@@ -1990,5 +1990,21 @@
   "pswitch.profile.deleted": "設定檔已刪除。",
   "pswitch.profile.delete_confirm_title": "刪除設定檔",
   "pswitch.profile.delete_confirm_desc": "刪除「{{name}}」？該應用的目前設定檔標記會清除，快照本身不會被還原。",
-  "pswitch.universal.added_but_sync_failed": "統一供應商已新增，但同步失敗。"
+  "pswitch.universal.added_but_sync_failed": "統一供應商已新增，但同步失敗。",
+  "proxy.action.restart": "重新啟動",
+  "proxy.settings.update_available": "發現新版本：v{{latest}}",
+  "proxy.settings.up_to_date": "已是最新（最新版 v{{latest}}）",
+  "proxy.settings.update_recheck": "重新檢查核心更新",
+  "proxy.creds.cooldown.resetHint": "清除此憑證的本機路由冷卻狀態",
+  "proxy.creds.cooldown.resetButton": "清除冷卻",
+  "proxy.creds.cooldown.resetting": "正在清除…",
+  "proxy.creds.cooldown.resetTitle": "清除憑證冷卻？",
+  "proxy.creds.cooldown.resetConfirm": "確定清除「{{name}}」的本機路由冷卻狀態嗎？清除後此憑證可能立即再次參與請求，但不會恢復上游額度。",
+  "proxy.creds.cooldown.resetSuccess": "已清除 {{name}} 的冷卻狀態。",
+  "proxy.creds.cooldown.missingIndex": "憑證缺少有效的驗證索引，無法清除冷卻。請重新整理列表後重試。",
+  "proxy.creds.cooldown.invalidResponse": "核心未傳回有效的清除結果，請重新整理列表確認冷卻狀態。",
+  "proxy.upstream.provider.interactions": "Gemini Interactions",
+  "proxy.upstream.provider.vertex": "Vertex AI",
+  "proxy.upstream.provider.xai": "xAI",
+  "proxy.upstream.provider.meta": "Meta"
 }

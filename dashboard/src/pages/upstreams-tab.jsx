@@ -18,11 +18,13 @@ import { CSS as DndCss } from "@dnd-kit/utilities";
 import {
   AlertTriangle,
   ArrowRight,
+  Bot,
   Boxes,
   Check,
   Edit3,
   Feather,
   GripVertical,
+  Layers,
   LoaderCircle,
   Plus,
   RefreshCw,
@@ -112,6 +114,10 @@ const CATEGORY_LABEL_KEYS = {
   "deepseek": "proxy.upstream.provider.deepseek",
   "claude-api-key": "proxy.upstream.provider.claude",
   "gemini-api-key": "proxy.upstream.provider.gemini",
+  "interactions-api-key": "proxy.upstream.provider.interactions",
+  "vertex-api-key": "proxy.upstream.provider.vertex",
+  "xai-api-key": "proxy.upstream.provider.xai",
+  "meta-api-key": "proxy.upstream.provider.meta",
 };
 
 const CATEGORY_ICONS = {
@@ -120,6 +126,10 @@ const CATEGORY_ICONS = {
   "deepseek": Waves,
   "claude-api-key": Feather,
   "gemini-api-key": Sparkles,
+  "interactions-api-key": Sparkles,
+  "vertex-api-key": Layers,
+  "xai-api-key": Zap,
+  "meta-api-key": Bot,
 };
 
 function UpstreamSwitch({ checked, onChange, disabled, title, label }) {
@@ -341,8 +351,10 @@ export function UpstreamsTab() {
         const row = allRows[nextIndex];
         nextIndex += 1;
         const identity = providerHealthIdentity(row);
-        const model = row.models.find((option) => option.name?.trim())?.name ?? "";
         const key = primaryProviderHealthCredential(row.apiKeys);
+        const selectedKey = providerGroupKeys(row.record).find((entry) => readString(entry, "api-key").trim() === key);
+        const record = selectedKey ? effectiveProviderKey(row.record, selectedKey) : row.record;
+        const model = modelsFromRecord(record.models).find((option) => option.name?.trim())?.name ?? "";
         if (!key || !model) {
           setBatchResults((current) => ({
             ...current,
@@ -351,12 +363,13 @@ export function UpstreamsTab() {
         } else {
           setBatchResults((current) => ({ ...current, [identity]: { status: "checking" } }));
           const result = await checkProviderModelHealth({
-            provider: providerModelType(row.section, row.record),
+            provider: providerModelType(row.section, record),
             baseUrl: row.baseUrl,
-            apiKeys: row.apiKeys,
-            authIndex: row.authIndex,
-            customHeaders: providerHeadersFromRecord(row.record),
+            apiKeys: [key],
+            authIndex: selectedKey ? readString(selectedKey, "auth-index", "authIndex", "auth_index") : row.authIndex,
+            customHeaders: providerHeadersFromRecord(record),
             timeoutMs: PROVIDER_HEALTH_TIMEOUT_MS,
+            proxyUrl: readString(record, "proxy-url"),
           }, model);
           if (controller.signal.aborted) return;
           let balance = null;
@@ -544,14 +557,19 @@ export function UpstreamsTab() {
         let fetchedModels;
         try {
           const firstKey = grouped ? preparedDraft.groupKeys?.[0] : null;
+          const connection = firstKey
+            ? effectiveProviderKey({ headers: providerHeaders, "proxy-url": proxyUrl }, serializeProviderKey(firstKey))
+            : null;
           fetchedModels = await fetchModels(
             "openai",
             baseUrl,
             parsedApiKeys[0],
             grouped ? undefined : editingRow?.authIndex,
-            firstKey
-              ? providerHeadersFromRecord(effectiveProviderKey({ headers: providerHeaders }, serializeProviderKey(firstKey)))
+            connection
+              ? providerHeadersFromRecord(connection)
               : providerHeaders,
+            undefined,
+            connection ? readString(connection, "proxy-url") : proxyUrl,
           );
           if (fetchedModels.length === 0) {
             throw new Error(copy("proxy.upstream.error.noModels"));
@@ -1303,7 +1321,7 @@ function UpstreamFormDialog({
 
   const updateTextField = (field, value) => {
     setFormError("");
-    if (field === "apiKey" || field === "baseUrl" || field === "headersText") {
+    if (field === "apiKey" || field === "baseUrl" || field === "headersText" || field === "proxyUrl") {
       discoveryRequestRef.current += 1;
       setModelLoading(false);
       setModelError("");
@@ -1389,16 +1407,10 @@ function UpstreamFormDialog({
     try {
       const provider = activeCategory === "deepseek"
         ? "deepseek"
-        : definition.section === "gemini-api-key"
-          ? "gemini"
-          : definition.section === "claude-api-key"
-            ? "claude"
-            : definition.section === "codex-api-key"
-              ? "codex"
-              : "openai";
+        : providerModelType(definition.section);
       const selectedKey = draft.groupKeys?.find((key) => key.id === discoveryKeyId) ?? draft.groupKeys?.[0];
       const connection = selectedKey
-        ? effectiveProviderKey({ headers: parseProviderHeaders(draft.headersText ?? "") }, serializeProviderKey(selectedKey))
+        ? effectiveProviderKey({ headers: parseProviderHeaders(draft.headersText ?? ""), "proxy-url": draft.proxyUrl }, serializeProviderKey(selectedKey))
         : null;
       const modelApiKey = connection
         ? readString(connection, "api-key")
@@ -1413,6 +1425,8 @@ function UpstreamFormDialog({
         connection
           ? providerHeadersFromRecord(connection)
           : parseProviderHeaders(draft.headersText ?? ""),
+        undefined,
+        connection ? readString(connection, "proxy-url") : draft.proxyUrl,
       );
       if (requestId !== discoveryRequestRef.current) return;
       const models = applyProviderPreset(
@@ -2044,6 +2058,7 @@ function UpstreamHealthDialog({ row, onClose, keySelector }) {
     authIndex: row.authIndex,
     customHeaders: providerHeadersFromRecord(row.record),
     timeoutMs: PROVIDER_HEALTH_TIMEOUT_MS,
+    proxyUrl: readString(row.record, "proxy-url"),
   }), [row]);
 
   useEffect(() => {
@@ -2057,6 +2072,7 @@ function UpstreamHealthDialog({ row, onClose, keySelector }) {
       healthOptions.authIndex,
       healthOptions.customHeaders,
       healthOptions.timeoutMs,
+      healthOptions.proxyUrl,
     ).then((discovered) => {
       if (!disposed) setModels(mergeProviderHealthModels(discovered, row.models));
     }).catch((requestError) => {

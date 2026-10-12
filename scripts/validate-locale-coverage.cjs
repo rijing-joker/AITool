@@ -47,7 +47,7 @@ const SOURCE_IDENTICAL_KEY_ALLOWLIST = [
   // AI Proxy tabs: protocol/units/field names that stay verbatim in zh/zh-TW.
   /^proxy[.]metric[.](?:rpm|tpm)$/,
   /^proxy[.]settings[.]config$/,
-  /^proxy[.]upstream[.]provider[.](?:codex|deepseek|claude|gemini)$/,
+  /^proxy[.]upstream[.]provider[.](?:codex|deepseek|claude|gemini|interactions|vertex|xai|meta)$/,
   /^proxy[.]upstream[.]field[.]baseUrl$/,
   /^proxy[.]creds[.]settings[.]websockets$/,
   /^proxy[.]creds[.]models[.]rulesPlaceholder$/,

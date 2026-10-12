@@ -5,7 +5,7 @@
 
 const MAX_STREAM_BYTES = 256 * 1024;
 const MAX_PROBE_CONCURRENCY = 4;
-const SUPPORTED_PROTOCOLS = new Set(["openai-chat", "openai-responses", "claude", "gemini"]);
+const SUPPORTED_PROTOCOLS = new Set(["openai-chat", "openai-responses", "claude", "gemini", "interactions"]);
 
 let activeProbes = 0;
 const waiters = [];
@@ -64,6 +64,17 @@ function jsonHasText(protocol, value) {
       return (value.candidates ?? []).some((candidate) =>
         (candidate?.content?.parts ?? []).some((part) => hasText(part?.text)),
       );
+    case "interactions": {
+      // easy provider_health.rs: the Gemini Interactions API emits typed events.
+      const event = value.event_type ?? value.type;
+      if (event === "content.delta") {
+        return value?.delta?.type === "text" && hasText(value?.delta?.text);
+      }
+      if (event === "interaction.complete") {
+        return value?.interaction?.status === "completed" && hasText(value?.interaction?.outputs);
+      }
+      return false;
+    }
     default:
       return false;
   }
@@ -100,7 +111,12 @@ function geminiTerminalSuccess(value) {
 }
 
 function streamHasTerminalSuccess(protocol, buffer) {
-  if (protocol !== "gemini") return false;
+  if (protocol !== "gemini" && protocol !== "interactions") return false;
+  if (protocol === "interactions") {
+    return sseJsonEvents(buffer.toString("utf8")).some((value) =>
+      (value.event_type ?? value.type) === "interaction.complete"
+      && value?.interaction?.status === "completed");
+  }
   return sseJsonEvents(buffer.toString("utf8")).some(geminiTerminalSuccess);
 }
 
@@ -111,9 +127,9 @@ function isStreamingContentType(contentType) {
     || lowered.includes("application/json-seq");
 }
 
-// request: { url, header, data, protocol, timeoutMs } (EasyCLIProxyAPI shape).
-// `model`/`source`/`authIndex` are accepted for shape parity; they only feed
-// the Rust side's local usage log, which AiTool does not keep.
+// request: { url, header, data, protocol, timeoutMs, proxyUrl } (EasyCLIProxyAPI
+// shape). `model`/`source`/`authIndex` are accepted for shape parity; they only
+// feed the Rust side's local usage log, which AiTool does not keep.
 async function probe(request) {
   const url = String(request?.url || "").trim();
   let parsed;
@@ -134,6 +150,28 @@ async function probe(request) {
     throw new Error("Health check request body is too large");
   }
   const timeoutMs = Math.min(120_000, Math.max(1_000, Number(request?.timeoutMs) || 15_000));
+  // easy parity (provider_health.rs): probes traverse the provider's
+  // proxy-url so the result reflects the route real requests take. undici's
+  // ProxyAgent speaks HTTP(S) proxies only — a socks5 record fails loudly
+  // instead of silently probing around the proxy (model discovery via the
+  // core's api-call still handles socks).
+  const proxyUrl = String(request?.proxyUrl || "").trim();
+  const direct = /^(direct|none)$/i.test(proxyUrl);
+  let dispatcher = null;
+  let doFetch = fetch;
+  if (proxyUrl && !direct && !/^https?:/i.test(proxyUrl)) {
+    throw new Error(`Health checks support only http(s) proxy URLs, got: ${proxyUrl}`);
+  }
+  if (proxyUrl) {
+    // undici's own fetch must carry the dispatcher: the global fetch pairs
+    // badly with npm-undici dispatchers (rejected with UND_ERR_INVALID_ARG
+    // on current runtimes) — same rule proxy-env.js follows for its
+    // connectivity test.
+    const { Agent, ProxyAgent, fetch: undiciFetch } = require("undici");
+    // Explicit direct routing must bypass the app's global proxy dispatcher.
+    dispatcher = direct ? new Agent() : new ProxyAgent(proxyUrl);
+    doFetch = undiciFetch;
+  }
 
   await acquireSlot();
   const controller = new AbortController();
@@ -143,11 +181,12 @@ async function probe(request) {
   try {
     let response;
     try {
-      response = await fetch(parsed, {
+      response = await doFetch(parsed, {
         method: "POST",
         headers: { ...(request?.header || {}) },
         body: data,
         signal: controller.signal,
+        ...(dispatcher ? { dispatcher } : {}),
       });
     } catch (error) {
       throw new Error(`Health check request failed: ${error?.cause?.code || error?.message || error}`);
@@ -188,6 +227,9 @@ async function probe(request) {
     controller.abort();
     if (reader) await reader.cancel().catch(() => {});
     clearTimeout(timer);
+    // 68b031797 made probe cleanup unconditional — the dispatcher's
+    // keep-alive pool belongs in the same finally.
+    if (dispatcher) await dispatcher.close().catch(() => {});
     releaseSlot();
   }
 }

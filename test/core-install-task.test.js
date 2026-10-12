@@ -15,6 +15,10 @@ function makeFakes({ running = false, installed = "8.0.8", failDownload = false 
   const state = { running, installed };
   const fetchCoreModule = {
     installedVersion: () => state.installed,
+    compareCoreVersions: (left, right) => {
+      const strip = (value) => String(value ?? "").trim().replace(/^v/, "");
+      return strip(left) === strip(right) ? 0 : strip(left) > strip(right) ? 1 : -1;
+    },
     resolveRelease: async ({ signal } = {}) => {
       log.push("resolve");
       if (signal?.aborted) throw ABORT();
@@ -35,6 +39,7 @@ function makeFakes({ running = false, installed = "8.0.8", failDownload = false 
   const manager = {
     readPid: () => 4242,
     pidAlive: () => state.running,
+    managedCoreAlive: async () => state.running,
     stop: async () => {
       log.push("stop");
       state.running = false;

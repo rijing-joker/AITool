@@ -31,8 +31,9 @@ function createCoreInstallService({ manager, bridge, fetchCoreModule }) {
   }
 
   async function coreRunning() {
-    const pid = manager.readPid();
-    return manager.pidAlive(pid);
+    // Identity-verified: a recycled PID holding the pid file must not pause
+    // installs (or count as "running") when our core is actually down.
+    return manager.managedCoreAlive(manager.readPid());
   }
 
   // The task stays active until the proxy is usable again. A restart failure
@@ -59,7 +60,13 @@ function createCoreInstallService({ manager, bridge, fetchCoreModule }) {
       const wasRunning = await coreRunning();
       const release = await fetchCoreModule.resolveRelease({ signal });
       signal.throwIfAborted();
-      if (!force && manager.binaryExists() && fetchCoreModule.installedVersion() === release.version) {
+      // Same or newer installed version skips the install; an unparseable
+      // one (local build) still installs on request — never a silent
+      // downgrade.
+      const comparison = !force && manager.binaryExists()
+        ? fetchCoreModule.compareCoreVersions(release.version, fetchCoreModule.installedVersion())
+        : null;
+      if (comparison !== null && comparison <= 0) {
         task.result = { skipped: true, version: release.version, path: paths.binPath, source: "already-installed" };
         applyProgress({ phase: "complete" });
       } else {

@@ -18,7 +18,7 @@ function binaryExists() {
 function readPid() {
   try {
     const pid = Number(fs.readFileSync(paths.pidPath, "utf8").trim());
-    return Number.isFinite(pid) && pid > 0 ? pid : null;
+    return Number.isSafeInteger(pid) && pid > 0 ? pid : null;
   } catch {
     return null;
   }
@@ -36,7 +36,7 @@ function clearPid() {
 }
 
 function pidAlive(pid) {
-  if (!pid) return false;
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
   try {
     // signal 0 → existence probe; EPERM still means "alive".
     process.kill(pid, 0);
@@ -44,6 +44,52 @@ function pidAlive(pid) {
   } catch (error) {
     return error?.code === "EPERM";
   }
+}
+
+// A recycled PID must never let us signal an unrelated process, so before
+// killing (or adopting) a pid-file PID its identity is verified like the
+// original does by executable path (EasyCLIProxyAPI core_runtime.rs). Our
+// core always runs as `<binPath> -config <configPath>`, and matching the
+// config path keeps hands off same-binary cores pointed at another config
+// (e.g. a separate install on this machine).
+async function managedCoreAlive(pid, { platform = process.platform, execFileImpl = execFile } = {}) {
+  if (!pid || !pidAlive(pid)) return false;
+  if (platform === "linux") {
+    // NUL-delimited arguments preserve paths containing spaces and distinguish
+    // config.yaml from config.yaml.bak. This also works without ps installed.
+    try {
+      const args = fs.readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0");
+      return args[0] === paths.binPath
+        && args.some((arg, index) => arg === "-config" && args[index + 1] === paths.configPath);
+    } catch (error) {
+      if ((error.code === "ENOENT" || error.code === "ESRCH") && !pidAlive(pid)) return false;
+    }
+  }
+  const windows = platform === "win32";
+  const result = await new Promise((resolve) => {
+    const executable = windows ? "powershell.exe" : "ps";
+    const args = windows
+      ? ["-NoProfile", "-NonInteractive", "-Command", `$ErrorActionPreference = 'Stop'; Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}' | Select-Object ExecutablePath,CommandLine | ConvertTo-Json -Compress`]
+      : ["-ww", "-p", String(pid), "-o", "command="];
+    execFileImpl(executable, args, { timeout: 5_000, windowsHide: true }, (error, stdout) => resolve({ error, stdout }));
+  });
+  if (!windows && result.error?.code === 1) return false;
+  if (result.error) throw new Error(`Cannot verify core process ${pid}: ${result.error.message}`);
+  let command = String(result.stdout || "").trim();
+  if (windows) {
+    if (!command) return false;
+    let info;
+    try { info = JSON.parse(command); } catch {}
+    if (!info?.ExecutablePath || !info?.CommandLine) throw new Error(`Cannot verify core process ${pid}`);
+    if (info.ExecutablePath.toLowerCase() !== paths.binPath.toLowerCase()) return false;
+    command = info.CommandLine.trim();
+  }
+  if (!command) throw new Error(`Cannot verify core process ${pid}`);
+  // ps/Windows flatten arguments. Match the complete launch command, allowing
+  // quotes around paths, never a substring from an editor or another config.
+  return [paths.binPath, `"${paths.binPath}"`].some((binary) =>
+    [paths.configPath, `"${paths.configPath}"`].some((configPath) =>
+      command === `${binary} -config ${configPath}`));
 }
 
 let versionCache = null;
@@ -136,7 +182,7 @@ async function start() {
   }
 
   const existingPid = readPid();
-  if (pidAlive(existingPid)) {
+  if (await managedCoreAlive(existingPid)) {
     return { started: false, alreadyRunning: true, pid: existingPid };
   }
   clearPid();
@@ -149,11 +195,12 @@ async function start() {
     return { started: false, alreadyRunning: true, pid: null, external: true };
   }
   if (probe.reachable && probe.authError) {
-    // Our own stale instance (pid file still alive) was started with an older
-    // key — recycle it so the reconciled config takes effect. A foreign core
-    // (no pid file) is not ours to kill.
+    // Our own stale instance (verified by command line) was started with an
+    // older key — recycle it so the reconciled config takes effect. A foreign
+    // core (no pid file, or a recycled PID we cannot identify) is not ours to
+    // kill.
     const stalePid = readPid();
-    if (stalePid && pidAlive(stalePid)) {
+    if (await managedCoreAlive(stalePid)) {
       await stop();
       await new Promise((resolve) => setTimeout(resolve, 500));
     } else {
@@ -192,7 +239,9 @@ async function start() {
 
 async function stop() {
   const pid = readPid();
-  if (!pid || !pidAlive(pid)) {
+  if (!(await managedCoreAlive(pid))) {
+    // Nothing to stop, or the PID was recycled by a process that is not our
+    // core — drop the stale pid file and never signal it.
     clearPid();
     return { stopped: false, running: false };
   }
@@ -215,7 +264,7 @@ async function stop() {
 async function status() {
   const binaryVersion = await readBinaryVersion();
   const pid = readPid();
-  const running = pidAlive(pid);
+  const running = await managedCoreAlive(pid);
   const probe = running ? await management.ping() : { reachable: false };
   const settings = config.readSettings();
   return {
@@ -235,14 +284,24 @@ async function status() {
   };
 }
 
+// easy parity (Kernel.tsx restart_core_process): one action that recycles the
+// core. The usage bridge goes down with it and the caller brings it back once
+// the start handshake succeeds.
+async function restart() {
+  await stop();
+  return start();
+}
+
 module.exports = {
   binaryExists,
   installCore,
   installFromRepo,
   start,
   stop,
+  restart,
   status,
   readPid,
   pidAlive,
+  managedCoreAlive,
   readBinaryVersion,
 };

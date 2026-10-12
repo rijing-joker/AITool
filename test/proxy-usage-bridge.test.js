@@ -182,6 +182,40 @@ test("proxy overview and request list exclude legacy notifications before repair
   }
 });
 
+test("overview headline excludes canceled requests from the success rate", async (t) => {
+  const f = fixture(t);
+  writeHistory(f, [zeroRequest, { ...zeroRequest, failed: true }, { ...zeroRequest, canceled: true }]);
+  let result;
+  await handleProxyApiRequest({ method: "GET" }, {
+    writeHead(status) { assert.equal(status, 200); },
+    end(body) { result = JSON.parse(body); },
+  }, new URL("http://localhost/api/proxy/usage/overview"), {});
+  // easy 88d5852 semantics: a cancellation is not a provider failure, so it
+  // stays out of the denominator (1 success / (1 success + 1 failure)).
+  assert.equal(result.overview.success_rate, 50);
+});
+
+test("overview headline drops the success rate without completions and averages tpm over the window", async (t) => {
+  const f = fixture(t);
+  const recent = new Date(Date.now() - 60_000).toISOString();
+  const stale = new Date(Date.now() - 10 * 60_000).toISOString();
+  writeHistory(f, [
+    { ...zeroRequest, canceled: true },
+    { ...zeroRequest, timestamp: recent, canceled: true, tokens: { totalTokens: 10 } },
+    { ...zeroRequest, timestamp: stale, canceled: true, tokens: { totalTokens: 1000 } },
+  ]);
+  let result;
+  await handleProxyApiRequest({ method: "GET" }, {
+    writeHead(status) { assert.equal(status, 200); },
+    end(body) { result = JSON.parse(body); },
+  }, new URL("http://localhost/api/proxy/usage/overview"), {});
+  assert.equal(result.overview.success_rate, null);
+  // rpm and tpm share the 5-minute recent window: 1 request and 10 tokens
+  // (the stale 1000-token row rides an older timestamp).
+  assert.equal(result.overview.rpm, 0.2);
+  assert.equal(result.overview.tpm, 2);
+});
+
 test("combined pagination and stats use the same filtered records and preserve the stats-only API", async (t) => {
   const f = fixture(t);
   writeHistory(f, [

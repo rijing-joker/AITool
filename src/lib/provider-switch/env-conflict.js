@@ -2,6 +2,8 @@ const fs = require("node:fs");
 const fsp = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
+const crypto = require("node:crypto");
+const { withFileLock } = require("../fs");
 
 // Env-conflict detection, ported from cc-switch's services/env_checker.rs +
 // services/env_manager.rs. Shell profiles and the process environment can
@@ -111,24 +113,12 @@ async function deleteConflicts(conflicts) {
   const clean = Array.isArray(conflicts) ? conflicts.filter((c) => c && typeof c === "object") : [];
   if (clean.length === 0) throw new Error("No environment conflicts selected");
 
-  // Backup first; deletion proceeds only when the backup is durable.
-  const dir = backupDir();
-  await fsp.mkdir(dir, { recursive: true });
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-  const backupPath = path.join(dir, `env-backup-${stamp}.json`);
-  const backupInfo = {
-    backupPath,
-    timestamp: new Date().toISOString(),
-    conflicts: JSON.parse(JSON.stringify(clean)),
-  };
-  await fsp.writeFile(backupPath, `${JSON.stringify(backupInfo, null, 2)}\n`, { mode: 0o600 });
-
   let deleted = 0;
   const failed = [];
   // Group file conflicts by file so each file is read and rewritten once.
   const byFile = new Map();
   for (const conflict of clean) {
-    if (conflict.sourceType === "system") continue; // process env cannot be removed from here
+    if (conflict.sourceType !== "file") continue; // process env cannot be removed from here
     const filePath = String(conflict.sourcePath || "").split(":").slice(0, -1).join(":");
     if (!filePath) {
       failed.push(`${conflict.varName}: invalid source path`);
@@ -137,17 +127,54 @@ async function deleteConflicts(conflicts) {
     if (!byFile.has(filePath)) byFile.set(filePath, new Set());
     byFile.get(filePath).add(conflict.varName);
   }
+  const edits = [];
+  const removed = [];
   for (const [filePath, names] of byFile) {
     try {
       const content = await fsp.readFile(filePath, "utf8");
-      const kept = content.split("\n").filter((line) => {
+      const entries = [];
+      const kept = content.split("\n").filter((line, index) => {
         const parsed = parseExportLine(line.trim());
-        return !(parsed && names.has(parsed.name));
+        if (!parsed || !names.has(parsed.name)) return true;
+        // Capture the bytes being removed, not the UI's display value (which
+        // strips quotes and may be stale). Keep every repeated assignment.
+        entries.push({ varName: parsed.name, varValue: parsed.value,
+          sourceType: "file", sourcePath: `${filePath}:${index + 1}`, originalLine: line });
+        return false;
       });
-      await fsp.writeFile(filePath, kept.join("\n"));
-      deleted += names.size;
+      if (entries.length) {
+        edits.push({ filePath, before: content, after: kept.join("\n"), count: entries.length });
+        removed.push(...entries);
+      }
     } catch (error) {
       failed.push(`${filePath}: ${error?.message || String(error)}`);
+    }
+  }
+
+  // Exclusive creation protects earlier backups even if two operations have
+  // the same timestamp. Flush the backup before changing any shell profile.
+  const dir = backupDir();
+  await fsp.mkdir(dir, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const backupPath = path.join(dir, `env-backup-${stamp}-${crypto.randomUUID()}.json`);
+  const backupInfo = { version: 2, backupPath, timestamp: new Date().toISOString(),
+    conflicts: removed, files: edits };
+  const backup = await fsp.open(backupPath, "wx", 0o600);
+  try {
+    await backup.writeFile(`${JSON.stringify(backupInfo, null, 2)}\n`);
+    await backup.sync();
+  } finally {
+    await backup.close();
+  }
+  for (const edit of edits) {
+    try {
+      if (await fsp.readFile(edit.filePath, "utf8") !== edit.before) {
+        throw new Error("Shell profile changed; rescan before removing variables");
+      }
+      await fsp.writeFile(edit.filePath, edit.after);
+      deleted += edit.count;
+    } catch (error) {
+      failed.push(`${edit.filePath}: ${error?.message || String(error)}`);
     }
   }
   if (deleted === 0 && failed.length > 0) {
@@ -173,7 +200,15 @@ async function restoreFromBackup(backupPath) {
   for (const [filePath, entries] of byFile) {
     try {
       const existing = await fsp.readFile(filePath, "utf8");
-      const names = new Set(entries.map((entry) => entry.varName));
+      const savedFile = info.version === 2 && Array.isArray(info.files)
+        ? info.files.find((file) => file.filePath === filePath) : null;
+      if (savedFile && typeof savedFile.before === "string" && existing === savedFile.after) {
+        // Without intervening edits, preserve ordering, comments, whitespace
+        // and even the original trailing newline byte-for-byte.
+        await fsp.writeFile(filePath, savedFile.before);
+        restored += entries.length;
+        continue;
+      }
       const missing = entries.filter((entry) => {
         const lines = existing.split("\n");
         return !lines.some((line) => {
@@ -182,10 +217,18 @@ async function restoreFromBackup(backupPath) {
         });
       });
       if (missing.length === 0) continue;
-      const addition = missing.map((entry) => `export ${entry.varName}=${entry.varValue}`).join("\n");
-      await fsp.writeFile(filePath, `${existing.replace(/\n*$/, "\n")}${addition}\n`);
+      const addition = missing.map((entry) => {
+        if (typeof entry.originalLine === "string") return entry.originalLine;
+        // Older backups lost their shell quoting. Restore the saved value as
+        // a literal; never interpret '$()', '&', spaces or backticks as code.
+        if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(entry.varName)) throw new Error("Invalid environment variable name in backup");
+        const value = String(entry.varValue ?? "");
+        const quoted = /^[A-Za-z0-9_@%+=:,./-]+$/.test(value) ? value : `'${value.replace(/'/g, `'"'"'`)}'`;
+        return `export ${entry.varName}=${quoted}`;
+      }).join("\n");
+      const separator = existing && !existing.endsWith("\n") ? "\n" : "";
+      await fsp.writeFile(filePath, `${existing}${separator}${addition}\n`);
       restored += missing.length;
-      void names;
     } catch (error) {
       failed.push(`${filePath}: ${error?.message || String(error)}`);
     }
@@ -204,8 +247,9 @@ module.exports = {
   checkAppConflicts,
   checkAllConflicts,
   backupDir,
-  deleteConflicts,
-  restoreFromBackup,
+  // Keep overlapping delete/restore operations from losing each other's edits.
+  deleteConflicts: (...args) => withFileLock(path.join(backupDir(), "operations"), () => deleteConflicts(...args)),
+  restoreFromBackup: (...args) => withFileLock(path.join(backupDir(), "operations"), () => restoreFromBackup(...args)),
   // exported for tests
   uniqueConflictKey,
   shellConfigFiles,

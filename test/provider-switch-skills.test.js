@@ -158,3 +158,128 @@ test("skills: import discovers from the agents dirs, toggle symlinks, disable re
   assert.equal(fs.lstatSync(userDir).isSymbolicLink(), false, "the user directory stays a plain directory");
   assert.equal(fs.existsSync(path.join(userDir, "SKILL.md")), true);
 });
+
+test("skills: user links survive enable, disable and missing-source sync", async () => {
+  const skills = require("../src/lib/provider-switch/skills");
+  const targetDir = path.join(tmpHome, ".codex", "skills");
+  fs.mkdirSync(targetDir, { recursive: true });
+  const sources = [];
+  for (const id of ["foreign", "same-source", "dangling"]) {
+    const source = makeSkill(path.join(tmpHome, ".agents", "skills"), id);
+    const target = path.join(targetDir, id);
+    const destination = id === "same-source" ? source : path.join(tmpHome, "user-owned", id);
+    if (id === "foreign") fs.mkdirSync(destination, { recursive: true });
+    fs.symlinkSync(destination, target, "dir");
+    sources.push({ id, source, target, destination });
+  }
+  await skills.importSkills();
+  for (const { id, source, target, destination } of sources) {
+    await skills.toggleSkill(id, "codex", true);
+    assert.equal(fs.readlinkSync(target), destination);
+    await skills.toggleSkill(id, "codex", false);
+    assert.equal(fs.readlinkSync(target), destination);
+    fs.rmSync(source, { recursive: true });
+  }
+  await skills.syncSkills(["codex"]);
+  for (const { target, destination } of sources) assert.equal(fs.readlinkSync(target), destination);
+});
+
+test("skills: ownership survives a reload but does not cover a replacement link", async () => {
+  let skills = require("../src/lib/provider-switch/skills");
+  const source = makeSkill(path.join(tmpHome, ".agents", "skills"), "demo");
+  const target = path.join(tmpHome, ".gemini", "skills", "demo");
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  await skills.importSkills();
+  await skills.toggleSkill("demo", "gemini", true);
+  delete require.cache[require.resolve("../src/lib/provider-switch/skills")];
+  skills = require("../src/lib/provider-switch/skills");
+  await skills.toggleSkill("demo", "gemini", false);
+  assert.equal(fs.existsSync(target), false);
+
+  await skills.toggleSkill("demo", "gemini", true);
+  fs.unlinkSync(target);
+  const userTarget = path.join(tmpHome, "my-skill");
+  fs.symlinkSync(userTarget, target, "dir");
+  await skills.toggleSkill("demo", "gemini", false);
+  assert.equal(fs.readlinkSync(target), userTarget);
+  fs.rmSync(source, { recursive: true });
+  await skills.syncSkills(["gemini"]);
+  assert.equal(fs.readlinkSync(target), userTarget);
+});
+
+test("skills: missing-source cleanup removes only our recorded dangling link", async () => {
+  const skills = require("../src/lib/provider-switch/skills");
+  const source = makeSkill(path.join(tmpHome, ".agents", "skills"), "demo");
+  const target = path.join(tmpHome, ".gemini", "skills", "demo");
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  await skills.importSkills();
+  await skills.toggleSkill("demo", "gemini", true);
+  fs.rmSync(source, { recursive: true });
+  await skills.syncSkills(["gemini"]);
+  assert.equal(fs.lstatSync(target, { throwIfNoEntry: false }), undefined);
+});
+
+test("skills: a user replacement pointing to the same source remains user-owned", async () => {
+  const skills = require("../src/lib/provider-switch/skills");
+  const source = makeSkill(path.join(tmpHome, ".agents", "skills"), "demo");
+  const target = path.join(tmpHome, ".gemini", "skills", "demo");
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  await skills.importSkills();
+  await skills.toggleSkill("demo", "gemini", true);
+  // Build the replacement while the original exists so it has a distinct
+  // identity even on filesystems that promptly recycle deleted inodes.
+  const replacement = path.join(path.dirname(target), "replacement");
+  fs.symlinkSync(source, replacement, "dir");
+  fs.unlinkSync(target);
+  fs.renameSync(replacement, target);
+  await skills.toggleSkill("demo", "gemini", true);
+  await skills.toggleSkill("demo", "gemini", false);
+  assert.equal(fs.readlinkSync(target), source);
+  fs.rmSync(source, { recursive: true });
+  await skills.syncSkills(["gemini"]);
+  assert.equal(fs.readlinkSync(target), source);
+});
+
+test("skills: copy fallback remains removable and preserves a stamped source", async (t) => {
+  const skills = require("../src/lib/provider-switch/skills");
+  const source = makeSkill(path.join(tmpHome, ".claude", "skills"), "demo");
+  fs.writeFileSync(path.join(source, skills.COPY_STAMP_FILE), "old installation");
+  const target = path.join(tmpHome, ".gemini", "skills", "demo");
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  await skills.importSkills();
+  t.mock.method(require("node:fs/promises"), "symlink", async () => {
+    throw Object.assign(new Error("Symlinks unavailable"), { code: "EPERM" });
+  });
+  const result = await skills.toggleSkill("demo", "gemini", true);
+  assert.deepEqual(result.failures, []);
+  assert.equal(fs.lstatSync(target).isDirectory(), true);
+  await skills.toggleSkill("demo", "gemini", false);
+  await skills.toggleSkill("demo", "claude", false);
+  assert.equal(fs.existsSync(target), false);
+  assert.equal(fs.existsSync(path.join(source, "SKILL.md")), true);
+});
+
+test("skills: a concurrent disable waits for link creation and leaves the stored state applied", async (t) => {
+  const skills = require("../src/lib/provider-switch/skills");
+  const fsp = require("node:fs/promises");
+  makeSkill(path.join(tmpHome, ".agents", "skills"), "demo");
+  const target = path.join(tmpHome, ".gemini", "skills", "demo");
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  await skills.importSkills();
+  let started, release;
+  const pending = new Promise((resolve) => { started = resolve; });
+  const resume = new Promise((resolve) => { release = resolve; });
+  const symlink = fsp.symlink;
+  t.mock.method(fsp, "symlink", async (...args) => {
+    started();
+    await resume;
+    return symlink(...args);
+  });
+  const enable = skills.toggleSkill("demo", "gemini", true);
+  await pending;
+  const disable = skills.toggleSkill("demo", "gemini", false);
+  release();
+  await Promise.all([enable, disable]);
+  assert.equal(fs.existsSync(target), false);
+  assert.equal((await skills.listSkills())[0].apps.gemini, false);
+});

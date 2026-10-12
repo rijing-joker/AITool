@@ -46,13 +46,15 @@ function skillsStorePath() {
 }
 
 function emptyStore() {
-  return { version: 1, skills: [] };
+  return { version: 1, skills: [], managedLinks: {} };
 }
 
 function normalizeStore(current) {
   const store = current && Array.isArray(current.skills) ? current : emptyStore();
   const skills = store.skills.filter((s) => s && typeof s === "object" && typeof s.id === "string" && s.id);
-  return { version: 1, skills };
+  const managedLinks = store.managedLinks && typeof store.managedLinks === "object" && !Array.isArray(store.managedLinks)
+    ? store.managedLinks : {};
+  return { version: 1, skills, managedLinks };
 }
 
 async function readSkillsStore() {
@@ -141,13 +143,17 @@ async function listSkills() {
 }
 
 // Enable: symlink the skill into the app's skills dir, falling back to a
-// stamped copy. Disable: remove the symlink, or a copy that carries our
-// stamp. A plain unmarked directory that collides with the skill id is left
-// alone and reported (the user manages it).
-function isManagedLinkOrCopy(targetPath) {
+// stamped copy. Link receipts identify the link we actually created, so a
+// pre-existing link (even to the same source), or a user's replacement, stays
+// user-owned. Older unrecorded links cannot safely be claimed retroactively.
+function linkIdentity(targetPath, stat = fs.lstatSync(targetPath)) {
+  return JSON.stringify([stat.dev, stat.ino, stat.ctimeMs, fs.readlinkSync(targetPath)]);
+}
+
+function isManagedLinkOrCopy(targetPath, managedLinks = {}) {
   try {
     const stat = fs.lstatSync(targetPath);
-    if (stat.isSymbolicLink()) return true;
+    if (stat.isSymbolicLink()) return managedLinks[targetPath] === linkIdentity(targetPath, stat);
     if (stat.isDirectory() && fs.existsSync(path.join(targetPath, COPY_STAMP_FILE))) return true;
   } catch {
     return false;
@@ -156,7 +162,9 @@ function isManagedLinkOrCopy(targetPath) {
 }
 
 async function copySkill(sourceDir, targetPath) {
-  await fsp.cp(sourceDir, targetPath, { recursive: true });
+  // Do not copy through a link that appeared after the symlink attempt.
+  await fsp.mkdir(targetPath);
+  await fsp.cp(sourceDir, targetPath, { recursive: true, force: false, errorOnExist: true });
   await fsp.writeFile(path.join(targetPath, COPY_STAMP_FILE), new Date().toISOString());
 }
 
@@ -164,19 +172,27 @@ async function projectSkill(app, skill) {
   const enabled = skill.apps?.[app] === true;
   const targetDir = appSkillsDir(app);
   if (!targetDir) return `${app}: unsupported app`;
+  const targetPath = path.join(targetDir, skill.id);
+  // A discovered source directory remains user-owned, even if it contains a
+  // copy stamp from an older installation.
+  if (skill.sourceDir && path.resolve(skill.sourceDir) === path.resolve(targetPath)) return null;
+  const { managedLinks } = await readSkillsStore();
+  const removeManaged = async () => {
+    if (!isManagedLinkOrCopy(targetPath, managedLinks)) return;
+    // No await between checking ownership and unlinking the entry.
+    if (fs.lstatSync(targetPath).isSymbolicLink()) fs.unlinkSync(targetPath);
+    else fs.rmSync(targetPath, { recursive: true, force: true });
+    await mutateSkillsStore((store) => { delete store.managedLinks[targetPath]; });
+  };
   if (!skill.sourceDir || !fs.existsSync(skill.sourceDir)) {
     // Source vanished: drop our projections so nothing dangling remains.
-    const targetPath = path.join(targetDir, skill.id);
-    if (isManagedLinkOrCopy(targetPath)) {
-      await fsp.rm(targetPath, { recursive: true, force: true });
-    }
+    await removeManaged();
     return enabled ? `${app}/${skill.id}: source directory is gone` : null;
   }
-  const targetPath = path.join(targetDir, skill.id);
   if (!enabled) {
     // Disable: remove our symlink or stamped copy; anything else (the user's
     // own directory, the skill's source location) is never touched.
-    if (isManagedLinkOrCopy(targetPath)) await fsp.rm(targetPath, { recursive: true, force: true });
+    await removeManaged();
     return null;
   }
   // The skill already lives in this app's skills directory: it is live by
@@ -192,7 +208,7 @@ async function projectSkill(app, skill) {
   if (samePlace) return null;
   // A plain directory with the same id that we did not write is the user's:
   // refuse to replace it and surface the collision instead.
-  if (fs.existsSync(targetPath) && !isManagedLinkOrCopy(targetPath)) {
+  if (fs.lstatSync(targetPath, { throwIfNoEntry: false }) && !isManagedLinkOrCopy(targetPath, managedLinks)) {
     return `${app}/${skill.id}: a user-managed entry with this name exists`;
   }
   if (!fs.existsSync(path.dirname(targetDir))) {
@@ -201,12 +217,16 @@ async function projectSkill(app, skill) {
     return null;
   }
   await ensureDir(targetDir);
-  if (isManagedLinkOrCopy(targetPath)) await fsp.rm(targetPath, { recursive: true, force: true });
+  await removeManaged();
   try {
     await fsp.symlink(skill.sourceDir, targetPath, "dir");
-  } catch {
+  } catch (error) {
+    if (!["EPERM", "EACCES", "ENOSYS", "ENOTSUP"].includes(error.code)) throw error;
     await copySkill(skill.sourceDir, targetPath);
+    return null;
   }
+  const receipt = linkIdentity(targetPath);
+  await mutateSkillsStore((store) => { store.managedLinks[targetPath] = receipt; });
   return null;
 }
 
@@ -257,9 +277,9 @@ module.exports = {
   readSkillsStore,
   parseSkillMeta,
   scanSkillsDir,
-  importSkills,
+  importSkills: (...args) => withFileLock(`${skillsStorePath()}.projection`, () => importSkills(...args)),
   listSkills,
-  toggleSkill,
-  syncSkills,
+  toggleSkill: (...args) => withFileLock(`${skillsStorePath()}.projection`, () => toggleSkill(...args)),
+  syncSkills: (...args) => withFileLock(`${skillsStorePath()}.projection`, () => syncSkills(...args)),
   isManagedLinkOrCopy,
 };

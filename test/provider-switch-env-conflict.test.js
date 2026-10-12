@@ -182,3 +182,112 @@ test("env conflicts: delete without auth is rejected and empty payloads fail cle
   });
   assert.equal(badPath.status, 400);
 });
+
+test("env conflicts: simultaneous deletions at the same timestamp keep independent backups", async (t) => {
+  const env = require("../src/lib/provider-switch/env-conflict");
+  const profile = path.join(tmpHome, ".zshrc");
+  fs.writeFileSync(profile, "export ANTHROPIC_BASE_URL=https://first.test\nexport ANTHROPIC_API_KEY=second-fixture\n");
+  const conflicts = env.checkAppConflicts("claude").filter((entry) => entry.sourcePath.startsWith(profile + ":"));
+  t.mock.method(Date.prototype, "toISOString", () => "2026-10-11T00:00:00.000Z");
+  const backups = await Promise.all(conflicts.map((entry) => env.deleteConflicts([entry])));
+  assert.notEqual(backups[0].backupPath, backups[1].backupPath);
+  assert.equal(fs.readFileSync(profile, "utf8"), "");
+  for (let i = 0; i < backups.length; i++) {
+    const info = JSON.parse(fs.readFileSync(backups[i].backupPath, "utf8"));
+    assert.deepEqual(info.conflicts.map((entry) => entry.varName), [conflicts[i].varName]);
+    if (process.platform !== "win32") assert.equal(fs.statSync(backups[i].backupPath).mode & 0o777, 0o600);
+  }
+  for (const backup of backups) await env.restoreFromBackup(backup.backupPath);
+  const restored = env.checkAppConflicts("claude").filter((entry) => entry.sourcePath.startsWith(profile + ":"));
+  assert.deepEqual(new Set(restored.map((entry) => entry.varName)), new Set(conflicts.map((entry) => entry.varName)));
+});
+
+test("env conflicts: restore retains original shell quoting, ordering and repeated assignments", async () => {
+  const env = require("../src/lib/provider-switch/env-conflict");
+  const profile = path.join(tmpHome, ".zshrc");
+  const original = [
+    "# profile comment",
+    "export ANTHROPIC_BASE_URL='https://relay.test/v1?a=1&b=2'",
+    "export ANTHROPIC_AUTH_TOKEN='literal $HOME $(printf unsafe) `printf unsafe`'",
+    '  export ANTHROPIC_LABEL="a value with spaces and a single \' quote" # keep comment',
+    'export ANTHROPIC_LABEL="$ANTHROPIC_LABEL updated"',
+    'COPIED_LABEL="$ANTHROPIC_LABEL"',
+  ].join("\n");
+  fs.writeFileSync(profile, original);
+  const conflicts = env.checkAppConflicts("claude").filter((entry) => entry.sourcePath.startsWith(profile + ":"));
+  const evaluate = () => require("node:child_process").execFileSync("bash", ["--noprofile", "--norc", "-c",
+    '. "$1"; printf "%s\\n" "$ANTHROPIC_BASE_URL" "$ANTHROPIC_AUTH_TOKEN" "$ANTHROPIC_LABEL" "$COPIED_LABEL"',
+    "test", profile], { encoding: "utf8", env: { PATH: process.env.PATH } });
+  const expected = process.platform === "win32" ? null : evaluate();
+  const result = await env.deleteConflicts(conflicts.map((entry) => ({ ...entry,
+    varValue: "stale UI display", originalLine: "export ANTHROPIC_LABEL=untrusted-ui-line" })));
+  assert.equal(result.deleted, 4);
+  await env.restoreFromBackup(result.backupPath);
+  assert.equal(fs.readFileSync(profile, "utf8"), original);
+  if (expected !== null) assert.equal(evaluate(), expected);
+  assert.equal((await env.restoreFromBackup(result.backupPath)).restored, 0);
+});
+
+test("env conflicts: restoring after manual edits keeps new values and original quoting for missing ones", async () => {
+  const env = require("../src/lib/provider-switch/env-conflict");
+  const profile = path.join(tmpHome, ".zshrc");
+  const quoted = "export ANTHROPIC_AUTH_TOKEN='a & literal $TOKEN'";
+  fs.writeFileSync(profile, `export ANTHROPIC_BASE_URL=https://old.test\n${quoted}\n`);
+  const conflicts = env.checkAppConflicts("claude").filter((entry) => entry.sourcePath.startsWith(profile + ":"));
+  const result = await env.deleteConflicts(conflicts);
+  const manual = "export ANTHROPIC_BASE_URL=https://new.test\n# added by user\n\n\n";
+  fs.writeFileSync(profile, manual);
+  await env.restoreFromBackup(result.backupPath);
+  assert.equal(fs.readFileSync(profile, "utf8"), manual + quoted + "\n");
+});
+
+test("env conflicts: legacy backup values restore as shell literals", { skip: process.platform === "win32" }, async () => {
+  const env = require("../src/lib/provider-switch/env-conflict");
+  const profile = path.join(tmpHome, ".zshrc");
+  fs.writeFileSync(profile, "");
+  const value = "space & $HOME $(printf unsafe) `printf unsafe` single'quote";
+  const backup = path.join(tmpHome, "legacy.json");
+  fs.writeFileSync(backup, JSON.stringify({ conflicts: [{ sourceType: "file", sourcePath: `${profile}:1`,
+    varName: "ANTHROPIC_AUTH_TOKEN", varValue: value }] }));
+  await env.restoreFromBackup(backup);
+  const output = require("node:child_process").execFileSync("bash", ["--noprofile", "--norc", "-c",
+    '. "$1"; printf "%s" "$ANTHROPIC_AUTH_TOKEN"', "test", profile], { encoding: "utf8", env: { PATH: process.env.PATH } });
+  assert.equal(output, value);
+});
+
+test("env conflicts: a backup creation failure leaves the shell profile unchanged", async (t) => {
+  const env = require("../src/lib/provider-switch/env-conflict");
+  const fsp = require("node:fs/promises");
+  const profile = path.join(tmpHome, ".zshrc");
+  const original = "export ANTHROPIC_API_KEY=fixture\n";
+  fs.writeFileSync(profile, original);
+  const open = fsp.open;
+  t.mock.method(fsp, "open", async (file, ...args) => {
+    if (String(file).endsWith(".json")) throw Object.assign(new Error("no space"), { code: "ENOSPC" });
+    return open(file, ...args);
+  });
+  const conflicts = env.checkAppConflicts("claude").filter((entry) => entry.sourcePath.startsWith(profile + ":"));
+  await assert.rejects(env.deleteConflicts(conflicts), /no space/);
+  assert.equal(fs.readFileSync(profile, "utf8"), original);
+});
+
+test("env conflicts: a backup flush failure leaves the shell profile unchanged", async (t) => {
+  const env = require("../src/lib/provider-switch/env-conflict");
+  const fsp = require("node:fs/promises");
+  const profile = path.join(tmpHome, ".zshrc");
+  const original = "export ANTHROPIC_API_KEY=fixture\n";
+  fs.writeFileSync(profile, original);
+  const open = fsp.open;
+  t.mock.method(fsp, "open", async (file, ...args) => {
+    const handle = await open(file, ...args);
+    if (String(file).endsWith(".json")) {
+      t.mock.method(handle, "sync", async () => {
+        throw Object.assign(new Error("backup flush failed"), { code: "EIO" });
+      });
+    }
+    return handle;
+  });
+  const conflicts = env.checkAppConflicts("claude").filter((entry) => entry.sourcePath.startsWith(profile + ":"));
+  await assert.rejects(env.deleteConflicts(conflicts), /backup flush failed/);
+  assert.equal(fs.readFileSync(profile, "utf8"), original);
+});

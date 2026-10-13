@@ -328,3 +328,18 @@ it("clears fetched models and voids an in-flight fetch when the header override 
   expect(screen.queryAllByRole("button", { name: "pswitch.models.dropdown_aria" })).toHaveLength(0);
   expect(fetchButton).toBeEnabled();
 });
+
+it("saves Codex subagent fields through the TOML editor while retaining unrelated agent settings", async () => {
+  const editing = { id: "codex-subagents", name: "Relay", category: "custom", settingsConfig: { config: { model: "gpt-5.5", base_url: "https://relay.test/v1", agents: { max_threads: 3 } }, auth: { OPENAI_API_KEY: "test-key" } } };
+  const projection = projectCodex({ prev: null, target: editing, liveToml: "[agents]\nmax_threads = 3\n", liveAuth: {}, stash: null });
+  providerSwitchApi.getEditorView.mockResolvedValue({ configToml: projection.configToml, authJson: {}, inactive: [] });
+  providerSwitchApi.updateProvider.mockResolvedValue({ provider: editing });
+  render(<ProviderEditDialog {...props()} app="codex" editing={editing} presets={listPresets("codex")} />);
+  await waitFor(() => expect(screen.getByRole("button", { name: "pswitch.action.save" })).toBeEnabled());
+  fireEvent.change(screen.getByLabelText("pswitch.subagent.model"), { target: { value: "gpt-5-mini" } });
+  fireEvent.change(screen.getByLabelText("pswitch.subagent.effort"), { target: { value: "high" } });
+  fireEvent.click(screen.getByRole("button", { name: "pswitch.action.save" }));
+  await waitFor(() => expect(providerSwitchApi.updateProvider).toHaveBeenCalledOnce());
+  const saved = providerSwitchApi.updateProvider.mock.calls[0][2];
+  expect(saved.settingsConfig.config.agents).toEqual({ max_threads: 3, default_subagent_model: "gpt-5-mini", default_subagent_reasoning_effort: "high" });
+});

@@ -417,8 +417,8 @@ test("balance: each vendor shape parses per upstream semantics", () => {
   const exhausted = quota.parseBalanceBody(quota.BALANCE_PROVIDERS.find((e) => e.id === "openrouter"), {
     data: { total_credits: 10, total_usage: 10 },
   });
-  assert.equal(exhausted[0].isValid, false);
-  assert.equal(exhausted[0].invalidMessage, "No credits remaining");
+  assert.equal(exhausted[0].isValid, true);
+  assert.equal(exhausted[0].invalidMessage, null);
 
   // Novita reports 0.0001 USD units.
   const novita = quota.parseBalanceBody(quota.BALANCE_PROVIDERS.find((e) => e.id === "novita"), { availableBalance: 123456 });
@@ -499,4 +499,16 @@ test("GET /quota falls back to balance when no plan provider matches", async () 
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("OpenRouter credit balances do not determine key validity", () => {
+  const entry = quota.BALANCE_PROVIDERS.find(item => item.id === "openrouter");
+  for (const [total, used] of [[0, 0], [100, 100], [100, 105], [100, 25.5]]) {
+    const [balance] = quota.parseBalanceBody(entry, { data: { total_credits: total, total_usage: used } });
+    assert.equal(balance.remaining, total - used);
+    assert.equal(balance.isValid, true);
+    assert.equal(balance.invalidMessage, null);
+  }
+  assert.equal(quota.parseBalanceBody(entry, { data: { total_credits: 1e308, total_usage: -1e308 } }), null);
+  assert.equal(quota.parseBalanceBody(entry, { data: { limit_remaining: 100 } }), null);
 });

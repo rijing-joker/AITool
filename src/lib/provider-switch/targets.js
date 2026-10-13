@@ -118,6 +118,19 @@ function projectCodex({ prev, target, liveToml, liveAuth, stash }) {
     text = toml.setTopLevelKey(text, key, targetConfig[key]);
   }
 
+  // cc-switch 2ff37a76: provider-owned subagent defaults share [agents]
+  // with user roles and limits. Only patch these two leaf keys.
+  const liveAgents = require("smol-toml").parse(text || "").agents || {};
+  for (const key of floor.CODEX_FLOOR_AGENTS) {
+    if (hasOwn(targetConfig.agents || {}, key)) {
+      text = toml.setTableValue(text, "agents", key, targetConfig.agents[key]);
+    } else if (hasOwn(prevConfig.agents || {}, key) && stableEqual(liveAgents[key], prevConfig.agents[key])) {
+      text = toml.setTableValue(text, "agents", key, undefined);
+    }
+  }
+  const remainingAgents = require("smol-toml").parse(text || "").agents;
+  if (remainingAgents && Object.keys(remainingAgents).length === 0) text = toml.replaceTable(text, "agents", null);
+
   // Auth decision first: whether a login remains on disk after the switch
   // feeds requires_openai_auth on the route table.
   const liveAuthObject = liveAuth && typeof liveAuth === "object" && Object.keys(liveAuth).length > 0 ? liveAuth : null;
@@ -543,6 +556,9 @@ function extractCodexConfig(liveToml) {
   for (const key of floor.CODEX_FLOOR_TOP) {
     const value = parsed[key];
     if (value !== undefined) config[key] = value;
+  }
+  for (const key of floor.CODEX_FLOOR_AGENTS) {
+    if (parsed.agents?.[key] !== undefined) (config.agents ||= {})[key] = parsed.agents[key];
   }
   const table = parsed.model_providers?.custom;
   if (table && Object.keys(table).length > 0) {

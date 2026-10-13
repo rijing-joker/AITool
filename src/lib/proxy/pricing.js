@@ -118,6 +118,8 @@ function flattenModelsDev(data) {
         contextWindow: positiveInt(model.limit?.context),
         maxOutputTokens: positiveInt(model.limit?.output),
         reasoningEfforts: reasoningEffortValues(model.reasoning_options),
+        reasoning: typeof model.reasoning === "boolean" ? model.reasoning : null,
+        inputModalities: Array.isArray(model.modalities?.input) ? model.modalities.input.filter(value => ["text", "image"].includes(value)) : [],
       });
     }
   }
@@ -135,6 +137,8 @@ function flattenModelsDev(data) {
         contextWindow: entry.contextWindow,
         maxOutputTokens: entry.maxOutputTokens,
         reasoningEfforts: entry.reasoningEfforts,
+        reasoning: entry.reasoning,
+        inputModalities: entry.inputModalities,
       });
     }
   }

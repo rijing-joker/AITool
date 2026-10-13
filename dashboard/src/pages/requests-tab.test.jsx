@@ -2,6 +2,7 @@ import React from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { RequestsTab } from "./requests-tab";
+import { setProxyPrivacy } from "../lib/proxy-privacy";
 import { showToast } from "../ui/components/Toast";
 import { managementApi, providerGroupsApi } from "../lib/easy-providers";
 vi.mock("../lib/copy", () => ({ copy: (key) => key }));
@@ -11,7 +12,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.stubGlobal("fetch", vi.fn(async () => ({ json: async () => response })));
 });
-afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); setProxyPrivacy(false); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 // BudgetBar polls /api/proxy/budget on its own schedule — count records
 // requests specifically so assertions stay independent of that poll.
 function recordsCalls() {
@@ -338,4 +339,39 @@ it("keeps the table actions in the footer next to the pagination", async () => {
   expect(footer).toContainElement(screen.getByRole("button", { name: "proxy.requests.col_settings" }));
   expect(footer).toContainElement(screen.getByRole("button", { name: "proxy.requests.export" }));
   expect(footer).toContainElement(screen.getByRole("combobox", { name: "proxy.requests.page_size" }));
+});
+
+it("refreshes filter labels while retaining exact key and upstream selections", async () => {
+  let label = "Old note";
+  fetch.mockImplementation(async () => ({ json: async () => ({ ...response, filterOptions: { keys: [{ key: "hash-a", label }], upstreams: [{ key: "auth:AccountA", label }], models: [], providers: [] } }) }));
+  await setup();
+  fireEvent.change(screen.getByRole("combobox", { name: "proxy.requests.filter.key" }), { target: { value: "hash-a" } });
+  fireEvent.change(screen.getByRole("combobox", { name: "proxy.requests.filter.upstream" }), { target: { value: "auth:AccountA" } });
+  await waitFor(() => expect(recordsCalls().at(-1)[0]).toContain("upstream=auth%3AAccountA"));
+  await waitFor(() => expect(screen.getByRole("button", { name: "proxy.upstream.common.refresh" })).toBeEnabled());
+  label = "Renamed note";
+  fireEvent.click(screen.getByRole("button", { name: "proxy.upstream.common.refresh" }));
+  await waitFor(() => expect(screen.getAllByRole("option", { name: label })).toHaveLength(2));
+  expect(screen.getByRole("combobox", { name: "proxy.requests.filter.key" })).toHaveValue("hash-a");
+  expect(screen.getByRole("combobox", { name: "proxy.requests.filter.upstream" })).toHaveValue("auth:AccountA");
+});
+
+it("masks displayed errors but copies and exports the original details", async () => {
+  setProxyPrivacy(true);
+  const failure = "Expired account alice@example.com";
+  const writeText = vi.fn().mockResolvedValue();
+  vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+  await setup({ records: [{ ...response.records[0], failed: true, failure_status: 401, failure_body: failure, source_display: "alice@example.com" }] });
+  expect(document.body.textContent).not.toContain("alice@example.com");
+  for (const node of document.querySelectorAll("[title]")) expect(node.title).not.toContain("alice@example.com");
+  fireEvent.click(screen.getByRole("button", { name: "proxy.requests.copyError" }));
+  await waitFor(() => expect(writeText).toHaveBeenCalledWith(`HTTP 401 · ${failure}`));
+  const { Blob: NodeBlob } = await import("node:buffer");
+  vi.stubGlobal("Blob", NodeBlob);
+  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+  const createObjectURL = vi.fn(() => "blob:csv");
+  class DownloadURL extends URL {}
+  vi.stubGlobal("URL", Object.assign(DownloadURL, { createObjectURL, revokeObjectURL: vi.fn() }));
+  fireEvent.click(screen.getByRole("button", { name: "proxy.requests.export" }));
+  expect(await createObjectURL.mock.calls[0][0].text()).toContain(failure);
 });

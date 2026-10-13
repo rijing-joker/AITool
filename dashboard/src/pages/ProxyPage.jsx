@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { copy } from "../lib/copy";
+import { ProxyPrivacyToggle } from "../lib/proxy-privacy";
 import { formatAggregateSpeed } from "../lib/usage-speed";
 import { proxyApi } from "../lib/proxy-api";
 import { useVisiblePolling } from "../hooks/use-visible-polling";
@@ -508,7 +509,7 @@ export function ProxyPage() {
     <div className="flex flex-col flex-1 text-oai-black dark:text-oai-white font-oai antialiased">
       <main className="flex-1 pt-6 sm:pt-8 pb-10 sm:pb-12">
         <div className="mx-auto max-w-6xl px-4 sm:px-6">
-          <PageHeader title={copy("nav.proxy")} description={copy("proxy.page.subtitle")} />
+          <PageHeader title={copy("nav.proxy")} description={copy("proxy.page.subtitle")} actions={<ProxyPrivacyToggle />} />
           <div className="mb-6">
             <PageTabs options={TABS.map((item) => ({ ...item, label: copy(item.labelKey) }))} value={tab} onChange={selectTab} label={copy("nav.proxy")} panelId="proxy-panel" />
           </div>

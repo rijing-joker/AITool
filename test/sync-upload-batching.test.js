@@ -252,7 +252,7 @@ test("mixed queue: buckets and states both count toward the batch cap; nextOffse
   assert.equal(second.sessionStates[0].session_id, "s-50");
 });
 
-test("duplicate observations of one session: last-wins within a batch, never duplicated inside one request", async (t) => {
+test("duplicate observations of one session: newest verified snapshot wins within a batch", async (t) => {
   const { dir, queuePath, queueStatePath } = tempQueue("tokentracker-dup-");
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const older = stateRecord("dup-1", { input: 100, verifiedAt: "2027-01-15T00:00:00.000Z" });
@@ -265,4 +265,62 @@ test("duplicate observations of one session: last-wins within a batch, never dup
   assert.equal(new Set(ids).size, 2, "no duplicate session id inside one request");
   const dup = batch.sessionStates.find((s) => s.session_id === "dup-1");
   assert.equal(dup.input_tokens, 60, "last-wins: the newer observation is the one delivered");
+});
+
+test("CRLF offsets and partial tails survive consecutive drains without losing appended data", async (t) => {
+  const { dir, queuePath, queueStatePath } = tempQueue("aitool-upload-tail-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const first = JSON.stringify(stateRecord("first")) + "\r\n";
+  const second = JSON.stringify(stateRecord("second"));
+  const cut = second.length - 8;
+  fs.writeFileSync(queuePath, first + second.slice(0, cut));
+  const ingest = installIngestMock();
+  t.after(() => ingest.restore());
+  await drainQueueToCloud({ baseUrl: "https://t.example", deviceToken: "tok", queuePath, queueStatePath });
+  assert.equal(JSON.parse(fs.readFileSync(queueStatePath)).offset, Buffer.byteLength(first));
+  fs.appendFileSync(queuePath, second.slice(cut) + "\r\n");
+  await drainQueueToCloud({ baseUrl: "https://t.example", deviceToken: "tok", queuePath, queueStatePath });
+  assert.deepEqual(ingest.calls.flatMap(c => c.states.map(s => s.session_id)), ["first", "second"]);
+  assert.equal(JSON.parse(fs.readFileSync(queueStatePath)).offset, fs.statSync(queuePath).size);
+});
+
+test("upload batches collapse repeated snapshots without replacing the append-only queue", async (t) => {
+  const { dir, queuePath } = tempQueue("aitool-upload-collapse-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const rows = Array.from({ length: 1200 }, (_, index) => ({
+    hour_start: "2026-10-12T00:00:00Z", source: "cliproxy", model: "fixture", input_tokens: index, output_tokens: 1, total_tokens: index + 1,
+  }));
+  writeQueue(queuePath, rows);
+  const before = fs.readFileSync(queuePath);
+  const batch = await readQueueBatch(queuePath, 0, BATCH_SIZE);
+  assert.equal(batch.buckets.length, 1);
+  assert.equal(batch.buckets[0].input_tokens, 1199);
+  assert.equal(batch.nextOffset, before.length);
+  assert.deepEqual(fs.readFileSync(queuePath), before);
+});
+
+test("session snapshot freshness survives stale replays and equal timestamp corrections", async (t) => {
+  const { dir, queuePath } = tempQueue("aitool-upload-freshness-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const newest = stateRecord("same", { input: 60, verifiedAt: "2026-10-12T00:02:00Z" });
+  const older = { ...newest, input_tokens: 100, total_tokens: 110, snapshot_verified_at: "2026-10-12T00:01:00Z" };
+  writeQueue(queuePath, [newest, older, { ...newest, input_tokens: 200, total_tokens: 210 }]);
+  const batch = await readQueueBatch(queuePath, 0, BATCH_SIZE);
+  assert.equal(batch.sessionStates.length, 1);
+  assert.equal(batch.sessionStates[0].input_tokens, newest.input_tokens);
+});
+
+test("ignored complete rows advance without uploading and opt-out never advances the queue", async (t) => {
+  const { dir, queuePath, queueStatePath } = tempQueue("aitool-upload-ignored-");
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const ignored = '{"kind":"account_sync_watermark"}\n';
+  fs.writeFileSync(queuePath, ignored + '{"unfinished":');
+  const ingest = installIngestMock();
+  t.after(() => ingest.restore());
+  const options = { baseUrl: "https://t.example", deviceToken: "tok", queuePath, queueStatePath };
+  await drainQueueToCloud({ ...options, canUpload: () => false });
+  assert.equal(fs.existsSync(queueStatePath), false);
+  await drainQueueToCloud(options);
+  assert.equal(JSON.parse(fs.readFileSync(queueStatePath)).offset, Buffer.byteLength(ignored));
+  assert.equal(ingest.calls.length, 0);
 });

@@ -116,6 +116,7 @@ const CODEX_FLOOR_TOP = [
 
 // The provider table the switcher writes into Codex live config.
 const CODEX_PROVIDER_TABLE = "model_providers.custom";
+const CODEX_FLOOR_AGENTS = ["default_subagent_model", "default_subagent_reasoning_effort"];
 
 function isCodexFloorTop(key) {
   return CODEX_FLOOR_TOP.includes(key);
@@ -208,6 +209,7 @@ module.exports = {
   CLAUDE_EXCLUSIVE_ENV,
   CLAUDE_FLOOR_TOP,
   CODEX_FLOOR_TOP,
+  CODEX_FLOOR_AGENTS,
   CODEX_PROVIDER_TABLE,
   isClaudeFloorEnv,
   isClaudeProjectedEnv,

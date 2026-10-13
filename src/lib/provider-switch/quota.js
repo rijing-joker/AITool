@@ -237,14 +237,17 @@ function parseBalanceBody(entry, body) {
     const used = balanceNumber(data?.total_usage);
     if (total === null || used === null) return null;
     const remaining = total - used;
+    if (!Number.isFinite(remaining)) return null;
     return [{
       label: entry.label,
       remaining,
       total,
       used,
       unit: entry.unit,
-      isValid: remaining > 0,
-      invalidMessage: remaining <= 0 ? "No credits remaining" : null,
+      // Account credit is independent of key validity; free models can still
+      // work with a zero balance (cc-switch 96d636ca).
+      isValid: true,
+      invalidMessage: null,
     }];
   }
   if (entry.id === "novita") {

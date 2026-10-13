@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useId, useRef, useState } from "react";
-import { ArrowDown, ArrowUp, Brain, ChevronLeft, ChevronRight, Columns3, Database, Download, RefreshCw, RotateCcw, Settings2, TriangleAlert, Zap } from "lucide-react";
+import { ArrowDown, ArrowUp, Brain, ChevronLeft, ChevronRight, Columns3, Copy, Database, Download, RefreshCw, RotateCcw, Settings2, TriangleAlert, Zap } from "lucide-react";
 import { copy } from "../lib/copy";
+import { usePrivacyText } from "../lib/proxy-privacy";
 import { formatCostUsd } from "../lib/cost-format";
 import { Card } from "../ui/components";
 import { UsageHeatmap } from "./usage-heatmap";
@@ -307,6 +308,7 @@ function MetricRow({ icon: Icon, tone, title, label, value }) {
 // sends it through the core's api-call with the record's auth index. The row
 // shows the upstream status + latency; the body excerpt rides on the title.
 function ReplayCell({ record, onReplay, state }) {
+  const display = usePrivacyText();
   const eligible = Boolean((record.id ?? record.request_id)
     && String(record.auth_index || record.authIndex || "").trim()
     && String(record.response_model || record.model || "").trim());
@@ -333,19 +335,19 @@ function ReplayCell({ record, onReplay, state }) {
               ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300"
               : "bg-red-50 text-red-600 dark:bg-red-950/40 dark:text-red-400"
           }`}
-          title={title}
+          title={display(title)}
         >
           {state.statusCode ?? "?"} · {(state.latencyMs / 1000).toFixed(1)}s
         </span>
       ) : state?.status === "error" ? (
-        <span className="inline-flex items-center rounded-full bg-red-50 px-1.5 py-0.5 text-[10px] font-medium text-red-600 dark:bg-red-950/40 dark:text-red-400" title={title}>
+        <span className="inline-flex items-center rounded-full bg-red-50 px-1.5 py-0.5 text-[10px] font-medium text-red-600 dark:bg-red-950/40 dark:text-red-400" title={display(title)}>
           {copy("proxy.requests.replay.failed")}
         </span>
       ) : (
         <button
           type="button"
           onClick={() => onReplay(record)}
-          title={title}
+          title={display(title)}
           aria-label={copy("proxy.requests.replay.action")}
           className="inline-flex h-6 items-center gap-1 rounded-md px-1.5 text-[10px] font-medium text-oai-gray-400 transition-colors hover:bg-oai-gray-100 hover:text-oai-gray-600 dark:hover:bg-oai-gray-800 dark:hover:text-oai-gray-300"
         >
@@ -357,7 +359,17 @@ function ReplayCell({ record, onReplay, state }) {
   );
 }
 
+function CopyErrorButton({ detail }) {
+  return <button type="button" aria-label={copy("proxy.requests.copyError")} title={copy("proxy.requests.copyError")} className="ml-1 inline-flex h-6 w-6 items-center justify-center rounded hover:bg-oai-gray-100 dark:hover:bg-oai-gray-800" onClick={async () => {
+    try {
+      await navigator.clipboard.writeText(detail);
+      showToast({ title: copy("proxy.requests.errorCopied"), type: "success" });
+    } catch { showToast({ title: copy("shared.copy_failed"), type: "error" }); }
+  }}><Copy size={12} aria-hidden="true" /></button>;
+}
+
 function EventCell({ record, column, onReplay, replayState, showDate }) {
+  const display = usePrivacyText();
   const tokens = record.tokens ?? {};
   switch (column.key) {
     case "time":
@@ -372,7 +384,8 @@ function EventCell({ record, column, onReplay, replayState, showDate }) {
     case "key":
       return (
         <td className="max-w-0 px-2 py-2 align-top">
-          <span className="block truncate font-mono text-xs" title={record.api_key_display || undefined}>{record.api_key_display || "—"}</span>
+          <span className="block truncate text-xs" title={display(record.api_key_remark || record.api_key_display) || undefined}>{display(record.api_key_remark || record.api_key_display) || "—"}</span>
+          {record.api_key_remark ? <span className="block truncate font-mono text-[10px] text-oai-gray-500">{record.api_key_display}</span> : null}
           {record.api_key_hash ? (
             <span className="block truncate font-mono text-[10px] text-oai-gray-500 dark:text-oai-gray-400" title={record.api_key_hash}>{record.api_key_hash.slice(0, 12)}</span>
           ) : null}
@@ -380,10 +393,10 @@ function EventCell({ record, column, onReplay, replayState, showDate }) {
       );
     case "source":
       return (
-        <td className="max-w-0 px-2 py-2 align-top" title={record.source || undefined}>
+        <td className="max-w-0 px-2 py-2 align-top" title={display(record.source_display || record.provider) || undefined}>
           <span className="inline-flex max-w-full items-center gap-1 text-xs">
             <Zap size={11} aria-hidden="true" className="shrink-0 text-oai-gray-400" />
-            <span className="truncate">{record.source || "—"}</span>
+            <span className="truncate">{display(record.source_display || record.provider) || "—"}</span>
           </span>
         </td>
       );
@@ -432,12 +445,13 @@ function EventCell({ record, column, onReplay, replayState, showDate }) {
           ? "bg-oai-gray-100 text-oai-gray-500 dark:bg-oai-gray-800 dark:text-oai-gray-400"
           : "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400";
       return (
-        <td className="max-w-0 px-2 py-2 align-top" title={detail || label}>
+        <td className="max-w-0 px-2 py-2 align-top" title={display(detail || label)}>
           <span className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium ${tone}`}>
             <span className={`h-1.5 w-1.5 rounded-full ${state === "failed" ? "bg-red-500" : state === "canceled" ? "bg-oai-gray-400" : "bg-emerald-500"}`} />
             <span className="truncate">{label}</span>
           </span>
-          {state === "failed" && detail ? <span className="mt-0.5 block truncate text-[10px] text-oai-gray-500 dark:text-oai-gray-400" title={detail}>{detail}</span> : null}
+          {state !== "success" && detail ? <CopyErrorButton detail={detail} /> : null}
+          {state === "failed" && detail ? <span className="mt-0.5 block truncate text-[10px] text-oai-gray-500 dark:text-oai-gray-400" title={display(detail)}>{display(detail)}</span> : null}
         </td>
       );
     }
@@ -840,6 +854,10 @@ function BudgetBar() {
 }
 
 export function RequestsTab() {
+  const display = usePrivacyText();
+  const [filterOptions, setFilterOptions] = useState(null);
+  const [keyHash, setKeyHash] = useState("");
+  const [upstream, setUpstream] = useState("");
   const [records, setRecords] = useState(null);
   const [stats, setStats] = useState(null);
   const [total, setTotal] = useState(0);
@@ -876,8 +894,10 @@ export function RequestsTab() {
   }, [model, provider]);
   const searchPending = model.trim() !== query.model || provider.trim() !== query.provider;
   const invalidRange = range === "custom" && (!customStart || !customEnd || !Number.isFinite(Date.parse(customStart)) || !Number.isFinite(Date.parse(customEnd)) || Date.parse(customStart) >= Date.parse(customEnd));
-  const filtered = !!model || !!provider || result !== "all" || range !== "24h";
-  const clearFilters = () => { setModel(""); setProvider(""); setQuery({ model: "", provider: "" }); setResult("all"); setRange("24h"); setPage(0); };
+  const filtered = !!keyHash || !!upstream || !!model || !!provider || result !== "all" || range !== "24h";
+  const missingKey = keyHash && !(filterOptions?.keys || []).some(option => option.key === keyHash);
+  const missingUpstream = upstream && !(filterOptions?.upstreams || []).some(option => option.key === upstream);
+  const clearFilters = () => { setKeyHash(""); setUpstream(""); setModel(""); setProvider(""); setQuery({ model: "", provider: "" }); setResult("all"); setRange("24h"); setPage(0); };
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   // Page/pageSize-only loads skip the stats recompute: the filtered
@@ -890,7 +910,7 @@ export function RequestsTab() {
 
   const load = useCallback(async (signal) => {
     if (invalidRange || searchPending) { setLoading(false); return false; }
-    const scopeKey = JSON.stringify([result, query.model, query.provider, range, customStart, customEnd]);
+    const scopeKey = JSON.stringify([result, query.model, query.provider, keyHash, upstream, range, customStart, customEnd]);
     const previous = lastLoadedRef.current;
     const scopeChanged = !previous || previous.scopeKey !== scopeKey;
     const sliceChanged = previous && (previous.page !== page || previous.pageSize !== pageSize);
@@ -903,6 +923,8 @@ export function RequestsTab() {
         pageSize: String(pageSize),
         includeStats,
         result,
+        ...(keyHash ? { api_key_hash: keyHash } : {}),
+        ...(upstream ? { upstream } : {}),
         ...(query.model ? { model: query.model } : {}),
         ...(query.provider ? { provider: query.provider } : {}),
         ...rangeParams(range, customStart, customEnd),
@@ -912,6 +934,7 @@ export function RequestsTab() {
       if (signal.aborted) return;
       if (!data?.ok) throw new Error(data?.error || `HTTP records`);
       setRecords(data.records);
+      if (data.filterOptions) setFilterOptions(data.filterOptions);
       setTotal(data.total);
       if (data.stats) setStats(data.stats);
       setError(null);
@@ -923,7 +946,7 @@ export function RequestsTab() {
     } finally {
       if (!signal.aborted) setLoading(false);
     }
-  }, [page, pageSize, result, query, range, customStart, customEnd, invalidRange, searchPending]);
+  }, [page, pageSize, result, query, keyHash, upstream, range, customStart, customEnd, invalidRange, searchPending]);
 
   const refreshRecords = useVisiblePolling(load, 10_000);
 
@@ -1131,7 +1154,7 @@ export function RequestsTab() {
     <div className="flex flex-col gap-4">
       {error ? (
         <div role="alert" className="flex items-start gap-2 rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-3.5 py-2.5 text-sm text-amber-800 dark:text-amber-300">
-          <span className="min-w-0 flex-1 break-words">{records ? copy("proxy.requests.stale") : error}</span>
+          <span className="min-w-0 flex-1 break-words">{records ? copy("proxy.requests.stale") : display(error)}</span>
           <button type="button" onClick={() => void refresh()} disabled={loading || invalidRange || searchPending} className="shrink-0 font-medium">{copy("shared.action.retry")}</button>
         </div>
       ) : null}
@@ -1160,6 +1183,13 @@ export function RequestsTab() {
           placeholder={copy("proxy.requests.filter.provider")}
           className="h-10 sm:h-8 min-w-0 w-full sm:w-36 rounded-lg border border-oai-gray-200 bg-transparent px-2.5 text-sm placeholder:text-oai-gray-400 focus:outline-none focus:ring-2 focus:ring-oai-brand-500 dark:border-oai-gray-700"
         />
+        {[["keys", keyHash, setKeyHash, "proxy.requests.filter.key"], ["upstreams", upstream, setUpstream, "proxy.requests.filter.upstream"]].map(([kind, value, setValue, labelKey]) => (
+          <select key={kind} aria-label={copy(labelKey)} value={value} onChange={(event) => { setPage(0); setValue(event.target.value); }} className="h-10 sm:h-8 min-w-0 sm:max-w-52 rounded-lg border border-oai-gray-200 bg-transparent px-2 text-sm dark:border-oai-gray-700">
+            <option value="">{copy(labelKey)}</option>
+            {(kind === "keys" ? missingKey : missingUpstream) ? <option value={value}>{display(value)}</option> : null}
+            {(filterOptions?.[kind] || []).map((option) => <option key={option.key} value={option.key}>{display(option.label)}</option>)}
+          </select>
+        ))}
         <select
           aria-label={copy("proxy.requests.status")}
           value={result}
@@ -1186,8 +1216,8 @@ export function RequestsTab() {
         </button>
       </div>
 
-      <datalist id={`${listId}-models`}>{(stats?.models ?? []).map((item) => <option key={item.model} value={item.model} />)}</datalist>
-      <datalist id={`${listId}-providers`}>{(stats?.providers ?? []).map((item) => <option key={item.provider} value={item.provider} />)}</datalist>
+      <datalist id={`${listId}-models`}>{(filterOptions?.models ?? (stats?.models ?? []).map((item) => item.model)).map((model) => <option key={model} value={model} />)}</datalist>
+      <datalist id={`${listId}-providers`}>{(filterOptions?.providers ?? (stats?.providers ?? []).map((item) => item.provider)).map((provider) => <option key={provider} value={provider} />)}</datalist>
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-oai-gray-500 dark:text-oai-gray-400">
         <span role="status">{loading || searchPending ? copy("proxy.loading") : copy("proxy.requests.count", { count: fullTokens.format(total) })}</span>
         {filtered ? <button type="button" className="min-h-10 px-2 font-medium text-oai-brand-600 dark:text-oai-brand-400 sm:min-h-0" onClick={clearFilters}>{copy("proxy.requests.clear_filters")}</button> : null}

@@ -161,8 +161,11 @@ const AUTO_UPLOAD_CONFIG = {
   intervalMs: 5 * 60_000,
   batchSize: 200,
   maxBatchesSmall: 5,
-  maxBatchesLarge: 5,
+  maxBatchesLarge: 100,
 };
+const { iterateQueueLines, sessionSnapshotMs } = require("../lib/upload-queue");
+const UPLOAD_BUDGET_MS = 90_000;
+const UPLOAD_BATCH_SCAN_BYTES = 8 * 1024 * 1024;
 const { maybeSendHeartbeat } = require("../lib/telemetry");
 const {
   isCursorInstalled,
@@ -3604,6 +3607,10 @@ async function cmdSync(argv, context = {}) {
         });
         await writeJson(uploadThrottlePath, uploadThrottleState);
       } catch (e) {
+        if (e.uploadResult?.batches > 0) {
+          uploadResult = e.uploadResult;
+          uploadThrottleState = recordUploadSuccess({ nowMs: Date.now(), state: uploadThrottleState, config: AUTO_UPLOAD_CONFIG });
+        }
         // Persist a backoff on 429 / 5xx so the next auto-sync waits instead
         // of retrying immediately and making the rate-limit worse. The
         // throttle module already parses Retry-After when we surface it on
@@ -4286,88 +4293,88 @@ const AUTO_RETRY_MAX_DELAY_MS = 2 * 60 * 60 * 1000;
 const INGEST_SLUG = "tokentracker-ingest";
 const MAX_INGEST_BUCKETS = 500;
 
-async function drainQueueToCloud({ baseUrl, anonKey, deviceToken, queuePath, queueStatePath, maxBatches = 5, batchSize = 200, canUpload = () => true }) {
+// The caller owns sync.lock. Keep successful offsets even when a bounded
+// drain stops part-way; never rewrite the queue shared with the proxy bridge.
+async function drainQueueToCloud({ baseUrl, anonKey, deviceToken, queuePath, queueStatePath, maxBatches = 5, batchSize = 200, maxDurationMs = UPLOAD_BUDGET_MS, canUpload = () => true }) {
   const state = (await readJson(queueStatePath)) || { offset: 0 };
   let offset = Number(state.offset || 0);
-  let inserted = 0;
-  let skipped = 0;
-  let batches = 0;
-
+  let inserted = 0, skipped = 0, batches = 0;
+  const duration = Number.isFinite(maxDurationMs) ? Math.max(0, maxDurationMs) : UPLOAD_BUDGET_MS;
+  const deadline = Date.now() + duration;
   const queueSize = await safeStatSize(queuePath);
   const limit = Math.min(Math.max(1, Math.floor(Number(batchSize || 200))), MAX_INGEST_BUCKETS);
-
-  for (let batch = 0; batch < maxBatches; batch++) {
-    if (offset >= queueSize) break;
-    const result = await readQueueBatch(queuePath, offset, limit);
-    // A states-only tail (e.g. a retry batch whose bucket rows already
-    // uploaded) is still a meaningful upload: it advances the canonical
-    // session corrections cloud-side.
-    if (result.buckets.length === 0 && result.sessionStates.length === 0) break;
-
-    const root = baseUrl.replace(/\/$/, "");
-    const headers = {
-      "Content-Type": "application/json",
-      Accept: "application/json",
-      Authorization: `Bearer ${deviceToken}`,
-    };
-    if (anonKey) headers.apikey = anonKey;
-    // Re-read after parsing/each batch so switching off stops an active drain.
-    if (!canUpload()) break;
-    const res = await fetchFunctionResponse(functionUrlFor(root, INGEST_SLUG), {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        hourly: result.buckets,
-        ...(result.sessionStates.length > 0
-          ? { account_session_states: result.sessionStates }
-          : {}),
-      }),
-    });
-
-    const rawText = await res.text().catch(() => "");
-    let data = {};
-    try { data = JSON.parse(rawText); } catch { data = {}; }
-    if (!res.ok) {
-      const err = new Error(`HTTP ${res.status}: ${rawText.substring(0, 500)}`);
-      err.status = res.status;
-      err.code = res.status === 401 ? "CLOUD_DEVICE_TOKEN_REJECTED"
-        : res.status === 403 ? "CLOUD_UPLOAD_FORBIDDEN"
-          : "CLOUD_UPLOAD_FAILED";
-      const retryAfter = res.headers?.get?.("Retry-After") ?? null;
-      const retryAfterMs = parseRetryAfterMs(retryAfter);
-      if (retryAfterMs !== null) err.retryAfterMs = retryAfterMs;
-      throw err;
+  const resultSoFar = () => ({ inserted, skipped, batches });
+  let requestSignal;
+  try {
+    for (let batch = 0; batch < Math.min(maxBatches, 100); batch++) {
+      if (!canUpload() || Date.now() >= deadline || offset >= queueSize) break;
+      const result = await readQueueBatch(queuePath, offset, limit);
+      if (!canUpload()) break;
+      if (result.buckets.length === 0 && result.sessionStates.length === 0) {
+        // Advance complete ignored rows, while leaving partial bytes for the
+        // next invocation. No network request is needed for this prefix.
+        if (result.nextOffset <= offset) break;
+        offset = result.nextOffset;
+        state.offset = offset;
+        state.updatedAt = new Date().toISOString();
+        await writeJson(queueStatePath, state);
+        continue;
+      }
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) break;
+      const headers = { "Content-Type": "application/json", Accept: "application/json", Authorization: `Bearer ${deviceToken}` };
+      if (anonKey) headers.apikey = anonKey;
+      requestSignal = AbortSignal.timeout(Math.max(1, Math.ceil(remainingMs)));
+      const res = await fetchFunctionResponse(functionUrlFor(baseUrl.replace(/\/$/, ""), INGEST_SLUG), {
+        method: "POST", headers, signal: requestSignal,
+        body: JSON.stringify({
+          hourly: result.buckets,
+          ...(result.sessionStates.length ? { account_session_states: result.sessionStates } : {}),
+        }),
+      });
+      const rawText = await res.text();
+      let data;
+      try { data = JSON.parse(rawText); } catch { data = {}; }
+      if (!res.ok) {
+        const error = new Error(`HTTP ${res.status}: ${rawText.substring(0, 500)}`);
+        error.status = res.status;
+        error.code = res.status === 401 ? "CLOUD_DEVICE_TOKEN_REJECTED" : res.status === 403 ? "CLOUD_UPLOAD_FORBIDDEN" : "CLOUD_UPLOAD_FAILED";
+        const retryAfterMs = parseRetryAfterMs(res.headers?.get?.("Retry-After") ?? null);
+        if (retryAfterMs !== null) error.retryAfterMs = retryAfterMs;
+        throw error;
+      }
+      inserted += Number(data?.inserted || 0);
+      skipped += Number(data?.skipped || 0);
+      batches += 1;
+      offset = result.nextOffset;
+      state.offset = offset;
+      state.updatedAt = new Date().toISOString();
+      await writeJson(queueStatePath, state);
     }
-
-    inserted += Number(data?.inserted || 0);
-    skipped += Number(data?.skipped || 0);
-    batches += 1;
-
-    offset = result.nextOffset;
-    state.offset = offset;
-    state.updatedAt = new Date().toISOString();
-    await writeJson(queueStatePath, state);
+  } catch (error) {
+    const timedOut = requestSignal?.aborted && requestSignal.reason?.name === "TimeoutError" &&
+      (error === requestSignal.reason || error.name === "TimeoutError" || error.name === "AbortError");
+    if (!timedOut || batches === 0) {
+      error.uploadResult = resultSoFar();
+      throw error;
+    }
   }
-
-  return { inserted, skipped, batches };
+  return resultSoFar();
 }
 
 async function readQueueBatch(queuePath, startOffset, maxBuckets) {
   const st = await fs.stat(queuePath).catch(() => null);
-  if (!st || !st.isFile()) return { buckets: [], nextOffset: startOffset };
-  if (startOffset >= st.size) return { buckets: [], nextOffset: startOffset };
+  if (!st || !st.isFile()) return { buckets: [], sessionStates: [], nextOffset: startOffset };
+  if (startOffset >= st.size) return { buckets: [], sessionStates: [], nextOffset: startOffset };
 
-  const stream = fssync.createReadStream(queuePath, { encoding: "utf8", start: startOffset });
-  const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+  const handle = await fs.open(queuePath, "r");
 
   const bucketMap = new Map();
   // Account session states (kind: "account_session_state") are queue
   // control records, not usage rows: collect them separately so they ride
   // the same upload (after the bucket rows in file order) without entering
-  // the bucket stream. Keyed by (source, session_id) LAST-WINS: the
-  // append-only queue writes a session's newer observation after its older
-  // one, and only the latest per session may reach the ingest batch (a
-  // duplicate would make the cloud ON CONFLICT affect one row twice).
+  // the bucket stream. Keep the strictly newest verified observation per
+  // session; equal timestamps keep the first, matching server-side truth.
   // snapshot_verified_at rides along verbatim from the ORIGINAL fetch, so a
   // transport retry never fakes logical freshness.
   //
@@ -4382,67 +4389,74 @@ async function readQueueBatch(queuePath, startOffset, maxBuckets) {
   // the edge cap while batching follows the existing design.
   const sessionStateMap = new Map();
   let offset = startOffset;
-  let linesRead = 0;
-  for await (const line of rl) {
-    const bytes = Buffer.byteLength(line, "utf8") + 1;
-    offset += bytes;
-    if (!line.trim()) continue;
-    let bucket;
-    try {
-      bucket = JSON.parse(line);
-    } catch (_e) {
-      continue;
-    }
-    if (bucket?.kind === "account_session_state") {
-      if (typeof bucket.source === "string" && typeof bucket.session_id === "string" && bucket.session_id.trim()) {
-        const ssSource = bucket.source.trim().toLowerCase();
-        sessionStateMap.set(ssSource + "|" + bucket.session_id.trim(), {
-          source: ssSource,
-          session_id: bucket.session_id.trim(),
-          model: typeof bucket.model === "string" ? bucket.model : "",
-          bucket_start: typeof bucket.bucket_start === "string" ? bucket.bucket_start : "",
-          input_tokens: Number(bucket.input_tokens) || 0,
-          output_tokens: Number(bucket.output_tokens) || 0,
-          cached_input_tokens: Number(bucket.cached_input_tokens) || 0,
-          cache_creation_input_tokens: Number(bucket.cache_creation_input_tokens) || 0,
-          reasoning_output_tokens: Number(bucket.reasoning_output_tokens) || 0,
-          total_tokens: Number(bucket.total_tokens) || 0,
-          ...(typeof bucket.snapshot_verified_at === "string" && bucket.snapshot_verified_at
-            ? { snapshot_verified_at: bucket.snapshot_verified_at }
-            : {}),
-        });
-        // Counted like a bucket row: the record rides THIS batch and its
-        // bytes are covered by nextOffset, so the next batch resumes right
-        // after it.
-        linesRead += 1;
-        if (linesRead >= maxBuckets) break;
+  const sessionStateStamps = new Map();
+  try {
+    for await (const record of iterateQueueLines(handle, startOffset, st.size)) {
+      if (!record.complete || offset - startOffset >= UPLOAD_BATCH_SCAN_BYTES) break;
+      const line = record.bytes.toString("utf8");
+      offset += record.bytes.length;
+      if (!line.trim()) continue;
+      let bucket;
+      try {
+        bucket = JSON.parse(line);
+      } catch (_e) {
+        continue;
       }
-      continue;
+      if (bucket?.kind === "account_session_state") {
+        if (typeof bucket.source === "string" && typeof bucket.session_id === "string" && bucket.session_id.trim()) {
+          const ssSource = bucket.source.trim().toLowerCase();
+          const key = ssSource + "|" + bucket.session_id.trim();
+          const stamp = sessionSnapshotMs(bucket);
+          const priorStamp = sessionStateStamps.get(key) ?? null;
+          if (!sessionStateMap.has(key) || (stamp !== null && (priorStamp === null || stamp > priorStamp))) {
+            sessionStateStamps.set(key, stamp);
+            sessionStateMap.set(key, {
+              source: ssSource,
+              session_id: bucket.session_id.trim(),
+              model: typeof bucket.model === "string" ? bucket.model : "",
+              bucket_start: typeof bucket.bucket_start === "string" ? bucket.bucket_start : "",
+              input_tokens: Number(bucket.input_tokens) || 0,
+              output_tokens: Number(bucket.output_tokens) || 0,
+              cached_input_tokens: Number(bucket.cached_input_tokens) || 0,
+              cache_creation_input_tokens: Number(bucket.cache_creation_input_tokens) || 0,
+              reasoning_output_tokens: Number(bucket.reasoning_output_tokens) || 0,
+              total_tokens: Number(bucket.total_tokens) || 0,
+              ...(typeof bucket.snapshot_verified_at === "string" && bucket.snapshot_verified_at
+                ? { snapshot_verified_at: bucket.snapshot_verified_at }
+                : {}),
+            });
+          }
+          // Counted like a bucket row: the record rides THIS batch and its
+          // bytes are covered by nextOffset, so the next batch resumes right
+          // after it.
+          if (bucketMap.size + sessionStateMap.size >= maxBuckets) break;
+        }
+        continue;
+      }
+      // Pre-release watermark records from this feature branch's dev queues
+      // are obsolete control records: drop them instead of letting them enter
+      // the bucket stream (they carry no hour_start and would be skipped
+      // downstream anyway, but be explicit).
+      if (bucket?.kind === "account_sync_watermark") continue;
+      const hourStart = typeof bucket?.hour_start === "string" ? bucket.hour_start : null;
+      if (!hourStart) continue;
+      const source = (typeof bucket?.source === "string" ? bucket.source.trim().toLowerCase() : "") || "codex";
+      const model = (typeof bucket?.model === "string" ? bucket.model.trim() : "") || "unknown";
+      bucket.source = source;
+      bucket.model = model;
+      // Apply the same legacy-row corrections every local reader applies
+      // (local-api readQueueData / project queue / wrapped aggregator). Without
+      // this the cloud permanently kept the RAW legacy values — e.g. old Codex
+      // rows whose input_tokens still include cached tokens (6-7x inflated) —
+      // while the local dashboard showed corrected numbers.
+      bucket = require("../lib/local-api").normalizeQueueRow(bucket);
+      bucketMap.set(`${source}|${model}|${hourStart}`, bucket);
+      if (bucketMap.size + sessionStateMap.size >= maxBuckets) break;
     }
-    // Pre-release watermark records from this feature branch's dev queues
-    // are obsolete control records: drop them instead of letting them enter
-    // the bucket stream (they carry no hour_start and would be skipped
-    // downstream anyway, but be explicit).
-    if (bucket?.kind === "account_sync_watermark") continue;
-    const hourStart = typeof bucket?.hour_start === "string" ? bucket.hour_start : null;
-    if (!hourStart) continue;
-    const source = (typeof bucket?.source === "string" ? bucket.source.trim().toLowerCase() : "") || "codex";
-    const model = (typeof bucket?.model === "string" ? bucket.model.trim() : "") || "unknown";
-    bucket.source = source;
-    bucket.model = model;
-    // Apply the same legacy-row corrections every local reader applies
-    // (local-api readQueueData / project queue / wrapped aggregator). Without
-    // this the cloud permanently kept the RAW legacy values — e.g. old Codex
-    // rows whose input_tokens still include cached tokens (6-7x inflated) —
-    // while the local dashboard showed corrected numbers.
-    bucket = require("../lib/local-api").normalizeQueueRow(bucket);
-    bucketMap.set(`${source}|${model}|${hourStart}`, bucket);
-    linesRead += 1;
-    if (linesRead >= maxBuckets) break;
-  }
 
-  rl.close();
-  stream.close?.();
+  } finally {
+    await handle.close();
+  }
   return {
     buckets: Array.from(bucketMap.values()),
     sessionStates: Array.from(sessionStateMap.values()),

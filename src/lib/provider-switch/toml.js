@@ -325,6 +325,48 @@ function replaceTable(text, dottedName, entries) {
   return setTable(finish(out, text), dottedName, entries);
 }
 
+// Patch one child value without replacing its siblings. Handles block,
+// dotted and inline tables, including multiline values and quoted keys.
+function setTableValue(text, dottedName, key, value) {
+  const target = [...dottedName.split("."), key];
+  const doc = require("smol-toml").parse(text || "");
+  const previous = target.reduce((node, part) => node?.[part], doc);
+  const object = (item) => item !== null && typeof item === "object" && !Array.isArray(item);
+  if (object(value)) return replaceTable(text, target.join("."), value);
+  if (object(previous)) {
+    const without = replaceTable(text, target.join("."), null);
+    return value === undefined ? without : setTableValue(without, dottedName, key, value);
+  }
+  const lines = text.split(/\r?\n/);
+  const context = scanLines(lines);
+  let table = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (context[i].header) table = context[i].header.parts || [];
+    if (!context[i].key) continue;
+    const assignment = splitKeyValue(lines[i]);
+    if (!assignment?.parts) continue;
+    const full = [...table, ...assignment.parts];
+    if (full.length > target.length || !full.every((part, index) => part === target[index])) continue;
+    const end = assignmentEnd(context, i);
+    let next = value;
+    if (full.length < target.length) {
+      next = structuredClone(full.reduce((node, part) => node?.[part], doc));
+      let parent = next;
+      const relative = target.slice(full.length);
+      for (const part of relative.slice(0, -1)) parent = parent[part] ||= {};
+      if (value === undefined) delete parent[relative.at(-1)];
+      else parent[relative.at(-1)] = value;
+    }
+    const replacement = next === undefined ? [] : [`${assignment.token} = ${formatTomlValue(next)}`];
+    return finish([...lines.slice(0, i), ...replacement, ...lines.slice(end)], text);
+  }
+  if (value === undefined) return text;
+  const start = findTableStart(lines, dottedName, context);
+  const assignment = `${formatTomlKey(key)} = ${formatTomlValue(value)}`;
+  if (start !== -1) return finish([...lines.slice(0, start + 1), assignment, ...lines.slice(start + 1)], text);
+  return finish([...lines, ...(lines.at(-1) === "" ? [] : [""]), `[${dottedName}]`, assignment], text);
+}
+
 // Remove `key = value` from inside the [table] block — the inline form of a
 // child table (`fetch = { command = … }` under [mcp_servers]). setTable can
 // only replace a `[table.key]` header block, so a caller that is about to
@@ -379,6 +421,7 @@ module.exports = {
   getTopLevelValue,
   setTable,
   replaceTable,
+  setTableValue,
   getTableEntries,
   removeTableKey,
   parseTomlScalar,

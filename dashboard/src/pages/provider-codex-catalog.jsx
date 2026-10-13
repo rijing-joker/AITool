@@ -2,6 +2,7 @@ import React from "react";
 import { ChevronDown, Download, Plus, Trash2 } from "lucide-react";
 import { copy } from "../lib/copy";
 import { ModelDropdown } from "./provider-model-dropdown";
+import { FetchedModelPicker } from "./provider-fetched-model-picker";
 import { showToast } from "../ui/components/Toast";
 
 // Codex model mapping editor — port of cc-switch's catalog table: each row
@@ -34,7 +35,7 @@ function metadataForModel(modelMetadata, modelId) {
   const levels = Array.isArray(entry.reasoningEfforts)
     ? CODEX_REASONING_LEVELS.filter((level) => entry.reasoningEfforts.includes(level))
     : [];
-  return { contextWindow, levels };
+  return { contextWindow, levels, inputModalities: entry.inputModalities };
 }
 
 // Only blank fields are filled — user-entered values always win
@@ -45,88 +46,8 @@ function fillRowMetadata(row, modelId, modelMetadata) {
   const patch = {};
   if (!String(row.contextWindow ?? "").trim() && metadata.contextWindow) patch.contextWindow = metadata.contextWindow;
   if (!(row.reasoningLevels || []).length && metadata.levels.length) patch.reasoningLevels = metadata.levels;
+  if (!row.inputModalities?.length && metadata.inputModalities?.length) patch.inputModalities = metadata.inputModalities;
   return Object.keys(patch).length > 0 ? patch : null;
-}
-
-// Searchable checkbox list over the fetched /models ids (cc-switch
-// FetchedModelPicker): picked ids become catalog rows named after the model.
-function FetchedModelPicker({ fetchedModels, configuredIds, onAdd }) {
-  const [search, setSearch] = React.useState("");
-  const [selectedIds, setSelectedIds] = React.useState(() => new Set());
-  const query = search.trim().toLowerCase();
-  const visibleModels = fetchedModels.filter((id) => id.toLowerCase().includes(query));
-  let pendingCount = 0;
-  for (const id of selectedIds) {
-    if (!configuredIds.has(id)) pendingCount += 1;
-  }
-  const toggle = (id, on) => {
-    setSelectedIds((current) => {
-      const next = new Set(current);
-      if (on) next.add(id);
-      else next.delete(id);
-      return next;
-    });
-  };
-  const addSelected = () => {
-    const ids = fetchedModels.filter((id) => selectedIds.has(id) && !configuredIds.has(id));
-    if (ids.length === 0) return;
-    setSelectedIds(new Set());
-    onAdd(ids);
-  };
-
-  return (
-    <fieldset className="mt-2 rounded-lg border border-oai-gray-200 p-3 dark:border-oai-gray-800">
-      <legend className="px-1 text-xs font-medium text-oai-gray-600 dark:text-oai-gray-300">
-        {copy("pswitch.catalog.picker_title", { count: fetchedModels.length })}
-      </legend>
-      <input
-        type="text"
-        value={search}
-        onChange={(event) => setSearch(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") event.preventDefault();
-        }}
-        placeholder={copy("pswitch.catalog.picker_search")}
-        aria-label={copy("pswitch.catalog.picker_search")}
-        autoComplete="off"
-        spellCheck={false}
-        className="w-full rounded-md border border-oai-gray-200 bg-white px-2 py-1.5 text-xs text-oai-black focus:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 dark:border-oai-gray-800 dark:bg-oai-gray-950 dark:text-white"
-      />
-      <div className="mt-2 max-h-48 overflow-y-auto pr-1">
-        {visibleModels.length === 0 ? (
-          <p className="py-4 text-center text-xs text-oai-gray-400 dark:text-oai-gray-500">{copy("pswitch.catalog.picker_empty")}</p>
-        ) : (
-          visibleModels.map((id) => {
-            const isConfigured = configuredIds.has(id);
-            return (
-              <label key={id} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 hover:bg-oai-gray-50 dark:hover:bg-oai-gray-900">
-                <input
-                  type="checkbox"
-                  aria-label={id}
-                  checked={isConfigured || selectedIds.has(id)}
-                  disabled={isConfigured}
-                  onChange={(event) => toggle(id, event.currentTarget.checked)}
-                  className="h-3 w-3 rounded border-oai-gray-300 accent-oai-brand-500"
-                />
-                <span className="min-w-0 flex-1 break-all font-mono text-xs text-oai-gray-700 dark:text-oai-gray-200">{id}</span>
-                {isConfigured ? <span className="shrink-0 text-[10px] text-oai-gray-400 dark:text-oai-gray-500">{copy("pswitch.catalog.picker_added")}</span> : null}
-              </label>
-            );
-          })
-        )}
-      </div>
-      <div className="mt-2 flex justify-end">
-        <button
-          type="button"
-          disabled={pendingCount === 0}
-          onClick={addSelected}
-          className="rounded-md border border-oai-gray-200 px-2 py-1 text-xs font-medium text-oai-gray-600 hover:bg-oai-gray-50 disabled:opacity-40 dark:border-oai-gray-700 dark:text-oai-gray-300 dark:hover:bg-oai-gray-800"
-        >
-          {copy("pswitch.catalog.picker_add_selected", { count: pendingCount })}
-        </button>
-      </div>
-    </fieldset>
-  );
 }
 
 function RowInput({ value, onChange, placeholder, ariaLabel, numeric }) {
@@ -213,7 +134,15 @@ function ReasoningLevelsPicker({ levels, defaultLevel, onLevelsChange, onDefault
 
 export function CodexCatalogEditor({ models, onChange, fetchedModels, fetchState, onFetch, defaultModel, onAddToMapping, modelMetadata, officialModelsReason }) {
   const rows = Array.isArray(models) ? models : [];
-  const hasFetched = Array.isArray(fetchedModels) && fetchedModels.length > 0;
+  const hasFetched = Array.isArray(fetchedModels);
+  const [pickerOpen, setPickerOpen] = React.useState(false);
+  const previousFetched = React.useRef(fetchedModels);
+  React.useEffect(() => {
+    if (fetchedModels !== previousFetched.current) {
+      setPickerOpen(Array.isArray(fetchedModels));
+      previousFetched.current = fetchedModels;
+    }
+  }, [fetchedModels]);
 
   const updateRow = (index, patch) => {
     onChange(rows.map((row, i) => (i === index ? { ...row, ...patch } : row)));
@@ -229,21 +158,21 @@ export function CodexCatalogEditor({ models, onChange, fetchedModels, fetchState
   // Picked models become rows named after the model id; known context
   // windows and reasoning levels are filled from the models.dev metadata
   // (cc-switch's handleAddFetchedCatalogRows + fillCatalogRowMetadata).
-  const addFetchedRows = (ids) => {
+  const applyFetchedRows = (ids) => {
+    const selected = new Set(ids);
     const present = new Set(configuredIds);
     const additions = [];
-    let filledCount = 0;
     for (const id of ids) {
       if (!id || present.has(id)) continue;
       present.add(id);
       const row = { model: id, displayName: id, contextWindow: "", reasoningLevels: [], defaultReasoningLevel: "" };
       const patch = fillRowMetadata(row, id, modelMetadata);
-      if (patch) filledCount += 1;
       additions.push(patch ? { ...row, ...patch } : row);
     }
-    if (additions.length === 0) return;
-    onChange([...rows, ...additions]);
-    if (filledCount > 0) showToast({ title: copy("pswitch.catalog.filled_many", { count: filledCount }) });
+    const kept = rows.filter(row => !String(row.model || "").trim() || selected.has(String(row.model).trim()));
+    const next = [...kept, ...additions];
+    onChange(next.length ? next : undefined);
+    setPickerOpen(false);
   };
   const selectRowModel = (index, row, model) => {
     const patch = fillRowMetadata(row, model, modelMetadata);
@@ -282,12 +211,12 @@ export function CodexCatalogEditor({ models, onChange, fetchedModels, fetchState
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={onFetch}
+            onClick={() => hasFetched ? setPickerOpen(true) : onFetch()}
             disabled={fetchState === "loading"}
             className="inline-flex items-center gap-1 text-xs font-medium text-oai-brand-600 hover:underline disabled:opacity-50 dark:text-oai-brand-400"
           >
             <Download className="h-3 w-3" />
-            {fetchState === "loading" ? copy("pswitch.models.fetching") : copy("pswitch.models.fetch")}
+            {copy(fetchState === "loading" ? "pswitch.models.fetching" : hasFetched ? "pswitch.catalog.choose" : "pswitch.models.fetch")}
           </button>
           <button
             type="button"
@@ -300,7 +229,7 @@ export function CodexCatalogEditor({ models, onChange, fetchedModels, fetchState
         </div>
       </div>
       <p className="mt-1 text-xs text-oai-gray-400 dark:text-oai-gray-500">{copy("pswitch.catalog.hint")}</p>
-      {hasFetched ? <FetchedModelPicker fetchedModels={fetchedModels} configuredIds={configuredIds} onAdd={addFetchedRows} /> : null}
+      {pickerOpen ? <FetchedModelPicker fetchedModels={fetchedModels} configuredIds={configuredIds} modelMetadata={modelMetadata} fetchState={fetchState} onFetch={onFetch} onApply={applyFetchedRows} onClose={() => setPickerOpen(false)} /> : null}
       {hasRows ? (
         <div className="mt-2 space-y-2">
           <div className="hidden grid-cols-[1fr_1fr_110px_150px_28px] gap-2 px-0.5 text-[10px] font-medium uppercase tracking-wide text-oai-gray-400 md:grid">

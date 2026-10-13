@@ -3002,3 +3002,34 @@ pswitch.profile.saved,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_sav
 pswitch.profile.deleted,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_deleted,Profile deleted.,,active
 pswitch.profile.delete_confirm_title,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_delete_confirm_title,Delete profile,,active
 pswitch.profile.delete_confirm_desc,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_delete_confirm_desc,"Delete ""{{name}}""? The app's current-profile marker clears; the snapshot itself is not restored.",,active
+proxy.settings.routing.rebind,proxy,ProxyPage,Proxy,rebind,Switch session credential on,,active
+proxy.settings.routing.rebindAny,proxy,ProxyPage,Proxy,rebindAny,Any credential failure,,active
+proxy.settings.routing.rebindQuota,proxy,ProxyPage,Proxy,rebindQuota,"Quota, authentication or model errors",,active
+proxy.settings.routing.rebindHint,proxy,ProxyPage,Proxy,rebindHint,"With the second option, temporary errors use another credential for that request only; later requests return to the original credential.",,active
+pswitch.catalog.choose,pswitch,ProviderSwitchPage,ProviderEditDialog,choose,Choose models,,active
+pswitch.catalog.select_all,pswitch,ProviderSwitchPage,ProviderEditDialog,select_all,Select all shown,,active
+pswitch.catalog.select_none,pswitch,ProviderSwitchPage,ProviderEditDialog,select_none,Deselect all shown,,active
+pswitch.catalog.only_selected,pswitch,ProviderSwitchPage,ProviderEditDialog,only_selected,Selected only,,active
+pswitch.catalog.refetch,pswitch,ProviderSwitchPage,ProviderEditDialog,refetch,Fetch again,,active
+pswitch.catalog.unavailable,pswitch,ProviderSwitchPage,ProviderEditDialog,unavailable,Not returned by this provider,,active
+pswitch.catalog.context_preview,pswitch,ProviderSwitchPage,ProviderEditDialog,context_preview,Context: {{count}},,active
+pswitch.catalog.reasoning_preview,pswitch,ProviderSwitchPage,ProviderEditDialog,reasoning_preview,Reasoning,,active
+pswitch.catalog.image_preview,pswitch,ProviderSwitchPage,ProviderEditDialog,image_preview,Image input,,active
+pswitch.catalog.selected_count,pswitch,ProviderSwitchPage,ProviderEditDialog,selected_count,{{count}} selected,,active
+pswitch.subagent.model,pswitch,ProviderSwitchPage,ProviderEditDialog,model,Subagent model,,active
+pswitch.subagent.effort,pswitch,ProviderSwitchPage,ProviderEditDialog,effort,Subagent reasoning effort,,active
+pswitch.subagent.inherit,pswitch,ProviderSwitchPage,ProviderEditDialog,inherit,Follow the main agent,,active
+pswitch.subagent.hint,pswitch,ProviderSwitchPage,ProviderEditDialog,hint,These defaults switch with the provider. Leave blank to follow the main agent.,,active
+pswitch.subagent.missing,pswitch,ProviderSwitchPage,ProviderEditDialog,missing,This model is missing from the model list; add it so its context window is available.,,active
+proxy.requests.filter.key,proxy,ProxyPage,Proxy,key,All client keys,,active
+proxy.requests.filter.upstream,proxy,ProxyPage,Proxy,upstream,All upstream credentials,,active
+proxy.requests.copyError,proxy,ProxyPage,Proxy,copyError,Copy error details,,active
+proxy.requests.errorCopied,proxy,ProxyPage,Proxy,errorCopied,Error details copied,,active
+proxy.privacy.label,proxy,ProxyPage,Proxy,label,Privacy mode,,active
+proxy.privacy.hint,proxy,ProxyPage,Proxy,hint,Hide account identities on screen. Copy and export keep the original values.,,active
+proxy.privacy.saveFailed,proxy,ProxyPage,Proxy,saveFailed,Could not save privacy mode,,active
+proxy.accounts.title,proxy,ProxyPage,Proxy,title,Saved accounts,,active
+proxy.accounts.empty,proxy,ProxyPage,Proxy,empty,Import a credential file to add an account.,,active
+proxy.accounts.view,proxy,ProxyPage,Proxy,view,View {{provider}} accounts,,active
+proxy.accounts.count,proxy,ProxyPage,Proxy,count,{{count}} accounts,,active
+proxy.accounts.more,proxy,ProxyPage,Proxy,more,{{count}} more,,active

@@ -210,6 +210,12 @@ function codexEntries(config) {
   const doc = isPlainObject(config) ? config : {};
   for (const [key, value] of Object.entries(doc)) {
     if (floor.isCodexFloorTop(key)) continue;
+    if (key === "agents" && isPlainObject(value)) {
+      for (const [child, childValue] of Object.entries(value)) {
+        if (!floor.CODEX_FLOOR_AGENTS.includes(child)) entries.push({ path: [key, child], value: childValue });
+      }
+      continue;
+    }
     if (key === "model_providers") {
       if (isPlainObject(value)) {
         for (const [id, table] of Object.entries(value)) {
@@ -253,6 +259,9 @@ function codexRowSettings(storedRow, edited, options) {
     config[key] = value;
   }
   const table = editedConfig.model_providers && editedConfig.model_providers.custom;
+  for (const key of floor.CODEX_FLOOR_AGENTS) {
+    if (editedConfig.agents?.[key] !== undefined) (config.agents ||= {})[key] = editedConfig.agents[key];
+  }
   if (isPlainObject(table)) {
     const cleaned = { ...table };
     // Both are recomputed by the switch projection from the row key and the
@@ -287,6 +296,12 @@ function codexInactiveFields(row) {
   const config = row && isPlainObject(row.config) ? row.config : {};
   for (const [key, value] of Object.entries(config)) {
     if (floor.isCodexFloorTop(key)) continue;
+    if (key === "agents" && isPlainObject(value)) {
+      for (const [child, childValue] of Object.entries(value)) {
+        if (!floor.CODEX_FLOOR_AGENTS.includes(child)) fields.push({ path: ["config", key, child], value: childValue });
+      }
+      continue;
+    }
     fields.push({ path: ["config", key], value });
   }
   return fields;
@@ -322,6 +337,10 @@ function codexApply(lives, changes) {
   for (const change of changes) {
     const [head, second] = change.path;
     assertNoArrayOfTables(text, second === undefined ? head : `${head}.${second}`);
+    if (head === "agents" && second !== undefined) {
+      text = toml.setTableValue(text, head, second, change.after);
+      continue;
+    }
     if (second === undefined) {
       if (change.after === undefined) {
         text = toml.removeTopLevelKey(text, head);

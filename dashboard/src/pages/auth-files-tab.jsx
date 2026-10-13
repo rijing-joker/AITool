@@ -24,6 +24,8 @@ import {
   Feather,
 } from "lucide-react";
 import { copy } from "../lib/copy";
+import { PrivacyIdentities, authFileIdentities, usePrivacyText } from "../lib/proxy-privacy";
+import { ProxyAccountOverview } from "./proxy-account-overview";
 import { getLocalApiAuthHeaders } from "../lib/local-api-auth";
 import { managementApi } from "../lib/easy-providers";
 import {
@@ -78,6 +80,7 @@ const PROVIDER_ICONS = {
 };
 
 function CredsNotice({ message, tone = "error", onDismiss }) {
+  const display = usePrivacyText();
   if (!message) return null;
   const isError = tone === "error";
   return (
@@ -91,7 +94,7 @@ function CredsNotice({ message, tone = "error", onDismiss }) {
       }`}
     >
       {isError ? <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> : <Check className="mt-0.5 h-4 w-4 shrink-0" />}
-      <span className="min-w-0 flex-1 break-words">{message}</span>
+      <span className="min-w-0 flex-1 break-words">{display(message)}</span>
       {onDismiss ? (
         <button
           type="button"
@@ -107,6 +110,7 @@ function CredsNotice({ message, tone = "error", onDismiss }) {
 }
 
 function CredsModal({ open, onClose, busy, title, subtitle, children, width = "max-w-2xl" }) {
+  const display = usePrivacyText();
   return (
     <Dialog.Root
       open={open}
@@ -123,7 +127,7 @@ function CredsModal({ open, onClose, busy, title, subtitle, children, width = "m
                 <Dialog.Title className="text-base font-semibold text-oai-black dark:text-white">{title}</Dialog.Title>
                 {subtitle ? (
                   <Dialog.Description className="mt-0.5 truncate text-sm text-oai-gray-500 dark:text-oai-gray-400">
-                    {subtitle}
+                    {display(subtitle)}
                   </Dialog.Description>
                 ) : null}
               </div>
@@ -182,6 +186,7 @@ function formatDuration(seconds) {
 }
 
 function CredentialHealthStatus({ file, receivedAtMs, observedAt, onReset, resetting = false }) {
+  const display = usePrivacyText();
   const snapshot = useMemo(
     () => normalizeAuthFileCooldowns(file.cooldowns, receivedAtMs, observedAt),
     [file, receivedAtMs, observedAt],
@@ -249,8 +254,8 @@ function CredentialHealthStatus({ file, receivedAtMs, observedAt, onReset, reset
           </span>
         ) : null}
         {health.message && !cooldown.rows.length && !health.label.startsWith("proxy.creds.health.reason.") ? (
-          <span className="mt-0.5 block truncate text-xs text-oai-gray-500 dark:text-oai-gray-400" title={health.message}>
-            {health.message}
+          <span className="mt-0.5 block truncate text-xs text-oai-gray-500 dark:text-oai-gray-400" title={display(health.message)}>
+            {display(health.message)}
           </span>
         ) : null}
         {cooldown.elapsed ? (
@@ -418,6 +423,7 @@ function CredentialRequestTimeline({ file }) {
 // --- settings dialog (AuthFileSettingsDialog port) ---------------------------
 
 function CredentialSettingsDialog({ name, onClose, onSaved }) {
+  const display = usePrivacyText();
   const [original, setOriginal] = useState(null);
   const [draft, setDraft] = useState(null);
   const [models, setModels] = useState([]);
@@ -584,7 +590,7 @@ function CredentialSettingsDialog({ name, onClose, onSaved }) {
                   {catalogError ? (
                     <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
                       {copy("proxy.creds.settings.catalogError")}
-                      <span className="block break-words">{catalogError}</span>
+                      <span className="block break-words">{display(catalogError)}</span>
                     </p>
                   ) : null}
                   <input
@@ -658,7 +664,7 @@ function CredentialSettingsDialog({ name, onClose, onSaved }) {
           ) : null}
         </div>
         <div className="space-y-2 border-t border-oai-gray-100 px-5 py-3.5 dark:border-oai-gray-800">
-          {error ? <p className="text-sm text-red-600 dark:text-red-400" role="alert">{error}</p> : null}
+          {error ? <p className="text-sm text-red-600 dark:text-red-400" role="alert">{display(error)}</p> : null}
           {discard ? (
             <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300" role="alert">
               <span className="flex-1">{copy("proxy.creds.settings.unsaved")}</span>
@@ -1038,6 +1044,8 @@ export function AuthFilesTab({ onDirty }) {
   const [vertexBusy, setVertexBusy] = useState(false);
 
   const { files, receivedAtMs, observedAt } = snapshot;
+  const identities = useMemo(() => files.flatMap(authFileIdentities), [files]);
+  const display = usePrivacyText(identities);
 
   const loadFiles = useCallback(async (showLoading = true) => {
     if (showLoading) setLoading(true);
@@ -1054,6 +1062,13 @@ export function AuthFilesTab({ onDirty }) {
 
   useEffect(() => {
     void loadFiles();
+    const refresh = () => void loadFiles(false);
+    window.addEventListener("focus", refresh);
+    window.addEventListener("aitool:credentials-changed", refresh);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      window.removeEventListener("aitool:credentials-changed", refresh);
+    };
   }, [loadFiles]);
 
   const providers = useMemo(
@@ -1077,7 +1092,7 @@ export function AuthFilesTab({ onDirty }) {
         || (statusFilter === "runtime" && isRuntimeOnlyAuthFile(file));
       const searchMatch =
         !query
-        || [authFileName(file), providerLabelForFile(file), String(file.email ?? file.account ?? file.label ?? "")]
+        || [authFileName(file), providerLabelForFile(file), [file.email, file.account, file.project_id, file.label].filter(Boolean).join(" ")]
           .join(" ")
           .toLowerCase()
           .includes(query);
@@ -1161,9 +1176,11 @@ export function AuthFilesTab({ onDirty }) {
       });
       const payload = await response.json().catch(() => null);
       if (!payload?.ok) throw new Error(payload?.error || `HTTP ${response.status}`);
+      const importedIdentities = [payload.result?.projectId, payload.result?.email, parsed.project_id, parsed.client_email]
+        .filter((value) => typeof value === "string" && value.trim());
       showToast(copy("proxy.creds.vertex.imported", {
-        project: payload.result?.projectId || file.name,
-        email: payload.result?.email || "",
+        project: display(payload.result?.projectId || file.name, importedIdentities),
+        email: display(payload.result?.email || "", importedIdentities),
       }), "success");
       setVertexImportOpen(false);
       setVertexFileName("");
@@ -1221,7 +1238,7 @@ export function AuthFilesTab({ onDirty }) {
         ...current,
         files: current.files.map((item) => (authFileCooldownResetIndex(item) === index ? { ...item, cooldowns: [] } : item)),
       }));
-      showToast(copy("proxy.creds.cooldown.resetSuccess", { name }), "success");
+      showToast(copy("proxy.creds.cooldown.resetSuccess", { name: display(name) }), "success");
       await loadFiles(false);
     } catch (requestError) {
       setError(String(requestError));
@@ -1264,6 +1281,7 @@ export function AuthFilesTab({ onDirty }) {
   const runtimeCount = files.filter(isRuntimeOnlyAuthFile).length;
 
   return (
+    <PrivacyIdentities.Provider value={identities}>
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-oai-gray-500 dark:text-oai-gray-400">
@@ -1316,6 +1334,7 @@ export function AuthFilesTab({ onDirty }) {
         </div>
       </div>
 
+      {!loading ? <ProxyAccountOverview files={files} onSelect={(provider) => { setProviderFilter(provider); setStatusFilter("all"); setFilter(""); }} /> : null}
       <CredsNotice message={error} onDismiss={() => setError("")} />
 
       <Card className="!p-0 overflow-hidden">
@@ -1397,11 +1416,11 @@ export function AuthFilesTab({ onDirty }) {
                           </span>
                         ) : null}
                       </div>
-                      <strong className="block truncate text-sm" title={identity || name}>{identity || name}</strong>
+                      <strong className="block truncate text-sm" title={display(identity || name)}>{display(identity || name)}</strong>
                     </div>
                   </header>
                   {identity ? (
-                    <p className="mt-1 truncate font-mono text-xs text-oai-gray-400 dark:text-oai-gray-500" title={name}>{name}</p>
+                    <p className="mt-1 truncate font-mono text-xs text-oai-gray-400 dark:text-oai-gray-500" title={display(name)}>{display(name)}</p>
                   ) : null}
                   <div className="mt-2.5">
                     <CredentialHealthStatus
@@ -1428,7 +1447,7 @@ export function AuthFilesTab({ onDirty }) {
                   {note ? (
                     <div className="mt-2.5 rounded-lg bg-oai-gray-50 px-2.5 py-1.5 text-xs dark:bg-oai-gray-800/60">
                       <span className="font-medium text-oai-gray-500 dark:text-oai-gray-400">{copy("proxy.creds.settings.note")}</span>
-                      <p className="mt-0.5 break-words text-oai-gray-600 dark:text-oai-gray-300" title={note}>{note}</p>
+                      <p className="mt-0.5 break-words text-oai-gray-600 dark:text-oai-gray-300" title={display(note)}>{display(note)}</p>
                     </div>
                   ) : null}
                   <footer className="mt-3 flex flex-wrap items-center gap-1.5">
@@ -1500,7 +1519,7 @@ export function AuthFilesTab({ onDirty }) {
           name={settingsName}
           onClose={() => setSettingsName(null)}
           onSaved={() => {
-            showToast(copy("proxy.creds.settings.updated", { name: settingsName }), "success");
+            showToast(copy("proxy.creds.settings.updated", { name: display(settingsName) }), "success");
             setSettingsName(null);
             void loadFiles(false);
           }}
@@ -1536,7 +1555,7 @@ export function AuthFilesTab({ onDirty }) {
           />
           <Button size="sm" onClick={() => vertexInputRef.current?.click()} disabled={vertexBusy}>
             <Import className="h-4 w-4" />
-            {vertexFileName || copy("proxy.creds.vertex.pickFile")}
+            {display(vertexFileName, [vertexFileName]) || copy("proxy.creds.vertex.pickFile")}
           </Button>
           <p className="text-xs text-oai-gray-500 dark:text-oai-gray-400">{copy("proxy.creds.vertex.hint")}</p>
         </div>
@@ -1545,7 +1564,7 @@ export function AuthFilesTab({ onDirty }) {
       <ConfirmModal
         open={deleteFile !== null}
         title={copy("proxy.upstream.common.delete")}
-        description={copy("proxy.creds.deleteConfirm", { name: deleteFile ? authFileName(deleteFile) : "" })}
+        description={copy("proxy.creds.deleteConfirm", { name: deleteFile ? display(authFileName(deleteFile)) : "" })}
         confirmLabel={copy("proxy.upstream.common.delete")}
         destructive
         busy={busy}
@@ -1556,13 +1575,14 @@ export function AuthFilesTab({ onDirty }) {
       <ConfirmModal
         open={cooldownResetFile !== null}
         title={copy("proxy.creds.cooldown.resetTitle")}
-        description={copy("proxy.creds.cooldown.resetConfirm", { name: cooldownResetFile ? authFileName(cooldownResetFile) : "" })}
+        description={copy("proxy.creds.cooldown.resetConfirm", { name: cooldownResetFile ? display(authFileName(cooldownResetFile)) : "" })}
         confirmLabel={copy("proxy.creds.cooldown.resetButton")}
         busy={cooldownResetting}
         onConfirm={() => void confirmCooldownReset(cooldownResetFile)}
         onCancel={() => setCooldownResetFile(null)}
       />
     </div>
+    </PrivacyIdentities.Provider>
   );
 }
 

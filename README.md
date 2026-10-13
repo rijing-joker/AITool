@@ -96,6 +96,7 @@ A Node port of [cc-switch](https://github.com/farion1231/cc-switch)'s config-fil
 | **Switch model** | Minimal-patch projection (cc-switch's "floor" key fields): only the provider's key fields — endpoint, credentials, model names — are written; user-owned content (hooks, permissions, comments) is never touched, and the previous provider's residue is removed only when you haven't changed it |
 | **Editor** | The add/edit dialog shows the full config file as it would look after switching to this provider (cc-switch's editor view); on save, key fields go back to the provider row while other edits are written into the live files with three-way conflict detection (keep mine / keep theirs) |
 | **Codex credentials** | The relay key is written to `experimental_bearer_token` under `[model_providers.custom]` in `config.toml` — Codex CLI 0.149+ no longer reads relay keys from `auth.json`, which holds only the official ChatGPT login (the add/edit dialog's Codex editors are split accordingly: `auth.json` JSON + `config.toml` TOML) |
+| **Codex models** | Manage fetched models in one picker with add/remove selection, capability previews and existing overrides preserved; optional subagent model and reasoning defaults switch with each provider |
 | **MCP servers** | The page's MCP tab keeps one list of MCP servers (cc-switch's unified `mcp_servers` module) with per-app toggles that project each spec into the app's native MCP config — Claude (`~/.claude.json`), Codex (`[mcp_servers.*]` in `config.toml`), Gemini (`settings.json`), Grok Build, OpenCode, Hermes, MiniMax Code (`~/.minimax/mcp.json`) — and can import what the tools already configured |
 | **Prompts** | The page's Prompts tab keeps named per-app prompt lists (cc-switch's prompt module); enabling one writes it over the app's instruction file — `~/.claude/CLAUDE.md`, `AGENTS.md` (Codex, Grok Build, OpenCode, OpenClaw, pi, mcode), `~/.gemini/GEMINI.md`, `~/.hermes/SOUL.md` — capturing the live file's content into the store first, so hand-written instruction files are never silently overwritten |
 | **Quota** | Providers whose base URL matches a supported plan provider (Command Code presets included for Claude Code and Codex) show per-window "left %" lines on their card (cc-switch's coding_plan quota service); the query uses the row's own API key against the provider's `/alpha` control plane |
@@ -112,7 +113,9 @@ Managed through the dashboard's **AI Proxy** page (tabs) or the core's managemen
 | Client access keys (`access.api-keys`) | Access Keys |
 | Compatible endpoints — `/v1/chat/completions`, `/v1/messages`, `/v1beta/models` | Access Keys |
 | Provider auth files (upload / list / delete / refresh) | Providers |
-| Per-request usage records (model, provider, tokens, latency, failures) with cost estimates (models.dev pricing sync) | Requests |
+| Per-request usage records with cost estimates, separate client/upstream notes, stable filters and error copying | Requests |
+| Saved OAuth account counts/status and privacy masking of displayed identities | Providers / page privacy toggle |
+| Session credential rebinding on any failure or quota/authentication/model errors | Settings |
 | `config.yaml` editor via the core's management API | Settings |
 | Auto-start with the dashboard | Settings |
 

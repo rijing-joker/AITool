@@ -77,3 +77,16 @@ it("blocks navigation until the user explicitly discards the draft", async () =>
   fireEvent.click(screen.getByRole("button", { name: "shared.unsaved.discard" }));
   await screen.findByText("Destination");
 });
+
+it("preserves and saves the session rebind policy without changing cooldown choices", async () => {
+  fields["routing.session-affinity"] = true;
+  fields["routing.session-affinity-rebind-on"] = "quota";
+  fields["routing.cooldown.disable-cooling"] = false;
+  await setup();
+  const policy = screen.getByRole("combobox", { name: /^proxy.settings.routing.rebind/ });
+  expect(policy).toHaveValue("quota");
+  fireEvent.change(policy, { target: { value: "any" } });
+  fireEvent.click(screen.getAllByRole("button", { name: "proxy.action.save_config" })[1]);
+  await waitFor(() => expect(fields["routing.session-affinity-rebind-on"]).toBe("any"));
+  expect(fields["routing.cooldown.disable-cooling"]).toBe(false);
+});

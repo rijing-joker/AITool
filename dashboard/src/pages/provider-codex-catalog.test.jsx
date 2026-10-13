@@ -1,117 +1,75 @@
 import React from "react";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { CodexCatalogEditor } from "./provider-codex-catalog";
 import { showToast } from "../ui/components/Toast";
-vi.mock("../lib/copy", () => ({ copy: (key) => key }));
+vi.mock("../lib/copy", () => ({ copy: (key, values) => values?.count ? `${key} ${values.count}` : key }));
 vi.mock("../ui/components/Toast", () => ({ showToast: vi.fn() }));
-
-// Normalized ids mirror the backend pricing store keys.
-const metadata = {
-  "kimi-k3": { contextWindow: 262144, maxOutputTokens: 32768, reasoningEfforts: ["low", "medium", "bogus"] },
-};
-
-const baseProps = {
-  fetchState: "done",
-  onFetch: () => {},
-  defaultModel: "",
-  onAddToMapping: () => {},
-};
-
-beforeEach(() => {
-  vi.clearAllMocks();
-});
+const metadata = { "kimi-k3": { contextWindow: 262144, reasoningEfforts: ["low", "medium", "bogus"], inputModalities: ["text", "image"] } };
+const baseProps = { fetchState: "done", onFetch: () => {}, defaultModel: "", onAddToMapping: () => {} };
+beforeEach(() => vi.clearAllMocks());
 afterEach(() => cleanup());
-
-it("picker appears only with fetched models and adds rows filled from models.dev metadata", () => {
+const openPicker = () => {
+  fireEvent.click(screen.getByRole("button", { name: "pswitch.catalog.choose" }));
+  return within(screen.getByRole("dialog"));
+};
+it("opens after fetching and previews the parameters applied to new models", () => {
   const onChange = vi.fn();
-  const { rerender } = render(
-    <CodexCatalogEditor {...baseProps} models={[]} onChange={onChange} fetchedModels={null} modelMetadata={metadata} />,
-  );
-  expect(screen.queryByText("pswitch.catalog.picker_title")).toBeNull();
-
-  rerender(
-    <CodexCatalogEditor
-      {...baseProps}
-      models={[]}
-      onChange={onChange}
-      fetchedModels={["vendor/kimi-k3[1m]", "other-model"]}
-      modelMetadata={metadata}
-    />,
-  );
-  // Vendor prefix / variant / [1m] markers resolve to the same store entry.
-  fireEvent.click(screen.getByLabelText("vendor/kimi-k3[1m]"));
-  fireEvent.click(screen.getByLabelText("other-model"));
-  fireEvent.click(screen.getByText("pswitch.catalog.picker_add_selected"));
-
-  expect(onChange).toHaveBeenCalledTimes(1);
+  const { rerender } = render(React.createElement(CodexCatalogEditor, { ...baseProps, models: [], onChange, fetchedModels: null, modelMetadata: metadata }));
+  expect(screen.queryByRole("dialog")).toBeNull();
+  rerender(<CodexCatalogEditor {...baseProps} models={[]} onChange={onChange} fetchedModels={["vendor/kimi-k3[1m]", "other"]} modelMetadata={metadata} />);
+  const picker = within(screen.getByRole("dialog"));
+  expect(picker.getByText("pswitch.catalog.context_preview 262144")).toBeInTheDocument();
+  expect(picker.getByText("pswitch.catalog.image_preview")).toBeInTheDocument();
+  fireEvent.click(picker.getByLabelText("vendor/kimi-k3[1m]"));
+  fireEvent.click(picker.getByRole("button", { name: "shared.action.apply" }));
   const rows = onChange.mock.calls[0][0];
-  expect(rows.map((row) => row.model)).toEqual(["vendor/kimi-k3[1m]", "other-model"]);
-  expect(rows[0].displayName).toBe("vendor/kimi-k3[1m]");
-  expect(rows[0].contextWindow).toBe("262144");
-  // Intersected with Codex's own level order; unknown values dropped.
-  expect(rows[0].reasoningLevels).toEqual(["low", "medium"]);
-  expect(rows[1].contextWindow).toBe("");
-  expect(showToast).toHaveBeenCalledWith({ title: "pswitch.catalog.filled_many" });
-});
-
-it("picker search filters and configured ids are disabled", () => {
-  const onChange = vi.fn();
-  render(
-    <CodexCatalogEditor
-      {...baseProps}
-      models={[{ model: "other-model", displayName: "Other", contextWindow: "", reasoningLevels: [], defaultReasoningLevel: "" }]}
-      onChange={onChange}
-      fetchedModels={["kimi-k3", "other-model"]}
-      modelMetadata={metadata}
-    />,
-  );
-  expect(screen.getByLabelText("other-model")).toBeDisabled();
-  const search = screen.getByLabelText("pswitch.catalog.picker_search");
-  fireEvent.change(search, { target: { value: "kimi" } });
-  expect(screen.queryByLabelText("other-model")).toBeNull();
-  fireEvent.click(screen.getByLabelText("kimi-k3"));
-  fireEvent.click(screen.getByText("pswitch.catalog.picker_add_selected"));
-  const rows = onChange.mock.calls[0][0];
-  expect(rows).toHaveLength(2);
-  expect(rows[1].model).toBe("kimi-k3");
-});
-
-it("per-row dropdown fills only blank fields and leaves user values alone", () => {
-  const onChange = vi.fn();
-  render(
-    <CodexCatalogEditor
-      {...baseProps}
-      models={[{ model: "", displayName: "Kept name", contextWindow: "999", reasoningLevels: [], defaultReasoningLevel: "" }]}
-      onChange={onChange}
-      fetchedModels={["kimi-k3"]}
-      modelMetadata={metadata}
-    />,
-  );
-  fireEvent.click(screen.getByLabelText("pswitch.models.dropdown_aria"));
-  // The picker lists the same id as a label; the dropdown option is a button.
-  fireEvent.click(screen.getByRole("button", { name: "kimi-k3" }));
-  const row = onChange.mock.calls[0][0][0];
-  expect(row.model).toBe("kimi-k3");
-  expect(row.displayName).toBe("Kept name");
-  expect(row.contextWindow).toBe("999");
-  expect(row.reasoningLevels).toEqual(["low", "medium"]);
-  expect(showToast).toHaveBeenCalledWith({ title: "pswitch.catalog.filled" });
-});
-
-it("fill stays silent when the model has no metadata entry", () => {
-  const onChange = vi.fn();
-  render(
-    <CodexCatalogEditor
-      {...baseProps}
-      models={[]}
-      onChange={onChange}
-      fetchedModels={["unknown-model"]}
-      modelMetadata={metadata}
-    />,
-  );
-  fireEvent.click(screen.getByLabelText("unknown-model"));
-  fireEvent.click(screen.getByText("pswitch.catalog.picker_add_selected"));
-  expect(onChange).toHaveBeenCalledTimes(1);
+  expect(rows[0]).toMatchObject({ model: "vendor/kimi-k3[1m]", contextWindow: "262144", reasoningLevels: ["low", "medium"], inputModalities: ["text", "image"] });
   expect(showToast).not.toHaveBeenCalled();
+});
+it("one selection can add and remove models while preserving duplicate routes and manual settings", () => {
+  const rows = [{ model: "keep", displayName: "Alias A", contextWindow: "999" }, { model: "keep", displayName: "Alias B", baseInstructions: "custom" }, { model: "retired", displayName: "Old" }];
+  const onChange = vi.fn();
+  render(<CodexCatalogEditor {...baseProps} models={rows} onChange={onChange} fetchedModels={["keep", "kimi-k3"]} modelMetadata={metadata} />);
+  const picker = openPicker();
+  expect(picker.getByText("pswitch.catalog.unavailable")).toBeInTheDocument();
+  fireEvent.click(picker.getByLabelText("retired"));
+  fireEvent.click(picker.getByLabelText("kimi-k3"));
+  fireEvent.click(picker.getByRole("button", { name: "shared.action.apply" }));
+  const next = onChange.mock.calls[0][0];
+  expect(next.slice(0, 2)).toEqual(rows.slice(0, 2));
+  expect(next.map(row => row.model)).toEqual(["keep", "keep", "kimi-k3"]);
+});
+it("cancel discards selection edits and search does not change hidden selections", () => {
+  const onChange = vi.fn();
+  render(<CodexCatalogEditor {...baseProps} models={[{ model: "keep" }]} onChange={onChange} fetchedModels={["keep", "kimi-k3"]} modelMetadata={metadata} />);
+  const picker = openPicker();
+  fireEvent.change(picker.getByLabelText("pswitch.catalog.picker_search"), { target: { value: "kimi" } });
+  fireEvent.click(picker.getByRole("button", { name: "pswitch.catalog.select_all" }));
+  fireEvent.click(picker.getByRole("button", { name: "shared.action.cancel" }));
+  expect(onChange).not.toHaveBeenCalled();
+  const reopened = openPicker();
+  expect(reopened.getByLabelText("keep")).toBeChecked();
+  expect(reopened.getByLabelText("kimi-k3")).not.toBeChecked();
+});
+it("refetch keeps draft choices and deselecting all removes the configured catalog", () => {
+  const onChange = vi.fn(), onFetch = vi.fn();
+  const props = { ...baseProps, onFetch, models: [{ model: "old" }], onChange };
+  const { rerender } = render(<CodexCatalogEditor {...props} fetchedModels={["old", "new"]} />);
+  const picker = openPicker();
+  fireEvent.click(picker.getByLabelText("new"));
+  fireEvent.click(picker.getByRole("button", { name: "pswitch.catalog.refetch" }));
+  expect(onFetch).toHaveBeenCalledOnce();
+  rerender(<CodexCatalogEditor {...props} fetchedModels={["new"]} />);
+  expect(picker.getByLabelText("new")).toBeChecked();
+  fireEvent.click(picker.getByRole("button", { name: "pswitch.catalog.select_none" }));
+  fireEvent.click(picker.getByRole("button", { name: "shared.action.apply" }));
+  expect(onChange).toHaveBeenCalledWith(undefined);
+});
+it("per-row dropdown fills blank parameters and preserves manual values", () => {
+  const onChange = vi.fn();
+  render(<CodexCatalogEditor {...baseProps} models={[{ model: "", displayName: "Kept", contextWindow: "999", reasoningLevels: [] }]} onChange={onChange} fetchedModels={["kimi-k3"]} modelMetadata={metadata} />);
+  fireEvent.click(screen.getByLabelText("pswitch.models.dropdown_aria"));
+  fireEvent.click(screen.getByRole("button", { name: "kimi-k3" }));
+  expect(onChange.mock.calls[0][0][0]).toMatchObject({ displayName: "Kept", contextWindow: "999", reasoningLevels: ["low", "medium"] });
 });

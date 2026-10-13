@@ -82,6 +82,7 @@ function normalizedDrafts(next) {
       strategy: String(read("routing.strategy", "round-robin")),
       sessionAffinity: Boolean(read("routing.session-affinity", false)),
       sessionTtl: String(read("routing.session-affinity-ttl", "")),
+      sessionRebind: String(read("routing.session-affinity-rebind-on", "any")),
       disableCooling: Boolean(read("routing.cooldown.disable-cooling", false)),
       requestRetry: String(read("routing.retry.request-retry", 0)),
       maxRetryCredentials: String(read("routing.retry.max-retry-credentials", 0)),
@@ -141,6 +142,7 @@ export function SettingsTab({ status, onRefresh, onInstallCore }) {
   const [strategy, setStrategy] = useState("round-robin");
   const [sessionAffinity, setSessionAffinity] = useState(false);
   const [sessionTtl, setSessionTtl] = useState("");
+  const [sessionRebind, setSessionRebind] = useState("any");
   const [disableCooling, setDisableCooling] = useState(false);
   const [requestRetry, setRequestRetry] = useState("");
   const [maxRetryCredentials, setMaxRetryCredentials] = useState("");
@@ -157,7 +159,7 @@ export function SettingsTab({ status, onRefresh, onInstallCore }) {
 
   const drafts = {
     network: { host, port, proxyUrl },
-    routing: { strategy, sessionAffinity, sessionTtl, disableCooling, requestRetry, maxRetryCredentials, maxRetryInterval, streamingBootstrapRetries },
+    routing: { strategy, sessionAffinity, sessionTtl, sessionRebind, disableCooling, requestRetry, maxRetryCredentials, maxRetryInterval, streamingBootstrapRetries },
     diagnostics: { debug, loggingToFile, usageStatistics, redisRetention },
     codex: { codexApplyPatch, codexOptimizeMultiAgent },
   };
@@ -166,6 +168,7 @@ export function SettingsTab({ status, onRefresh, onInstallCore }) {
   const structuredDirty = dirtySections.length > 0;
   const revertSection = (section) => {
     const setters = { host: setHost, port: setPort, proxyUrl: setProxyUrl, strategy: setStrategy, sessionAffinity: setSessionAffinity, sessionTtl: setSessionTtl, disableCooling: setDisableCooling, requestRetry: setRequestRetry, maxRetryCredentials: setMaxRetryCredentials, maxRetryInterval: setMaxRetryInterval, streamingBootstrapRetries: setStreamingBootstrapRetries, debug: setDebug, loggingToFile: setLoggingToFile, usageStatistics: setUsageStatistics, redisRetention: setRedisRetention, codexApplyPatch: setCodexApplyPatch, codexOptimizeMultiAgent: setCodexOptimizeMultiAgent };
+    setters.sessionRebind = setSessionRebind;
     for (const [key, value] of Object.entries(savedDrafts[section])) setters[key](value);
   };
   const applyFields = useCallback((next) => {
@@ -176,6 +179,7 @@ export function SettingsTab({ status, onRefresh, onInstallCore }) {
     setStrategy(normalized.routing.strategy);
     setSessionAffinity(normalized.routing.sessionAffinity);
     setSessionTtl(normalized.routing.sessionTtl);
+    setSessionRebind(normalized.routing.sessionRebind);
     setDisableCooling(normalized.routing.disableCooling);
     setRequestRetry(normalized.routing.requestRetry);
     setMaxRetryCredentials(normalized.routing.maxRetryCredentials);
@@ -449,6 +453,7 @@ export function SettingsTab({ status, onRefresh, onInstallCore }) {
               ...(strategy === "round-robin" ? { "routing.strategy": null } : { "routing.strategy": strategy }),
               "routing.session-affinity": sessionAffinity,
               ...(sessionTtl.trim() ? { "routing.session-affinity-ttl": sessionTtl.trim() } : { "routing.session-affinity-ttl": null }),
+              "routing.session-affinity-rebind-on": sessionRebind,
               "routing.cooldown.disable-cooling": disableCooling,
               "routing.retry.request-retry": integerOrNull(requestRetry) ?? 0,
               "routing.retry.max-retry-credentials": integerOrNull(maxRetryCredentials) ?? 0,
@@ -481,6 +486,14 @@ export function SettingsTab({ status, onRefresh, onInstallCore }) {
           </label>
         </div>
         <div className="mt-3 space-y-3 border-t border-oai-gray-100 pt-3 dark:border-oai-gray-800">
+          <label className="block space-y-1">
+            <span className="text-xs font-medium text-oai-gray-500 dark:text-oai-gray-400">{copy("proxy.settings.routing.rebind")}</span>
+            <select value={sessionRebind} onChange={(event) => setSessionRebind(event.currentTarget.value)} disabled={!sessionAffinity} className={inputClass}>
+              <option value="any">{copy("proxy.settings.routing.rebindAny")}</option>
+              <option value="quota">{copy("proxy.settings.routing.rebindQuota")}</option>
+            </select>
+            <span className="block text-xs text-oai-gray-400 dark:text-oai-gray-500">{copy("proxy.settings.routing.rebindHint")}</span>
+          </label>
           <Toggle
             checked={sessionAffinity}
             onChange={setSessionAffinity}

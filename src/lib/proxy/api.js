@@ -9,6 +9,7 @@ const bridge = require("./usage-bridge");
 const management = require("./management");
 const recordStore = require("./usage-records").createUsageRecordStore();
 const pricing = require("./pricing");
+const { upstreamIdentity, createUsageLabeler, usageFilterOptions } = require("./usage-labels");
 const coreInstall = require("./core-install").getInstance;
 
 // Dashboard-facing REST surface for the proxy layer. Mounted by local-api.js
@@ -512,6 +513,20 @@ async function handleProxyApiRequest(req, res, url, ctx) {
       return true;
     }
 
+    if (p === "/api/proxy/privacy" && (method === "GET" || method === "PUT")) {
+      if (method === "PUT") {
+        if (!requireMutation()) return true;
+        const body = await readJsonBody(req);
+        if (typeof body.enabled !== "boolean") {
+          json(res, { ok: false, error: "enabled must be boolean" }, 400);
+          return true;
+        }
+        config.writeSettings({ ...config.readSettings(), privacyMode: body.enabled });
+      }
+      json(res, { ok: true, enabled: config.readSettings().privacyMode ?? null });
+      return true;
+    }
+
     // --- client access keys ---
     if (p === "/api/proxy/keys" && (method === "PUT" || method === "PATCH" || method === "DELETE")) {
       if (!requireMutation()) return true;
@@ -704,7 +719,17 @@ async function handleProxyApiRequest(req, res, url, ctx) {
       const result = url.searchParams.get("result") || "all";
       const since = Date.parse(url.searchParams.get("since") || "");
       const until = Date.parse(url.searchParams.get("until") || "");
-      const filtered = rows.filter((row) => {
+      const keyHash = url.searchParams.get("api_key_hash") || "";
+      const upstream = url.searchParams.get("upstream") || "";
+      const inRange = (row) => {
+        const ts = recordTimestamp(row);
+        return !(Number.isFinite(since) && (!Number.isFinite(ts) || ts < since))
+          && !(Number.isFinite(until) && (!Number.isFinite(ts) || ts > until));
+      };
+      const rangeRows = rows.filter(inRange);
+      const filtered = rangeRows.filter((row) => {
+        if (keyHash && row.api_key_hash !== keyHash) return false;
+        if (upstream && upstreamIdentity(row) !== upstream) return false;
         if (model && !String(row.response_model || row.model || "").toLowerCase().includes(model)) return false;
         if (provider && !String(row.provider || "").toLowerCase().includes(provider)) return false;
         if (failed === "true" && !row.failed) return false;
@@ -782,12 +807,25 @@ async function handleProxyApiRequest(req, res, url, ctx) {
         json(res, { ok: true, stats });
         return true;
       }
+      // Refresh optional labels with every records request, including manual
+      // refresh. Core outages never prevent reading the local history.
+      let credentials = [];
+      if (rangeRows.some((row) => row.auth_index)) {
+        try {
+          const result = await management.request("GET", "/v8/management/credentials", { timeoutMs: 3000 });
+          if (result.ok && Array.isArray(result.data?.files)) credentials = result.data.files;
+        } catch {}
+      }
+      let remarks = {};
+      try { remarks = JSON.parse(fs.readFileSync(paths.apiKeyRemarksPath, "utf8")) || {}; } catch {}
+      const label = createUsageLabeler({ keys: config.readConfig()?.["api-keys"] || [], remarks, providerRemarks: readRemarksStore().entries, credentials });
+      const filterOptions = usageFilterOptions(rangeRows.map(label));
       const pageSize = Math.min(Math.max(Number(url.searchParams.get("pageSize")) || 50, 1), 500);
       const page = Math.max(Number(url.searchParams.get("page")) || 0, 0);
       const start = page * pageSize;
       const pageRecords = filtered.slice(start, start + pageSize).map((record) => {
         const costUsd = pricing.estimateCostUsd(pricingModels, String(record.response_model || record.model || ""), record.tokens, { executorType: record.executor_type });
-        return costUsd == null ? record : { ...record, costUsd };
+        return label(costUsd == null ? record : { ...record, costUsd });
       });
       json(res, {
         ok: true,
@@ -795,6 +833,7 @@ async function handleProxyApiRequest(req, res, url, ctx) {
         page,
         pageSize,
         records: pageRecords,
+        filterOptions,
         ...(stats ? { stats } : {}),
       });
       return true;
@@ -974,6 +1013,7 @@ async function handleProxyApiRequest(req, res, url, ctx) {
           "routing.strategy": get("routing.strategy"),
           "routing.session-affinity": get("routing.session-affinity"),
           "routing.session-affinity-ttl": get("routing.session-affinity-ttl"),
+          "routing.session-affinity-rebind-on": get("routing.session-affinity-rebind-on"),
           "routing.cooldown.disable-cooling": get("routing.cooldown.disable-cooling"),
           "routing.retry.request-retry": get("routing.retry.request-retry"),
           "routing.retry.max-retry-credentials": get("routing.retry.max-retry-credentials"),

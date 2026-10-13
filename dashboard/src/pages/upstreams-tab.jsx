@@ -38,6 +38,7 @@ import {
   Zap,
 } from "lucide-react";
 import { copy } from "../lib/copy";
+import { usePrivacyText } from "../lib/proxy-privacy";
 import {
   apiAccessRemarkLocatorFromRecord,
   apiAccessRemarkLocatorFromRow,
@@ -156,6 +157,7 @@ function UpstreamSwitch({ checked, onChange, disabled, title, label }) {
 }
 
 function UpstreamNotice({ message, tone = "error", onDismiss }) {
+  const display = usePrivacyText();
   if (!message) return null;
   const isError = tone === "error";
   return (
@@ -169,7 +171,7 @@ function UpstreamNotice({ message, tone = "error", onDismiss }) {
       }`}
     >
       {isError ? <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> : <Check className="mt-0.5 h-4 w-4 shrink-0" />}
-      <span className="min-w-0 flex-1 break-words">{message}</span>
+      <span className="min-w-0 flex-1 break-words">{display(message)}</span>
       {onDismiss ? (
         <button
           type="button"
@@ -185,6 +187,7 @@ function UpstreamNotice({ message, tone = "error", onDismiss }) {
 }
 
 function UpstreamModal({ open, onClose, busy, title, subtitle, children, width = "max-w-2xl" }) {
+  const display = usePrivacyText();
   return (
     <Dialog.Root
       open={open}
@@ -201,7 +204,7 @@ function UpstreamModal({ open, onClose, busy, title, subtitle, children, width =
                 <Dialog.Title className="text-base font-semibold text-oai-black dark:text-white">{title}</Dialog.Title>
                 {subtitle ? (
                   <Dialog.Description className="mt-0.5 truncate text-sm text-oai-gray-500 dark:text-oai-gray-400">
-                    {subtitle}
+                    {display(subtitle)}
                   </Dialog.Description>
                 ) : null}
               </div>
@@ -274,6 +277,7 @@ function SortableUpstreamRow({ row, disabled, dragLabel, isDragOver, children })
 }
 
 export function UpstreamsTab() {
+  const display = usePrivacyText();
   const [records, setRecords] = useState(emptyRecords);
   const [activeCategory, setActiveCategory] = useState("codex-api-key");
   const [filter, setFilter] = useState("");
@@ -864,18 +868,18 @@ export function UpstreamsTab() {
                       key={providerDragId(row)}
                       row={row}
                       disabled={busy || rows.length < 2}
-                      dragLabel={copy("proxy.upstream.dragHandle", { remark: row.remark || row.name })}
+                      dragLabel={copy("proxy.upstream.dragHandle", { remark: display(row.remark || row.name) })}
                       isDragOver={dragOverId === providerDragId(row)}
                     >
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
                           <ProviderIcon className="h-4 w-4 shrink-0 text-oai-gray-400" />
-                          <strong className="min-w-0 truncate text-sm font-medium text-oai-black dark:text-white" title={row.name}>
-                            {row.name}
+                          <strong className="min-w-0 truncate text-sm font-medium text-oai-black dark:text-white" title={display(row.name)}>
+                            {display(row.name)}
                           </strong>
                           {row.remark ? (
-                            <span className="shrink-0 max-w-40 truncate text-xs text-oai-gray-500 dark:text-oai-gray-400" title={row.remark}>
-                              {row.remark}
+                            <span className="shrink-0 max-w-40 truncate text-xs text-oai-gray-500 dark:text-oai-gray-400" title={display(row.remark)}>
+                              {display(row.remark)}
                             </span>
                           ) : null}
                           {row.priority !== null ? (
@@ -895,8 +899,8 @@ export function UpstreamsTab() {
                               ? copy("proxy.upstream.keys.summary", { key: maskSecret(row.apiKey), count: row.apiKeys.length })
                               : maskSecret(row.apiKey)}
                           </code>
-                          <span className="min-w-0 truncate" title={row.baseUrl || undefined}>
-                            {row.baseUrl || copy("proxy.upstream.defaultUrl")}
+                          <span className="min-w-0 truncate" title={display(row.baseUrl) || undefined}>
+                            {display(row.baseUrl) || copy("proxy.upstream.defaultUrl")}
                           </span>
                           {row.authIndex ? (
                             <span className="shrink-0 max-w-48 truncate font-mono" title={row.authIndex}>
@@ -929,7 +933,7 @@ export function UpstreamsTab() {
                                     ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300"
                                     : "bg-red-50 text-red-600 dark:bg-red-950/40 dark:text-red-400"
                                 }`}
-                                title={result.error || undefined}
+                                title={display(result.error) || undefined}
                               >
                                 {healthy && result.latencyMs
                                   ? copy("proxy.upstream.batch.healthy", { latency: result.latencyMs })
@@ -971,7 +975,7 @@ export function UpstreamsTab() {
                           disabled={busy}
                           title={copy("proxy.upstream.groups.sharedToggleHint")}
                           label={copy("proxy.upstream.toggleAria", {
-                            remark: row.remark || row.name,
+                            remark: display(row.remark || row.name),
                             action: sharedToggleOn ? copy("proxy.upstream.common.disable") : copy("proxy.upstream.common.enable"),
                           })}
                         />
@@ -1031,7 +1035,7 @@ export function UpstreamsTab() {
         open={pendingDelete !== null}
         title={copy("proxy.upstream.common.delete")}
         description={pendingDelete
-          ? copy("proxy.upstream.deleteConfirm", { remark: pendingDelete.remark || pendingDelete.name })
+          ? copy("proxy.upstream.deleteConfirm", { remark: display(pendingDelete.remark || pendingDelete.name) })
           : ""}
         confirmLabel={copy("proxy.upstream.common.delete")}
         cancelLabel={copy("proxy.upstream.common.cancel")}
@@ -2033,6 +2037,7 @@ function UpstreamGroupHealthDialog({ row, onClose }) {
 }
 
 function UpstreamHealthDialog({ row, onClose, keySelector }) {
+  const display = usePrivacyText();
   const configuredModels = useMemo(
     () => mergeProviderHealthModels([], row.models),
     [row.models],
@@ -2218,7 +2223,7 @@ function UpstreamHealthDialog({ row, onClose, keySelector }) {
                 <div className="min-w-0 flex-1">
                   <strong className="block truncate font-mono text-xs font-medium text-oai-black dark:text-white" title={model.name}>{model.name}</strong>
                   {error ? (
-                    <small className="block truncate text-xs text-red-600 dark:text-red-400" title={error}>{error}</small>
+                    <small className="block truncate text-xs text-red-600 dark:text-red-400" title={display(error)}>{display(error)}</small>
                   ) : model.alias || model.displayName ? (
                     <small className="block truncate text-xs text-oai-gray-400" title={model.alias || model.displayName}>{model.alias || model.displayName}</small>
                   ) : null}

@@ -9,6 +9,7 @@ import { ModalFrame } from "../ui/components/ModalFrame";
 import { showToast } from "../ui/components/Toast";
 import { EndpointSpeedTestDialog } from "./provider-speed-test";
 import { ProviderIconPicker, iconComponentFor } from "./provider-icon-picker";
+import { CodexSubagentFields } from "./provider-codex-subagents";
 import { CodexCatalogEditor } from "./provider-codex-catalog";
 import { ModelDropdown, ModelInputAction } from "./provider-model-dropdown";
 import { withClaudeGatewayDefaults } from "./provider-claude-gateway-defaults";
@@ -957,9 +958,9 @@ export function ProviderEditDialog({
       setFetchedModels(res.models);
       setFetchState("done");
       void ensureModelMetadata();
-      if (res.models.length > 0) {
+      if (res.models.length > 0 && app !== "codex") {
         showToast({ title: copy("pswitch.models.fetch_success", { count: res.models.length }) });
-      } else {
+      } else if (res.models.length === 0) {
         showToast({ title: copy("pswitch.models.fetch_empty") });
       }
     } catch (err) {
@@ -971,7 +972,7 @@ export function ProviderEditDialog({
         }),
       });
     }
-  }, [currentApiKey, currentEndpoint, ensureModelMetadata, fetchState, meta.isFullUrl, meta.localProxyRequestOverrides, selectedPreset]);
+  }, [app, currentApiKey, currentEndpoint, ensureModelMetadata, fetchState, meta.isFullUrl, meta.localProxyRequestOverrides, selectedPreset]);
 
   // --- claude model roles helpers ---
   const oneMOn = (role) => String(getPath(draft, role.modelPath) ?? "").endsWith("[1m]");
@@ -1757,6 +1758,19 @@ export function ProviderEditDialog({
               fetchState={fetchState}
               onFetch={fetchModels}
               hint={copy("pswitch.field.model_hint")}
+            />
+          ) : null}
+
+          {app === "codex" && !officialSelected ? (
+            <CodexSubagentFields
+              agents={draft.config?.agents}
+              models={meta.codexCatalogModels}
+              onChange={(agents) => setDraft((current) => Object.keys(agents).length
+                ? setPath(current, "config.agents", agents) : deletePath(current, "config.agents"))}
+              onAddModel={(model) => setMetaValue("codexCatalogModels", [
+                ...(meta.codexCatalogModels || []),
+                { model, displayName: model, contextWindow: "", reasoningLevels: [] },
+              ])}
             />
           ) : null}
 

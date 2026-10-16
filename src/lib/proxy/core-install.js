@@ -3,8 +3,8 @@
 // install_core_version + CoreInstallTask). One task at a time; the snapshot is
 // polled by the dashboard at GET /api/proxy/install while the progress dialog
 // is open. Flow mirrors the GUI: resolve the latest release (GitCode mirror
-// first), stop the running core ("停止并更新"), download with progress,
-// extract + install, then restart the core if it was running before.
+// first), download/verify/extract while the proxy runs, then stop it briefly,
+// install and restart. Keep the old installation until startup succeeds.
 
 const paths = require("./paths");
 
@@ -56,8 +56,9 @@ function createCoreInstallService({ manager, bridge, fetchCoreModule }) {
   async function run(signal, force) {
     let stoppedForInstall = false;
     let previousInstallation = null;
+    let staged = null;
     try {
-      const wasRunning = await coreRunning();
+      await coreRunning();
       const release = await fetchCoreModule.resolveRelease({ signal });
       signal.throwIfAborted();
       // Same or newer installed version skips the install; an unparseable
@@ -70,6 +71,13 @@ function createCoreInstallService({ manager, bridge, fetchCoreModule }) {
         task.result = { skipped: true, version: release.version, path: paths.binPath, source: "already-installed" };
         applyProgress({ phase: "complete" });
       } else {
+        staged = await fetchCoreModule.stageCoreRelease(release, { signal, onProgress: applyProgress });
+        signal.throwIfAborted();
+        const wasRunning = await coreRunning();
+        signal.throwIfAborted();
+        // Cancellation is safe during staging. Once replacement starts, finish
+        // or roll back before allowing another lifecycle operation.
+        task.cancellable = false;
         if (wasRunning) {
           applyProgress({ phase: "stopping" });
           // Restore the bridge even if stopping the core fails after the
@@ -80,11 +88,12 @@ function createCoreInstallService({ manager, bridge, fetchCoreModule }) {
           if (await coreRunning()) throw new Error("failed to stop the running core");
         }
         previousInstallation = fetchCoreModule.backupInstallation?.();
-        const result = await fetchCoreModule.downloadAndInstall(release, { signal, onProgress: applyProgress });
+        const result = await fetchCoreModule.installStagedCore(staged, { signal });
         task.result = result;
         applyProgress({ phase: "complete" });
         if (stoppedForInstall && !await restartCoreAfterInstall("complete") && previousInstallation) {
           await manager.stop();
+          if (await coreRunning()) throw new Error("cannot roll back while the new core is running");
           await previousInstallation.restore();
           await restartCoreAfterInstall("failed");
         }
@@ -101,11 +110,22 @@ function createCoreInstallService({ manager, bridge, fetchCoreModule }) {
       // whatever the outcome (install failure, cancel), or the proxy dies
       // silently.
       if (previousInstallation) {
-        try { await previousInstallation.restore(); }
-        catch (restoreError) { task.error = `${task.error || terminalPhase}; restore failed: ${restoreError.message}`; }
+        try {
+          if (await coreRunning()) {
+            await manager.stop();
+            if (await coreRunning()) throw new Error("cannot restore while the core is running");
+          }
+          await previousInstallation.restore();
+        }
+        catch (restoreError) {
+          previousInstallation.preserve?.();
+          task.error = `${task.error || terminalPhase}; restore failed: ${restoreError.message}`;
+        }
       }
       if (stoppedForInstall) await restartCoreAfterInstall(terminalPhase);
     } finally {
+      try { staged?.cleanup(); }
+      catch (error) { task.error = `${task.error || ""}; staging cleanup failed: ${error.message}`; }
       try { previousInstallation?.cleanup(); }
       catch (error) { task.error = `${task.error || ""}; backup cleanup failed: ${error.message}`; }
       task.running = false;
@@ -146,7 +166,7 @@ function createCoreInstallService({ manager, bridge, fetchCoreModule }) {
     },
 
     cancelInstall() {
-      if (task?.running && controller) controller.abort();
+      if (task?.running && task.cancellable && controller) controller.abort();
       return snapshot();
     },
   };

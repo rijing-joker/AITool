@@ -319,23 +319,42 @@ function findBinary(dir) {
 function backupInstallation() {
   fs.mkdirSync(paths.binDir, { recursive: true });
   const directory = fs.mkdtempSync(path.join(paths.binDir, ".previous-"));
-  const originals = [paths.binPath, paths.coreVersionPath].map((target, index) => {
-    const backup = path.join(directory, String(index));
-    const exists = fs.existsSync(target);
-    if (exists) fs.copyFileSync(target, backup);
-    return { target, backup, exists };
-  });
+  let originals;
+  let restorationFailed = false;
+  try {
+    originals = [paths.binPath, paths.coreVersionPath].map((target, index) => {
+      const backup = path.join(directory, String(index));
+      const exists = fs.existsSync(target);
+      if (exists) fs.copyFileSync(target, backup);
+      return { target, backup, exists };
+    });
+  } catch (error) {
+    fs.rmSync(directory, { recursive: true, force: true });
+    throw error;
+  }
   return {
+    directory,
+    preserve() { restorationFailed = true; },
     restore() {
-      for (const { target, backup, exists } of originals) {
-        if (exists) {
-          const staged = `${target}.restore-${crypto.randomUUID()}`;
-          fs.copyFileSync(backup, staged);
-          fs.renameSync(staged, target);
-        } else fs.rmSync(target, { force: true });
+      try {
+        for (const { target, backup, exists } of originals) {
+          if (exists) {
+            const staged = `${target}.restore-${crypto.randomUUID()}`;
+            try {
+              fs.copyFileSync(backup, staged);
+              fs.renameSync(staged, target);
+            } finally { fs.rmSync(staged, { force: true }); }
+          } else fs.rmSync(target, { force: true });
+        }
+        restorationFailed = false;
+      } catch (error) {
+        restorationFailed = true;
+        throw new Error(`core restore failed; previous installation retained at ${directory}: ${error.message}`, { cause: error });
       }
     },
-    cleanup() { fs.rmSync(directory, { recursive: true, force: true }); },
+    cleanup() {
+      if (!restorationFailed) fs.rmSync(directory, { recursive: true, force: true });
+    },
   };
 }
 
@@ -343,7 +362,7 @@ function backupInstallation() {
 //   { phase: "downloading", source, downloaded, total }
 //   { phase: "switching", source, message }   (source failed, moving on)
 //   { phase: "extracting", source }
-async function downloadAndInstall(release, { onProgress = null, signal, fetchImpl = fetch } = {}) {
+async function stageCoreRelease(release, { onProgress = null, signal, fetchImpl = fetch } = {}) {
   const emit = (event) => onProgress?.(event);
   const { version } = release;
   const asset = platformAsset(version);
@@ -395,19 +414,40 @@ async function downloadAndInstall(release, { onProgress = null, signal, fetchImp
     // intact so the orchestration can restart the previous version.
     fs.copyFileSync(binary, stagedBinary);
     fs.chmodSync(stagedBinary, 0o755);
-    const previous = backupInstallation();
-    try {
-      signal?.throwIfAborted();
-      fs.renameSync(stagedBinary, paths.binPath);
-      fs.writeFileSync(paths.coreVersionPath, `v${version}\n`);
-    } catch (error) {
-      previous.restore();
-      throw error;
-    } finally { previous.cleanup(); }
-    return { skipped: false, version, path: paths.binPath, source: downloadedFrom };
-  } finally {
+    signal?.throwIfAborted();
+    return {
+      version, binaryPath: stagedBinary, source: downloadedFrom,
+      cleanup() { fs.rmSync(stagedBinary, { force: true }); },
+    };
+  } catch (error) {
     fs.rmSync(stagedBinary, { force: true });
+    throw error;
+  } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+// The caller stops the core and captures its rollback snapshot before this
+// short commit. Staging never replaces the live binary or version marker.
+function installStagedCore(staged, { signal } = {}) {
+  signal?.throwIfAborted();
+  fs.renameSync(staged.binaryPath, paths.binPath);
+  fs.writeFileSync(paths.coreVersionPath, `v${staged.version}\n`);
+  return { skipped: false, version: staged.version, path: paths.binPath, source: staged.source };
+}
+
+async function downloadAndInstall(release, options = {}) {
+  const staged = await stageCoreRelease(release, options);
+  let previous;
+  try {
+    previous = backupInstallation();
+    return installStagedCore(staged, options);
+  } catch (error) {
+    if (previous) previous.restore();
+    throw error;
+  } finally {
+    staged.cleanup();
+    previous?.cleanup();
   }
 }
 
@@ -482,6 +522,8 @@ module.exports = {
   resolveRelease,
   fetchGithubLatest,
   downloadCandidates,
+  stageCoreRelease,
+  installStagedCore,
   downloadAndInstall,
   fetchCore,
   checkUpdate,

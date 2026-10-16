@@ -143,7 +143,7 @@ export function CoreInstallDialog({ open, task, onCancel, onClose }) {
 
             <div className="mt-5 flex justify-end gap-2">
               {running ? (
-                <Button type="button" variant="secondary" size="sm" onClick={() => onCancel?.()}>
+                <Button type="button" variant="secondary" size="sm" disabled={task.cancellable === false} onClick={() => onCancel?.()}>
                   {copy("proxy.core.action_cancel")}
                 </Button>
               ) : (

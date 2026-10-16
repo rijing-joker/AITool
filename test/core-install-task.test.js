@@ -4,7 +4,7 @@ const { test } = require("node:test");
 const { createCoreInstallService } = require("../src/lib/proxy/core-install");
 
 // The stop-and-update orchestration around the downloader, with fake
-// manager/bridge/downloader: stop the running core before replacing the
+// manager/bridge/downloader: stage the release before stopping the core and replacing the
 // binary, restart it after (also on failure/cancel), one task at a time,
 // phases/percent flowing into the snapshot the dashboard polls.
 
@@ -24,7 +24,7 @@ function makeFakes({ running = false, installed = "8.0.8", failDownload = false 
       if (signal?.aborted) throw ABORT();
       return { version: "8.0.9", source: "gitcode" };
     },
-    downloadAndInstall: async (_release, { onProgress, signal } = {}) => {
+    stageCoreRelease: async (_release, { onProgress, signal } = {}) => {
       log.push("download-start");
       onProgress?.({ phase: "downloading", source: "GitCode", downloaded: 0, total: 100 });
       await new Promise((resolve) => setTimeout(resolve, 15));
@@ -33,7 +33,12 @@ function makeFakes({ running = false, installed = "8.0.8", failDownload = false 
       onProgress?.({ phase: "downloading", source: "GitCode", downloaded: 100, total: 100 });
       onProgress?.({ phase: "extracting", source: "GitCode" });
       log.push("download-done");
-      return { skipped: false, version: "8.0.9", path: "/bin/cli-proxy-api", source: "GitCode" };
+      return { version: "8.0.9", source: "GitCode", cleanup: () => log.push("stage-cleanup") };
+    },
+    installStagedCore: async (staged) => {
+      log.push("install");
+      state.installed = staged.version;
+      return { skipped: false, version: staged.version, path: "/bin/cli-proxy-api", source: staged.source };
     },
   };
   const manager = {
@@ -68,7 +73,7 @@ async function waitFor(predicate, { timeout = 2000, step = 5 } = {}) {
   return predicate();
 }
 
-test("a fresh install stops the running core first and restarts it after", async () => {
+test("a fresh install stages the release before stopping and restarting the core", async () => {
   const fakes = makeFakes({ running: true });
   const service = createCoreInstallService(fakes);
   const started = service.startInstall();
@@ -82,12 +87,14 @@ test("a fresh install stops the running core first and restarts it after", async
   assert.equal(task.result.version, "8.0.9");
   assert.deepEqual(fakes.log, [
     "resolve",
-    "bridge-stop",
-    "stop",
     "download-start",
     "download-done",
+    "bridge-stop",
+    "stop",
+    "install",
     "start",
     "bridge-start",
+    "stage-cleanup",
   ]);
 });
 
@@ -112,7 +119,7 @@ test("the install is skipped without touching the core when already current", as
   assert.deepEqual(fakes.log, ["resolve"], "no stop/download/restart for a no-op");
 });
 
-test("a failed download marks the task failed and brings the core back up", async () => {
+test("a failed download leaves the running core and bridge untouched", async () => {
   const fakes = makeFakes({ running: true, failDownload: true });
   const service = createCoreInstallService(fakes);
   service.startInstall();
@@ -122,15 +129,11 @@ test("a failed download marks the task failed and brings the core back up", asyn
   assert.match(task.error, /HTTP 404/);
   assert.deepEqual(fakes.log, [
     "resolve",
-    "bridge-stop",
-    "stop",
     "download-start",
-    "start",
-    "bridge-start",
   ]);
 });
 
-test("cancel mid-download lands the task in canceled and restarts the core", async () => {
+test("cancel mid-download leaves the existing proxy running", async () => {
   const fakes = makeFakes({ running: true });
   const service = createCoreInstallService(fakes);
   service.startInstall();
@@ -141,7 +144,9 @@ test("cancel mid-download lands the task in canceled and restarts the core", asy
   const task = service.snapshot();
   assert.equal(task.phase, "canceled");
   assert.ok(!fakes.log.includes("download-done"), "download did not finish");
-  assert.deepEqual(fakes.log.slice(-2), ["start", "bridge-start"], "core restarted after cancel");
+  assert.equal(fakes.state.running, true);
+  assert.ok(!fakes.log.includes("stop"));
+  assert.ok(!fakes.log.includes("bridge-stop"));
 });
 
 test("only one install task may run at a time", async () => {
@@ -163,11 +168,38 @@ test("progress events flow into the polled snapshot", async () => {
   // Mid-download the snapshot must expose the byte counters.
   assert.ok(await waitFor(() => service.snapshot()?.phase === "downloading"));
   const mid = service.snapshot();
+  assert.equal(fakes.state.running, false);
   assert.equal(mid.source, "GitCode");
   assert.equal(mid.total, 100);
   assert.ok(mid.downloaded >= 0);
   assert.ok(await waitFor(() => service.snapshot()?.running === false));
   assert.equal(service.snapshot().percent, 100);
+});
+
+test("the proxy stays running throughout download and extraction", async () => {
+  const fakes = makeFakes({ running: true });
+  const service = createCoreInstallService(fakes);
+  service.startInstall();
+  assert.ok(await waitFor(() => service.snapshot()?.phase === "downloading"));
+  assert.equal(fakes.state.running, true);
+  assert.equal(service.snapshot().cancellable, true);
+  assert.ok(!fakes.log.includes("bridge-stop"));
+  assert.ok(await waitFor(() => service.snapshot()?.running === false));
+  assert.ok(fakes.log.indexOf("download-done") < fakes.log.indexOf("stop"));
+});
+
+test("cancellation during replacement cannot interrupt commit or recovery", async () => {
+  const fakes = makeFakes({ running: true });
+  const service = createCoreInstallService(fakes);
+  fakes.bridge.stopBridge = () => {
+    assert.equal(service.snapshot().cancellable, false);
+    service.cancelInstall();
+  };
+  service.startInstall();
+  assert.ok(await waitFor(() => service.snapshot()?.running === false));
+  assert.equal(service.snapshot().phase, "complete");
+  assert.ok(fakes.log.includes("install"));
+  assert.equal(fakes.state.running, true);
 });
 
 test("a stale version marker does not skip installation when the binary is missing", async () => {
@@ -188,7 +220,7 @@ test("stop failure prevents installation and restores the usage bridge", async (
   assert.ok(await waitFor(() => service.snapshot()?.running === false));
   assert.equal(service.snapshot().phase, "failed");
   assert.match(service.snapshot().error, /stop denied/);
-  assert.ok(!fakes.log.includes("download-start"));
+  assert.ok(!fakes.log.includes("install"));
   assert.ok(fakes.log.includes("bridge-start"));
 });
 
@@ -199,7 +231,7 @@ test("a core that survives stop is not overwritten", async () => {
   service.startInstall();
   assert.ok(await waitFor(() => service.snapshot()?.running === false));
   assert.equal(service.snapshot().phase, "failed");
-  assert.ok(!fakes.log.includes("download-start"));
+  assert.ok(!fakes.log.includes("install"));
 });
 
 test("restart failure is a failed task instead of a completed update", async () => {
@@ -230,7 +262,7 @@ test("an unusable new core restores the previous binary and service", async () =
   assert.equal(starts, 2);
   assert.equal(service.snapshot().phase, "failed");
   assert.match(service.snapshot().error, /new binary incompatible/);
-  assert.equal(fakes.log.at(-1), "bridge-start");
+  assert.deepEqual(fakes.log.slice(-2), ["bridge-start", "stage-cleanup"]);
 });
 
 test("a status failure settles the task and allows retry", async () => {

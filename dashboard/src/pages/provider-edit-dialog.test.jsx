@@ -82,6 +82,21 @@ it("does not prefill an external catalog or unrelated endpoint", () => {
   ]) expect(prefillProviderMeta("codex", { settingsConfig: { config } }, presets)).toEqual({});
 });
 
+it("saves a local Claude bearer token while the preset disables the API key", async () => {
+  const preset = listPresets("claude").find((row) => row.id === "claude_ollama");
+  const editing = { id: "local", name: "Ollama", category: "custom", settingsConfig: preset.settingsConfig };
+  providerSwitchApi.getEditorView.mockResolvedValue({ settings: preset.settingsConfig, inactive: [] });
+  providerSwitchApi.updateProvider.mockResolvedValue({ provider: editing });
+  render(<ProviderEditDialog {...props()} editing={editing} presets={listPresets("claude")} />);
+  await waitFor(() => expect(screen.getByLabelText("pswitch.field.api_key_name")).toHaveValue("ANTHROPIC_AUTH_TOKEN"));
+  expect(screen.getByLabelText("pswitch.field.api_key")).toHaveValue("ollama");
+  fireEvent.click(screen.getByRole("button", { name: "pswitch.action.save" }));
+  await waitFor(() => expect(providerSwitchApi.updateProvider).toHaveBeenCalledTimes(1));
+  expect(providerSwitchApi.updateProvider.mock.calls[0][2].settingsConfig.env).toMatchObject({
+    ANTHROPIC_AUTH_TOKEN: "ollama", ANTHROPIC_API_KEY: "",
+  });
+});
+
 it("saves the projected config and editor base once during repeated clicks", async () => {
   const pendingSave = deferred();
   providerSwitchApi.updateProvider.mockReturnValue(pendingSave.promise);

@@ -135,7 +135,7 @@ export interface ProviderSwitchPreset {
   name: string;
   nameKey?: string;
   hintKey?: string;
-  group: "official" | "community" | "custom";
+  group: "official" | "community" | "local" | "custom";
   icon?: string;
   color?: string;
   websiteUrl?: string;

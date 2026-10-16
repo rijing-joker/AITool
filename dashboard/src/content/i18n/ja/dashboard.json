@@ -1720,5 +1720,7 @@
   "proxy.accounts.empty": "認証情報ファイルをインポートしてアカウントを追加してください。",
   "proxy.accounts.view": "{{provider}} のアカウントを表示",
   "proxy.accounts.count": "{{count}} アカウント",
-  "proxy.accounts.more": "ほか {{count}} 件"
+  "proxy.accounts.more": "ほか {{count}} 件",
+  "pswitch.preset.badge.local": "ローカル",
+  "pswitch.hint.local": "ローカルサーバーで読み込んだモデルを使用します。必要に応じて接続先とモデルを変更してください。"
 }

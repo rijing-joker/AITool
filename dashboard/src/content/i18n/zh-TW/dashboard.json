@@ -2037,5 +2037,7 @@
   "proxy.accounts.empty": "匯入憑證檔案以新增帳號。",
   "proxy.accounts.view": "檢視 {{provider}} 帳號",
   "proxy.accounts.count": "{{count}} 個帳號",
-  "proxy.accounts.more": "另外 {{count}} 個"
+  "proxy.accounts.more": "另外 {{count}} 個",
+  "pswitch.preset.badge.local": "本機",
+  "pswitch.hint.local": "使用本機服務已載入的模型；可依需要修改位址和模型。"
 }

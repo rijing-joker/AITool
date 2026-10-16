@@ -13,7 +13,7 @@ import { CodexSubagentFields } from "./provider-codex-subagents";
 import { CodexCatalogEditor } from "./provider-codex-catalog";
 import { ModelDropdown, ModelInputAction } from "./provider-model-dropdown";
 import { withClaudeGatewayDefaults } from "./provider-claude-gateway-defaults";
-import { mergePresetMeta, prefillProviderMeta } from "./provider-preset-meta";
+import { mergePresetMeta, prefillProviderMeta, claudeApiKeyName as resolveClaudeApiKeyName } from "./provider-preset-meta";
 
 // Additive apps (cc-switch's additive mode, backed by
 // src/lib/provider-switch/additive.js): the provider owns one keyed entry in
@@ -702,7 +702,7 @@ export function ProviderEditDialog({
           setDraft(full);
           if (initial) setInitialSnapshot(JSON.stringify({ ...initial, draft: full }));
           if (app === "claude") {
-            setClaudeApiKeyName("ANTHROPIC_API_KEY" in (full.env || {}) ? "ANTHROPIC_API_KEY" : "ANTHROPIC_AUTH_TOKEN");
+            setClaudeApiKeyName(resolveClaudeApiKeyName(full.env));
           }
           setEditorBase(JSON.parse(JSON.stringify(full)));
           setEditorSlotKey(typeof view.slotKey === "string" ? view.slotKey : "");
@@ -812,7 +812,7 @@ export function ProviderEditDialog({
       setMeta(initial.meta);
       setDraft(additiveInitialDraft(app, editing.settingsConfig ?? {}));
       if (app === "claude" && editing.settingsConfig?.env) {
-        if ("ANTHROPIC_API_KEY" in editing.settingsConfig.env) setClaudeApiKeyName("ANTHROPIC_API_KEY");
+        setClaudeApiKeyName(resolveClaudeApiKeyName(editing.settingsConfig.env));
       }
       const editingMeta = initial.meta;
       if (app === "claude" && claudeHasAdvancedValues(editing.settingsConfig ?? {}, editingMeta)) {

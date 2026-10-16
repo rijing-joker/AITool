@@ -1720,5 +1720,7 @@
   "proxy.accounts.empty": "자격 증명 파일을 가져와 계정을 추가하세요.",
   "proxy.accounts.view": "{{provider}} 계정 보기",
   "proxy.accounts.count": "계정 {{count}}개",
-  "proxy.accounts.more": "{{count}}개 더 보기"
+  "proxy.accounts.more": "{{count}}개 더 보기",
+  "pswitch.preset.badge.local": "로컬",
+  "pswitch.hint.local": "로컬 서버에 로드된 모델을 사용합니다. 필요에 따라 엔드포인트와 모델을 변경하세요."
 }

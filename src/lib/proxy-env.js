@@ -2,6 +2,7 @@ const cp = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { isIP } = require("node:net");
 const { normalizeProxyConfig, buildProxyUrl } = require("./proxy-settings");
 
 // scutil --proxy is a sync spawn (2s timeout) that blocks the event loop.
@@ -288,10 +289,37 @@ function installFailClosedDispatcher(parts, reason) {
  * parseMacProxyOutput (system). This is the intended CONNECT/SOCKS target,
  * not an unsanitized server-side request URL.
  */
-function createProxyDispatcher(proxyUrl, { ProxyAgent } = {}) {
+function isLoopbackOrigin(origin) {
+  try {
+    const hostname = new URL(String(origin)).hostname.toLowerCase().replace(/\.$/, "");
+    return hostname === "localhost" || hostname.endsWith(".localhost")
+      || (isIP(hostname) === 4 && hostname.startsWith("127.")) || hostname === "[::1]"
+      || /^\[::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}\]$/.test(hostname);
+  } catch { return false; }
+}
+
+function createProxyDispatcher(proxyUrl, { ProxyAgent, Agent, bypassLocal = true } = {}) {
   if (!proxyUrl) return null;
   if (typeof ProxyAgent !== "function") return null;
-  return new ProxyAgent(proxyUrl);
+  const proxy = new ProxyAgent(proxyUrl);
+  if (!bypassLocal || typeof Agent !== "function" || typeof proxy.dispatch !== "function") return proxy;
+  // Keep the ProxyAgent's protocol support, including SOCKS, while routing
+  // loopback requests directly. Create the direct pool only when it is used.
+  let direct = null;
+  const dispatch = proxy.dispatch.bind(proxy);
+  proxy.dispatch = (options, handler) => {
+    if (isLoopbackOrigin(options.origin)) {
+      direct ||= new Agent();
+      return direct.dispatch(options, handler);
+    }
+    return dispatch(options, handler);
+  };
+  for (const method of ["close", "destroy"]) {
+    if (typeof proxy[method] !== "function") continue;
+    const original = proxy[method].bind(proxy);
+    proxy[method] = (...args) => Promise.all([original(...args), direct?.[method]?.(...args)]).then(() => undefined);
+  }
+  return proxy;
 }
 
 function loadUndiciParts({ setGlobalDispatcher, ProxyAgent, Agent } = {}) {
@@ -348,7 +376,7 @@ async function runProxyConnectivityTest({
   let dispatcher = null;
   try {
     const parts = loadUndiciParts({ ProxyAgent, Agent, setGlobalDispatcher });
-    dispatcher = createProxyDispatcher(proxyUrl, parts);
+    dispatcher = createProxyDispatcher(proxyUrl, { ...parts, bypassLocal: false });
     if (!dispatcher) {
       return { ok: false, error: "unsupported proxy protocol", latencyMs: latency() };
     }

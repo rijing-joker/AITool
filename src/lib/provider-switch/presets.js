@@ -12,7 +12,7 @@
 // `name` is the English fallback; `nameKey`/`hintKey`/field `labelKey`s
 // resolve through the dashboard copy registry. `color` keys into the
 // dashboard's avatar palette. `group` drives the selector badge
-// (official | community | custom). `endpointCandidates` seeds the endpoint
+// (official | community | local | custom). `endpointCandidates` seeds the endpoint
 // speed-test dialog; `modelsUrl` overrides the model-list URL when the
 // models endpoint lives on a different host than the API endpoint.
 //
@@ -1250,11 +1250,13 @@ const CODEX_COMMANDCODE = {
   ],
 };
 
+const localPresets = require("./local-presets");
+
 const PRESETS = {
-  claude: [CLAUDE_OFFICIAL, CLAUDE_KIMI, CLAUDE_DEEPSEEK, CLAUDE_MODELSCOPE, CLAUDE_COMMANDCODE, CLAUDE_MOARK, CLAUDE_ZEN, CLAUDE_CUSTOM],
-  codex: [CODEX_OFFICIAL, CODEX_COMMANDCODE, CODEX_MOARK, CODEX_ZEN, CODEX_CUSTOM],
+  claude: [CLAUDE_OFFICIAL, CLAUDE_KIMI, CLAUDE_DEEPSEEK, CLAUDE_MODELSCOPE, CLAUDE_COMMANDCODE, CLAUDE_MOARK, CLAUDE_ZEN, ...localPresets.claude, CLAUDE_CUSTOM],
+  codex: [CODEX_OFFICIAL, CODEX_COMMANDCODE, CODEX_MOARK, CODEX_ZEN, ...localPresets.codex, CODEX_CUSTOM],
   gemini: [GEMINI_OFFICIAL, GEMINI_CUSTOM],
-  opencode: [OPENCODE_KIMI, OPENCODE_DEEPSEEK, OPENCODE_MODELSCOPE, OPENCODE_MOARK, OPENCODE_CUSTOM],
+  opencode: [OPENCODE_KIMI, OPENCODE_DEEPSEEK, OPENCODE_MODELSCOPE, OPENCODE_MOARK, ...localPresets.opencode, OPENCODE_CUSTOM],
   openclaw: [OPENCLAW_KIMI, OPENCLAW_DEEPSEEK, OPENCLAW_MOARK, OPENCLAW_CUSTOM],
   mcode: [MCODE_MINIMAX, MCODE_CUSTOM],
   hermes: [HERMES_NOUS, HERMES_KIMI, HERMES_DEEPSEEK, HERMES_MODELSCOPE, HERMES_CUSTOM],

@@ -2709,6 +2709,8 @@ pswitch.preset.sort_default,pswitch,ProviderSwitchPage,ProviderEditDialog,sort_d
 pswitch.preset.badge.official,pswitch,ProviderSwitchPage,ProviderEditDialog,official,Official,,active
 pswitch.preset.badge.community,pswitch,ProviderSwitchPage,ProviderEditDialog,community,Community,,active
 pswitch.preset.badge.custom,pswitch,ProviderSwitchPage,ProviderEditDialog,custom,Custom,,active
+pswitch.preset.badge.local,pswitch,ProviderSwitchPage,ProviderEditDialog,local,Local,,active
+pswitch.hint.local,pswitch,ProviderSwitchPage,ProviderEditDialog,local,Use a model loaded on your local server; adjust the endpoint and model as needed.,,active
 pswitch.speed.title,pswitch,ProviderSwitchPage,ProviderEditDialog,title,Endpoints,,active
 pswitch.speed.subtitle,pswitch,ProviderSwitchPage,ProviderEditDialog,subtitle,"Add candidate endpoints, test their latency, pick the fastest.",,active
 pswitch.speed.manage,pswitch,ProviderSwitchPage,ProviderEditDialog,manage,Manage & test,,active

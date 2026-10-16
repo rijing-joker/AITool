@@ -1978,5 +1978,7 @@
   "proxy.accounts.empty": "导入凭证文件以添加账号。",
   "proxy.accounts.view": "查看 {{provider}} 账号",
   "proxy.accounts.count": "{{count}} 个账号",
-  "proxy.accounts.more": "另外 {{count}} 个"
+  "proxy.accounts.more": "另外 {{count}} 个",
+  "pswitch.preset.badge.local": "本地",
+  "pswitch.hint.local": "使用本地服务已加载的模型；可按需修改地址和模型。"
 }

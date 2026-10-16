@@ -1731,5 +1731,7 @@
   "proxy.accounts.empty": "Importieren Sie eine Zugangsdaten-Datei, um ein Konto hinzuzufügen.",
   "proxy.accounts.view": "{{provider}}-Konten anzeigen",
   "proxy.accounts.count": "{{count}} Konten",
-  "proxy.accounts.more": "{{count}} weitere"
+  "proxy.accounts.more": "{{count}} weitere",
+  "pswitch.preset.badge.local": "Lokal",
+  "pswitch.hint.local": "Verwendet ein auf Ihrem lokalen Server geladenes Modell. Passen Sie Endpunkt und Modell nach Bedarf an."
 }

@@ -406,6 +406,45 @@ test("createProxyDispatcher constructs a real undici ProxyAgent for socks5", () 
   closeQuietlyForTest(dispatcher);
 });
 
+test("local HTTP requests bypass an unavailable global proxy while remote requests still use it", async () => {
+  const undici = require("undici");
+  let proxyRequests = 0;
+  const local = http.createServer((_req, res) => res.end("local model list"));
+  const proxy = http.createServer((_req, res) => { proxyRequests++; res.writeHead(502); res.end(); });
+  proxy.on("connect", (_req, socket) => { proxyRequests++; socket.end("HTTP/1.1 502 Bad Gateway\r\n\r\n"); });
+  await new Promise((resolve) => local.listen(0, "127.0.0.1", resolve));
+  await new Promise((resolve) => proxy.listen(0, "127.0.0.1", resolve));
+  const dispatcher = createProxyDispatcher(`http://127.0.0.1:${proxy.address().port}`, undici);
+  try {
+    const result = await undici.fetch(`http://127.0.0.1:${local.address().port}/v1/models`, { dispatcher });
+    assert.equal(await result.text(), "local model list");
+    assert.equal(proxyRequests, 0);
+    await assert.rejects(undici.fetch("https://model-provider.invalid/v1/models", { dispatcher }));
+    assert.equal(proxyRequests, 1);
+  } finally {
+    await dispatcher.close();
+    await Promise.all([local, proxy].map((server) => new Promise((resolve) => server.close(resolve))));
+  }
+});
+
+test("loopback bypass covers IPv6 and 127/8 without matching remote host names", async () => {
+  const routes = [];
+  class FakeProxy {
+    dispatch(options) { routes.push(["proxy", String(options.origin)]); return true; }
+    async close() {}
+  }
+  class FakeDirect {
+    dispatch(options) { routes.push(["direct", String(options.origin)]); return true; }
+    async close() {}
+  }
+  const dispatcher = createProxyDispatcher("http://proxy:7890", { ProxyAgent: FakeProxy, Agent: FakeDirect });
+  for (const origin of ["http://localhost:11434", "http://127.10.20.30", "http://[::1]", "http://[::ffff:127.0.0.1]", "https://127.example.com", "https://localhost.example.com"]) {
+    dispatcher.dispatch({ origin }, {});
+  }
+  assert.deepEqual(routes.map(([route]) => route), ["direct", "direct", "direct", "direct", "proxy", "proxy"]);
+  await dispatcher.close();
+});
+
 function closeQuietlyForTest(dispatcher) {
   if (dispatcher && typeof dispatcher.close === "function") {
     Promise.resolve(dispatcher.close()).catch(() => {});

@@ -10,6 +10,7 @@ const { before, describe, it } = require("node:test");
 const sandboxHome = fs.mkdtempSync(path.join(os.tmpdir(), "tt-skills-mgr-"));
 process.env.HOME = sandboxHome;
 process.env.USERPROFILE = sandboxHome;
+delete process.env.CODEX_HOME;
 process.env.TOKENTRACKER_GROK_HOME = path.join(sandboxHome, ".grok");
 delete process.env.GROK_HOME;
 delete process.env.TOKENTRACKER_ANTIGRAVITY_HOME;

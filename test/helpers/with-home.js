@@ -18,6 +18,7 @@ function withHome(dir) {
     DSH_HOME: process.env.DSH_HOME,
     TOKENTRACKER_DSH_HOME: process.env.TOKENTRACKER_DSH_HOME,
     CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR,
+    CODEX_HOME: process.env.CODEX_HOME,
   };
   process.env.HOME = dir;
   process.env.USERPROFILE = dir;
@@ -36,8 +37,11 @@ function withHome(dir) {
   // the developer's real transcripts past this isolation. Clear it the same
   // way; a test that wants it sets it explicitly after withHome().
   delete process.env.CLAUDE_CONFIG_DIR;
+  // Codex exports this override to child commands; keep real sessions outside
+  // the isolated test home unless a test explicitly sets its own override.
+  delete process.env.CODEX_HOME;
   return function restoreHome() {
-    for (const key of ["HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "DSH_HOME", "TOKENTRACKER_DSH_HOME", "CLAUDE_CONFIG_DIR"]) {
+    for (const key of ["HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "DSH_HOME", "TOKENTRACKER_DSH_HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME"]) {
       if (prev[key] === undefined) delete process.env[key];
       else process.env[key] = prev[key];
     }

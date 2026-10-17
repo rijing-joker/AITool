@@ -11,6 +11,7 @@ process.env.USERPROFILE = sandboxHome;
 process.env.TOKENTRACKER_GROK_HOME = path.join(sandboxHome, ".grok");
 delete process.env.GROK_HOME;
 delete process.env.TOKENTRACKER_ANTIGRAVITY_HOME;
+delete process.env.CODEX_HOME;
 
 const { createLocalApiHandler } = require("../src/lib/local-api");
 

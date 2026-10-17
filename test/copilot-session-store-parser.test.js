@@ -139,6 +139,7 @@ async function withSyncHome(home, fn) {
   const keys = [
     "HOME",
     "USERPROFILE",
+    "CODEX_HOME",
     "TOKENTRACKER_DEVICE_TOKEN",
     "TOKENTRACKER_INSFORGE_BASE_URL",
     "COPILOT_HOME",

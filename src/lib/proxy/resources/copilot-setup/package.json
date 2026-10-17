@@ -1,0 +1,23 @@
+{
+  "name": "aitool-copilot-setup",
+  "displayName": "AiTool One-time Copilot Setup",
+  "description": "Temporary local setup assistant. Runs once and closes its own window; never installed by AiTool.",
+  "version": "0.1.0",
+  "publisher": "aitool",
+  "engines": {
+    "vscode": "^1.141.0"
+  },
+  "main": "./extension.cjs",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "extensionKind": [
+    "ui"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true
+    }
+  },
+  "license": "MIT"
+}

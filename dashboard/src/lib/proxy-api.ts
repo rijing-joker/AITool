@@ -152,6 +152,18 @@ export type CoreUpdateCheck = {
 };
 
 export const proxyApi = {
+  copilotStatus(): Promise<{ ok: true; clients: Array<{ client: "cli" | "vscode"; path: string; configured: boolean; canRestore: boolean; model?: string; error?: string }> }> {
+    return get("/api/proxy/copilot");
+  },
+  connectCopilot(client: "cli" | "vscode", apiKey: string, model: string): Promise<{ ok: true; path: string }> {
+    return mutate("/api/proxy/copilot/connect", "POST", { client, apiKey, model });
+  },
+  restoreCopilot(client: "cli" | "vscode"): Promise<{ ok: true }> {
+    return mutate("/api/proxy/copilot/restore", "POST", { client });
+  },
+  copilotModels(apiKey: string): Promise<{ ok: true; models: string[] }> {
+    return mutate("/api/proxy/copilot/models", "POST", { apiKey });
+  },
   status: (signal?: AbortSignal) => get<ProxyStatus>("/api/proxy/status", signal),
   start: () => mutate<{ ok: true }>("/api/proxy/start", "POST"),
   stop: () => mutate<{ ok: true }>("/api/proxy/stop", "POST"),

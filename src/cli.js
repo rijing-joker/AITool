@@ -64,6 +64,9 @@ async function run(argv) {
     case "proxy":
       await cmdProxy(rest);
       return;
+    case "copilot":
+      process.exitCode = await require("./lib/proxy/copilot").launch(rest);
+      return;
     default:
       throw new Error(`Unknown command: ${command}`);
   }
@@ -89,6 +92,7 @@ function printHelp() {
       "  npx tokentracker [--debug] wrapped [--year 2026] [--json]",
       "  npx tokentracker sessions [--from YYYY-MM-DD] [--to YYYY-MM-DD] [--format json|csv] [--out file] [--refresh] [--no-git]",
       "  aitool proxy [status|start|stop|install|config]",
+      "  aitool copilot [Copilot CLI arguments]                  Use the configured local AI proxy",
       "",
       "Notes:",
       "  - init: consent first, local setup next, browser sign-in last.",

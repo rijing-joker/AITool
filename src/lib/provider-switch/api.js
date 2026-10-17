@@ -20,6 +20,7 @@ const envConflict = require("./env-conflict");
 const skills = require("./skills");
 const quota = require("./quota");
 const failover = require("./failover");
+const codexClient = require("./codex-client");
 
 // Dashboard-facing REST surface for the provider-switch layer, mounted by
 // local-api.js under /api/provider-switch/*. Mirrors the proxy/api.js
@@ -193,6 +194,7 @@ function computeSwitchPlan(app, prev, target, lives, stash) {
 // Backup each existing live file, persist the auth stash, then publish all
 // file writes atomically (tmp+rename) and handle the catalog sidecar.
 async function persistSwitchPlan(app, plan) {
+  if (app === "codex") await codexClient.noteCodexState();
   const backups = [];
   for (const write of plan.writes) {
     if (!write.skipBackupIfMissing || (await liveExists(write.file))) {
@@ -229,6 +231,7 @@ async function persistSwitchPlan(app, plan) {
     }
   }
 
+  if (app === "codex") await codexClient.noteCodexState();
   return { wrote, backups };
 }
 
@@ -376,6 +379,7 @@ async function saveProvider({ app, id, body }) {
 
 // Write only the files the editor's global changes touched (backup first).
 async function persistEditorChanges(app, patchedLives, originalLives, accepted) {
+  if (app === "codex") await codexClient.noteCodexState();
   const touchedFiles = new Set();
   for (const change of accepted) {
     if (app === "claude") touchedFiles.add("settings");
@@ -397,6 +401,7 @@ async function persistEditorChanges(app, patchedLives, originalLives, accepted) 
     await writeLiveFile(file, patched.content);
     wrote.push(file.path);
   }
+  if (app === "codex") await codexClient.noteCodexState();
   return { wrote, backups };
 }
 
@@ -420,6 +425,22 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
   try {
     if (p === `${prefix}/status`) {
       json(res, await buildStatus());
+      return true;
+    }
+
+    if (p === `${prefix}/codex-client` && method === "GET") {
+      json(res, { ok: true, client: await codexClient.getCodexClientStatus() });
+      return true;
+    }
+    if (p === `${prefix}/codex-client/restart` && method === "POST") {
+      if (!requireMutation()) return true;
+      json(res, { ok: true, ...await codexClient.restartCodexDaemon() });
+      return true;
+    }
+    if (p === `${prefix}/codex-client/acknowledge` && method === "POST") {
+      if (!requireMutation()) return true;
+      await codexClient.acknowledgeCodexClients();
+      json(res, { ok: true });
       return true;
     }
 
@@ -769,7 +790,9 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
         return true;
       }
       const created = await backup.createBackup(app, file.path, { force: true });
+      if (app === "codex") await codexClient.noteCodexState();
       await writeLiveFile(file, body.content);
+      if (app === "codex") await codexClient.noteCodexState();
       json(res, { ok: true, file: fileMeta(file, await readLiveFile(file)), backup: created });
       return true;
     }
@@ -793,7 +816,9 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
       if (!file) throw new Error(`Unknown live file for backup: ${backupName}`);
       const content = await backup.readBackup(app, backupName);
       const created = await backup.createBackup(app, file.path, { force: true });
+      if (app === "codex") await codexClient.noteCodexState();
       await writeLiveFile(file, content);
+      if (app === "codex") await codexClient.noteCodexState();
       json(res, { ok: true, restored: file.path, backup: created });
       return true;
     }

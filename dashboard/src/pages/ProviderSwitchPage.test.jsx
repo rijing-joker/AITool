@@ -21,6 +21,9 @@ vi.mock("../lib/provider-switch-api", () => ({
   },
   providerSwitchApi: {
     getStatus: vi.fn(async () => mocks.status),
+    getCodexClient: vi.fn(async () => ({ client: { daemon: false, others: false } })),
+    restartCodexDaemon: vi.fn(),
+    acknowledgeCodexClients: vi.fn(),
     listBackups: vi.fn(async () => ({ backups: [] })),
     getPresets: vi.fn(async () => ({ presets: [] })),
     getFailover: vi.fn(async () => ({ failover: { config: { enabled: false, autoSwitch: false, windowMinutes: 30, minRequests: 5, failureRatePct: 50, cooldownMinutes: 30 }, apps: {}, suggestions: [], cooldowns: [], actions: [] } })),

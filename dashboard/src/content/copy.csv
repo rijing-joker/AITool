@@ -3036,3 +3036,37 @@ proxy.accounts.empty,proxy,ProxyPage,Proxy,empty,Import a credential file to add
 proxy.accounts.view,proxy,ProxyPage,Proxy,view,View {{provider}} accounts,,active
 proxy.accounts.count,proxy,ProxyPage,Proxy,count,{{count}} accounts,,active
 proxy.accounts.more,proxy,ProxyPage,Proxy,more,{{count}} more,,active
+pswitch.codex_client.auth,ui,ProviderSwitchPage,ProviderCodexClient,auth,Codex may still use the previous account.,,active
+pswitch.codex_client.catalog,ui,ProviderSwitchPage,ProviderCodexClient,catalog,Codex may still use the previous model list.,,active
+pswitch.codex_client.others,ui,ProviderSwitchPage,ProviderCodexClient,others,Quit and reopen the Codex desktop app or editor extension to apply changes.,,active
+pswitch.codex_client.unverified,ui,ProviderSwitchPage,ProviderCodexClient,unverified,Client status is unavailable. Reopen any Codex desktop app or editor extension after changing accounts or models.,,active
+pswitch.codex_client.restart,ui,ProviderSwitchPage,ProviderCodexClient,restart,Restart Codex daemon,,active
+pswitch.codex_client.dismiss,ui,ProviderSwitchPage,ProviderCodexClient,dismiss,Dismiss,,active
+pswitch.codex_client.confirm_title,ui,ProviderSwitchPage,ProviderCodexClient,confirm_title,Restart the Codex daemon?,,active
+pswitch.codex_client.confirm_desc,ui,ProviderSwitchPage,ProviderCodexClient,confirm_desc,Codex waits for running tasks within its shutdown grace period before restarting. Reopen the CLI afterward.,,active
+pswitch.codex_client.restarted,ui,ProviderSwitchPage,ProviderCodexClient,restarted,Codex daemon restarted. Reopen the CLI to load the current account and models.,,active
+pswitch.codex_client.not_running,ui,ProviderSwitchPage,ProviderCodexClient,not_running,The Codex daemon is not running.,,active
+proxy.copilot.title,proxy,ProxyPage,CopilotClients,title,Connect Copilot,,active
+proxy.copilot.client,proxy,ProxyPage,CopilotClients,client,Client,,active
+proxy.copilot.cli,proxy,ProxyPage,CopilotClients,cli,GitHub Copilot CLI,,active
+proxy.copilot.vscode,proxy,ProxyPage,CopilotClients,vscode,VS Code Copilot,,active
+proxy.copilot.cli_hint,proxy,ProxyPage,CopilotClients,cli_hint,Run aitool copilot to use this connection. Your Copilot settings are preserved.,,active
+proxy.copilot.vscode_hint,proxy,ProxyPage,CopilotClients,vscode_hint,VS Code opens a temporary setup window and saves the key in its native credential store.,,active
+proxy.copilot.key_number,proxy,ProxyPage,CopilotClients,key_number,Client key {{number}},,active
+proxy.copilot.model,proxy,ProxyPage,CopilotClients,model,Model,,active
+proxy.copilot.connect,proxy,ProxyPage,CopilotClients,connect,Connect / update,,active
+proxy.copilot.restore,proxy,ProxyPage,CopilotClients,restore,Restore configuration,,active
+proxy.copilot.restored,proxy,ProxyPage,CopilotClients,restored,Previous configuration restored.,,active
+proxy.copilot.cli_ready,proxy,ProxyPage,CopilotClients,cli_ready,Connected. Run aitool copilot in your terminal.,,active
+proxy.copilot.vscode_ready,proxy,ProxyPage,CopilotClients,vscode_ready,Connected. Select the AiTool model in VS Code Copilot.,,active
+proxy.copilot.current,proxy,ProxyPage,CopilotClients,current,Configured model: {{model}},,active
+proxy.copilot.preparing,proxy,ProxyPage,CopilotClients,preparing,Waiting for the VS Code setup window…,,active
+proxy.copilot.restore_hint,proxy,ProxyPage,CopilotClients,restore_hint,Restore the previous AiTool configuration and keep other provider groups.,,active
+proxy.copilot.error.disabled,proxy,ProxyPage,CopilotClients,error.disabled,"Enable AI features and GitHub Copilot Chat in VS Code, then try again.",,active
+proxy.copilot.error.dirty,proxy,ProxyPage,CopilotClients,error.dirty,"Save the open model configuration in VS Code, then try again.",,active
+proxy.copilot.error.unsupported,proxy,ProxyPage,CopilotClients,error.unsupported,Update VS Code and GitHub Copilot Chat to support custom endpoint credentials.,,active
+proxy.copilot.error.profile,proxy,ProxyPage,CopilotClients,error.profile,Use the default local VS Code profile for this connection.,,active
+proxy.copilot.error.failed,proxy,ProxyPage,CopilotClients,error.failed,"Connection failed. Check the selected client installation, proxy key and configuration.",,active
+proxy.copilot.error.timeout,proxy,ProxyPage,CopilotClients,error.timeout,VS Code setup timed out. Close the setup window and try again.,,active
+proxy.copilot.error.launch_failed,proxy,ProxyPage,CopilotClients,error.launch_failed,Unable to open the VS Code setup window.,,active
+proxy.copilot.error.conflict,proxy,ProxyPage,CopilotClients,error.conflict,The managed configuration was edited outside AiTool. Restore it from a backup or undo those edits first.,,active

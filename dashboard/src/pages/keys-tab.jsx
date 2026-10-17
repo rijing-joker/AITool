@@ -16,6 +16,7 @@ import {
 import { copy } from "../lib/copy";
 import { proxyApi } from "../lib/proxy-api";
 import { Button, Card, ConfirmModal } from "../ui/components";
+import { CopilotClients } from "./copilot-clients";
 
 // ---------------------------------------------------------------------------
 // Keys tab (客户端密钥) — EasyCLIProxyAPI's ConfigPanel key list, ported
@@ -369,6 +370,7 @@ export function KeysTab({ status }) {
         </ul>
       </Card>
 
+      <CopilotClients keys={keys} remarks={remarks} />
       <KeyDialog
         open={dialogOpen}
         editing={editing}

@@ -397,6 +397,23 @@ async function handleProxyApiRequest(req, res, url, ctx) {
   };
 
   try {
+    if (p === "/api/proxy/copilot" && method === "GET") {
+      json(res, { ok: true, clients: await require("./copilot").status() });
+      return true;
+    }
+    if (["/api/proxy/copilot/connect", "/api/proxy/copilot/restore", "/api/proxy/copilot/models"].includes(p) && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      const copilot = require("./copilot");
+      if (p.endsWith("/models")) json(res, { ok: true, models: await copilot.models(body) });
+      else if (p.endsWith("/restore")) json(res, { ok: true, ...await copilot.restore(body.client) });
+      else {
+        const keys = config.readConfig()?.["api-keys"] || [];
+        if (!keys.includes(body.apiKey)) { json(res, { ok: false, error: "Select a configured proxy client key." }, 400); return true; }
+        json(res, { ok: true, ...await copilot.connect(body.client, body) });
+      }
+      return true;
+    }
     // --- lifecycle ---
     if (p === "/api/proxy/status") {
       const coreStatus = await manager.status();

@@ -19,8 +19,8 @@ async function parseResponse<T>(res: Response): Promise<T> {
   return body as T;
 }
 
-async function get<T>(path: string): Promise<T> {
-  return parseResponse<T>(await fetch(path, { cache: "no-store" }));
+async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
+  return parseResponse<T>(await fetch(path, { cache: "no-store", signal }));
 }
 
 async function mutate<T>(path: string, method: string, body?: unknown): Promise<T> {
@@ -162,6 +162,16 @@ export interface ProviderSwitchStatus {
   apps: ProviderSwitchAppState[];
 }
 
+export interface CodexClientStatus {
+  daemonRunning: boolean;
+  daemon: boolean;
+  others: boolean;
+  auth: boolean;
+  catalog: boolean;
+  unverified: boolean;
+  revision: string;
+}
+
 export interface ProviderSwitchBackup {
   name: string;
   file: string;
@@ -292,6 +302,15 @@ export const piPromptFilesApi = {  get(kind: PiPromptFileKind) {
 };
 
 export const providerSwitchApi = {
+  getCodexClient(signal?: AbortSignal): Promise<{ ok: true; client: CodexClientStatus }> {
+    return get("/api/provider-switch/codex-client", signal);
+  },
+  restartCodexDaemon(): Promise<{ ok: true; outcome: "restarted" | "notRunning" }> {
+    return mutate("/api/provider-switch/codex-client/restart", "POST", {});
+  },
+  acknowledgeCodexClients(): Promise<{ ok: true }> {
+    return mutate("/api/provider-switch/codex-client/acknowledge", "POST", {});
+  },
   getStatus(): Promise<ProviderSwitchStatus> {
     return get<ProviderSwitchStatus>("/api/provider-switch/status");
   },

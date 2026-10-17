@@ -47,6 +47,7 @@ import { ProviderUniversalPanel } from "./provider-universal-panel";
 import { ProviderQuotaLine } from "./provider-quota-line";
 import { ProviderEnvBanner } from "./provider-env-banner";
 import { ProviderSkillsPanel } from "./provider-skills-panel";
+import { ProviderCodexClient } from "./provider-codex-client";
 
 // Provider config management — an interaction port of cc-switch's provider
 // module. Presets live in ~/.aitool/provider-switch (served by the local
@@ -934,6 +935,7 @@ export function ProviderSwitchPage() {
         </div>
       ) : null}
       <ProviderProfilesBar activeApp={activeApp} onNotice={setNotice} onChanged={refreshStatus} />
+      {activeApp === "codex" ? <ProviderCodexClient revision={status} /> : null}
       <section className="mb-8">
         <SectionTitle>{copy("pswitch.section.providers")}</SectionTitle>
         {!appState || appState.providers.length === 0 ? (

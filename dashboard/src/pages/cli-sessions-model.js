@@ -75,6 +75,16 @@ export function filterSessions(sessions, query) {
     );
 }
 
+export function projectGroupKey(directory) {
+  const value = String(directory || "");
+  // Only Windows paths are case-insensitive. POSIX backslashes and case are
+  // meaningful; preserve them regardless of which OS renders the history.
+  if (/^(?:[a-z]:[\\/]|\\\\|\/\/)/i.test(value)) {
+    return value.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+  }
+  return value.replace(/\/+$/, "") || (value.startsWith("/") ? "/" : "");
+}
+
 export function groupSessions(sessions, mode, now = new Date()) {
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const yesterday = new Date(today);
@@ -86,7 +96,7 @@ export function groupSessions(sessions, mode, now = new Date()) {
     const time = sessionTime(session);
     const key =
       mode === "project"
-        ? session.projectDir || ""
+        ? projectGroupKey(session.projectDir)
         : time >= today
           ? "today"
           : time >= yesterday
@@ -94,7 +104,7 @@ export function groupSessions(sessions, mode, now = new Date()) {
             : time >= week
               ? "week"
               : "earlier";
-    if (!groups.has(key)) groups.set(key, { key, sessions: [], latest: time });
+    if (!groups.has(key)) groups.set(key, { key, projectDir: session.projectDir || "", sessions: [], latest: time });
     groups.get(key).sessions.push(session);
   }
   return [...groups.values()];

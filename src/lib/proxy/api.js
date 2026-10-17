@@ -27,6 +27,20 @@ function json(res, data, status) {
   res.end(JSON.stringify(data));
 }
 
+function configResponse(res, result, data = {}) {
+  if (result.etag) res.setHeader("ETag", result.etag);
+  const status = result.ok ? 200 : result.status === 412 ? 412 : result.status >= 400 && result.status < 500 ? result.status : 502;
+  json(res, result.ok ? { ok: true, ...data, etag: result.etag || null }
+    : { ok: false, error: result.status === 412 ? "PROXY_CONFIG_CONFLICT" : result.error || result.data?.error || `HTTP ${result.status}` }, status);
+}
+
+function requireConfigRevision(res, value) {
+  // Require an actual strong revision; '*' would deliberately bypass protection.
+  if (typeof value === "string" && /^"[^"\r\n]+"$/.test(value)) return true;
+  json(res, { ok: false, error: "PROXY_CONFIG_REVISION_REQUIRED" }, 428);
+  return false;
+}
+
 function readJsonBody(req, maxBytes = 8 * 1024 * 1024) {
   return new Promise((resolve, reject) => {
     const chunks = [];
@@ -419,9 +433,12 @@ async function handleProxyApiRequest(req, res, url, ctx) {
       if (p.endsWith("/models")) json(res, { ok: true, models: await copilot.models(body) });
       else if (p.endsWith("/restore")) json(res, { ok: true, ...await copilot.restore(body.client) });
       else {
-        const keys = config.readConfig()?.["api-keys"] || [];
+        const cfg = config.readConfig() || {};
+        const keys = Array.isArray(cfg.access?.["api-keys"]) ? cfg.access["api-keys"]
+          : Array.isArray(cfg["api-keys"]) ? cfg["api-keys"] : [];
         if (!keys.includes(body.apiKey)) { json(res, { ok: false, error: "Select a configured proxy client key." }, 400); return true; }
-        json(res, { ok: true, ...await copilot.connect(body.client, body) });
+        const models = body.client === "vscode" ? await copilot.modelCatalog(body) : undefined;
+        json(res, { ok: true, ...await copilot.connect(body.client, { ...body, models }) });
       }
       return true;
     }
@@ -518,26 +535,30 @@ async function handleProxyApiRequest(req, res, url, ctx) {
     // --- config pass-through (management API) ---
     if (p === "/api/proxy/config" && (method === "PUT" || method === "PATCH")) {
       if (!requireMutation()) return true;
+      if (!requireConfigRevision(res, req.headers["if-match"])) return true;
       const body = await readJsonBody(req);
-      const result = await management.request("PUT", "/v0/management/config", { body });
-      json(res, result.ok ? { ok: true } : { ok: false, error: result.error || result.status }, result.ok ? 200 : 502);
+      const result = await management.request(method, "/v8/management/config", { body, ifMatch: req.headers["if-match"] });
+      configResponse(res, result);
       return true;
     }
     if (p === "/api/proxy/config") {
-      const result = await management.request("GET", "/v0/management/config");
-      json(res, result.ok ? { ok: true, config: result.data } : { ok: false, error: result.error || result.status }, result.ok ? 200 : 502);
+      const result = await management.request("GET", "/v8/management/config");
+      configResponse(res, result, { config: result.data });
       return true;
     }
     if (p === "/api/proxy/config.yaml") {
       if (method === "PUT") {
         if (!requireMutation()) return true;
         const body = await readJsonBody(req);
-        const result = await management.request("PUT", "/v0/management/config.yaml", { body: { yaml: String(body.yaml || "") } });
-        json(res, result.ok ? { ok: true } : { ok: false, error: result.error || result.status }, result.ok ? 200 : 502);
+        if (!requireConfigRevision(res, body.etag)) return true;
+        const result = await management.request("PUT", "/v8/management/config.yaml", {
+          body: String(body.yaml || ""), contentType: "application/yaml", ifMatch: body.etag,
+        });
+        configResponse(res, result);
         return true;
       }
-      const result = await management.request("GET", "/v0/management/config.yaml");
-      json(res, result.ok ? { ok: true, yaml: typeof result.data === "string" ? result.data : String(result.data || "") } : { ok: false, error: result.error || result.status }, result.ok ? 200 : 502);
+      const result = await management.request("GET", "/v8/management/config.yaml");
+      configResponse(res, result, { yaml: typeof result.data === "string" ? result.data : String(result.data || "") });
       return true;
     }
 
@@ -559,16 +580,17 @@ async function handleProxyApiRequest(req, res, url, ctx) {
     if (p === "/api/proxy/keys" && (method === "PUT" || method === "PATCH" || method === "DELETE")) {
       if (!requireMutation()) return true;
       const body = await readJsonBody(req);
-      const result = await management.request(method, "/v0/management/api-keys", { body });
-      json(res, result.ok ? { ok: true } : { ok: false, error: result.error || result.status }, result.ok ? 200 : 502);
+      if (!requireConfigRevision(res, body.etag)) return true;
+      const result = await management.request(method, "/v8/management/config/access/api-keys", { body: body.keys, ifMatch: body.etag });
+      configResponse(res, result);
       return true;
     }
     if (p === "/api/proxy/keys") {
-      const result = await management.request("GET", "/v0/management/api-keys");
+      const result = await management.request("GET", "/v8/management/config/access/api-keys");
       if (result.ok) {
         const data = result.data;
         const list = Array.isArray(data) ? data : data?.["api-keys"] || data?.items || [];
-        json(res, { ok: true, keys: list });
+        configResponse(res, result, { keys: list });
       } else {
         json(res, { ok: false, error: result.error || result.status }, 502);
       }
@@ -930,16 +952,20 @@ async function handleProxyApiRequest(req, res, url, ctx) {
         return true;
       }
       const timeoutMs = Math.min(120_000, Math.max(1_000, Number(body.timeoutMs) || 15_000));
+      if (verb !== "GET" && /^\/?config(?:[/.]|$)/.test(route)
+        && !requireConfigRevision(res, body.ifMatch)) return true;
       const result = await management.request(verb, `/v8/management/${route.replace(/^\/+/, "")}`, {
         query: body.query && typeof body.query === "object" && !Array.isArray(body.query) ? body.query : undefined,
         body: body.body,
         timeoutMs,
+        ifMatch: body.ifMatch,
       });
       if (!result.ok) {
-        json(res, { ok: false, error: formatManagementError(result.status, result.data) });
+        if (result.status === 412) configResponse(res, result);
+        else json(res, { ok: false, error: formatManagementError(result.status, result.data) });
         return true;
       }
-      json(res, { ok: true, value: result.data === "" ? null : result.data });
+      json(res, { ok: true, value: result.data === "" ? null : result.data, etag: result.etag || null });
       return true;
     }
 
@@ -1018,14 +1044,11 @@ async function handleProxyApiRequest(req, res, url, ctx) {
     }
 
     // --- structured config fields (EasyCLIProxyAPI ConfigPanel port) ---
-    // The Rust GUI patches config.yaml on disk and lets the core's watcher
-    // reload; this route does the same with dotted-path field merges. Fields
-    // not in the map are untouched; null removes a key.
+    // Apply settings through the core's conditional config writer. The core
+    // checks If-Match under its config lock; no direct file write races reload.
     if (p === "/api/proxy/config-fields") {
       const YAML = require("yaml");
-      const readFields = () => {
-        let doc = {};
-        try { doc = YAML.parse(fs.readFileSync(paths.configPath, "utf8")) || {}; } catch {}
+      const readFields = (doc) => {
         const get = (dotted) => {
           let node = doc;
           for (const part of dotted.split(".")) {
@@ -1063,10 +1086,14 @@ async function handleProxyApiRequest(req, res, url, ctx) {
           json(res, { ok: false, error: "fields object required" }, 400);
           return true;
         }
-        let doc = {};
-        try { doc = YAML.parse(fs.readFileSync(paths.configPath, "utf8")) || {}; } catch {}
+        if (!requireConfigRevision(res, body.etag)) return true;
+        const snapshot = await management.request("GET", "/v8/management/config.yaml");
+        if (!snapshot.ok) { configResponse(res, snapshot); return true; }
+        if (snapshot.etag !== body.etag) { configResponse(res, { ok: false, status: 412, etag: snapshot.etag }); return true; }
+        const doc = YAML.parse(snapshot.data) || {};
+        const allowed = readFields(doc);
         for (const [dotted, value] of Object.entries(fields)) {
-          if (!/^[a-z0-9.-]+$/i.test(dotted)) {
+          if (!Object.hasOwn(allowed, dotted)) {
             json(res, { ok: false, error: `Invalid config field: ${dotted}` }, 400);
             return true;
           }
@@ -1079,13 +1106,14 @@ async function handleProxyApiRequest(req, res, url, ctx) {
           if (value === null) delete node[parts[parts.length - 1]];
           else node[parts[parts.length - 1]] = value;
         }
-        fs.mkdirSync(path.dirname(paths.configPath), { recursive: true });
-        fs.writeFileSync(paths.configPath, YAML.stringify(doc));
-        // Keep the bootstrap copy consistent with what ensureConfig expects.
-        json(res, { ok: true, fields: readFields() });
+        const result = await management.request("PUT", "/v8/management/config.yaml", {
+          body: YAML.stringify(doc), contentType: "application/yaml", ifMatch: body.etag,
+        });
+        configResponse(res, result, { fields: readFields(doc) });
         return true;
       }
-      json(res, { ok: true, fields: readFields() });
+      const result = await management.request("GET", "/v8/management/config.yaml");
+      configResponse(res, result, { fields: result.ok ? readFields(YAML.parse(result.data) || {}) : {} });
       return true;
     }
 

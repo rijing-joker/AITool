@@ -105,6 +105,7 @@ test("CLI onboarding advertises the same supported integrations", () => {
   assert.ok(SUPPORTED_PROVIDERS.includes("AnythingLLM Desktop"));
   assert.ok(SUPPORTED_PROVIDERS.includes("Qoder"));
   assert.ok(SUPPORTED_PROVIDERS.includes("Reasonix"));
+  assert.ok(SUPPORTED_PROVIDERS.includes("Muse Code"));
   assert.ok(SUPPORTED_PROVIDERS.includes("DeepSeek Harness"));
   assert.ok(SUPPORTED_PROVIDERS.includes("Prime Agent"));
   assert.ok(SUPPORTED_PROVIDERS.includes("TRAE Work CN"));

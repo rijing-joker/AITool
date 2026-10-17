@@ -721,6 +721,15 @@ describe("UsageLimitsPanel", () => {
     expect(within(group).queryByText(/^Stale/i)).not.toBeInTheDocument();
   });
 
+  it("shows an exhausted weekly allowance as blocking a fresh five-hour window", () => {
+    render(<UsageLimitsPanel antigravity={{ configured: true, error: null, quota_windows: [
+      { key: "week", group: "Claude and GPT", kind: "weekly", window: { used_percent: 100 } },
+      { key: "short", group: "Claude and GPT", kind: "5h", window: { used_percent: 0, blocked_by_weekly: true } },
+    ] }} order={["antigravity"]} />);
+    expect(screen.getByText(copy("limits.bar.blocked"))).toBeInTheDocument();
+    expect(screen.getByText(`Claude and GPT · ${copy("limits.window.five_hour")}`)).toBeInTheDocument();
+  });
+
   it("flags Antigravity reauth ahead of the cached badge", () => {
     render(
       <UsageLimitsPanel

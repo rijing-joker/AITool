@@ -160,7 +160,10 @@ function projectCodex({ prev, target, liveToml, liveAuth, stash }) {
   // Sidecar action for the caller: write the catalog file for the target,
   // remove ours when only the previous provider had one, or leave it alone.
   const catalogAction = targetCatalog.length > 0
-    ? { action: "write", models: targetCatalog }
+    ? { action: "write", models: targetCatalog, options: {
+      autoReviewModel: target.meta?.codexAutoReviewModel,
+      speedTiersEnabled: target.meta?.codexSpeedTiersEnabled !== false,
+    } }
     : prevCatalog.length > 0
       ? { action: "remove" }
       : { action: "keep" };

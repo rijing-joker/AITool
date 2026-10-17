@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { copy } from "../lib/copy";
-import { proxyApi } from "../lib/proxy-api";
+import { proxyApi, configErrorMessage } from "../lib/proxy-api";
 import { Button, Card } from "../ui/components";
 import { UnsavedChangesGuard } from "../ui/components/UnsavedChangesGuard";
 
@@ -104,6 +104,8 @@ function normalizedDrafts(next) {
 
 export function SettingsTab({ status, onRefresh, onInstallCore }) {
   const [fields, setFields] = useState(null);
+  const [fieldsEtag, setFieldsEtag] = useState(null);
+  const [yamlEtag, setYamlEtag] = useState(null);
   const [loadError, setLoadError] = useState(null);
   const [notice, setNotice] = useState(null);
   const [error, setError] = useState(null);
@@ -200,6 +202,7 @@ export function SettingsTab({ status, onRefresh, onInstallCore }) {
       if (!data?.ok) throw new Error(data?.error || "HTTP config-fields");
       applyFields(data.fields);
       setFields(data.fields);
+      setFieldsEtag(data.etag ?? null);
       setLoadError(null);
     } catch (e) {
       setLoadError(e instanceof Error ? e.message : String(e));
@@ -216,6 +219,7 @@ export function SettingsTab({ status, onRefresh, onInstallCore }) {
       const data = await proxyApi.configYaml();
       if (version !== yamlReadVersion.current) return;
       setYaml(data.yaml);
+      setYamlEtag(data.etag ?? null);
       setYamlDirty(false);
       setYamlError(null);
     } catch (error) {
@@ -249,11 +253,12 @@ export function SettingsTab({ status, onRefresh, onInstallCore }) {
       const response = await fetch("/api/proxy/config-fields", {
         method: "PATCH",
         headers: { ...(await getLocalApiAuthHeaders()), "content-type": "application/json" },
-        body: JSON.stringify({ fields: patch }),
+        body: JSON.stringify({ fields: patch, etag: fieldsEtag }),
       });
       const data = await response.json().catch(() => null);
       if (!data?.ok) throw new Error(data?.error || `HTTP ${response.status}`);
       setFields(data.fields);
+      setFieldsEtag(data.etag ?? null);
       setSavedDrafts((previous) => ({ ...previous, [section]: submittedDraft }));
       // Keep the YAML view in sync; it cannot be edited while a section saves.
       await loadYaml();
@@ -261,7 +266,7 @@ export function SettingsTab({ status, onRefresh, onInstallCore }) {
       setNotice(copy("proxy.settings.sectionSaved"));
       return true;
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(configErrorMessage(e));
       // Preserve every draft on failure so the user can retry.
       return false;
     } finally {
@@ -332,6 +337,9 @@ export function SettingsTab({ status, onRefresh, onInstallCore }) {
       {loadError || error ? (
         <div className="flex items-start gap-2 rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-3.5 py-2.5 text-sm text-amber-800 dark:text-amber-300">
           <span className="break-words">{error || loadError}</span>
+          <button type="button" disabled={busyField !== ""} onClick={() => { void loadFields(); void loadYaml(); setError(null); }} className="shrink-0 underline">
+            {copy("proxy.settings.reload")}
+          </button>
         </div>
       ) : null}
       {notice ? (
@@ -636,7 +644,8 @@ export function SettingsTab({ status, onRefresh, onInstallCore }) {
                 setBusyField("yaml");
                 setError(null);
                 try {
-                  await proxyApi.putConfigYaml(yaml);
+                  const saved = await proxyApi.putConfigYaml(yaml, yamlEtag);
+                  setYamlEtag(saved.etag ?? null);
                   setYamlDirty(false);
                   await loadFields();
                   onRefresh?.();

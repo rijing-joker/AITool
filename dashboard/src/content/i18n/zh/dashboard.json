@@ -2004,5 +2004,19 @@
   "proxy.free.catalog_error": "目录刷新失败，成功刷新前暂停推理。",
   "pswitch.preset.aitool_opencode_free": "AiTool OpenCode 免费",
   "pswitch.hint.aitool_opencode_free": "请先在 AI 代理启用免费上游，再填写 AiTool 客户端访问密钥。所选模型必须已在上游启用。",
-  "proxy.free.inference_pending": "目录发现不代表推理可用。本次适配器运行尚无成功请求。"
+  "proxy.free.inference_pending": "目录发现不代表推理可用。本次适配器运行尚无成功请求。",
+  "pswitch.catalog.auto_review": "自动审批模型",
+  "pswitch.catalog.auto_review_default": "使用供应商默认值",
+  "pswitch.catalog.auto_review_hint": "从当前供应商的模型目录中选择自动审批使用的模型。",
+  "pswitch.catalog.auto_review_missing": "此模型已不在目录中，审批将使用供应商默认值。",
+  "pswitch.catalog.speed_tiers": "保留模型速度档位",
+  "pswitch.catalog.speed_tiers_hint": "保留各模型声明的速度档位；供应商不支持时可关闭。",
+  "proxy.settings.conflict": "配置已被其他操作修改，草稿已保留。请重新载入并核对最新设置后再保存。",
+  "proxy.settings.revision_required": "请重新载入配置后再保存。若仍出现此提示，请将代理内核更新至 v8.0.32 或更高版本。",
+  "proxy.settings.reload": "放弃草稿并重新载入",
+  "limits.window.weekly": "每周",
+  "limits.window.five_hour": "5 小时",
+  "limits.bar.blocked": "受限",
+  "limits.antigravity.weekly_exhausted": "周额度已耗尽，需等待周额度重置后才能使用此五小时窗口。",
+  "proxy.copilot.catalog_count": "已接入 {{count}} 个模型"
 }

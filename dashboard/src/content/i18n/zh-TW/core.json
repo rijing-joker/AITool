@@ -795,7 +795,7 @@
   "proxy.copilot.cli": "GitHub Copilot 命令列",
   "proxy.copilot.vscode": "VS Code Copilot 擴充功能",
   "proxy.copilot.cli_hint": "執行 aitool copilot 使用此連線。保留現有 Copilot 設定。",
-  "proxy.copilot.vscode_hint": "VS Code 會開啟臨時設定視窗，將金鑰儲存到原生憑證儲存區。",
+  "proxy.copilot.vscode_hint": "把所選模型和全部可用模型接入 VS Code Copilot。首次設定會開啟一個暫時的 VS Code 視窗以儲存金鑰。",
   "proxy.copilot.key_number": "用戶端金鑰 {{number}}",
   "proxy.copilot.model": "模型",
   "proxy.copilot.connect": "連接 / 更新",

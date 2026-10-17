@@ -77,6 +77,7 @@ const {
   resolveAnythingllmDbPath,
   resolveDevinDbPath,
   resolveReasonixHome,
+  resolveMuseHome,
   resolveTraeStoragePath,
 } = require("../lib/rollout");
 const { resolveRuntimeConfig, DEFAULT_BASE_URL } = require("../lib/runtime-config");
@@ -138,6 +139,7 @@ const SUPPORTED_PROVIDERS = [
   "Prime Agent",
   "Craft Agents",
   "Reasonix",
+  "Muse Code",
   "Kilo CLI",
   "Kilo Code",
   "Roo Code",
@@ -883,6 +885,13 @@ async function applyIntegrationSetup({
     const reasonixHome = resolveReasonixHome(process.env);
     if (fssync.existsSync(reasonixHome)) {
       summary.push({ label: "Reasonix", status: "detected", detail: "Passive telemetry reader (no hook needed)" });
+    }
+  }
+
+  // Muse Code: passive reader of ~/.local/share/muse/sessions/**/session.jsonl.
+  {
+    if (fssync.existsSync(path.join(resolveMuseHome(process.env), "sessions"))) {
+      summary.push({ label: "Muse Code", status: "detected", detail: "Passive session reader (no hook needed)" });
     }
   }
 

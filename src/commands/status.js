@@ -46,6 +46,7 @@ const {
   probeOpenclawSessionPluginState,
 } = require("../lib/openclaw-session-plugin");
 const { resolveTrackerPaths } = require("../lib/tracker-paths");
+const { resolveDeviceTokenPresence } = require("../lib/cloud-device-token");
 const {
   resolveKimiWireFiles,
   resolveKimiCodeWireFiles,
@@ -73,6 +74,8 @@ const {
   resolveCraftConfigDir,
   resolveReasonixHome,
   resolveReasonixTelemetryFiles,
+  resolveMuseHome,
+  resolveMuseSessionFiles,
   resolveKilocodeTaskFiles,
   resolveRoocodeTaskFiles,
   resolveClineSessionFilesWithStatus,
@@ -549,6 +552,10 @@ async function cmdStatus(argv = []) {
   const reasonixHome = resolveReasonixHome(process.env);
   const reasonixInstalled = Boolean(reasonixHome && fssync.existsSync(reasonixHome));
   const reasonixFiles = reasonixInstalled ? resolveReasonixTelemetryFiles(process.env) : [];
+
+  // Muse Code (Meta) — passive scan of per-session session.jsonl logs.
+  const museInstalled = fssync.existsSync(path.join(resolveMuseHome(process.env), "sessions"));
+  const museFiles = museInstalled ? resolveMuseSessionFiles(process.env) : [];
 
   // Kilo CLI (kilo.ai @kilocode/plugin) — passive scan of kilo.db.
   const xdgDataHome = process.env.XDG_DATA_HOME || path.join(home, ".local", "share");
@@ -1027,12 +1034,17 @@ async function cmdStatus(argv = []) {
     },
   });
 
+  const deviceTokenPresence = resolveDeviceTokenPresence({
+    trackerDir,
+    config: config || {},
+  });
+
   if (opts.json || opts.light) {
     const summary = {
       version: pkg.version,
       generated_at: new Date().toISOString(),
       base_url: config?.baseUrl || null,
-      device_token_set: Boolean(config?.deviceToken),
+      device_token_set: deviceTokenPresence.set,
       queue: {
         pending_bytes: pendingBytes,
         size_bytes: queueSize,
@@ -1126,6 +1138,9 @@ async function cmdStatus(argv = []) {
           : { installed: false },
         reasonix: reasonixInstalled
           ? { installed: true, files: reasonixFiles.length }
+          : { installed: false },
+        muse: museInstalled
+          ? { installed: true, files: museFiles.length }
           : { installed: false },
         anythingllm: anythingllmInstalled
           ? { installed: true, detail: anythingllmDbPath }
@@ -1259,7 +1274,7 @@ async function cmdStatus(argv = []) {
       `TokenTracker v${pkg.version}`,
       "Status:",
       `- Base URL: ${config?.baseUrl || "unset"}`,
-      `- Device token: ${config?.deviceToken ? "set" : "unset"}`,
+      `- Device token: ${deviceTokenPresence.set ? "set" : "unset"}`,
       `- Queue: ${pendingBytes} bytes pending`,
       `- Last parse: ${cursors?.updatedAt || "never"}`,
       `- Last notify: ${lastNotify || "never"}`,
@@ -1322,6 +1337,9 @@ async function cmdStatus(argv = []) {
         : null,
       reasonixInstalled
         ? `- Reasonix: passive reader (${reasonixFiles.length} telemetry file${reasonixFiles.length !== 1 ? "s" : ""} found)`
+        : null,
+      museInstalled
+        ? `- Muse Code: passive reader (${museFiles.length} session jsonl file${museFiles.length !== 1 ? "s" : ""} found)`
         : null,
       anythingllmInstalled
         ? `- AnythingLLM Desktop: passive reader (${anythingllmDbPath})`

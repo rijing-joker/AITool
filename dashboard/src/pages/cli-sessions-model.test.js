@@ -6,6 +6,13 @@ import {
   turnText,
 } from "./cli-sessions-model";
 
+it("groups Windows drive and UNC variants while preserving POSIX case", () => {
+  const sessions = ["D:\\Project", "d:/project/", "\\\\Server\\Share\\Repo", "//server/share/repo/", "/Project", "/project"]
+    .map(projectDir => ({ projectDir }));
+  expect(groupSessions(sessions, "project").map(group => group.sessions.length)).toEqual([2, 2, 1, 1]);
+  expect(sessions[0].projectDir).toBe("D:\\Project");
+});
+
 it("pairs delayed tool results across questions without losing orphan output or mutating messages", () => {
   const messages = [
     { role: "user", content: "First question" },

@@ -46,10 +46,14 @@ a clean model configuration editor. Custom VS Code profiles/alternate editor
 builds are not supported by this path. A cached secret reference is reused for
 the same key; changing the key runs native setup again.
 
-The dashboard currently discovers model IDs. VS Code models default to a
-128,000-token context window, tool calling enabled and vision disabled; the
-backend accepts explicit context/vision metadata for callers that have it.
-These defaults are configuration assumptions, not detected provider limits.
+VS Code receives the selected model first, followed by every public model ID
+from the proxy, including aliases, with duplicates removed. Reconnect to refresh
+that catalog. Model context, image-input and output limits use the proxy's
+metadata, then the local models.dev snapshot when available. Unknown models
+default to a 128,000-token context, tool calling enabled and vision disabled;
+these defaults are configuration assumptions, not detected provider limits.
+Output limits never exceed half the context window. An alias without its own
+metadata uses these same conservative defaults.
 
 ## Restore and validation
 

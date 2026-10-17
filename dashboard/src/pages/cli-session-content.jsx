@@ -11,7 +11,7 @@ import {
   Wrench,
 } from "lucide-react";
 import { copy } from "../lib/copy";
-import { formatCostUsd } from "../lib/cost-format";
+import { useCostFormatter } from "../hooks/useCostFormatter";
 import { toolCallPayloadText } from "../lib/session-export";
 import { isFailedStep, stepText } from "./cli-sessions-model";
 
@@ -67,6 +67,7 @@ export function roleKey(role) {
 // Reader-header usage chips (cc-switch 31e5ae3): total tokens, active span and
 // the models.dev-estimated cost, when the server could price the session.
 export function UsageChips({ usage }) {
+  const formatCost = useCostFormatter();
   if (!usage || typeof usage !== "object") return null;
   const chips = [];
   const tokens = formatUsageTokens(usage.totalTokens);
@@ -89,14 +90,14 @@ export function UsageChips({ usage }) {
       title: `${Math.round(usage.durationMs / 1000)}s`,
     });
   }
-  const cost = formatCostUsd(usage.estimatedCostUsd);
+  const cost = formatCost(usage.estimatedCostUsd);
   if (cost != null) {
     chips.push({
       key: "cost",
       label: copy("clisessions.usage.cost"),
       value: cost,
       title: usage.model
-        ? `$${usage.estimatedCostUsd.toFixed(6)} · ${usage.model}`
+        ? `${formatCost(usage.estimatedCostUsd, true)} · ${usage.model}`
         : undefined,
     });
   }

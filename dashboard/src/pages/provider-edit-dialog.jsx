@@ -11,6 +11,7 @@ import { EndpointSpeedTestDialog } from "./provider-speed-test";
 import { ProviderIconPicker, iconComponentFor } from "./provider-icon-picker";
 import { CodexSubagentFields } from "./provider-codex-subagents";
 import { CodexCatalogEditor } from "./provider-codex-catalog";
+import { CodexCatalogOptions } from "./provider-codex-catalog-options";
 import { ModelDropdown, ModelInputAction } from "./provider-model-dropdown";
 import { withClaudeGatewayDefaults } from "./provider-claude-gateway-defaults";
 import { mergePresetMeta, prefillProviderMeta, claudeApiKeyName as resolveClaudeApiKeyName } from "./provider-preset-meta";
@@ -227,7 +228,7 @@ const CLAUDE_MODEL_ROLES = [
     labelKey: "pswitch.role.haiku",
     namePath: "env.ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME",
     modelPath: "env.ANTHROPIC_DEFAULT_HAIKU_MODEL",
-    supportsOneM: false,
+    supportsOneM: true,
   },
   {
     key: "subagent",
@@ -1962,6 +1963,7 @@ export function ProviderEditDialog({
               ) : null}
               {codexAdvancedOpen ? (
                 <div className="space-y-4 border-t border-oai-gray-100 px-4 py-4 dark:border-oai-gray-800">
+                  <CodexCatalogOptions meta={meta} onChange={setMetaValue} />
                   <CodexCatalogEditor
                     models={Array.isArray(meta.codexCatalogModels) ? meta.codexCatalogModels : []}
                     onChange={(rows) => setMetaValue("codexCatalogModels", rows)}

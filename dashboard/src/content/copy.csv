@@ -3051,7 +3051,7 @@ proxy.copilot.client,proxy,ProxyPage,CopilotClients,client,Client,,active
 proxy.copilot.cli,proxy,ProxyPage,CopilotClients,cli,GitHub Copilot CLI,,active
 proxy.copilot.vscode,proxy,ProxyPage,CopilotClients,vscode,VS Code Copilot,,active
 proxy.copilot.cli_hint,proxy,ProxyPage,CopilotClients,cli_hint,Run aitool copilot to use this connection. Your Copilot settings are preserved.,,active
-proxy.copilot.vscode_hint,proxy,ProxyPage,CopilotClients,vscode_hint,VS Code opens a temporary setup window and saves the key in its native credential store.,,active
+proxy.copilot.vscode_hint,proxy,ProxyPage,CopilotClients,vscode_hint,Connect the selected model and all available models to VS Code Copilot. Initial setup opens a temporary window to save the key securely.,,active
 proxy.copilot.key_number,proxy,ProxyPage,CopilotClients,key_number,Client key {{number}},,active
 proxy.copilot.model,proxy,ProxyPage,CopilotClients,model,Model,,active
 proxy.copilot.connect,proxy,ProxyPage,CopilotClients,connect,Connect / update,,active
@@ -3094,3 +3094,17 @@ proxy.free.catalog_error,proxy,ProxyPage,OpenCodeFreePanel,catalog_error,Catalog
 pswitch.preset.aitool_opencode_free,proxy,ProxyPage,OpenCodeFreePanel,aitool_opencode_free,AiTool OpenCode Free,,active
 pswitch.hint.aitool_opencode_free,proxy,ProxyPage,OpenCodeFreePanel,aitool_opencode_free,"Enable the free upstream in AI Proxy first, then enter an AiTool client access key. The selected model must be enabled there.",,active
 proxy.free.inference_pending,proxy,ProxyPage,OpenCodeFreePanel,inference_pending,Catalog discovery does not verify inference. No successful request in this adapter session yet.,,active
+pswitch.catalog.auto_review,pswitch,*,Integration,label,Auto-review model,,active
+pswitch.catalog.auto_review_default,pswitch,*,Integration,label,Use the provider default,,active
+pswitch.catalog.auto_review_hint,pswitch,*,Integration,label,Choose a model from this provider’s catalog for automatic approval reviews.,,active
+pswitch.catalog.auto_review_missing,pswitch,*,Integration,label,This model is no longer in the catalog. Reviews will use the provider default.,,active
+pswitch.catalog.speed_tiers,pswitch,*,Integration,label,Keep model speed tiers,,active
+pswitch.catalog.speed_tiers_hint,pswitch,*,Integration,label,Keep the tiers declared by each model. Turn off if this provider does not support them.,,active
+proxy.settings.conflict,proxy,*,Integration,label,Configuration changed elsewhere. Your draft is retained. Reload and review the latest settings before saving.,,active
+proxy.settings.revision_required,proxy,*,Integration,label,"Reload configuration before saving. If this persists, update the proxy core to v8.0.32 or later.",,active
+proxy.settings.reload,proxy,*,Integration,label,Discard drafts and reload,,active
+limits.window.weekly,limits,*,Integration,label,Weekly,,active
+limits.window.five_hour,limits,*,Integration,label,5 hours,,active
+limits.bar.blocked,limits,*,Integration,label,Blocked,,active
+limits.antigravity.weekly_exhausted,limits,*,Integration,label,The weekly allowance is exhausted. This five-hour window cannot be used until the weekly allowance resets.,,active
+proxy.copilot.catalog_count,proxy,*,Integration,label,{{count}} models connected,,active

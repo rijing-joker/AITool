@@ -168,6 +168,7 @@ function KeyDialog({ open, editing, keys, onClose, onSubmit, busy }) {
 
 export function KeysTab({ status }) {
   const [keys, setKeys] = useState(null);
+  const [etag, setEtag] = useState(null);
   const [remarks, setRemarks] = useState({});
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -184,6 +185,7 @@ export function KeysTab({ status }) {
       ]);
       const list = Array.isArray(keysData.keys) ? keysData.keys : keysData.keys?.items || [];
       setKeys(list.map(String));
+      setEtag(keysData.etag ?? null);
       if (remarksData?.ok && remarksData.remarks && typeof remarksData.remarks === "object") {
         setRemarks(remarksData.remarks);
       }
@@ -202,7 +204,8 @@ export function KeysTab({ status }) {
     setBusy(true);
     setError(null);
     try {
-      await proxyApi.putKeys(nextKeys);
+      const saved = await proxyApi.putKeys(nextKeys, etag);
+      setEtag(saved.etag ?? null);
       const response = await fetch("/api/proxy/api-key-remarks", {
         method: "PUT",
         headers: await (async () => {
@@ -217,13 +220,13 @@ export function KeysTab({ status }) {
       setRemarks(nextRemarks);
       return true;
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
       await load();
+      setError(e instanceof Error ? e.message : String(e));
       return false;
     } finally {
       setBusy(false);
     }
-  }, [load]);
+  }, [load, etag]);
 
   const submitDialog = async ({ apiKey, remark }) => {
     const current = keys ?? [];

@@ -92,7 +92,7 @@ const ANTIGRAVITY_QUOTA_SUMMARY_URLS = Object.freeze([
   "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary",
   "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary",
 ]);
-const ANTIGRAVITY_USER_AGENT = "antigravity/2.9.1";
+const ANTIGRAVITY_USER_AGENT = "antigravity/hub/2.23.0 darwin/arm64";
 const ANTIGRAVITY_TOKEN_REFRESH_SKEW_MS = 60 * 1000;
 // Per-step ceilings for the Antigravity serial chain. `providerTimeoutMs` bounds the
 // whole chain (see fetchAntigravityLimits); these only cap a single step, so one slow
@@ -2247,6 +2247,8 @@ function parseTimeMs(value) {
 
 function isCacheWindowUsable(window, { cachedAtMs, nowMs } = {}) {
   if (!window || typeof window !== "object") return false;
+  const blockedUntilMs = parseTimeMs(window.blocked_until);
+  if (window.blocked_by_weekly && blockedUntilMs !== null && blockedUntilMs <= nowMs) return false;
   const resetAtMs = parseTimeMs(window.reset_at);
   if (resetAtMs !== null) return resetAtMs > nowMs;
   return Number.isFinite(cachedAtMs)
@@ -2254,7 +2256,7 @@ function isCacheWindowUsable(window, { cachedAtMs, nowMs } = {}) {
 }
 
 function hasAntigravityWindow(limits) {
-  return Boolean(limits?.primary_window || limits?.secondary_window || limits?.tertiary_window || limits?.quaternary_window);
+  return Boolean(limits?.primary_window || limits?.secondary_window || limits?.tertiary_window || limits?.quaternary_window || limits?.quota_windows?.length);
 }
 
 function normalizeAntigravityCachedLimits(raw, { nowMs = Date.now() } = {}) {
@@ -2272,6 +2274,7 @@ function normalizeAntigravityCachedLimits(raw, { nowMs = Date.now() } = {}) {
     secondary_window: isCacheWindowUsable(raw?.secondary_window, { cachedAtMs, nowMs }) ? raw.secondary_window : null,
     tertiary_window: isCacheWindowUsable(raw?.tertiary_window, { cachedAtMs, nowMs }) ? raw.tertiary_window : null,
     quaternary_window: isCacheWindowUsable(raw?.quaternary_window, { cachedAtMs, nowMs }) ? raw.quaternary_window : null,
+    ...(Array.isArray(raw.quota_windows) ? { quota_windows: raw.quota_windows.filter((row) => isCacheWindowUsable(row?.window, { cachedAtMs, nowMs })) } : {}),
     cached: true,
     cached_at: raw.cached_at,
   };
@@ -2304,6 +2307,7 @@ function writeAntigravityLimitsCache(limits, { home, nowMs = Date.now() } = {}) 
       secondary_window: limits.secondary_window || null,
       tertiary_window: limits.tertiary_window || null,
       quaternary_window: limits.quaternary_window || null,
+      ...(limits.quota_windows ? { quota_windows: limits.quota_windows } : {}),
       cached_at: new Date(nowMs).toISOString(),
     },
   };
@@ -3133,43 +3137,52 @@ function normalizeAntigravityQuotaSummary(body) {
     throw new Error("Could not parse Antigravity quota summary: no groups.");
   }
 
-  // Map bucketId → window, regardless of which group they live in
-  const makeWindow = (remainingFraction, resetTime) => {
-    if (typeof remainingFraction !== "number") return null;
-    return buildWindow({
-      usedPercent: Math.round((1 - remainingFraction) * 100),
-      resetAt: parseAntigravityDate(resetTime) || (typeof resetTime === "string" ? resetTime : null),
+  const labelOf = (entry) => [entry?.display_name, entry?.displayName, entry?.description]
+    .find((value) => typeof value === "string" && value.trim())?.trim() || "";
+  const kindOf = (bucket) => {
+    const label = `${bucket.window || ""} ${labelOf(bucket)} ${bucket.bucketId || bucket.bucket_id || ""}`.toLowerCase();
+    if (/weekly|week|7[ -]?day/.test(label)) return "weekly";
+    if (/5[ -]?(?:h|hour)|five[ _-]?hour/.test(label)) return "5h";
+    return null;
+  };
+  const fractionOf = (bucket) => {
+    const value = bucket.remaining_fraction ?? bucket.remainingFraction;
+    if (typeof value !== "number" || !Number.isFinite(value)) return null;
+    return Math.max(0, Math.min(1, value));
+  };
+  const windows = { primary_window: null, secondary_window: null, tertiary_window: null, quaternary_window: null };
+  const quotaWindows = [];
+  groups.forEach((group, groupIndex) => {
+    if (!group || !Array.isArray(group.buckets)) return;
+    const buckets = group.buckets.filter((bucket) => bucket && typeof bucket === "object");
+    const exhaustedWeek = buckets.find((bucket) => kindOf(bucket) === "weekly" && fractionOf(bucket) === 0);
+    buckets.forEach((bucket, bucketIndex) => {
+      const remaining = fractionOf(bucket);
+      const kind = kindOf(bucket);
+      if (remaining === null || !kind) return;
+      const reset = bucket.reset_time ?? bucket.resetTime;
+      const window = buildWindow({ usedPercent: Math.round((1 - remaining) * 100), resetAt: parseAntigravityDate(reset),
+        windowSeconds: kind === "weekly" ? 604800 : 18000 });
+      if (kind === "5h" && exhaustedWeek) {
+        window.blocked_by_weekly = true;
+        window.blocked_until = parseAntigravityDate(exhaustedWeek.reset_time ?? exhaustedWeek.resetTime);
+      }
+      const id = String(bucket.bucket_id || bucket.bucketId || "");
+      const familyLabel = `${id} ${labelOf(group)}`.toLowerCase();
+      const family = /gemini/.test(familyLabel) ? "gemini" : /3p|claude|gpt|third.party/.test(familyLabel) ? "claude" : null;
+      const slot = family === "claude" ? kind === "weekly" ? "primary_window" : "secondary_window"
+        : family === "gemini" ? kind === "weekly" ? "tertiary_window" : "quaternary_window" : null;
+      if (slot) windows[slot] = window;
+      quotaWindows.push({ key: `${groupIndex}-${bucketIndex}`, group: labelOf(group), family, kind, window });
     });
-  };
-
-  // Collect all buckets into a flat bucketId-keyed map
-  const buckets = {};
-  for (const group of groups) {
-    if (!Array.isArray(group.buckets)) continue;
-    for (const b of group.buckets) {
-      buckets[b.bucketId] = b;
-    }
-  }
-
-  const windows = {
-    primary_window: makeWindow(buckets["3p-weekly"]?.remainingFraction, buckets["3p-weekly"]?.resetTime),
-    secondary_window: makeWindow(buckets["3p-5h"]?.remainingFraction, buckets["3p-5h"]?.resetTime),
-    tertiary_window: makeWindow(buckets["gemini-weekly"]?.remainingFraction, buckets["gemini-weekly"]?.resetTime),
-    quaternary_window: makeWindow(buckets["gemini-5h"]?.remainingFraction, buckets["gemini-5h"]?.resetTime),
-  };
-
-  // If the groups parsed but none of the known bucketIds matched (upstream
-  // renamed them), treat it as a parse failure so the caller falls back to
-  // GetUserStatus rather than rendering an empty, error-free card.
-  if (!windows.primary_window && !windows.secondary_window
-    && !windows.tertiary_window && !windows.quaternary_window) {
-    throw new Error("Could not parse Antigravity quota summary: no known buckets matched.");
-  }
+  });
+  if (!quotaWindows.length) throw new Error("Could not parse Antigravity quota summary: no known windows matched.");
 
   return {
     account_email: null, // quota summary doesn't include email
     account_plan: null,  // quota summary doesn't include plan info
     ...windows,
+    quota_windows: quotaWindows,
   };
 }
 
@@ -3622,6 +3635,7 @@ async function fetchAntigravityRemoteLimits({
       secondary_window: windows.secondary_window,
       tertiary_window: windows.tertiary_window,
       quaternary_window: windows.quaternary_window,
+      quota_windows: windows.quota_windows,
     };
   };
 

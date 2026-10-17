@@ -79,7 +79,7 @@ export function SessionList({ sessions, query, mode, hidden, onOpen, onCopy }) {
       const open = Boolean(query) || !collapsed.has(row.key);
       const label =
         mode === "project"
-          ? baseName(row.group.key) || copy("clisessions.unknown_project")
+          ? baseName(row.group.projectDir) || copy("clisessions.unknown_project")
           : copy(`clisessions.group.${row.group.key}`);
       return (
         <button
@@ -92,7 +92,7 @@ export function SessionList({ sessions, query, mode, hidden, onOpen, onCopy }) {
             updateCollapsed(next);
           }}
           disabled={Boolean(query)}
-          title={row.group.key}
+          title={mode === "project" ? row.group.projectDir : row.group.key}
           className="flex min-h-12 w-full items-center gap-2 border-b border-oai-gray-100 px-4 text-left text-xs text-oai-gray-500 dark:border-oai-gray-800 sm:px-6"
         >
           {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
@@ -104,7 +104,7 @@ export function SessionList({ sessions, query, mode, hidden, onOpen, onCopy }) {
           </span>
           {mode === "project" ? (
             <span className="hidden min-w-0 truncate text-[11px] text-oai-gray-400 sm:block">
-              {row.group.key}
+              {row.group.projectDir}
             </span>
           ) : null}
           <span className="ml-auto tabular-nums">

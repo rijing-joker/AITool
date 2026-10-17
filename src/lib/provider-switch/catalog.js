@@ -272,12 +272,33 @@ function codexOfficialModelEntry(official, model, priority) {
   entry.slug = model;
   entry.priority = 1000 + priority;
   entry.visibility = "list";
-  entry.service_tiers = [];
-  entry.additional_speed_tiers = [];
+  entry.service_tiers = sanitizeServiceTiers(entry.service_tiers);
+  entry.additional_speed_tiers = sanitizeSpeedTiers(entry.additional_speed_tiers);
+  if (entry.default_service_tier && !entry.service_tiers.some((tier) => tier.id === entry.default_service_tier)) {
+    entry.default_service_tier = null;
+  }
+  delete entry.auto_review_model_override;
   entry.availability_nux = null;
   entry.upgrade = null;
   entry.use_responses_lite = false;
   return entry;
+}
+
+function sanitizeServiceTiers(value) {
+  const seen = new Set();
+  return (Array.isArray(value) ? value : []).flatMap((tier) => {
+    if (!tier || typeof tier !== "object" || Array.isArray(tier)) return [];
+    const id = typeof tier.id === "string" ? tier.id.trim() : "";
+    const name = typeof tier.name === "string" ? tier.name.trim() : "";
+    if (!id || !name || typeof tier.description !== "string" || seen.has(id)) return [];
+    seen.add(id);
+    return [{ ...tier, id, name }];
+  });
+}
+
+function sanitizeSpeedTiers(value) {
+  return [...new Set((Array.isArray(value) ? value : [])
+    .filter((tier) => typeof tier === "string").map((tier) => tier.trim()).filter(Boolean))];
 }
 
 // A catalog row is a pure mirror when everything import keeps (display name,
@@ -319,7 +340,7 @@ function sanitizeLevels(levels) {
 // model slug are skipped; the file is only written when at least one remains.
 // Rows hitting the official list mirror that entry (their own overrides do
 // not apply); the rest come from the neutral template.
-function buildCodexCatalog(models, officialModels) {
+function buildCodexCatalog(models, officialModels, { autoReviewModel, speedTiersEnabled = true } = {}) {
   const official = officialModels !== undefined ? officialModels || [] : codexOpenaiOfficialModels();
   const entries = [];
   for (const row of Array.isArray(models) ? models : []) {
@@ -340,6 +361,8 @@ function buildCodexCatalog(models, officialModels) {
     entry.context_window = window;
     entry.max_context_window = window;
     entry.priority = 1000 + entries.length;
+    if (row.serviceTiers) entry.service_tiers = sanitizeServiceTiers(row.serviceTiers);
+    if (row.additionalSpeedTiers) entry.additional_speed_tiers = sanitizeSpeedTiers(row.additionalSpeedTiers);
     if (Array.isArray(row.inputModalities)) {
       const modalities = ["text", "image"].filter((value) => row.inputModalities.includes(value));
       if (modalities.length) entry.input_modalities = modalities;
@@ -364,7 +387,27 @@ function buildCodexCatalog(models, officialModels) {
       entry.model_messages = { ...(entry.model_messages || {}), instructions_template: baseInstructions };
     }
   }
+  const reviewer = typeof autoReviewModel === "string" ? autoReviewModel.trim() : "";
+  const validReviewer = reviewer && entries.some((entry) => entry.slug === reviewer);
+  for (const entry of entries) {
+    if (validReviewer) entry.auto_review_model_override = reviewer;
+    if (!speedTiersEnabled) {
+      entry.service_tiers = [];
+      entry.additional_speed_tiers = [];
+      entry.default_service_tier = null;
+    }
+  }
   return `${JSON.stringify({ models: entries }, null, 2)}\n`;
+}
+
+function parseCodexAutoReviewModel(text) {
+  try {
+    const entries = JSON.parse(text).models;
+    if (!Array.isArray(entries) || !entries.length) return null;
+    const model = entries[0]?.auto_review_model_override;
+    return typeof model === "string" && model.trim() && entries.some((entry) => entry?.slug === model)
+      && entries.every((entry) => entry?.auto_review_model_override === model) ? model : null;
+  } catch { return null; }
 }
 
 // Reverse-parse a catalog file (import-from-live): back into provider meta
@@ -403,6 +446,10 @@ function parseCodexCatalog(text, officialModels) {
       contextWindow:
         Number.isFinite(entry.context_window) && entry.context_window > 0 ? String(Math.floor(entry.context_window)) : "",
     };
+    const tiers = sanitizeServiceTiers(entry.service_tiers);
+    const speeds = sanitizeSpeedTiers(entry.additional_speed_tiers);
+    if (tiers.length) row.serviceTiers = tiers;
+    if (speeds.length) row.additionalSpeedTiers = speeds;
     if (Array.isArray(entry.input_modalities)) {
       const modalities = ["text", "image"].filter((value) => entry.input_modalities.includes(value));
       if (modalities.length) row.inputModalities = modalities;
@@ -437,6 +484,7 @@ module.exports = {
   catalogRowsOf,
   buildCodexCatalog,
   parseCodexCatalog,
+  parseCodexAutoReviewModel,
   findCodexOfficialModel,
   codexOpenaiOfficialModels,
   codexOfficialModelsReason,

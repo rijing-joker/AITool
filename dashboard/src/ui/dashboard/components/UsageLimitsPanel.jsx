@@ -150,7 +150,7 @@ function buildWindowHoverDetail(spec, pace, mode) {
 // Shared with the session browser; see ui/components/HoverTooltip.jsx.
 const Tooltip = HoverTooltip;
 
-function LimitBar({ label, pct, reset, mode = LIMIT_DISPLAY_MODES.USED, pacePercent = null, paceOver = false, title = null }) {
+function LimitBar({ label, pct, reset, mode = LIMIT_DISPLAY_MODES.USED, pacePercent = null, paceOver = false, title = null, blocked = false }) {
   const rawUsed = Math.max(0, Math.min(100, Number(pct) || 0));
   const displayPct = mode === LIMIT_DISPLAY_MODES.REMAINING ? 100 - rawUsed : rawUsed;
   const rounded = Math.round(displayPct);
@@ -173,7 +173,7 @@ function LimitBar({ label, pct, reset, mode = LIMIT_DISPLAY_MODES.USED, pacePerc
       </span>
       <div className="relative flex-1 bg-oai-gray-100 dark:bg-oai-gray-700/50 rounded-full h-1.5 overflow-hidden">
         <div
-          className={`${barColor(displayPct, mode)} rounded-full h-full transition-[width] duration-500 ease-out`}
+          className={`${blocked ? "bg-oai-gray-400" : barColor(displayPct, mode)} rounded-full h-full transition-[width] duration-500 ease-out`}
           style={{ width: `${widthPct}%`, minWidth: displayPct > 0 ? "3px" : 0 }}
         />
         {paceX != null && (
@@ -192,7 +192,7 @@ function LimitBar({ label, pct, reset, mode = LIMIT_DISPLAY_MODES.USED, pacePerc
         )}
       </div>
       <span className="text-[11px] tabular-nums text-oai-gray-500 dark:text-oai-gray-400 w-9 text-right shrink-0 whitespace-nowrap">
-        {labelPct}%
+        {blocked ? copy("limits.bar.blocked") : `${labelPct}%`}
       </span>
       {reset && (
         <span className="text-[10px] text-oai-gray-400 dark:text-oai-gray-500 w-6 text-right shrink-0">{reset}</span>
@@ -525,7 +525,8 @@ function LimitWindowSection({ rows, mode, extra = null }) {
           mode={mode}
           pacePercent={pace.pacePercent}
           paceOver={pace.paceOver}
-          title={buildWindowHoverDetail(spec, pace, mode)}
+          blocked={spec.window?.blocked_by_weekly === true}
+          title={spec.window?.blocked_by_weekly ? copy("limits.antigravity.weekly_exhausted") : buildWindowHoverDetail(spec, pace, mode)}
         />
       ))}
       {showEmpty ? <StatusLine>{copy("limits.status.no_data")}</StatusLine> : null}

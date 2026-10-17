@@ -4,7 +4,7 @@ const paths = require("./paths");
 // (http://127.0.0.1:<port>/v0/management/*, Bearer <management secret-key>).
 // Uses undici (already a runtime dependency of the CLI).
 
-async function request(method, route, { query, body, timeoutMs = 15_000 } = {}) {
+async function request(method, route, { query, body, ifMatch, contentType = "application/json", timeoutMs = 15_000 } = {}) {
   const config = require("./config");
   const port = config.getServerPort();
   const token = config.getManagementKey();
@@ -28,20 +28,22 @@ async function request(method, route, { query, body, timeoutMs = 15_000 } = {}) 
       signal: controller.signal,
       headers: {
         authorization: `Bearer ${token}`,
-        ...(body !== undefined ? { "content-type": "application/json" } : {}),
+        ...(body !== undefined ? { "content-type": contentType } : {}),
+        ...(typeof ifMatch === "string" ? { "if-match": ifMatch } : {}),
       },
-      body: body !== undefined ? JSON.stringify(body) : undefined,
+      body: body !== undefined ? contentType === "application/json" ? JSON.stringify(body) : String(body) : undefined,
     });
     const text = await response.body.text();
     let parsed = null;
     if (text) {
       try {
-        parsed = JSON.parse(text);
+        parsed = route.endsWith(".yaml") && response.statusCode < 300 ? text : JSON.parse(text);
       } catch {
         parsed = text;
       }
     }
-    return { ok: response.statusCode >= 200 && response.statusCode < 300, status: response.statusCode, data: parsed };
+    return { ok: response.statusCode >= 200 && response.statusCode < 300, status: response.statusCode, data: parsed,
+      etag: typeof response.headers.etag === "string" ? response.headers.etag : null };
   } catch (error) {
     return { ok: false, status: 0, error: error?.code || error?.message || String(error) };
   } finally {

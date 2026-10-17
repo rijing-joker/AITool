@@ -3633,6 +3633,24 @@ describe("normalizeAntigravityResponse", () => {
 });
 
 describe("normalizeAntigravityQuotaSummary", () => {
+  it("accepts Hub group labels and snake_case windows without treating an exhausted week as available", () => {
+    const result = normalizeAntigravityQuotaSummary({ groups: [
+      { displayName: "Claude and GPT", buckets: [
+        { display_name: "Weekly limit", remaining_fraction: 0, reset_time: "2026-10-24T00:00:00Z" },
+        { description: "Five-hour limit", remaining_fraction: 1, reset_time: "2026-10-17T12:00:00Z" },
+        { window: "weekly", remaining_fraction: "invalid" },
+      ] },
+      { display_name: "Gemini", buckets: [
+        { window: "weekly", remainingFraction: 0.7 },
+        { window: "5h", remainingFraction: 1 },
+      ] },
+    ] });
+    assert.equal(result.primary_window.used_percent, 100);
+    assert.equal(result.secondary_window.used_percent, 0);
+    assert.equal(result.secondary_window.blocked_by_weekly, true);
+    assert.equal(result.quaternary_window.blocked_by_weekly, undefined);
+    assert.equal(result.quota_windows.length, 4);
+  });
   it("accepts the Cloud Code HTTP payload with top-level groups", () => {
     const result = normalizeAntigravityQuotaSummary(antigravityQuotaSummaryPayload());
     assert.equal(result.primary_window.used_percent, 42);

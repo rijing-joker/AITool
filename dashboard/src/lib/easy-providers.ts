@@ -8,6 +8,7 @@
 
 import { getLocalApiAuthHeaders } from "./local-api-auth";
 import { copy } from "./copy";
+import { configErrorMessage } from "./proxy-api";
 
 // ---------------------------------------------------------------------------
 // primitives (managementApi.ts)
@@ -86,7 +87,21 @@ type ManagementRequestOptions = {
   query?: Record<string, string | number | boolean | undefined>;
   body?: ManagementJson;
   timeoutMs?: number;
+  ifMatch?: string | null;
 };
+
+const configRevisions = new Map<string, string>();
+const snapshotRevisions = new WeakMap<object, string>();
+
+function revisionForPath(path: string): string | undefined {
+  const parts = path.split("/");
+  while (parts.length > 1) {
+    const revision = configRevisions.get(parts.join("/"));
+    if (revision) return revision;
+    parts.pop();
+  }
+  return undefined;
+}
 
 const normalizeQuery = (
   query?: ManagementRequestOptions["query"],
@@ -105,7 +120,12 @@ async function invokeManagement<T>(request: {
   query?: Record<string, string>;
   body?: ManagementJson;
   timeoutMs?: number;
+  ifMatch?: string | null;
 }): Promise<T> {
+  const isConfig = /^\/config(?:[/.]|$)/.test(request.path);
+  if (isConfig && request.method !== "GET" && request.ifMatch === undefined) {
+    request = { ...request, ifMatch: revisionForPath(request.path) };
+  }
   const headers = await getLocalApiAuthHeaders();
   const response = await fetch("/api/proxy/management-request", {
     method: "POST",
@@ -113,9 +133,18 @@ async function invokeManagement<T>(request: {
     body: JSON.stringify({ request }),
   });
   const payload = (await response.json().catch(() => null)) as
-    | { ok: boolean; value?: unknown; error?: string }
+    | { ok: boolean; value?: unknown; error?: string; etag?: string | null }
     | null;
-  if (!payload?.ok) throw new Error(payload?.error || `HTTP ${response.status}`);
+  if (!payload?.ok) throw new Error(configErrorMessage(payload?.error || `HTTP ${response.status}`));
+  if (isConfig && payload.etag) {
+    configRevisions.set(request.path, payload.etag);
+    if (payload.value && typeof payload.value === "object") snapshotRevisions.set(payload.value, payload.etag);
+    if (request.method !== "GET") {
+      for (const [path, revision] of configRevisions) {
+        if (revision === request.ifMatch) configRevisions.set(path, payload.etag);
+      }
+    }
+  }
   return payload.value as T;
 }
 
@@ -130,6 +159,7 @@ export async function managementRequest<T>(
     query: normalizeQuery(options.query),
     body: options.body,
     timeoutMs: options.timeoutMs,
+    ifMatch: options.ifMatch,
   });
 }
 
@@ -144,7 +174,19 @@ async function optionalConfigValue(path: string, fallback: ManagementJson, optio
   } catch (error) {
     // Only an absent v8 config node is optional, not an unavailable endpoint or server.
     const message = error instanceof Error ? error.message : error;
-    if (message === "Management API error (404): not_found") return fallback;
+    if (message === "Management API error (404): not_found") {
+      // Read the missing node from a single root snapshot, including its
+      // revision. Another client may have created it since the original 404.
+      const root = await invokeManagement<Record<string, unknown>>({ method: "GET", path: "/config" });
+      let value: unknown = root;
+      for (const part of path.replace(/^\/config\/?/, "").split("/").filter(Boolean)) {
+        value = isRecord(value) ? value[decodeURIComponent(part)] : undefined;
+      }
+      const result = value ?? structuredClone(fallback);
+      const revision = snapshotRevisions.get(root);
+      if (revision && result && typeof result === "object") snapshotRevisions.set(result, revision);
+      return result;
+    }
     throw error;
   }
 }
@@ -1406,11 +1448,12 @@ export const providerGroupsApi = {
     if (!Array.isArray(value) || !value.every(isRecord)) throw new Error("Invalid provider group response");
     return value;
   },
-  put: (section: ProviderSection, groups: Record<string, unknown>[]) =>
+  put: (section: ProviderSection, groups: Record<string, unknown>[], baseline?: Record<string, unknown>[]) =>
     invokeManagement<ManagementJson>({
       method: "PUT",
       path: `/config/api-keys/${section.replace(/-api-key$/, "")}`,
       body: groups as ManagementJson,
+      ifMatch: baseline ? snapshotRevisions.get(baseline) ?? null : undefined,
     }),
 };
 

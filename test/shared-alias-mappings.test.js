@@ -17,11 +17,12 @@ function fixture(t, initial) {
   t.mock.method(management, "request", async (method, route, options = {}) => {
     if (method === "GET" && route === "/v8/management/config") {
       if (onRead) onRead(state);
-      return { ok: true, data: structuredClone(state) };
+      return { ok: true, data: structuredClone(state), etag: '"fixture"' };
     }
     if (route.endsWith("/credentials")) return { ok: true, data: { files: [{ provider: "codex" }, { provider: "claude" }] } };
     if (route.includes("/model-definitions/")) return { ok: true, data: { models: ["model-a", "model-b"].map((id) => ({ id, reasoning_levels: ["low", "high"] })) } };
     if (method === "PUT") {
+      assert.equal(options.ifMatch, '"fixture"');
       if (onWrite) {
         const response = onWrite(route, options.body, state);
         if (response) return response;

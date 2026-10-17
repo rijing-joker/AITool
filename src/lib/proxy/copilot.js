@@ -162,10 +162,8 @@ async function connect(client, values, options = {}) {
     let next;
     if (client === "cli") next = { ...current, provider: MARKER, baseUrl: base, apiKey: secret, model: values.model.trim() };
     else {
-      const contextWindow = Number.isSafeInteger(values.contextWindow) && values.contextWindow > 1 ? Math.min(values.contextWindow, 10000000) : 128000;
       const group = { ...current.find(managedGroup), name: GROUP, vendor: "customendpoint", apiKey: secret,
-        models: [{ id: values.model.trim(), name: values.model.trim(), url: `${base}/chat/completions`, apiType: "chat-completions",
-          toolCalling: true, vision: values.vision === true, contextWindow, maxOutputTokens: Math.min(16384, Math.floor(contextWindow / 2)) }] };
+        models: buildVscodeModels(values, base) };
       next = [...current.filter((row) => !managedGroup(row)), group];
     }
     // Journal the proposed owned fields before replacing the target so restore
@@ -174,7 +172,7 @@ async function connect(client, values, options = {}) {
     await privateWrite(files.target, next);
     const { pendingApplied, pendingKeyHash, ...committed } = baseline;
     await privateWrite(files.baseline, { ...committed, applied: owned(client, next), keyHash: hash(values.apiKey) });
-    return { configured: true, path: files.target, model: values.model.trim(), command: client === "cli" ? "aitool copilot" : null };
+    return { configured: true, path: files.target, model: values.model.trim(), modelCount: client === "vscode" ? next.find(managedGroup).models.length : 1, command: client === "cli" ? "aitool copilot" : null };
   });
 }
 async function restore(client, options = {}) {
@@ -212,6 +210,7 @@ async function status(options = {}) {
       const entry = client === "cli" ? value.provider === MARKER ? value : null : value.find(managedGroup);
       clients.push({ client, path: files.target, configured: !!entry, canRestore: !!(baseline?.applied || baseline?.pendingApplied),
         model: client === "cli" ? entry?.model || null : entry?.models?.[0]?.id || null,
+        modelCount: client === "cli" ? entry ? 1 : 0 : entry?.models?.length || 0,
         keyHash: JSON.stringify(owned(client, value)) === JSON.stringify(baseline?.pendingApplied)
           ? baseline?.pendingKeyHash || null : baseline?.keyHash || null });
     } catch { clients.push({ client, path: files.target, configured: false, canRestore: false, error: "COPILOT_CONFIG_INVALID" }); }
@@ -242,10 +241,42 @@ async function directModelCatalog(url, key) {
   });
 }
 async function models(values, options = {}) {
+  return (await modelCatalog(values, options)).map((row) => row.id);
+}
+async function modelCatalog(values, options = {}) {
   selection({ ...values, model: "catalog" });
   const result = await directModelCatalog(`${baseUrl(options)}/models`, values.apiKey);
-  return [...new Set((Array.isArray(result?.data) ? result.data : [])
-    .map((row) => typeof row?.id === "string" ? row.id : "").filter(Boolean))];
+  const pricing = require("./pricing");
+  const metadata = (await pricing.loadPricingStore(options.pricingPath || require("./paths").pricingPath))?.models || {};
+  const seen = new Set();
+  return (Array.isArray(result?.data) ? result.data : []).flatMap((row) => {
+    const id = typeof row?.id === "string" ? row.id.trim() : "";
+    if (!id || id.length > 256 || /[\x00-\x1f]/.test(id) || seen.has(id)) return [];
+    seen.add(id);
+    const fallback = pricing.findPricing(metadata, id) || {};
+    return [{ id, contextWindow: row.context_window ?? row.contextWindow ?? fallback.contextWindow,
+      inputModalities: row.input_modalities ?? row.inputModalities ?? fallback.inputModalities,
+      maxOutputTokens: row.max_output_tokens ?? row.maxOutputTokens ?? fallback.maxOutputTokens }];
+  });
+}
+
+function buildVscodeModels(values, base, metadata) {
+  const pricing = require("./pricing");
+  const known = metadata || {};
+  const catalog = Array.isArray(values.models) ? values.models : [];
+  const ids = [...new Set([values.model.trim(), ...catalog.map((row) => row.id)].filter((id) => typeof id === "string" && id.trim()))];
+  return ids.map((id) => {
+    const row = catalog.find((row) => row.id === id) || {};
+    const fallback = pricing.findPricing(known, id) || {};
+    const window = row.contextWindow ?? (id === values.model.trim() ? values.contextWindow : undefined) ?? fallback.contextWindow;
+    const contextWindow = Number.isSafeInteger(window) && window > 1 ? Math.min(window, 10000000) : 128000;
+    const modalities = row.inputModalities ?? fallback.inputModalities;
+    const vision = Array.isArray(modalities) && modalities.length ? modalities.some((value) => String(value).toLowerCase() === "image")
+      : id === values.model.trim() && typeof values.vision === "boolean" ? values.vision : false;
+    const output = row.maxOutputTokens ?? fallback.maxOutputTokens;
+    const maxOutputTokens = Math.min(Number.isSafeInteger(output) && output > 0 ? output : 16384, Math.floor(contextWindow / 2));
+    return { id, name: id, url: `${base}/chat/completions`, apiType: "chat-completions", toolCalling: true, vision, contextWindow, maxOutputTokens };
+  });
 }
 function cliEnvironment(connection, binary, options = {}) {
   const env = resolvedCliEnvironment(binary, options);
@@ -286,4 +317,4 @@ async function launch(args, options = {}) {
   });
   return new Promise((resolve, reject) => { child.once("error", () => reject(new Error("Failed to start Copilot CLI."))); child.once("exit", (code) => resolve(code ?? 1)); });
 }
-module.exports = { locations, connect, restore, status, models, launch, cliEnvironment, validSecret };
+module.exports = { locations, connect, restore, status, models, modelCatalog, buildVscodeModels, launch, cliEnvironment, validSecret };

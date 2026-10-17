@@ -109,6 +109,22 @@ test("catalog uses direct loopback HTTP despite an outbound proxy and never foll
   server.on("request", (_req, res) => { res.writeHead(302, { Location: "http://127.0.0.1:1" }); res.end(); });
   await assert.rejects(copilot.models({ apiKey: "fixture-key" }, { port: server.address().port }), /catalog is unavailable/);
 });
+
+test("VS Code publishes the full public catalog including aliases with bounded capability metadata", () => {
+  const models = copilot.buildVscodeModels({ model: "selected", models: [
+    { id: "vision-alias", contextWindow: 1000000, inputModalities: ["text", "image"], maxOutputTokens: 32000 },
+    { id: "text-only", contextWindow: 8000, inputModalities: ["text"], maxOutputTokens: 20000 },
+    { id: "vision-alias" }, { id: "selected" },
+  ] }, "http://127.0.0.1:8318/v1", {});
+  assert.deepEqual(models.map(row => row.id), ["selected", "vision-alias", "text-only"]);
+  assert.equal(models[0].vision, false);
+  assert.equal(models[1].vision, true);
+  assert.equal(models[1].contextWindow, 1000000);
+  assert.equal(models[1].maxOutputTokens, 32000);
+  assert.equal(models[2].vision, false);
+  assert.equal(models[2].maxOutputTokens, 4000);
+  assert.ok(models.every(row => row.url === "http://127.0.0.1:8318/v1/chat/completions"));
+});
 test("CLI connect re-reads external edits made during the executable probe", async (t) => {
   const { options } = await fixture(t);
   const files = copilot.locations("cli", options);

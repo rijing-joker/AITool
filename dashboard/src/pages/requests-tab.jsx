@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useId, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, Brain, ChevronLeft, ChevronRight, Columns3, Copy, Database, Download, RefreshCw, RotateCcw, Settings2, TriangleAlert, Zap } from "lucide-react";
 import { copy } from "../lib/copy";
 import { usePrivacyText } from "../lib/proxy-privacy";
-import { formatCostUsd } from "../lib/cost-format";
+import { useCostFormatter } from "../hooks/useCostFormatter";
 import { Card } from "../ui/components";
 import { UsageHeatmap } from "./usage-heatmap";
 import { ModalFrame } from "../ui/components/ModalFrame";
@@ -369,6 +369,7 @@ function CopyErrorButton({ detail }) {
 }
 
 function EventCell({ record, column, onReplay, replayState, showDate }) {
+  const formatCost = useCostFormatter();
   const display = usePrivacyText();
   const tokens = record.tokens ?? {};
   switch (column.key) {
@@ -514,9 +515,9 @@ function EventCell({ record, column, onReplay, replayState, showDate }) {
         </td>
       );
     case "cost": {
-      const costText = formatCostUsd(record.costUsd) ?? "—";
+      const costText = formatCost(record.costUsd) ?? "—";
       return (
-        <td className="px-2 py-2 align-top text-xs tabular-nums" title={record.costUsd != null ? `$${record.costUsd.toFixed(6)}` : undefined}>
+        <td className="px-2 py-2 align-top text-xs tabular-nums" title={record.costUsd != null ? formatCost(record.costUsd, true) : undefined}>
           {costText}
         </td>
       );
@@ -732,6 +733,7 @@ function BudgetEditDialog({ draft, setDraft, saving, onClose, onSave }) {
 // alerts as a banner and native/web notifications, and edits the budget
 // settings persisted in the proxy settings.json.
 function BudgetBar() {
+  const formatCost = useCostFormatter();
   const [budget, setBudget] = useState(null);
   const [pricingAvailable, setPricingAvailable] = useState(true);
   const [editOpen, setEditOpen] = useState(false);
@@ -806,13 +808,13 @@ function BudgetBar() {
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-oai-gray-500 dark:text-oai-gray-400">
           {config?.enabled && budget ? (
             <>
-              <span className="tabular-nums">{copy("budget.banner.today", { value: formatCostUsd(budget.todayUsd) ?? "$0" })}</span>
-              <span className="tabular-nums">{copy("budget.banner.month", { value: formatCostUsd(budget.monthUsd) ?? "$0" })}</span>
+              <span className="tabular-nums">{copy("budget.banner.today", { value: formatCost(budget.todayUsd) ?? formatCost(0) })}</span>
+              <span className="tabular-nums">{copy("budget.banner.month", { value: formatCost(budget.monthUsd) ?? formatCost(0) })}</span>
               <span
                 className="tabular-nums"
-                title={copy("budget.banner.burn_hint", { value: formatCostUsd(budget.burn?.projectedTodayUsd) ?? "—" })}
+                title={copy("budget.banner.burn_hint", { value: formatCost(budget.burn?.projectedTodayUsd) ?? "—" })}
               >
-                {copy("budget.banner.burn", { value: formatCostUsd(budget.burn?.lastHourUsd) ?? "$0" })}
+                {copy("budget.banner.burn", { value: formatCost(budget.burn?.lastHourUsd) ?? formatCost(0) })}
               </span>
               {!pricingAvailable ? <span>{copy("budget.banner.pricing_missing")}</span> : null}
             </>
@@ -854,6 +856,7 @@ function BudgetBar() {
 }
 
 export function RequestsTab() {
+  const formatCost = useCostFormatter();
   const display = usePrivacyText();
   const [filterOptions, setFilterOptions] = useState(null);
   const [keyHash, setKeyHash] = useState("");
@@ -1261,7 +1264,7 @@ export function RequestsTab() {
           <StatTile label={copy("proxy.requests.canceled")} value={fullTokens.format(stats.canceled_count)} />
           <StatTile label={copy("proxy.requests.tokens")} value={formatTokens(stats.total_tokens)} />
           {stats.total_cost_usd != null ? (
-            <StatTile label={copy("proxy.requests.cost")} value={formatCostUsd(stats.total_cost_usd) ?? "—"} />
+            <StatTile label={copy("proxy.requests.cost")} value={formatCost(stats.total_cost_usd) ?? "—"} />
           ) : null}
           <StatTile
             label={copy("proxy.metric.top_model")}

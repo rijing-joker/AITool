@@ -122,6 +122,13 @@ export const PROVIDER_LIMIT_SPECS = {
   },
   antigravity: {
     windows(data) {
+      if (data.quota_windows?.length) return data.quota_windows.map((row) => ({
+        key: row.key, window: row.window,
+        label: row.group ? `${row.group} · ${copy(row.kind === "weekly" ? "limits.window.weekly" : "limits.window.five_hour")}` : undefined,
+        labelKey: row.family === "gemini"
+          ? row.kind === "weekly" ? "limits.label.antigravity_gemini_weekly" : "limits.label.antigravity_gemini_5h"
+          : row.kind === "weekly" ? "limits.label.antigravity_claude_weekly" : "limits.label.antigravity_claude_5h",
+      }));
       return [
         { key: "claude-weekly", labelKey: "limits.label.antigravity_claude_weekly", window: data.primary_window },
         { key: "claude-5h", labelKey: "limits.label.antigravity_claude_5h", window: data.secondary_window },

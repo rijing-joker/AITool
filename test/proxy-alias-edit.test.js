@@ -15,9 +15,10 @@ const writes = [];
 
 management.request = async (method, route, options = {}) => {
   if (method === "GET" && route === "/v8/management/config") {
-    return { ok: true, status: 200, data: currentPayload };
+    return { ok: true, status: 200, data: currentPayload, etag: '"fixture"' };
   }
   if (method === "PUT" || method === "POST") {
+    assert.equal(options.ifMatch, '"fixture"');
     writes.push({ method, route, body: options.body });
     return { ok: true, status: 200, data: {} };
   }

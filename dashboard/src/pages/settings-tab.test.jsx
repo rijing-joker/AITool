@@ -6,17 +6,20 @@ import { SettingsTab } from "./settings-tab";
 
 vi.mock("../lib/copy", () => ({ copy: (key) => key }));
 vi.mock("../lib/local-api-auth", () => ({ getLocalApiAuthHeaders: async () => ({}) }));
-vi.mock("../lib/proxy-api", () => ({ proxyApi: { configYaml: async () => ({ yaml: "server: {}" }) } }));
-let fields, failSave;
+vi.mock("../lib/proxy-api", async importOriginal => ({ ...(await importOriginal()), proxyApi: { configYaml: async () => ({ yaml: "server: {}", etag: '"initial"' }) } }));
+let fields, failSave, revision;
 beforeEach(() => {
   fields = { "server.host": "127.0.0.1", "server.port": 8318, "routing.retry.request-retry": 0 };
   failSave = false;
+  revision = '"initial"';
   vi.stubGlobal("fetch", vi.fn(async (_url, options) => {
     if (options?.method === "PATCH") {
-      if (failSave) return { json: async () => ({ ok: false, error: "Save failed" }) };
+      if (failSave) return { json: async () => ({ ok: false, error: typeof failSave === "string" ? failSave : "Save failed" }) };
+      expect(JSON.parse(options.body).etag).toBe(revision);
       Object.assign(fields, JSON.parse(options.body).fields);
+      revision = '"saved"';
     }
-    return { json: async () => ({ ok: true, fields }) };
+    return { json: async () => ({ ok: true, fields, etag: revision }) };
   }));
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
@@ -50,6 +53,22 @@ it("failed saves retain the draft for retry", async () => {
   await screen.findByText("Save failed");
   expect(port).toHaveValue("8320");
   expect(fields["server.port"]).toBe(8318);
+});
+it("conflicts keep edits visible until the user reloads the latest revision", async () => {
+  const { port } = await setup();
+  fireEvent.change(port, { target: { value: "8320" } });
+  failSave = "PROXY_CONFIG_CONFLICT";
+  fields["server.port"] = 8400;
+  revision = '"external"';
+  fireEvent.click(screen.getAllByRole("button", { name: "proxy.action.save_config" })[0]);
+  await screen.findByText("proxy.settings.conflict");
+  expect(port).toHaveValue("8320");
+  fireEvent.click(screen.getByRole("button", { name: "proxy.settings.reload" }));
+  await waitFor(() => expect(port).toHaveValue("8400"));
+  failSave = false;
+  fireEvent.change(port, { target: { value: "8401" } });
+  fireEvent.click(screen.getAllByRole("button", { name: "proxy.action.save_config" })[0]);
+  await waitFor(() => expect(fields["server.port"]).toBe(8401));
 });
 it("codex client section loads and saves both client.codex fields", async () => {
   fields["client.codex.optimize-multi-agent-v2"] = true;

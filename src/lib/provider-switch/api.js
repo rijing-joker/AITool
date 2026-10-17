@@ -221,7 +221,7 @@ async function persistSwitchPlan(app, plan) {
   if (plan.catalogAction.action === "write") {
     const catalogPath = paths.codexModelCatalogPath();
     await ensureDir(path.dirname(catalogPath));
-    await writeFileAtomic(catalogPath, catalog.buildCodexCatalog(plan.catalogAction.models));
+    await writeFileAtomic(catalogPath, catalog.buildCodexCatalog(plan.catalogAction.models, undefined, plan.catalogAction.options));
     wrote.push(catalogPath);
   } else if (plan.catalogAction.action === "remove") {
     try {
@@ -1054,7 +1054,13 @@ async function importCodexCatalogMeta(config) {
   }
   const rows = catalog.parseCodexCatalog(text);
   delete config.model_catalog_json;
-  return rows.length > 0 ? { codexCatalogModels: rows } : null;
+  const reviewer = catalog.parseCodexAutoReviewModel(text);
+  if (!rows.length) return null;
+  const speedTiersDisabled = JSON.parse(text).models.every((entry) =>
+    Array.isArray(entry?.service_tiers) && !entry.service_tiers.length
+    && Array.isArray(entry?.additional_speed_tiers) && !entry.additional_speed_tiers.length);
+  return { codexCatalogModels: rows, ...(reviewer ? { codexAutoReviewModel: reviewer } : {}),
+    ...(speedTiersDisabled ? { codexSpeedTiersEnabled: false } : {}) };
 }
 
 // ---------------------------------------------------------------------------

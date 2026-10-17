@@ -2013,7 +2013,7 @@ test("provider-switch codex catalog: GPT rows mirror the official entry", () => 
       apply_patch_tool_type: "freeform",
       use_responses_lite: true,
       visibility: "hide",
-      service_tiers: [{ id: "priority", name: "Fast" }],
+      service_tiers: [{ id: "priority", name: "Fast", description: "Faster requests" }],
       additional_speed_tiers: ["fast"],
       upgrade: { model: "gpt-next" },
       context_window: 272000,
@@ -2053,8 +2053,8 @@ test("provider-switch codex catalog: GPT rows mirror the official entry", () => 
   assert.equal(direct.default_reasoning_level, "low");
   // account/backend-owned fields reset
   assert.equal(direct.use_responses_lite, false);
-  assert.deepEqual(direct.service_tiers, []);
-  assert.deepEqual(direct.additional_speed_tiers, []);
+  assert.deepEqual(direct.service_tiers, officialRows[0].service_tiers);
+  assert.deepEqual(direct.additional_speed_tiers, ["fast"]);
   assert.equal(direct.availability_nux, null);
   assert.equal(direct.upgrade, null);
   assert.equal(direct.visibility, "list");

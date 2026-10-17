@@ -6,6 +6,7 @@
 
 import { copy } from "./copy";
 import { getLocalApiAuthHeaders } from "./local-api-auth";
+import { configErrorMessage } from "./proxy-api";
 
 export type ThinkingAliasEntry = {
   mappingId?: string;
@@ -88,7 +89,7 @@ async function aliasConfig<T>(body: AliasRequest): Promise<T> {
   const payload = (await response.json().catch(() => null)) as
     | { ok: boolean; state?: AliasState; context?: ModelAliasEditContext; error?: string }
     | null;
-  if (!payload?.ok) throw new Error(payload?.error || `HTTP ${response.status}`);
+  if (!payload?.ok) throw new Error(configErrorMessage(payload?.error || `HTTP ${response.status}`));
   if (body.action === "load") return payload.state as T;
   if (body.action === "edit-source") return payload.context as T;
   return payload.state as T;

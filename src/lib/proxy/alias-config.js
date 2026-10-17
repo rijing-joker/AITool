@@ -218,7 +218,7 @@ async function fetchLegacyConfig() {
   // Native v8 group arrays per provider section — the write-back needs the
   // original layout (multi-key groups, per-key overrides) that the flattened
   // legacy view above deliberately erases.
-  return { legacy, nativeApiKeys: upstream };
+  return { legacy, nativeApiKeys: upstream, etag: result.etag || null };
 }
 
 // --- kernel model list -------------------------------------------------------

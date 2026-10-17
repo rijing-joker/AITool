@@ -3,6 +3,13 @@
 // the other dashboard mutations (see local-api-auth.ts).
 
 import { getLocalApiAuthHeaders } from "./local-api-auth";
+import { copy } from "./copy";
+
+export function configErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message === "PROXY_CONFIG_CONFLICT" ? copy("proxy.settings.conflict")
+    : message === "PROXY_CONFIG_REVISION_REQUIRED" ? copy("proxy.settings.revision_required") : message;
+}
 
 async function parseResponse<T>(res: Response): Promise<T> {
   const body = await res.json().catch(() => null);
@@ -10,7 +17,7 @@ async function parseResponse<T>(res: Response): Promise<T> {
     const message =
       (body && typeof body === "object" && typeof body.error === "string" && body.error) ||
       `HTTP ${res.status}`;
-    throw new Error(message);
+    throw new Error(configErrorMessage(message));
   }
   return body as T;
 }
@@ -220,9 +227,9 @@ export const proxyApi = {
     mutate<{ ok: true }>(`/api/proxy/auth-files?name=${encodeURIComponent(name)}`, "DELETE"),
   refreshAuthFiles: () => mutate<{ ok: true }>("/api/proxy/auth-files/refresh", "POST"),
 
-  keys: () => get<{ ok: true; keys: string[] | { items?: string[] } }>("/api/proxy/keys"),
-  putKeys: (keys: string[]) => mutate<{ ok: true }>("/api/proxy/keys", "PUT", keys),
+  keys: () => get<{ ok: true; keys: string[] | { items?: string[] }; etag: string | null }>("/api/proxy/keys"),
+  putKeys: (keys: string[], etag?: string | null) => mutate<{ ok: true; etag: string | null }>("/api/proxy/keys", "PUT", { keys, etag }),
 
-  configYaml: () => get<{ ok: true; yaml: string }>("/api/proxy/config.yaml"),
-  putConfigYaml: (yaml: string) => mutate<{ ok: true }>("/api/proxy/config.yaml", "PUT", { yaml }),
+  configYaml: () => get<{ ok: true; yaml: string; etag: string | null }>("/api/proxy/config.yaml"),
+  putConfigYaml: (yaml: string, etag?: string | null) => mutate<{ ok: true; etag: string | null }>("/api/proxy/config.yaml", "PUT", { yaml, etag }),
 };

@@ -608,6 +608,9 @@ export function UpstreamsTab() {
           throw new Error(copy("proxy.upstream.error.stale"));
         }
         currentRecord = current[targetIndex];
+        if (grouped && JSON.stringify(stripResponseFields(currentRecord)) !== JSON.stringify(stripResponseFields(editingRow.record))) {
+          throw new Error(copy("proxy.upstream.error.stale"));
+        }
       }
 
       const recordsToSave = grouped
@@ -631,7 +634,7 @@ export function UpstreamsTab() {
         : [...current, ...recordsToSave];
 
       if (grouped) {
-        await providerGroupsApi.put(activeSection, nextList.map(stripResponseFields));
+        await providerGroupsApi.put(activeSection, nextList.map(stripResponseFields), current);
       } else {
         await managementApi.put(`/${activeSection}`, nextList.map(stripResponseFields));
       }
@@ -660,7 +663,7 @@ export function UpstreamsTab() {
       const targetIndex = resolveProviderRecordIndex(current, row);
       if (targetIndex < 0) throw new Error(copy("proxy.upstream.error.stale"));
       const remainingRecords = current.filter((_, index) => index !== targetIndex).map(stripResponseFields);
-      await providerGroupsApi.put(row.section, remainingRecords);
+      await providerGroupsApi.put(row.section, remainingRecords, current);
       await saveApiAccessRemark({
         providerSection: row.section,
         previousRecords: [apiAccessRemarkLocatorFromRow(row)],
@@ -694,7 +697,7 @@ export function UpstreamsTab() {
           && latestRecord["excluded-models"].some((model) => String(model).trim() === "*");
       if (definition.openAi) {
         await providerGroupsApi.put(row.section, latestRows.map((record, index) =>
-          stripResponseFields(index === targetIndex ? { ...record, disabled: !currentlyDisabled } : record)));
+          stripResponseFields(index === targetIndex ? { ...record, disabled: !currentlyDisabled } : record)), latestRows);
       } else {
         const nextRecord = providerRecordWithDisabledState(
           row.section,
@@ -703,7 +706,7 @@ export function UpstreamsTab() {
         );
         const nextRows = latestRows.map((record, index) =>
           index === targetIndex ? nextRecord : stripResponseFields(record));
-        await providerGroupsApi.put(row.section, nextRows);
+        await providerGroupsApi.put(row.section, nextRows, latestRows);
       }
       await loadProviders(false);
     } catch (requestError) {
@@ -721,7 +724,7 @@ export function UpstreamsTab() {
       const latestRows = await providerGroupsApi.get(source.section);
       const nextRows = reorderProviderRecords(latestRows, rows, source, target);
       if (!nextRows) throw new Error(copy("proxy.upstream.error.stale"));
-      await providerGroupsApi.put(source.section, nextRows);
+      await providerGroupsApi.put(source.section, nextRows, latestRows);
       await loadProviders(false);
     } catch (requestError) {
       await loadProviders(false);

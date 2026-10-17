@@ -252,27 +252,33 @@ function createMappingService(h) {
     const old = sections(before), next = sections(after);
     const changes = next.map((entry, index) => ({ ...entry, previous: old[index].data })).filter((entry) => !equal(entry.previous, entry.data));
     const applied = [];
-    const put = async (url, data) => {
-      const result = await h.request("PUT", url, { body: data, timeoutMs: 30_000 });
+    const put = async (url, data, etag) => {
+      if (typeof etag !== "string" || !/^"[^"\r\n]+"$/.test(etag)) {
+        throw new Error("PROXY_CONFIG_REVISION_REQUIRED");
+      }
+      const result = await h.request("PUT", url, { body: data, ifMatch: etag, timeoutMs: 30_000 });
+      if (result.status === 412) throw Object.assign(conflict("Configuration changed during save. Refresh and try again"), { retryable: true });
       if (!result.ok) throw new Error(`Management API rejected alias save (${result.status})`);
     };
     try {
       for (const entry of changes) {
         // Detect external writes after our fresh read. Local alias writers
         // are serialized; a changed section is never overwritten blindly.
-        const current = sections(await h.fetchLegacyConfig()).find((section) => section.url === entry.url).data;
+        const snapshot = await h.fetchLegacyConfig();
+        const current = sections(snapshot).find((section) => section.url === entry.url).data;
         if (!equal(current, entry.previous)) throw Object.assign(conflict("Configuration changed during save. Refresh and try again"), { retryable: true });
         applied.push(entry); // An HTTP error can follow a successful server write.
-        await put(entry.url, entry.data);
+        await put(entry.url, entry.data, snapshot.etag);
       }
     } catch (error) {
       let incomplete = false;
       for (const entry of applied.reverse()) {
         try {
-          const current = sections(await h.fetchLegacyConfig()).find((section) => section.url === entry.url).data;
+          const snapshot = await h.fetchLegacyConfig();
+          const current = sections(snapshot).find((section) => section.url === entry.url).data;
           if (equal(current, entry.previous)) continue;
           if (!equal(current, entry.data)) { incomplete = true; continue; }
-          await put(entry.url, entry.previous);
+          await put(entry.url, entry.previous, snapshot.etag);
         } catch { incomplete = true; }
       }
       if (incomplete) {

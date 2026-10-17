@@ -407,6 +407,7 @@
   "limits.label.qoder_credits": "Credits",
   "limits.label.qoder_ultimate": "Ultimate Gratisaufrufe",
   "limits.label.qoder_cn_credits": "Credits",
+  "limits.label.qoder_cn_addon_credits": "Zusätzliche Credits",
   "limits.label.qoder_cn_ultimate": "Ultimate Gratisaufrufe",
   "limits.qoder_calls.detail": "{{used}} / {{limit}} Aufrufe genutzt · {{remaining}} übrig",
   "limits.hover.expires_at": "Läuft {{time}} ab",

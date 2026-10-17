@@ -175,6 +175,7 @@
   "limits.label.qoder_credits": "クレジット",
   "limits.label.qoder_ultimate": "Ultimate 無料呼び出し",
   "limits.label.qoder_cn_credits": "クレジット",
+  "limits.label.qoder_cn_addon_credits": "追加クレジット",
   "limits.label.qoder_cn_ultimate": "Ultimate 無料呼び出し",
   "limits.qoder_calls.detail": "{{used}} / {{limit}} 回使用 · 残り {{remaining}} 回",
   "limits.hover.expires_at": "{{time}} に期限切れ",

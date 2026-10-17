@@ -175,6 +175,7 @@
   "limits.label.qoder_credits": "크레딧",
   "limits.label.qoder_ultimate": "Ultimate 무료 호출",
   "limits.label.qoder_cn_credits": "크레딧",
+  "limits.label.qoder_cn_addon_credits": "추가 크레딧",
   "limits.label.qoder_cn_ultimate": "Ultimate 무료 호출",
   "limits.qoder_calls.detail": "{{used}} / {{limit}}회 사용 · {{remaining}}회 남음",
   "limits.hover.expires_at": "{{time}} 만료",

@@ -397,6 +397,17 @@ async function handleProxyApiRequest(req, res, url, ctx) {
   };
 
   try {
+    if (p === "/api/proxy/opencode-free" && method === "GET") {
+      json(res, { ok: true, ...await require("./opencode-free").status() });
+      return true;
+    }
+    if (["/api/proxy/opencode-free", "/api/proxy/opencode-free/refresh"].includes(p) && method === "POST") {
+      if (!requireMutation()) return true;
+      const free = require("./opencode-free");
+      if (p.endsWith("/refresh")) json(res, { ok: true, catalog: await free.refresh() });
+      else json(res, { ok: true, ...await free.configure(await readJsonBody(req)) });
+      return true;
+    }
     if (p === "/api/proxy/copilot" && method === "GET") {
       json(res, { ok: true, clients: await require("./copilot").status() });
       return true;

@@ -13,6 +13,19 @@ const bridge = require("../lib/proxy/usage-bridge");
 async function cmdProxy(argv = []) {
   const sub = String(argv[0] || "status").toLowerCase();
 
+  if (sub === "opencode-free") {
+    const free = require("../lib/proxy/opencode-free");
+    const action = argv[1] || "status";
+    let result;
+    if (action === "models") result = await free.refresh();
+    else if (action === "enable") result = await free.configure({ enabled: true, models: argv.slice(2) });
+    else if (action === "disable") result = await free.configure({ enabled: false });
+    else if (action === "status") result = await free.status();
+    else throw new Error("Usage: aitool proxy opencode-free status|models|enable <model...>|disable");
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return;
+  }
+
   if (sub === "repair-usage") {
     process.stdout.write(`${JSON.stringify(bridge.repairUsageHistory())}\n`);
     return;

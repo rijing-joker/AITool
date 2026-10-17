@@ -6,6 +6,18 @@
     "iflytek_maas_pricing_note": "iFlytek MaaS inference prices supplied for AStudio on 2026-08-31. AStudio homepage: https://agent.xfyun.cn/. Official pricing source: https://maas.xfyun.cn/modelSquare. Source values are RMB per million tokens, converted at 7.2 RMB/USD, then rounded to two decimal places for billing. Models without a dedicated cache-hit price use the normal input rate; cache writes also use the normal input rate. iFlytek MaaS prices are source-scoped and do not inherit DeepSeek time-of-use discounts. Spark-X2.5 entries (spark-x2.5, spark-x2.5-4b, spark-x2.5-1.7b) were read from the model square on 2026-10-08; spark-x2.5 is listed at a limited-time 30% rate (0.96 / 3.6 / 0.14 RMB input / output / cache-hit, list price 3.2 / 12 / 0.48), and the two small models are free."
   },
   "exact": {
+    "big-pickle": {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "note": "OpenCode free tier verified 2026-10-17; historical IDs retained. https://opencode.ai/docs/zen/"},
+    "beam-free": {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "note": "OpenCode free tier verified 2026-10-17; historical IDs retained. https://opencode.ai/docs/zen/"},
+    "cat-jam-free": {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "note": "OpenCode free tier verified 2026-10-17; historical IDs retained. https://opencode.ai/docs/zen/"},
+    "deepseek-v4.1-flash-free": {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "note": "OpenCode free tier verified 2026-10-17; historical IDs retained. https://opencode.ai/docs/zen/"},
+    "glm-5.3-flash-free": {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "note": "OpenCode free tier verified 2026-10-17; historical IDs retained. https://opencode.ai/docs/zen/"},
+    "ll-alpha-free": {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "note": "OpenCode free tier verified 2026-10-17; historical IDs retained. https://opencode.ai/docs/zen/"},
+    "longcat-2.5-preview-free": {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "note": "OpenCode free tier verified 2026-10-17; historical IDs retained. https://opencode.ai/docs/zen/"},
+    "mimo-v2.6-flash-free": {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "note": "OpenCode free tier verified 2026-10-17; historical IDs retained. https://opencode.ai/docs/zen/"},
+    "muse-spark-1.3-contributor-free": {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "note": "OpenCode free tier verified 2026-10-17; historical IDs retained. https://opencode.ai/docs/zen/"},
+    "nemotron-3.5-lightning-free": {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "note": "OpenCode free tier verified 2026-10-17; historical IDs retained. https://opencode.ai/docs/zen/"},
+    "nemotron-3.5-super-vl-free": {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "note": "OpenCode free tier verified 2026-10-17; historical IDs retained. https://opencode.ai/docs/zen/"},
+    "space-bunny-free": {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "note": "OpenCode free tier verified 2026-10-17; historical IDs retained. https://opencode.ai/docs/zen/"},
     "claude-opus-5-5": {
       "input": 4,
       "output": 20,

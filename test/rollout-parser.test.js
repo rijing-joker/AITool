@@ -4087,12 +4087,17 @@ test("parseOpencodeIncremental updates totals after message rewrite with new tok
     const res = await parseOpencodeIncremental({ messageFiles: [messagePath], cursors, queuePath });
     assert.equal(res.bucketsQueued, 1);
 
+    const previousMtime = (await fs.stat(messagePath)).mtimeMs;
     await fs.rm(messagePath);
     const messageV2 = buildOpencodeMessage({
       ...baseMessage,
       tokens: { input: 8, output: 0, reasoning: 0, cached: 0 },
     });
     await fs.writeFile(messagePath, JSON.stringify(messageV2), "utf8");
+    // A fast delete/recreate can reuse both the inode and filesystem timestamp
+    // with the same byte size. Make this changed-file fixture deterministic.
+    const rewrittenAt = new Date(previousMtime + 1000);
+    await fs.utimes(messagePath, rewrittenAt, rewrittenAt);
 
     const resAgain = await parseOpencodeIncremental({
       messageFiles: [messagePath],

@@ -118,6 +118,7 @@ Managed through the dashboard's **AI Proxy** page (tabs) or the core's managemen
 | Session credential rebinding on any failure or quota/authentication/model errors | Settings |
 | `config.yaml` editor via the core's management API | Settings |
 | Auto-start with the dashboard | Settings |
+| Optional OpenCode free models: discover, select, enable/disable, adapter health and data-policy notices | Upstreams |
 
 On-disk layout: `~/.aitool/proxy/` — `bin/` (core), `config.yaml`, `auths/` (provider credentials), `usage/` (per-request records + bucket state), `logs/core.log`.
 
@@ -177,6 +178,7 @@ Dockerfile / docker-compose.yml   NEW — container run (compose publishes loopb
 - [EasyCLIProxyAPI](https://github.com/router-for-me/EasyCLIProxyAPI) (MIT) — reference for the GUI-over-core architecture and feature set; AiTool re-implements the management layer in Node.
 - [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) (MIT) — the proxy engine, downloaded at runtime as an external binary (not vendored).
 - [cc-switch](https://github.com/farion1231/cc-switch) (MIT) — reference for the provider-preset / config-file-switching module; AiTool re-implements it in Node (dashboard Provider Configs page).
+- [opencode-free-bridge](https://github.com/azrinaldi/opencode-free-bridge) (MIT, `f3e1c5a`) — adapted session/tool/protocol helpers for the optional OpenCode free-model adapter; attribution and license are retained in `src/lib/proxy/opencode-free/`.
 
 ## License
 

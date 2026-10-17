@@ -84,6 +84,21 @@ test("MODEL_PRICING + getModelPricing are byte-identical across all 5 edge files
   }
 });
 
+test("reviewed OpenCode free IDs retain zero prices across local and every edge table", () => {
+  const { VERIFIED_FREE_IDS } = require("../src/lib/proxy/opencode-free/catalog");
+  for (const name of [CANONICAL, ...MIRRORS]) {
+    const { code } = transformSync(extractBlock(name), { loader: "ts", target: "es2020" });
+    const pricing = vm.runInNewContext(`${code}\ngetModelPricing;`);
+    for (const id of VERIFIED_FREE_IDS) {
+      const zero = { input: 0, output: 0, cache_read: 0, cache_write: 0 };
+      assert.deepEqual(JSON.parse(JSON.stringify(pricing(id))), zero, `${name}: ${id}`);
+      const local = curatedPricing.exact[id];
+      assert.deepEqual(Object.fromEntries(Object.keys(zero).map((key) => [key, local[key]])), zero, id);
+    }
+    assert.ok(pricing("deepseek-v4.1-flash").input > 0);
+  }
+});
+
 test("Qwen3.8 Flash local and all cloud paths share full cache pricing (#715)", () => {
   const { getModelPricing: localPricing, computeRowCost } = require("../src/lib/pricing");
   const expected = { input: 0.15, output: 0.47, cache_read: 0.016, cache_write: 0.2 };

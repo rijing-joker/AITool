@@ -170,7 +170,7 @@ async function installFromRepo(repoPath) {
   return { installed: true, path: paths.binPath, source: `local-repo (${version})` };
 }
 
-async function start() {
+async function startCore() {
   config.ensureConfig();
   if (!binaryExists()) {
     const envBin = process.env.AITOOL_CORE_BIN;
@@ -237,7 +237,7 @@ async function start() {
   throw new Error(`Core did not become healthy within 15s: ${lastError || "timeout"}`);
 }
 
-async function stop() {
+async function stopCore() {
   const pid = readPid();
   if (!(await managedCoreAlive(pid))) {
     // Nothing to stop, or the PID was recycled by a process that is not our
@@ -259,6 +259,42 @@ async function stop() {
   } catch {}
   clearPid();
   return { stopped: true, running: false };
+}
+
+function warnOptionalUpstream(action, error) {
+  const message = `OpenCode free upstream ${action} warning: ${error?.message || error}`;
+  console.warn(message);
+  // Desktop launchers may not expose stderr; keep the same diagnostic log as
+  // serve's proxy bootstrap warnings. Logging must not fail the core action.
+  try {
+    fs.mkdirSync(paths.logsDir, { recursive: true });
+    fs.appendFileSync(path.join(paths.logsDir, "dashboard.log"), `${new Date().toISOString()} ${message}\n`);
+  } catch {}
+}
+
+async function start() {
+  const result = await startCore();
+  // An optional upstream must not prevent other providers or the caller's
+  // usage bridge from starting. Core failures still propagate to the caller.
+  try {
+    const free = require("./opencode-free");
+    await free.startEnabled();
+    if ((await free.status()).enabled) await free.syncGroup();
+  } catch (error) {
+    warnOptionalUpstream("start", error);
+  }
+  return result;
+}
+
+async function stop() {
+  const result = await stopCore();
+  try {
+    await require("./opencode-free").stop();
+  } catch (error) {
+    // restart() must still reach start() if only the adapter failed to stop.
+    warnOptionalUpstream("stop", error);
+  }
+  return result;
 }
 
 async function status() {

@@ -26,7 +26,7 @@ test("local presets project bearer keys, model mappings and editable endpoints i
 
 test("local OpenCode defaults always select a model present in their provider entry", () => {
   const presets = listPresets("opencode").filter((row) => row.group === "local");
-  assert.equal(presets.length, 4);
+  assert.equal(presets.length, 5);
   for (const { settingsConfig: { slotKey, modelId, provider } } of presets) {
     assert.ok(provider.models[modelId.slice(slotKey.length + 1)]);
   }

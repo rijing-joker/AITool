@@ -1265,7 +1265,9 @@ const PRESETS = {
 };
 
 function listPresets(app) {
-  return PRESETS[app] || [];
+  const preset = require("./opencode-free-preset").freePreset(app);
+  const items = PRESETS[app] || [];
+  return preset ? [...items.filter((item) => item.group !== "custom"), preset, ...items.filter((item) => item.group === "custom")] : items;
 }
 
 function getPreset(app, presetId) {

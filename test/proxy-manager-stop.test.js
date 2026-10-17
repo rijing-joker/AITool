@@ -9,6 +9,7 @@ const manager = require("../src/lib/proxy/manager");
 
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "aitool-manager-test-"));
+  t.mock.method(require("../src/lib/proxy/opencode-free"), "stop", async () => {});
   const previous = { pidPath: paths.pidPath, configPath: paths.configPath, binPath: paths.binPath };
   paths.pidPath = path.join(root, "core.pid");
   paths.configPath = path.join(root, "config.yaml");

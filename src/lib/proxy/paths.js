@@ -24,6 +24,7 @@ module.exports = {
   pricingPath: path.join(proxyRoot, "usage", "models-dev-pricing.json"),
   pidPath: path.join(proxyRoot, "core.pid"),
   settingsPath: path.join(proxyRoot, "settings.json"),
+  opencodeFreeDir: path.join(proxyRoot, "opencode-free"),
   remarksPath: path.join(proxyRoot, "api-access-remarks.json"),
   apiKeyRemarksPath: path.join(proxyRoot, "api-key-remarks.json"),
   coreVersionPath: path.join(proxyRoot, "core-version.txt"),

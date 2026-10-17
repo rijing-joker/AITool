@@ -30,6 +30,25 @@ async function mutate<T>(path: string, method: string, body?: unknown): Promise<
   );
 }
 
+export interface OpenCodeFreeCatalog {
+  models: Array<{ id: string; name: string; protocol: string; policy: string; policyUrl: string }>;
+  updatedAt: string | null;
+  lastError: string | null;
+}
+export interface OpenCodeFreeStatus {
+  enabled: boolean;
+  running: boolean;
+  port: number;
+  selectedModels: string[];
+  catalog: OpenCodeFreeCatalog;
+  lastInference: { at: string; model?: string; ok: boolean; code?: string; status?: number } | null;
+}
+export const opencodeFreeApi = {
+  status: () => get<OpenCodeFreeStatus>("/api/proxy/opencode-free"),
+  refresh: () => mutate<{ catalog: OpenCodeFreeCatalog }>("/api/proxy/opencode-free/refresh", "POST"),
+  configure: (enabled: boolean, models: string[]) => mutate<OpenCodeFreeStatus>("/api/proxy/opencode-free", "POST", { enabled, models }),
+};
+
 export interface ProxyCoreStatus {
   installed: boolean;
   binary: string | null;

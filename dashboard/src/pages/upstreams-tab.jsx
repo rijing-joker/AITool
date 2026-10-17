@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { OpenCodeFreePanel } from "./opencode-free-panel";
 import { Dialog } from "@base-ui/react/dialog";
 import {
   closestCenter,
@@ -756,6 +757,7 @@ export function UpstreamsTab() {
   return (
     <div className="flex flex-col gap-4">
       <p className="text-sm text-oai-gray-500 dark:text-oai-gray-400">{copy("proxy.upstreams.subtitle")}</p>
+      <OpenCodeFreePanel onChanged={() => loadProviders(false)} />
 
       <Card className="p-4 sm:p-5">
         <div className="flex flex-wrap items-center justify-between gap-3">

@@ -159,6 +159,18 @@ async function verifiedUserIdFromJwt(authHeader: string | null): Promise<string 
 // 2026-05-28: includes mimo, gpt-5.5, glm, grok, deepseek-v4, kiro, hy3-preview (86 models).
 // Keep this block byte-identical with leaderboard-refresh.ts; see feedback_model_pricing_sync.
 const MODEL_PRICING: Record<string, { input: number; output: number; cache_read: number; cache_write?: number }> = {
+  "big-pickle": { input: 0, output: 0, cache_read: 0, cache_write: 0 },
+  "beam-free": { input: 0, output: 0, cache_read: 0, cache_write: 0 },
+  "cat-jam-free": { input: 0, output: 0, cache_read: 0, cache_write: 0 },
+  "deepseek-v4.1-flash-free": { input: 0, output: 0, cache_read: 0, cache_write: 0 },
+  "glm-5.3-flash-free": { input: 0, output: 0, cache_read: 0, cache_write: 0 },
+  "ll-alpha-free": { input: 0, output: 0, cache_read: 0, cache_write: 0 },
+  "longcat-2.5-preview-free": { input: 0, output: 0, cache_read: 0, cache_write: 0 },
+  "mimo-v2.6-flash-free": { input: 0, output: 0, cache_read: 0, cache_write: 0 },
+  "muse-spark-1.3-contributor-free": { input: 0, output: 0, cache_read: 0, cache_write: 0 },
+  "nemotron-3.5-lightning-free": { input: 0, output: 0, cache_read: 0, cache_write: 0 },
+  "nemotron-3.5-super-vl-free": { input: 0, output: 0, cache_read: 0, cache_write: 0 },
+  "space-bunny-free": { input: 0, output: 0, cache_read: 0, cache_write: 0 },
   // ── Anthropic Claude ──
   "claude-fable-5": { input: 10, output: 50, cache_read: 1, cache_write: 12.5 },
   "claude-opus-5": { input: 5, output: 25, cache_read: 0.5, cache_write: 6.25 },

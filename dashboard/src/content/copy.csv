@@ -3070,3 +3070,27 @@ proxy.copilot.error.failed,proxy,ProxyPage,CopilotClients,error.failed,"Connecti
 proxy.copilot.error.timeout,proxy,ProxyPage,CopilotClients,error.timeout,VS Code setup timed out. Close the setup window and try again.,,active
 proxy.copilot.error.launch_failed,proxy,ProxyPage,CopilotClients,error.launch_failed,Unable to open the VS Code setup window.,,active
 proxy.copilot.error.conflict,proxy,ProxyPage,CopilotClients,error.conflict,The managed configuration was edited outside AiTool. Restore it from a backup or undo those edits first.,,active
+proxy.free.title,proxy,ProxyPage,OpenCodeFreePanel,title,OpenCode free models,,active
+proxy.free.running,proxy,ProxyPage,OpenCodeFreePanel,running,Adapter running,,active
+proxy.free.stopped,proxy,ProxyPage,OpenCodeFreePanel,stopped,Enabled · adapter stopped,,active
+proxy.free.disabled,proxy,ProxyPage,OpenCodeFreePanel,disabled,Disabled,,active
+proxy.free.description,proxy,ProxyPage,OpenCodeFreePanel,description,"Select models, then enable this optional upstream. Start the AI proxy first. Availability depends on OpenCode capacity and client checks; no paid fallback is added.",,active
+proxy.free.compatibility,proxy,ProxyPage,OpenCodeFreePanel,compatibility,Client output limits are preserved. Compatibility tool definitions are added upstream; only tools supplied by your client can be returned.,,active
+proxy.free.refresh,proxy,ProxyPage,OpenCodeFreePanel,refresh,Refresh models and status,,active
+proxy.free.save,proxy,ProxyPage,OpenCodeFreePanel,save,Apply selection / restart,,active
+proxy.free.enable,proxy,ProxyPage,OpenCodeFreePanel,enable,Enable selected models,,active
+proxy.free.disable,proxy,ProxyPage,OpenCodeFreePanel,disable,Disable,,active
+proxy.free.updated,proxy,ProxyPage,OpenCodeFreePanel,updated,Catalog updated: {{time}},,active
+proxy.free.policy.training,proxy,ProxyPage,OpenCodeFreePanel,training,Contributor tier: prompts and completions may be used for training.,,active
+proxy.free.policy.improvement,proxy,ProxyPage,OpenCodeFreePanel,improvement,Free-period data may be used to improve the model.,,active
+proxy.free.policy.no_training,proxy,ProxyPage,OpenCodeFreePanel,no_training,Official policy: zero retention and no training.,,active
+proxy.free.policy.review,proxy,ProxyPage,OpenCodeFreePanel,review,Review the official data policy before use.,,active
+proxy.free.policy.retired,proxy,ProxyPage,OpenCodeFreePanel,retired,Unavailable in the current catalog; deselect to save.,,active
+proxy.free.empty,proxy,ProxyPage,OpenCodeFreePanel,empty,Refresh the catalog to discover currently supported free models.,,active
+proxy.free.policy_link,proxy,ProxyPage,OpenCodeFreePanel,policy_link,OpenCode model availability and data policies,,active
+proxy.free.inference_ok,proxy,ProxyPage,OpenCodeFreePanel,inference_ok,Last successful inference: {{time}},,active
+proxy.free.inference_error,proxy,ProxyPage,OpenCodeFreePanel,inference_error,Last inference failed: {{code}},,active
+proxy.free.catalog_error,proxy,ProxyPage,OpenCodeFreePanel,catalog_error,Catalog refresh failed. Inference is blocked until a successful refresh.,,active
+pswitch.preset.aitool_opencode_free,proxy,ProxyPage,OpenCodeFreePanel,aitool_opencode_free,AiTool OpenCode Free,,active
+pswitch.hint.aitool_opencode_free,proxy,ProxyPage,OpenCodeFreePanel,aitool_opencode_free,"Enable the free upstream in AI Proxy first, then enter an AiTool client access key. The selected model must be enabled there.",,active
+proxy.free.inference_pending,proxy,ProxyPage,OpenCodeFreePanel,inference_pending,Catalog discovery does not verify inference. No successful request in this adapter session yet.,,active

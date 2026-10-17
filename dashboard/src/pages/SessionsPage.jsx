@@ -38,6 +38,8 @@ const SOURCE_FILTERS = [
   { id: "codex", label: () => "Codex" },
   { id: "grok", label: () => "Grok" },
   { id: "zcode", label: () => "ZCode" },
+  { id: "opencode", label: () => copy("leaderboard.column.opencode") },
+  { id: "kimi", label: () => copy("leaderboard.column.kimi") },
 ];
 
 const DATE_RANGES = [

@@ -1,6 +1,7 @@
 const { cacheSubset, addCacheSubset } = require("./cache-tokens");
 const { normalizeCodexUsage } = require("./codex-token-usage");
 const codexFiles = require("./codex-rollout-file");
+const { forkReplayMetadata } = require("./codex-fork-replay");
 const { inspectDshZstdFrames, decodeDshZstd } = require("./zstd");
 const { claudeUserIdentity, collectClaudeForkAliases } = require("./claude-user-identity");
 const fs = require("node:fs/promises");
@@ -271,6 +272,7 @@ async function parseRolloutIncremental({
   publicRepoResolver,
   diagnostics,
   invalidRecordPolicy = "skip",
+  rolloutInventory = rolloutFiles,
 }) {
   if (invalidRecordPolicy !== "skip" && invalidRecordPolicy !== "throw") {
     throw new TypeError(`unsupported invalidRecordPolicy: ${invalidRecordPolicy}`);
@@ -278,6 +280,7 @@ async function parseRolloutIncremental({
   await ensureDir(path.dirname(queuePath));
   let filesProcessed = 0;
   let eventsAggregated = 0;
+  let deferredFiles = 0;
 
   const cb = typeof onProgress === "function" ? onProgress : null;
   const totalFiles = Array.isArray(rolloutFiles) ? rolloutFiles.length : 0;
@@ -300,6 +303,9 @@ async function parseRolloutIncremental({
   // state, so a fork replay or a copied rollout under any path or day shard
   // sees every compaction counted before.
   const compactionResponseIds = createCompactionResponseIds(cursors);
+  const resolveForkReplay = require("./codex-fork-replay").createForkReplayResolver(
+    (rolloutInventory || []).filter((entry) => typeof entry === "string" ? defaultSource === DEFAULT_SOURCE : entry?.source === DEFAULT_SOURCE)
+      .map((entry) => typeof entry === "string" ? entry : entry.path));
 
   // Persisted set of seen Codex event keys (sessionUUID:eventTimestamp). Mirrors
   // the claudeHashes pattern: it makes an inode-changing re-scan idempotent so an
@@ -511,17 +517,27 @@ async function parseRolloutIncremental({
       (!prev.lastTotal || typeof prev.lastTotal !== "object")
     );
     const startOffset = sameInode && !truncated && !rebuildingCodexBaseline ? prevOffset : 0;
-    const lastTotal = sameInode && !truncated && !rebuildingCodexBaseline
+    let lastTotal = sameInode && !truncated && !rebuildingCodexBaseline
       ? prev.lastTotal || null
       : null;
-    const tokenUsageBaselines = sameInode && !truncated && !rebuildingCodexBaseline
+    let tokenUsageBaselines = sameInode && !truncated && !rebuildingCodexBaseline
       ? prev.tokenUsageBaselines || null
       : null;
-    const lastModel = sameInode && !truncated ? prev.lastModel || null : null;
-    const lastServiceTier = sameInode && !truncated ? prev.lastServiceTier || null : null;
-    const modelAttributionState = sameInode && !truncated
+    let lastModel = sameInode && !truncated ? prev.lastModel || null : null;
+    let lastServiceTier = sameInode && !truncated ? prev.lastServiceTier || null : null;
+    let modelAttributionState = sameInode && !truncated
       ? prev.modelAttributionState || null
       : null;
+    if (startOffset === 0 && fileSource === DEFAULT_SOURCE && codexFiles.rolloutIds(filePath)?.paginated) {
+      const pageState = await resolveForkReplay.pageState(filePath);
+      if (pageState) {
+        lastTotal = pageState.lastTotal;
+        tokenUsageBaselines = pageState.tokenUsageBaselines;
+        lastModel = pageState.lastModel;
+        lastServiceTier = pageState.lastServiceTier;
+        modelAttributionState = pageState.modelAttributionState;
+      }
+    }
     // Only valid for the bytes before the resume offset; a rescan from 0
     // rebuilds it. A cursor from before #652 with a lastTotal has seen a
     // token_count already.
@@ -598,48 +614,58 @@ async function parseRolloutIncremental({
           ? rolloutEventDedup.getHistoricalEvents
           : rolloutEventDedup.getAppendOnlyEvents)
       : null;
-    const result = projectContextOnlyScan
-      ? await scanRolloutProjectFileContexts({
-          filePath,
-          fileStat: st,
-          lastTotal,
-          tokenUsageBaselines,
-          lastModel,
-          lastServiceTier,
-          modelAttributionState,
-          projectState,
-          projectMetaCache,
-          publicRepoCache,
-          publicRepoResolver,
-          projectContext,
-          invalidRecordPolicy,
-        })
-      : await parseRolloutFile({
-          filePath,
-          fileStat: st,
-          startOffset,
-          lastTotal,
-          tokenUsageBaselines,
-          lastModel,
-          lastServiceTier,
-          modelAttributionState,
-          usageRecordState,
-          compactionResponseIds,
-          hourlyState,
-          touchedBuckets,
-          source: fileSource,
-          projectState,
-          projectTouchedBuckets,
-          projectRef,
-          projectKey,
-          projectMetaCache,
-          publicRepoCache,
-          publicRepoResolver,
-          projectContext,
-          seenCodexEvents: codexEventTracker,
-          sessionId: codexSessionIdFromPath(filePath),
-          invalidRecordPolicy,
-        });
+    let result;
+    try {
+      result = projectContextOnlyScan
+        ? await scanRolloutProjectFileContexts({
+            filePath,
+            fileStat: st,
+            lastTotal,
+            tokenUsageBaselines,
+            lastModel,
+            lastServiceTier,
+            modelAttributionState,
+            projectState,
+            projectMetaCache,
+            publicRepoCache,
+            publicRepoResolver,
+            projectContext,
+            invalidRecordPolicy,
+          })
+        : await parseRolloutFile({
+            filePath,
+            fileStat: st,
+            startOffset,
+            lastTotal,
+            tokenUsageBaselines,
+            lastModel,
+            lastServiceTier,
+            modelAttributionState,
+            usageRecordState,
+            compactionResponseIds,
+            hourlyState,
+            touchedBuckets,
+            source: fileSource,
+            projectState,
+            projectTouchedBuckets,
+            projectRef,
+            projectKey,
+            projectMetaCache,
+            publicRepoCache,
+            publicRepoResolver,
+            projectContext,
+            seenCodexEvents: codexEventTracker,
+            sessionId: codexSessionIdFromPath(filePath),
+            invalidRecordPolicy,
+            resolveForkReplay: fileSource === DEFAULT_SOURCE ? resolveForkReplay : null,
+            forkReplayState: startOffset > 0 ? prev?.forkReplayState : null,
+          });
+    } catch (error) {
+      if (error.code !== "CODEX_FORK_DEFERRED" || invalidRecordPolicy === "throw") throw error;
+      deferredFiles++;
+      if (!process.env.NODE_TEST_CONTEXT) console.warn(`[sync] deferred Codex fork: ${error.message}`);
+      continue;
+    }
 
     const nextCursor = {
       ...(codexFiles.isCompressed(filePath) ? { compressed: true, compressedSignature: codexFiles.signature(st) } : {}),
@@ -656,6 +682,7 @@ async function parseRolloutIncremental({
       ? usageRecordState
       : result.usageRecordState;
     if (nextUsageRecordState) nextCursor.codexUsageRecord = nextUsageRecordState;
+    if (result.forkReplayState) nextCursor.forkReplayState = result.forkReplayState;
     // Files whose usage only exists as token_usage_record rows are not
     // counted (issue #652); keep them in core cursor state so sync and status
     // can warn without loading per-file cursor shards.
@@ -715,7 +742,7 @@ async function parseRolloutIncremental({
     if (!fssync.existsSync(flaggedPath)) delete cursors.codexUsageRecordOnlyFiles[flaggedPath];
   }
 
-  return { filesProcessed, eventsAggregated, bucketsQueued, projectBucketsQueued };
+  return { filesProcessed, eventsAggregated, bucketsQueued, projectBucketsQueued, ...(deferredFiles ? { deferredFiles } : {}) };
 }
 
 async function filterColdCodexRolloutFiles({
@@ -2302,6 +2329,8 @@ async function parseRolloutFile({
   seenCodexEvents,
   sessionId,
   invalidRecordPolicy,
+  resolveForkReplay = null,
+  forkReplayState: previousForkReplay = null,
 }) {
   const st = fileStat || (await fs.stat(filePath));
   const compressed = codexFiles.isCompressed(filePath);
@@ -2347,6 +2376,12 @@ async function parseRolloutFile({
   let currentCwd = null;
   let currentDate = null;
   let isForkedRollout = false;
+  let lineageCaptured = startOffset > 0;
+  let forkReplayMeta = previousForkReplay?.meta || null;
+  let forkReplayTimestamp = previousForkReplay?.timestamp || null;
+  let forkReplay = resolveForkReplay && forkReplayMeta
+    ? await resolveForkReplay(forkReplayMeta, forkReplayTimestamp, [filePath], previousForkReplay.state)
+    : null;
   // The replay prefix only ever exists at the head of a freshly-forked file. A
   // resumed scan (startOffset > 0) can never see it — and never re-reads the
   // session_meta line, so isForkedRollout stays false there anyway — but gate
@@ -2453,7 +2488,7 @@ async function parseRolloutFile({
       (line.includes('"model"') ||
         line.includes('"cwd"') ||
         line.includes('"current_date"') ||
-        line.includes('"forked_from_id"'));
+        line.includes('"forked_from_id"') || line.includes('"parent_thread_id"') || line.includes('"session_meta"'));
     const maybeServiceTier =
       !maybeTokenCount && !maybeModelReroute && !maybeTurnContext &&
       line.includes(CODEX_SERVICE_TIER_MARKER);
@@ -2506,8 +2541,15 @@ async function parseRolloutFile({
       obj?.payload &&
       typeof obj.payload === "object"
     ) {
-      if (obj.type === "session_meta" && typeof obj.payload.forked_from_id === "string") {
-        isForkedRollout = obj.payload.forked_from_id.trim().length > 0;
+      if (obj.type === "session_meta" && !lineageCaptured) {
+        lineageCaptured = true;
+        const lineage = forkReplayMetadata(obj.payload);
+        isForkedRollout = !!lineage;
+        if (resolveForkReplay && isForkedRollout) {
+          forkReplayMeta = lineage;
+          forkReplayTimestamp = obj.timestamp;
+          forkReplay = await resolveForkReplay(forkReplayMeta, obj.timestamp, [filePath]);
+        }
       }
       if (obj.type === "turn_context" && typeof obj.payload.current_date === "string") {
         currentDate = normalizeIsoDate(obj.payload.current_date);
@@ -2566,6 +2608,7 @@ async function parseRolloutFile({
     if (totalUsage && typeof totalUsage === "object") latestTotal = totalUsage;
 
     const rawDelta = consumeUsageDelta(usageDeltaState, lastUsage, totalUsage);
+    const matchedReplay = forkReplay?.skip(info) === true;
     const totalOnlyResetSentinel = source === DEFAULT_SOURCE
       && isCodexTotalOnlyResetSentinel(lastUsage, totalUsage);
     const delta = rawDelta && !totalOnlyResetSentinel ? normalizeUsage(rawDelta) : null;
@@ -2592,6 +2635,7 @@ async function parseRolloutFile({
     let forkedReplaySkip = false;
     if (
       isForkedRollout &&
+      !forkReplay &&
       (source === DEFAULT_SOURCE || source === "acode") &&
       replayPrefixActive
     ) {
@@ -2617,7 +2661,7 @@ async function parseRolloutFile({
 
     // date matching is conservative; same-day fork replays are caught by the
     // burst detector above rather than this cross-day date guard.
-    if (forkedReplaySkip || isForkedReplayToken({ isForkedRollout, rolloutDate, currentDate })) {
+    if (matchedReplay || (!forkReplay && (forkedReplaySkip || isForkedReplayToken({ isForkedRollout, rolloutDate, currentDate })))) {
       continue;
     }
 
@@ -2678,6 +2722,7 @@ async function parseRolloutFile({
       ? snapshotUsageRecordState(usageRecordState)
       : previousUsageRecordState,
     eventsAggregated,
+    forkReplayState: forkReplayMeta ? { meta: forkReplayMeta, timestamp: forkReplayTimestamp, state: forkReplay?.snapshot() || null } : null,
     projectFileContexts,
   };
 }
@@ -9592,7 +9637,8 @@ function resolveKimiCodeDefaultModel(env = process.env) {
 }
 
 function kimiCodeModelAlias(value) {
-  if (typeof value !== "string" || !value) return null;
+  if (typeof value !== "string" || !value.trim()) return null;
+  value = value.trim();
   return value.includes("/") ? value.split("/").pop() : value;
 }
 
@@ -9642,8 +9688,8 @@ async function parseKimiCodeIncremental({ wireFiles, cursors, queuePath, onProgr
       let entry;
       try { entry = JSON.parse(line); } catch { continue; }
 
-      if (entry.type === "config.update") {
-        const alias = kimiCodeModelAlias(entry.modelAlias);
+      if (["config.update", "profile.bind", "llm.request"].includes(entry.type)) {
+        const alias = kimiCodeModelAlias(entry.modelAlias || entry.model);
         if (alias) fileModel = alias;
         continue;
       }

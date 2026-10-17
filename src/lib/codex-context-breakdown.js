@@ -118,6 +118,8 @@ function mergeParsedSessionResults(previous, delta) {
     model: delta.model || previous.model,
     provider: delta.provider || previous.provider,
     version: delta.version || previous.version,
+    forkedFromId: delta.forkedFromId || previous.forkedFromId,
+    parentThreadId: delta.parentThreadId || previous.parentThreadId,
     filePath: previous.filePath || delta.filePath,
     turnCount: Number(previous.turnCount || 0) + Number(delta.turnCount || 0),
     totals,
@@ -171,7 +173,7 @@ function buildDateRange({ period, date }) {
 const CACHE = new Map();
 const PARSED_GROUP_CACHE = new Map();
 const CACHE_TTL_MS = 60_000;
-const CACHE_SCHEMA_VERSION = "codex-context-v6";
+const CACHE_SCHEMA_VERSION = "codex-context-v7";
 const MAX_PARSED_GROUP_CACHE_ENTRIES = 4096;
 const PREFIX_HASH_READ_BYTES = 1024 * 1024;
 
@@ -432,6 +434,7 @@ async function computeCodexContextBreakdown({
     diagnostics,
   });
   const candidates = discovered.filter((entry) => entry.candidate);
+  const resolveForkReplay = require("./codex-fork-replay").createForkReplayResolver(discovered.map((entry) => entry.filePath));
   const fileSignature = inventorySignature(discovered);
   const cacheKey = [
     CACHE_SCHEMA_VERSION,
@@ -460,141 +463,160 @@ async function computeCodexContextBreakdown({
   }
   const appendHashPaths = selectAppendHashPaths(candidateGroups);
 
+  let skippedSessions = 0;
   for (const entries of candidateGroups.values()) {
-    const filePaths = entries.map((entry) => entry.filePath);
-    const cacheable = Boolean(rolloutSessionIdFromPath(filePaths[0]));
-    const parsedCacheKey = cacheable
-      ? parsedGroupCacheKey(entries, { from: fromKey, to: toKey, timeZoneContext })
-      : null;
-    const signature = parsedGroupSignature(entries);
-    const cachedGroup = parsedCacheKey ? PARSED_GROUP_CACHE.get(parsedCacheKey) : null;
-    let parsed = null;
-    if (cachedGroup?.signature === signature) {
-      // Cacheable groups are partitioned by rollout UUID, so their token event
-      // keys cannot overlap and cache hits need not backfill seenTokenEvents.
-      diagnostics.parse_cache_hits += 1;
-      parsed = cachedGroup.parsed;
-      PARSED_GROUP_CACHE.delete(parsedCacheKey);
-      PARSED_GROUP_CACHE.set(parsedCacheKey, cachedGroup);
-    } else {
-      let captured = null;
-      const singleEntry = entries.length === 1 ? entries[0] : null;
-      const appendHashEligible = Boolean(
-        singleEntry && appendHashPaths.has(singleEntry.filePath),
-      );
-      const resumeHandle = appendHashEligible
-        ? await openValidatedResumeFile(cachedGroup, singleEntry, diagnostics)
+    try {
+      const filePaths = entries.map((entry) => entry.filePath);
+      const cacheable = Boolean(rolloutSessionIdFromPath(filePaths[0]));
+      const parsedCacheKey = cacheable
+        ? parsedGroupCacheKey(entries, { from: fromKey, to: toKey, timeZoneContext })
         : null;
-      if (resumeHandle) {
-        try {
-          const resumed = await parseCodexRolloutFile(singleEntry.filePath, {
-            from: fromKey,
-            to: toKey,
-            timeZoneContext,
-            diagnostics,
-            seenTokenEvents: new Set(),
-            startOffset: cachedGroup.endOffset,
-            endOffset: singleEntry.stat.size,
-            resumeState: cachedGroup.resumeState,
-            captureResumeState: true,
-            captureContentHash: true,
-            contentHashState: cachedGroup.contentHashState,
-            sourceHandle: resumeHandle,
-          });
-          if (diagnostics) diagnostics.stat_calls += 1;
-          const afterParse = await resumeHandle.stat().catch(() => null);
-          let stableAfterParse = Boolean(
-            afterParse &&
-            statIdentity(singleEntry.filePath, afterParse) ===
-              statIdentity(singleEntry.filePath, singleEntry.stat),
-          );
-          if (
-            !stableAfterParse &&
-            isUnlinkedResumeSnapshot(
-              singleEntry.filePath,
-              singleEntry.stat,
-              afterParse,
-            )
-          ) {
-            try {
-              const expectedSnapshot = resumed.contentHashState.copy().digest("hex");
-              const actualSnapshot = await digestFilePrefix(
-                resumeHandle,
-                singleEntry.stat.size,
-                diagnostics,
-              );
-              stableAfterParse = actualSnapshot === expectedSnapshot;
-            } catch {
-              stableAfterParse = false;
-            }
-          }
-          if (stableAfterParse) {
-            const delta = splitCapturedParse(resumed);
-            captured = {
-              parsed: mergeParsedSessionResults(cachedGroup.parsed, delta.parsed),
-              resumeState: delta.resumeState,
-              endOffset: delta.endOffset,
-              appendable: delta.appendable,
-              contentHashState: delta.contentHashState,
-            };
-            diagnostics.incremental_parse_hits += 1;
-          } else {
-            diagnostics.incremental_parse_fallbacks += 1;
-          }
-        } catch (error) {
-          if (!isCodexResumeInvalidated(error)) throw error;
-          diagnostics.incremental_parse_fallbacks += 1;
-        } finally {
-          await resumeHandle.close();
-        }
-      }
-
-      if (!captured) {
-        let freshHandle = null;
-        let freshEndOffset = singleEntry?.stat?.size ?? null;
-        try {
-          if (resumeHandle && singleEntry) {
-            freshHandle = await fs.promises.open(singleEntry.filePath, "r");
-            if (diagnostics) diagnostics.stat_calls += 1;
-            freshEndOffset = (await freshHandle.stat()).size;
-          }
-          const fresh = await parseCodexRolloutFile(
-            filePaths.length === 1 ? filePaths[0] : filePaths,
-            {
+      const cachedGroup = parsedCacheKey ? PARSED_GROUP_CACHE.get(parsedCacheKey) : null;
+      const parentId = cachedGroup?.parsed?.forkedFromId || cachedGroup?.parsed?.parentThreadId;
+      const parentEntries = resolveForkReplay.dependencies(parentId).map((filePath) => {
+        try { return { filePath, stat: fs.statSync(filePath) }; } catch { return { filePath, stat: null }; }
+      });
+      const parentSignature = parsedGroupSignature(parentEntries);
+      let signature = parsedGroupSignature([...entries, ...parentEntries]);
+      let parsed = null;
+      if (cachedGroup?.signature === signature) {
+        // Cacheable groups are partitioned by rollout UUID, so their token event
+        // keys cannot overlap and cache hits need not backfill seenTokenEvents.
+        diagnostics.parse_cache_hits += 1;
+        parsed = cachedGroup.parsed;
+        PARSED_GROUP_CACHE.delete(parsedCacheKey);
+        PARSED_GROUP_CACHE.set(parsedCacheKey, cachedGroup);
+      } else {
+        let captured = null;
+        const singleEntry = entries.length === 1 ? entries[0] : null;
+        const appendHashEligible = Boolean(
+          singleEntry && appendHashPaths.has(singleEntry.filePath),
+        );
+        const resumeHandle = appendHashEligible && cachedGroup?.parentSignature === parentSignature
+          ? await openValidatedResumeFile(cachedGroup, singleEntry, diagnostics)
+          : null;
+        if (resumeHandle) {
+          try {
+            const resumed = await parseCodexRolloutFile(singleEntry.filePath, {
               from: fromKey,
               to: toKey,
               timeZoneContext,
               diagnostics,
-              seenTokenEvents: filePaths.length === 1 ? new Set() : seenTokenEvents,
-              endOffset: freshEndOffset,
-              captureResumeState: Boolean(singleEntry),
-              captureContentHash: appendHashEligible,
-              sourceHandle: freshHandle,
-            },
-          );
-          captured = splitCapturedParse(fresh);
-        } finally {
-          await freshHandle?.close();
+              seenTokenEvents: new Set(),
+              startOffset: cachedGroup.endOffset,
+              endOffset: singleEntry.stat.size,
+              resumeState: cachedGroup.resumeState,
+              captureResumeState: true,
+              captureContentHash: true,
+              contentHashState: cachedGroup.contentHashState,
+              sourceHandle: resumeHandle,
+              resolveForkReplay,
+            });
+            if (diagnostics) diagnostics.stat_calls += 1;
+            const afterParse = await resumeHandle.stat().catch(() => null);
+            let stableAfterParse = Boolean(
+              afterParse &&
+              statIdentity(singleEntry.filePath, afterParse) ===
+                statIdentity(singleEntry.filePath, singleEntry.stat),
+            );
+            if (
+              !stableAfterParse &&
+              isUnlinkedResumeSnapshot(
+                singleEntry.filePath,
+                singleEntry.stat,
+                afterParse,
+              )
+            ) {
+              try {
+                const expectedSnapshot = resumed.contentHashState.copy().digest("hex");
+                const actualSnapshot = await digestFilePrefix(
+                  resumeHandle,
+                  singleEntry.stat.size,
+                  diagnostics,
+                );
+                stableAfterParse = actualSnapshot === expectedSnapshot;
+              } catch {
+                stableAfterParse = false;
+              }
+            }
+            if (stableAfterParse) {
+              const delta = splitCapturedParse(resumed);
+              captured = {
+                parsed: mergeParsedSessionResults(cachedGroup.parsed, delta.parsed),
+                resumeState: delta.resumeState,
+                endOffset: delta.endOffset,
+                appendable: delta.appendable,
+                contentHashState: delta.contentHashState,
+              };
+              diagnostics.incremental_parse_hits += 1;
+            } else {
+              diagnostics.incremental_parse_fallbacks += 1;
+            }
+          } catch (error) {
+            if (!isCodexResumeInvalidated(error)) throw error;
+            diagnostics.incremental_parse_fallbacks += 1;
+          } finally {
+            await resumeHandle.close();
+          }
+        }
+
+        if (!captured) {
+          let freshHandle = null;
+          let freshEndOffset = singleEntry?.stat?.size ?? null;
+          try {
+            if (resumeHandle && singleEntry) {
+              freshHandle = await fs.promises.open(singleEntry.filePath, "r");
+              if (diagnostics) diagnostics.stat_calls += 1;
+              freshEndOffset = (await freshHandle.stat()).size;
+            }
+            const fresh = await parseCodexRolloutFile(
+              filePaths.length === 1 ? filePaths[0] : filePaths,
+              {
+                from: fromKey,
+                to: toKey,
+                timeZoneContext,
+                diagnostics,
+                seenTokenEvents: filePaths.length === 1 ? new Set() : seenTokenEvents,
+                endOffset: freshEndOffset,
+                captureResumeState: Boolean(singleEntry),
+                captureContentHash: appendHashEligible,
+                sourceHandle: freshHandle,
+                resolveForkReplay,
+              },
+            );
+            captured = splitCapturedParse(fresh);
+          } finally {
+            await freshHandle?.close();
+          }
+        }
+
+        parsed = captured.parsed;
+        if (parsedCacheKey) {
+          const dependencies = resolveForkReplay.dependencies(parsed.forkedFromId || parsed.parentThreadId).map((filePath) => {
+            try { return { filePath, stat: fs.statSync(filePath) }; } catch { return { filePath, stat: null }; }
+          });
+          signature = parsedGroupSignature([...entries, ...dependencies]);
+          rememberParsedGroup(parsedCacheKey, {
+            signature,
+            parentSignature: parsedGroupSignature(dependencies),
+            parsed,
+            resumeState: captured.resumeState,
+            endOffset: captured.endOffset,
+            appendable: captured.appendable === true,
+            contentHashState: captured.contentHashState,
+            filePath: singleEntry?.filePath || null,
+            stat: singleEntry?.stat || null,
+          });
         }
       }
-
-      parsed = captured.parsed;
-      if (parsedCacheKey) {
-        rememberParsedGroup(parsedCacheKey, {
-          signature,
-          parsed,
-          resumeState: captured.resumeState,
-          endOffset: captured.endOffset,
-          appendable: captured.appendable === true,
-          contentHashState: captured.contentHashState,
-          filePath: singleEntry?.filePath || null,
-          stat: singleEntry?.stat || null,
-        });
-      }
+      if (!parsed || !parsed.totals || !parsed.totals.total_tokens) continue;
+      sessions.push(parsed);
+    } catch (error) {
+      if (error.code !== "CODEX_FORK_DEFERRED") throw error;
+      skippedSessions += 1;
     }
-    if (!parsed || !parsed.totals || !parsed.totals.total_tokens) continue;
-    sessions.push(parsed);
   }
+  if (skippedSessions > 0) diagnostics.skipped_sessions = skippedSessions;
 
   const grand = emptyTotals();
   const byTool = new Map();
@@ -789,8 +811,9 @@ async function computeCodexContextBreakdown({
     },
   };
 
+  if (skippedSessions > 0) result.skipped_sessions = skippedSessions;
   const cacheValue = { ...result };
-  CACHE.set(cacheKey, { at: Date.now(), value: cacheValue });
+  if (skippedSessions === 0) CACHE.set(cacheKey, { at: Date.now(), value: cacheValue });
   while (CACHE.size > 32) {
     const oldest = [...CACHE.entries()].sort((a, b) => a[1].at - b[1].at)[0];
     if (oldest) CACHE.delete(oldest[0]);

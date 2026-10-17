@@ -1038,8 +1038,8 @@ describe("repairCodexRescanInflation (#187) — atomic guarded rebuild", () => {
 
 // ---------------------------------------------------------------------------
 // #169 follow-up: fork-replay historical repair. Re-runs the guarded rebuild
-// under CODEX_FORK_REPLAY_REPAIR_KEY so history parsed before the same-day
-// fork burst detector landed gets rebuilt with the fork-aware parser.
+// under CODEX_FORK_REPLAY_REPAIR_KEY so older history is rebuilt using the
+// matching parent timeline, including the first replay row.
 // ---------------------------------------------------------------------------
 
 const {
@@ -1047,18 +1047,17 @@ const {
   CODEX_FORK_REPLAY_REPAIR_KEY,
 } = require("../src/commands/sync");
 
-// A same-day forked rollout: 2 replay rows in one flush (1ms apart), then one
-// live turn 30s later. Old parser counted all 3 (total 250+150=400 inflated
-// ... replay 100+150, live 50 → phantom 150); fork-aware parser counts the
-// first-of-run replay row (no lookahead) + the live turn.
+// The parent has 250 tokens. The child replays both parent snapshots and adds
+// a live 50-token turn. The old combined history billed 550; repair yields 300.
 const FORK_R1 = { input_tokens: 60, cached_input_tokens: 0, output_tokens: 40, reasoning_output_tokens: 0, total_tokens: 100 };
 const FORK_R2 = { input_tokens: 90, cached_input_tokens: 0, output_tokens: 60, reasoning_output_tokens: 0, total_tokens: 150 };
 const FORK_LIVE = { input_tokens: 30, cached_input_tokens: 0, output_tokens: 20, reasoning_output_tokens: 0, total_tokens: 50 };
 const FORK_T2 = { input_tokens: 150, cached_input_tokens: 0, output_tokens: 100, reasoning_output_tokens: 0, total_tokens: 250 };
 const FORK_T3 = { input_tokens: 180, cached_input_tokens: 0, output_tokens: 120, reasoning_output_tokens: 0, total_tokens: 300 };
-// first-of-run replay row (100) + live (50): the bounded residual documented at the skip site
-const FORK_TRUE_TOTAL = FORK_R1.total_tokens + FORK_LIVE.total_tokens;
-const FORK_INFLATED_TOTAL = FORK_R1.total_tokens + FORK_R2.total_tokens + FORK_LIVE.total_tokens;
+// The matching parent timeline removes both replay rows, including the old
+// burst detector's first-row residual.
+const FORK_TRUE_TOTAL = FORK_R1.total_tokens + FORK_R2.total_tokens + FORK_LIVE.total_tokens;
+const FORK_INFLATED_TOTAL = FORK_TRUE_TOTAL + FORK_T2.total_tokens;
 
 async function writeForkedCodexFile(home, uuid = "bbbbbbbb-cccc-dddd-eeee-ffffffffffff") {
   const dir = path.join(home, ".codex", "sessions", "2025", "12", "17");
@@ -1067,6 +1066,7 @@ async function writeForkedCodexFile(home, uuid = "bbbbbbbb-cccc-dddd-eeee-ffffff
   const lines = [
     JSON.stringify({
       type: "session_meta",
+      timestamp: "2025-12-17T00:00:00.000Z",
       payload: { id: uuid, forked_from_id: "019e095c-c041-7b40-b7cb-43ddb153086c", model: "gpt-4" },
     }),
     JSON.stringify({ type: "turn_context", payload: { model: "gpt-4", current_date: "2025-12-17" } }),
@@ -1083,6 +1083,14 @@ describe("repairCodexForkReplayInflation (#169 follow-up) — fork replay histor
     const home = await makeTempHome();
     try {
       const forkedFile = await writeForkedCodexFile(home);
+      const parentId = "019e095c-c041-7b40-b7cb-43ddb153086c";
+      const parentFile = path.join(path.dirname(forkedFile), `rollout-2025-12-16T23-00-00-${parentId}.jsonl`);
+      await fs.writeFile(parentFile, [
+        JSON.stringify({ type: "session_meta", timestamp: "2025-12-16T23:00:00Z", payload: { id: parentId, model: "gpt-4" } }),
+        tokenCountLine({ ts: "2025-12-16T23:00:00.100Z", last: FORK_R1, total: FORK_R1 }),
+        tokenCountLine({ ts: "2025-12-16T23:00:00.101Z", last: FORK_R2, total: FORK_T2 }),
+        JSON.stringify({ type: "turn_context", timestamp: "2025-12-17T00:00:00Z", payload: { model: "gpt-4" } }),
+      ].join("\n") + "\n");
       const queuePath = path.join(home, "queue.jsonl");
       const queueStatePath = path.join(home, "queue.state.json");
 
@@ -1115,7 +1123,7 @@ describe("repairCodexForkReplayInflation (#169 follow-up) — fork replay histor
         cursors,
         queuePath,
         queueStatePath,
-        rolloutFiles: [{ path: forkedFile, source: "codex" }],
+        rolloutFiles: [{ path: forkedFile, source: "codex" }, { path: parentFile, source: "codex" }],
       });
       assert.equal(ran, true);
 

@@ -4,6 +4,7 @@
 // Never write decoded conversation text to disk or expose a compressed byte
 // offset as a plaintext cursor. Decoders enforce the existing Harness limits.
 const fs = require("node:fs/promises");
+const path = require("node:path");
 const { Readable } = require("node:stream");
 const { decodeDshZstd } = require("./zstd");
 const MAX_COMPRESSED_BYTES = 64 * 1024 * 1024;
@@ -14,6 +15,11 @@ const isRollout = (file) => typeof file === "string" && (file.endsWith(".jsonl")
 const logicalPath = (file) => isCompressed(file) ? file.slice(0, -4) : file;
 const siblingPath = (file) => isCompressed(file) ? logicalPath(file) : isRollout(file) ? `${file}.zst` : null;
 const signature = (stat) => [stat.dev, stat.ino, stat.size, stat.mtimeMs, stat.ctimeMs].join(":");
+const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+function rolloutIds(file) {
+  const match = path.basename(String(file || "")).match(new RegExp(`(${UUID})(?:_(${UUID}))?\\.jsonl(?:\\.zst)?$`, "i"));
+  return match ? { thread: match[1].toLowerCase(), rollout: (match[2] || match[1]).toLowerCase(), paginated: !!match[2] } : null;
+}
 
 function dedupeSiblings(files, pathOf = (file) => file) {
   const plain = new Set(files.filter((file) => !isCompressed(pathOf(file))).map(pathOf));
@@ -49,4 +55,4 @@ function bufferStream(data, start = 0, end = data.length) {
   })());
 }
 
-module.exports = { isCompressed, isRollout, logicalPath, siblingPath, signature, dedupeSiblings, readSnapshot, readText, bufferStream };
+module.exports = { isCompressed, isRollout, logicalPath, siblingPath, signature, rolloutIds, dedupeSiblings, readSnapshot, readText, bufferStream };

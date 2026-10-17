@@ -1,5 +1,6 @@
 const { normalizeCodexUsage } = require("./codex-token-usage");
 const codexFiles = require("./codex-rollout-file");
+const { forkReplayMetadata } = require("./codex-fork-replay");
 // Codex rollout JSONL parser — extracted from codex-context-breakdown.js.
 //
 // Handles file discovery and per-file parsing. Does NOT hold any aggregation
@@ -553,6 +554,7 @@ async function parseCodexRolloutFile(filePath, {
   collectModelUsage = false,
   onObject = null,
   onUsage = null,
+  resolveForkReplay = null,
 } = {}) {
   const filePaths = (Array.isArray(filePath) ? filePath : [filePath]).filter(Boolean);
   const primaryFilePath = filePaths[0] || String(filePath || "");
@@ -605,6 +607,11 @@ async function parseCodexRolloutFile(filePath, {
     lastTotal: isResuming ? resumeState.prevTotals || null : null,
     baselines: isResuming ? resumeState.tokenUsageBaselines || null : null,
   });
+  let forkReplayMeta = isResuming ? resumeState.forkReplayMeta || null : null;
+  let forkReplayTimestamp = isResuming ? resumeState.forkReplayTimestamp || null : null;
+  let forkReplay = forkReplayMeta && resolveForkReplay
+    ? await resolveForkReplay(forkReplayMeta, forkReplayTimestamp, filePaths, resumeState.forkReplayState)
+    : null;
   let pendingToolNames = isResuming
     ? Array.from(resumeState.pendingToolNames || [])
     : [];
@@ -1003,12 +1010,18 @@ async function parseCodexRolloutFile(filePath, {
         cwd = p.cwd || cwd;
         cliVersion = p.cli_version || cliVersion;
         provider = p.model_provider || provider;
-        forkedFromId = p.forked_from_id || null;
-        parentThreadId = p.parent_thread_id || null;
+        const lineage = forkReplayMetadata(p);
+        forkedFromId = lineage?.forked_from_id || null;
+        parentThreadId = lineage?.parent_thread_id || lineage?.spawned_from_id || null;
         threadSource = p.thread_source || p.source || null;
         agentNickname = p.agent_nickname || null;
         agentRole = p.agent_role || null;
         sessionLineageCaptured = true;
+        if (resolveForkReplay && lineage) {
+          forkReplayMeta = lineage;
+          forkReplayTimestamp = ts;
+          forkReplay = await resolveForkReplay(forkReplayMeta, ts, filePaths);
+        }
       } else if (!sessionId) {
         sessionId = p.id || null;
       }
@@ -1075,6 +1088,7 @@ async function parseCodexRolloutFile(filePath, {
         );
       }
       const rawDelta = consumeUsageDelta(usageDeltaState, lastUsage, totalUsage);
+      const replayed = forkReplay?.skip(info) === true;
       const delta = rawDelta ? normalizeUsage(rawDelta) : null;
       // Timing consumers receive canonical, deduplicated usage below. A null
       // delta is a snapshot, not another model response.
@@ -1083,7 +1097,7 @@ async function parseCodexRolloutFile(filePath, {
       if (inRequestedRange) {
         const eventSessionId = sessionId || rolloutSessionIdFromPath(primaryFilePath) || primaryFilePath;
         const eventKey = `${eventSessionId}:${ts}:${usageEventSignature(lastUsage, totalUsage)}`;
-        if (!isNewResumeEvent || (seenTokenEvents && seenTokenEvents.has(eventKey))) {
+        if (replayed || !isNewResumeEvent || (seenTokenEvents && seenTokenEvents.has(eventKey))) {
           if (typeof onUsage === "function") onUsage({ timestamp: ts, delta: null, rawUsage: lastUsage, model: attributedModel });
           attributeTurn(null);
         } else {
@@ -1148,6 +1162,9 @@ async function parseCodexRolloutFile(filePath, {
       sessionLineageCaptured,
       prevTotals: usageDeltaState.lastTotal,
       tokenUsageBaselines: snapshotUsageBaselines(usageDeltaState),
+      forkReplayMeta,
+      forkReplayTimestamp,
+      forkReplayState: forkReplay?.snapshot() || null,
       pendingToolNames,
       pendingSkills,
       pendingExecDetails,
@@ -1353,6 +1370,11 @@ async function* iterateCodexObjects(filePaths, diagnostics, options = {}) {
     }
   }
   if (!scannedFiles) throw new Error("all grouped Codex rollout files failed during read");
+  // Root lineage is physical metadata. Replayed parent rows can have earlier
+  // timestamps than the child's root, so capture the first file's root before
+  // sorting the remaining events across pages and archived copies.
+  const rootMeta = records.find((record) => record.obj?.type === "session_meta");
+  if (rootMeta) yield rootMeta.obj;
   records.sort((a, b) => {
     const aTimestamp = typeof a.obj?.timestamp === "string" ? a.obj.timestamp : "";
     const bTimestamp = typeof b.obj?.timestamp === "string" ? b.obj.timestamp : "";
@@ -1360,6 +1382,7 @@ async function* iterateCodexObjects(filePaths, diagnostics, options = {}) {
   });
   const firstFileByRecord = new Map();
   for (const record of records) {
+    if (record === rootMeta) continue;
     const semanticKey = JSON.stringify(record.obj);
     const firstFile = firstFileByRecord.get(semanticKey);
     if (firstFile !== undefined && firstFile !== record.fileIndex) continue;
@@ -1369,10 +1392,7 @@ async function* iterateCodexObjects(filePaths, diagnostics, options = {}) {
 }
 
 function rolloutSessionIdFromPath(filePath) {
-  const match = path.basename(String(filePath || "")).match(
-    /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl(?:\.zst)?$/i,
-  );
-  return match ? match[1] : null;
+  return codexFiles.rolloutIds(filePath)?.thread || null;
 }
 
 function isCodexResumeInvalidated(error) {

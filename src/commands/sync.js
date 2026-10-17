@@ -277,7 +277,7 @@ const CODEX_RESCAN_DEDUP_REPAIR_KEY = "codexRescanDedupRepair_2026_06";
 // (unreproducible-session skip, atomic throwaway rebuild, queue strip, upload
 // offset reset for the cloud overwrite). Pre-gated: installs with no forked
 // rollout on disk carry no fork phantom and mark done without the rebuild.
-const CODEX_FORK_REPLAY_REPAIR_KEY = "codexForkReplayRepair_2026_07";
+const CODEX_FORK_REPLAY_REPAIR_KEY = "codexForkReplayRepair_2026_10_v2";
 // One-time repair for Codex rollouts that contain token counters from multiple
 // interleaved SessionState instances. Older parsers subtracted each cumulative
 // total from the most recently observed total, even when it belonged to another
@@ -1088,6 +1088,7 @@ async function cmdSync(argv, context = {}) {
       codexColdFilter.restarted || codexCursorLoadRestarted,
     );
     const runCodexParse = (files) => parseRolloutIncremental({
+      rolloutInventory: rolloutFiles,
       rolloutFiles: files,
       cursors,
       codexEventStore: Array.isArray(cursors.codexHashes)
@@ -6063,7 +6064,7 @@ async function repairCodexForkReplayInflation({
     projectQueueStatePath,
     rolloutFiles,
     migrationKey: CODEX_FORK_REPLAY_REPAIR_KEY,
-    uploadNote: "reset_after_codex_fork_replay_2026_07",
+    uploadNote: "reset_after_codex_fork_replay_2026_10_v2",
   });
 }
 
@@ -6299,13 +6300,13 @@ async function scanForForkedCodexRollout(rolloutFiles) {
     try {
       if (codexRolloutFiles.isCompressed(fp)) {
         const { data } = await codexRolloutFiles.readSnapshot(fp);
-        if (data.subarray(0, HEAD_BYTES).toString("utf8").includes('"forked_from_id"')) return { forked: true, indeterminate: false };
+        if (/"(?:forked_from_id|parent_thread_id)"/.test(data.subarray(0, HEAD_BYTES).toString("utf8")) || codexRolloutFiles.rolloutIds(fp)?.paginated) return { forked: true, indeterminate: false };
         continue;
       }
       fh = await fs.open(fp, "r");
       const buf = Buffer.alloc(HEAD_BYTES);
       const { bytesRead } = await fh.read(buf, 0, HEAD_BYTES, 0);
-      if (buf.toString("utf8", 0, bytesRead).includes('"forked_from_id"')) {
+      if (/"(?:forked_from_id|parent_thread_id)"/.test(buf.toString("utf8", 0, bytesRead)) || codexRolloutFiles.rolloutIds(fp)?.paginated) {
         return { forked: true, indeterminate: false };
       }
     } catch (_e) {

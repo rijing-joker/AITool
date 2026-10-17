@@ -609,7 +609,7 @@ async function codexParseCompressedSession(filePath) {
     }
   }
 
-  if (!sessionId) sessionId = codexSessionIdFromPath(filePath);
+  if (!sessionId) sessionId = codexFiles.rolloutIds(filePath)?.thread || codexSessionIdFromPath(filePath);
   if (!sessionId) return null;
 
   const stat = await fsp.stat(filePath).catch(() => null);
@@ -680,8 +680,9 @@ function parseApplyPatch(argumentsText) {
   return { body, files, additions, deletions, status: "pending", error: false };
 }
 
-async function codexReadMessages(filePath) {
-  const raw = await codexFiles.readText(filePath);
+async function codexReadMessages(filePaths, { resolveForkReplay } = {}) {
+  const paths = Array.isArray(filePaths) ? filePaths : [filePaths];
+  const raw = (await Promise.all(paths.map((file) => codexFiles.readText(file)))).join("\n");
   const messages = [];
   // Ordinary tool results must not scan the transcript for a patch they lack.
   const patchesByCallId = new Map();
@@ -700,11 +701,22 @@ async function codexReadMessages(filePath) {
     total_tokens: value.total_tokens ?? ((Number(value.input_tokens) || 0) + (Number(value.output_tokens) || 0)),
   } : null;
   let usageSeen = false;
+  let lineageSeen = false;
+  let replay = null;
+  let usageDeferred = false;
   for (const line of raw.split("\n")) {
     if (line === "") continue;
     const value = parseJsonLine(line);
     if (!value) continue;
     trackSpan(usage, parseTimestampToMs(value.timestamp));
+    if (value.type === "session_meta" && !lineageSeen) {
+      lineageSeen = true;
+      try { replay = await resolveForkReplay?.(value.payload, value.timestamp, paths); }
+      catch (error) {
+        if (error.code !== "CODEX_FORK_DEFERRED") throw error;
+        usageDeferred = true;
+      }
+    }
     if (value.type === "turn_context" && typeof value.payload?.model === "string" && value.payload.model) {
       usage.model = value.payload.model;
     }
@@ -715,7 +727,8 @@ async function codexReadMessages(filePath) {
       if (typeof info?.model === "string" && info.model) usage.model = info.model;
       else if (typeof info?.model_name === "string" && info.model_name) usage.model = info.model_name;
       const delta = consumeUsageDelta(usageState, snapshot(info?.last_token_usage), snapshot(info?.total_token_usage));
-      if (delta) {
+      const replayed = replay?.skip(info) === true;
+      if (delta && !usageDeferred && !replayed) {
         const normalized = normalizeCodexUsage(delta);
         const row = {
           inputTokens: normalized.input_tokens,
@@ -1076,9 +1089,19 @@ async function listSessions({ app, home, env = process.env } = {}) {
     const meta = app === "claude" ? await claudeParseSession(filePath) : await codexParseSession(filePath);
     if (meta) sessions.push(meta);
   }
-  return sortByRecency(app === "codex"
-    ? [...new Map(sortByRecency(sessions).reverse().map((row) => [row.sessionId, row])).values()]
-    : sessions);
+  if (app !== "codex") return sortByRecency(sessions);
+  const grouped = new Map();
+  for (const row of sessions.sort((a, b) => path.basename(a.sourcePath).localeCompare(path.basename(b.sourcePath)))) {
+    const id = codexFiles.rolloutIds(row.sourcePath)?.thread || row.sessionId;
+    const previous = grouped.get(id);
+    if (!previous) grouped.set(id, { ...row, sessionId: id, resumeCommand: `codex resume ${id}` });
+    else {
+      previous.lastActiveAt = Math.max(previous.lastActiveAt || 0, row.lastActiveAt || 0);
+      if (row.summary) previous.summary = row.summary;
+      if (!previous.title) previous.title = row.title;
+    }
+  }
+  return sortByRecency([...grouped.values()]);
 }
 
 function sortByRecency(sessions) {
@@ -1127,10 +1150,27 @@ async function readSession({ app, sourcePath, home, env = process.env } = {}) {
   if (app === "claude" && (isClaudeAgentSession(path.basename(resolved)) || isClaudeAgentSession(path.basename(realPath)))) {
     throw new Error("Not a claude session file");
   }
+  let codexPages = [realPath];
+  let resolveForkReplay;
+  if (app === "codex") {
+    const inventory = [];
+    const candidates = [];
+    for (const root of rootsForApp(app, resolvedHome)) await collectJsonlFiles(root, candidates, { compressed: true });
+    for (const candidate of codexFiles.dedupeSiblings(candidates)) {
+      try { inventory.push({ candidate, real: await resolveSessionPath(candidate, rootsForApp(app, resolvedHome)) }); }
+      catch { /* every physical page must pass the same root clamp */ }
+    }
+    const thread = codexFiles.rolloutIds(resolved)?.thread || codexFiles.rolloutIds(realPath)?.thread;
+    if (thread) codexPages = inventory.filter((row) => codexFiles.rolloutIds(row.candidate)?.thread === thread)
+      .sort((a, b) => path.basename(a.candidate).localeCompare(path.basename(b.candidate))).map((row) => row.real);
+    if (!codexPages.length) codexPages = [realPath];
+    codexPages = [...new Set(codexPages)];
+    resolveForkReplay = require("./codex-fork-replay").createForkReplayResolver(inventory.map((row) => row.real));
+  }
   const transcript = app === "claude"
     ? await claudeReadMessages(realPath)
     : app === "codex"
-      ? await codexReadMessages(realPath)
+      ? await codexReadMessages(codexPages, { resolveForkReplay })
       : await geminiReadMessages(realPath);
   return { sourcePath: resolved, messages: transcript.messages, usage: transcript.usage };
 }

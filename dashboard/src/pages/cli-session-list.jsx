@@ -93,7 +93,7 @@ export function SessionList({ sessions, query, mode, hidden, onOpen, onCopy }) {
           }}
           disabled={Boolean(query)}
           title={mode === "project" ? row.group.projectDir : row.group.key}
-          className="flex min-h-12 w-full items-center gap-2 border-b border-oai-gray-100 px-4 text-left text-xs text-oai-gray-500 dark:border-oai-gray-800 sm:px-6"
+          className="flex min-h-12 w-full items-center gap-2 border-b border-oai-gray-200 bg-oai-gray-50 px-4 text-left text-xs text-oai-gray-500 transition-colors hover:bg-oai-gray-100 dark:border-oai-gray-800 dark:bg-oai-gray-800/40 dark:hover:bg-oai-gray-800 sm:px-5"
         >
           {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
           {mode === "project" ? (
@@ -115,7 +115,7 @@ export function SessionList({ sessions, query, mode, hidden, onOpen, onCopy }) {
     }
     const { session } = row;
     return (
-      <div className="group flex min-h-20 items-center border-b border-oai-gray-100 px-4 hover:bg-oai-gray-50 dark:border-oai-gray-800/70 dark:hover:bg-oai-gray-800/40 sm:px-6">
+      <div className="group flex min-h-20 items-center border-b border-oai-gray-100 px-4 transition-colors hover:bg-oai-gray-50 dark:border-oai-gray-800/70 dark:hover:bg-oai-gray-800/40 sm:px-5">
         <button
           type="button"
           data-session-key={sessionKey(session)}
@@ -130,14 +130,14 @@ export function SessionList({ sessions, query, mode, hidden, onOpen, onCopy }) {
               />
             </span>
             <time
-              className="shrink-0 text-[11px] tabular-nums text-oai-gray-400"
+              className="shrink-0 text-xs tabular-nums text-oai-gray-500 dark:text-oai-gray-400"
               title={formatTime(sessionTime(session))}
             >
               {relativeFrom(sessionTime(session)) ||
                 formatTime(sessionTime(session))}
             </time>
           </span>
-          <span className="flex w-full items-center gap-2 text-[11px] text-oai-gray-400">
+          <span className="flex w-full items-center gap-2 text-xs text-oai-gray-500 dark:text-oai-gray-400">
             <span className="shrink-0">{sessionAppLabel(session.appId)}</span>
             {mode === "time" && session.projectDir ? (
               <span className="max-w-[35%] truncate" title={session.projectDir}>

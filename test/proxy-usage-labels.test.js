@@ -40,7 +40,8 @@ test("records API filters exact upstream identities, keeps range options and wor
   const previous = { usageDir: paths.usageDir, apiKeyRemarksPath: paths.apiKeyRemarksPath, remarksPath: paths.remarksPath };
   Object.assign(paths, { usageDir: root, apiKeyRemarksPath: path.join(root, "keys.json"), remarksPath: path.join(root, "remarks.json") });
   t.after(() => { Object.assign(paths, previous); fs.rmSync(root, { force: true, recursive: true }); });
-  t.mock.method(config, "readConfig", () => ({ "api-keys": ["client"] }));
+  let clientConfig = { "api-keys": ["client"] };
+  t.mock.method(config, "readConfig", () => clientConfig);
   t.mock.method(pricing, "getPricingSnapshot", async () => ({ models: null }));
   let offline = false;
   t.mock.method(management, "request", async (method, route, options) => {
@@ -71,6 +72,15 @@ test("records API filters exact upstream identities, keeps range options and wor
   const renamed = await read(`api_key_hash=${sha256Hex("client")}`);
   assert.equal(renamed.total, 4);
   assert.equal(renamed.filterOptions.keys[0].label, "Renamed");
+  const upstreams = { codex: [{ keys: [{ "api-key": "upstream-fixture" }] }] };
+  clientConfig = { access: { "api-keys": ["client"] }, "api-keys": upstreams };
+  const native = await read(`api_key_hash=${sha256Hex("client")}`);
+  assert.equal(native.filterOptions.keys[0].label, "Renamed");
+  assert.ok(native.records.every((row) => row.api_key_remark === "Renamed"));
+  clientConfig = { "api-keys": upstreams };
+  const withoutClientKeys = await read("");
+  assert.equal(withoutClientKeys.total, 4);
+  assert.equal(JSON.stringify(withoutClientKeys).includes("upstream-fixture"), false);
   offline = true;
   assert.equal((await read("upstream=auth:AccountA")).total, 1);
   assert.equal((await read("upstream=auth:unknown")).total, 0);

@@ -41,6 +41,12 @@ function requireConfigRevision(res, value) {
   return false;
 }
 
+function clientAccessKeys(cfg) {
+  if (Array.isArray(cfg?.access?.["api-keys"])) return cfg.access["api-keys"];
+  // Legacy configs used a top-level array; v8 uses that name for upstreams.
+  return Array.isArray(cfg?.["api-keys"]) ? cfg["api-keys"] : [];
+}
+
 function readJsonBody(req, maxBytes = 8 * 1024 * 1024) {
   return new Promise((resolve, reject) => {
     const chunks = [];
@@ -434,8 +440,7 @@ async function handleProxyApiRequest(req, res, url, ctx) {
       else if (p.endsWith("/restore")) json(res, { ok: true, ...await copilot.restore(body.client) });
       else {
         const cfg = config.readConfig() || {};
-        const keys = Array.isArray(cfg.access?.["api-keys"]) ? cfg.access["api-keys"]
-          : Array.isArray(cfg["api-keys"]) ? cfg["api-keys"] : [];
+        const keys = clientAccessKeys(cfg);
         if (!keys.includes(body.apiKey)) { json(res, { ok: false, error: "Select a configured proxy client key." }, 400); return true; }
         const models = body.client === "vscode" ? await copilot.modelCatalog(body) : undefined;
         json(res, { ok: true, ...await copilot.connect(body.client, { ...body, models }) });
@@ -586,13 +591,14 @@ async function handleProxyApiRequest(req, res, url, ctx) {
       return true;
     }
     if (p === "/api/proxy/keys") {
-      const result = await management.request("GET", "/v8/management/config/access/api-keys");
+      // The core omits access.api-keys until the first key is created (and
+      // may omit it again when empty). Read the document so an empty list
+      // still carries the revision required to create the missing path.
+      const result = await management.request("GET", "/v8/management/config");
       if (result.ok) {
-        const data = result.data;
-        const list = Array.isArray(data) ? data : data?.["api-keys"] || data?.items || [];
-        configResponse(res, result, { keys: list });
+        configResponse(res, result, { keys: clientAccessKeys(result.data) });
       } else {
-        json(res, { ok: false, error: result.error || result.status }, 502);
+        configResponse(res, result);
       }
       return true;
     }
@@ -868,7 +874,7 @@ async function handleProxyApiRequest(req, res, url, ctx) {
       }
       let remarks = {};
       try { remarks = JSON.parse(fs.readFileSync(paths.apiKeyRemarksPath, "utf8")) || {}; } catch {}
-      const label = createUsageLabeler({ keys: config.readConfig()?.["api-keys"] || [], remarks, providerRemarks: readRemarksStore().entries, credentials });
+      const label = createUsageLabeler({ keys: clientAccessKeys(config.readConfig()), remarks, providerRemarks: readRemarksStore().entries, credentials });
       const filterOptions = usageFilterOptions(rangeRows.map(label));
       const pageSize = Math.min(Math.max(Number(url.searchParams.get("pageSize")) || 50, 1), 500);
       const page = Math.max(Number(url.searchParams.get("page")) || 0, 0);

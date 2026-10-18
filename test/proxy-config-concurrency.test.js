@@ -7,8 +7,8 @@ const YAML = require("yaml");
 const config = require("../src/lib/proxy/config");
 const { handleProxyApiRequest } = require("../src/lib/proxy/api");
 
-async function fixture(t) {
-  let document = 'server:\n  port: 8318\nrouting:\n  strategy: round-robin\naccess:\n  api-keys: [fixture-key]\n';
+async function fixture(t, initialDocument = 'server:\n  port: 8318\nrouting:\n  strategy: round-robin\naccess:\n  api-keys: [fixture-key]\n') {
+  let document = initialDocument;
   let race = false;
   const calls = [];
   const etag = () => `"${crypto.createHash("sha256").update(document).digest("hex")}"`;
@@ -30,11 +30,19 @@ async function fixture(t) {
         assert.equal(typeof YAML.parse(body), "object");
         document = body;
       } else {
-        const doc = YAML.parse(document); doc.access["api-keys"] = JSON.parse(body); document = YAML.stringify(doc);
+        const doc = YAML.parse(document);
+        doc.access = { ...doc.access, "api-keys": JSON.parse(body) };
+        document = YAML.stringify(doc);
       }
     }
+    const doc = YAML.parse(document);
+    const data = req.url === "/v8/management/config" ? doc : doc.access?.["api-keys"];
+    if (req.method === "GET" && !yaml && data == null) {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end('{"error":"not_found"}'); return;
+    }
     res.writeHead(200, { ETag: etag(), "Content-Type": yaml && req.method === "GET" ? "application/yaml" : "application/json" });
-    res.end(req.method !== "GET" ? '{"status":"ok"}' : yaml ? document : JSON.stringify(YAML.parse(document).access["api-keys"]));
+    res.end(req.method !== "GET" ? '{"status":"ok"}' : yaml ? document : JSON.stringify(data));
   });
   await new Promise(resolve => core.listen(0, "127.0.0.1", resolve));
   const original = { getServerPort: config.getServerPort, getManagementKey: config.getManagementKey };
@@ -94,6 +102,7 @@ test("structured saves use conditional core writes and retain unrelated configur
 test("client keys and management transport forward revisions and expose conflicts", async t => {
   const f = await fixture(t);
   const loaded = (await f.request("keys")).data;
+  assert.deepEqual(loaded.keys, ["fixture-key"]);
   const saved = await f.request("keys", "PUT", { keys: ["changed"], etag: loaded.etag });
   assert.equal(saved.status, 200);
   assert.deepEqual(f.document().access["api-keys"], ["changed"]);
@@ -103,6 +112,53 @@ test("client keys and management transport forward revisions and expose conflict
   assert.equal(conflict.status, 412);
   assert.deepEqual(f.document().access["api-keys"], ["changed"]);
   assert.equal(f.calls.at(-1).headers["if-match"], loaded.etag);
+});
+
+test("empty client keys retain a revision for first creation and recreation", async t => {
+  for (const access of [undefined, {}, { "api-keys": null }, { "api-keys": [] }]) {
+    await t.test(JSON.stringify(access) || "missing access", async t => {
+      const initial = {
+        server: { port: 8318 },
+        "api-keys": { "openai-compatibility": [{ name: "upstream", keys: [{ "api-key": "upstream-fixture" }] }] },
+        ...(access === undefined ? {} : { access }),
+      };
+      const f = await fixture(t, YAML.stringify(initial));
+      const loaded = await f.request("keys");
+      assert.equal(loaded.status, 200);
+      assert.deepEqual(loaded.data.keys, []);
+      assert.equal(loaded.data.etag, f.etag());
+      assert.deepEqual(f.document(), initial, "reading must not initialize the configuration");
+      assert.equal((await f.request("keys", "PUT", { keys: ["client-fixture"] })).status, 428);
+      assert.equal((await f.request("keys", "PUT", { keys: ["client-fixture"], etag: loaded.data.etag }, false)).status, 401);
+
+      const created = await f.request("keys", "PUT", { keys: ["client-fixture"], etag: loaded.data.etag });
+      assert.equal(created.status, 200);
+      assert.deepEqual((await f.request("keys")).data.keys, ["client-fixture"]);
+      assert.deepEqual(f.document()["api-keys"], initial["api-keys"], "client keys must not replace upstream credentials");
+      const stale = await f.request("keys", "PUT", { keys: ["stale-client"], etag: loaded.data.etag });
+      assert.equal(stale.status, 412);
+      assert.deepEqual(f.document().access["api-keys"], ["client-fixture"]);
+
+      const removed = await f.request("keys", "PUT", { keys: [], etag: created.data.etag });
+      assert.equal(removed.status, 200);
+      const empty = (await f.request("keys")).data;
+      assert.deepEqual(empty.keys, []);
+      assert.equal(empty.etag, f.etag());
+      const recreated = await f.request("keys", "PUT", { keys: ["new-client"], etag: empty.etag });
+      assert.equal(recreated.status, 200);
+      assert.deepEqual(f.document().access["api-keys"], ["new-client"]);
+    });
+  }
+});
+
+test("failed config reads are not reported as an empty client key list", async t => {
+  const f = await fixture(t);
+  t.mock.method(require("../src/lib/proxy/management"), "request", async () => ({
+    ok: false, status: 503, data: { error: "core_unavailable" },
+  }));
+  const result = await f.request("keys");
+  assert.equal(result.status, 502);
+  assert.deepEqual(result.data, { ok: false, error: "core_unavailable" });
 });
 
 test("Copilot connects native v8 client keys and uses a server-fetched catalog", async t => {

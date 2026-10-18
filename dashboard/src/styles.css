@@ -99,7 +99,9 @@
   --community-muted: #9ca3af;
 
   /* Typography - Font Families */
-  --oai-font-sans: -apple-system, blinkmacsystemfont, "Segoe UI", roboto, oxygen, ubuntu, sans-serif;
+  --oai-font-sans: -apple-system, blinkmacsystemfont, "Segoe UI", roboto, oxygen, ubuntu,
+    "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", "WenQuanYi Micro Hei",
+    "Droid Sans Fallback", sans-serif;
   --oai-font-mono: "SF Mono", sfmono-regular, ui-monospace, menlo, monaco, consolas, monospace;
 
   /* Typography - Font Sizes */
@@ -198,13 +200,26 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Global: suppress focus outlines and Tailwind ring on Tab/click focus.
-   Inputs/textareas keep their own border-color :focus styling defined per-component. */
-*:focus,
-*:focus-visible {
-  outline: none !important;
-  --tw-ring-shadow: 0 0 #0000 !important;
-  --tw-ring-offset-shadow: 0 0 #0000 !important;
+/* Keep keyboard focus visible, including inside scrolling tabs and dialogs.
+   Inset outlines do not get clipped by overflow/height animations. */
+:focus-visible {
+  outline: 2px solid var(--oai-blue);
+  outline-offset: -2px;
+}
+
+input,
+textarea {
+  caret-color: var(--oai-blue);
+}
+
+::selection {
+  background: var(--brand-200);
+  color: var(--brand-950);
+}
+
+.dark ::selection {
+  background: var(--brand-800);
+  color: var(--brand-50);
 }
 
 /* TokenTrackerBar WKWebView: `native-app` on <html> (inline head script + Swift); NSVisualEffectView under transparent WKWebView. */

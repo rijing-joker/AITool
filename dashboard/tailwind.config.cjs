@@ -1,5 +1,4 @@
 /** @type {import("tailwindcss").Config} */
-const defaultTheme = require("tailwindcss/defaultTheme");
 
 module.exports = {
   darkMode: "class",
@@ -15,16 +14,8 @@ module.exports = {
         xtall: { raw: "(min-height: 1000px)" },
       },
       fontFamily: {
-        oai: [
-          "'OpenAI Sans'",
-          "-apple-system",
-          "BlinkMacSystemFont",
-          "'Segoe UI'",
-          "Roboto",
-          "Oxygen",
-          "Ubuntu",
-          "sans-serif",
-        ],
+        sans: ["var(--oai-font-sans)"],
+        oai: ["var(--oai-font-sans)"],
         mono: [
           "'SF Mono'",
           "SFMono-Regular",

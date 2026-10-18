@@ -8,7 +8,9 @@ import React, {
 } from "react";
 import { History, RefreshCw, Search } from "lucide-react";
 import { copy } from "../lib/copy";
-import { Input } from "../ui/components";
+import { Button, Input } from "../ui/components";
+import { PageHeader } from "../ui/components/PageHeader";
+import { PageTabs } from "../ui/components/PageTabs";
 import { LocalOnlyNotice } from "../components/LocalOnlyNotice.jsx";
 import { isLocalDashboardHost } from "../lib/host-mode";
 import { isMockEnabled } from "../lib/mock-data";
@@ -19,7 +21,6 @@ import {
   readPreference,
   SESSION_PREFS,
   sessionAppLabel,
-  sessionIconButton,
   sessionKey,
   writePreference,
 } from "./cli-sessions-model";
@@ -178,7 +179,7 @@ function LocalCliSessionsPage() {
   }, [sessions, query]);
 
   return (
-    <div className="flex h-full min-h-0 flex-1 flex-col overflow-hidden font-oai text-oai-black antialiased dark:text-oai-white">
+    <div className={`mx-auto flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden font-oai text-oai-black antialiased dark:text-oai-white ${selected ? "" : "max-w-6xl px-4 py-6 sm:px-6 sm:py-8"}`}>
       {notice ? (
         <div
           role="status"
@@ -187,138 +188,128 @@ function LocalCliSessionsPage() {
           {notice}
         </div>
       ) : null}
+      {/* Keep the outer and virtual list scroll positions when the reader opens. */}
       <div
         hidden={Boolean(selected)}
-        className={
-          selected
-            ? "hidden"
-            : "shrink-0 border-b border-oai-gray-200 dark:border-oai-gray-800"
-        }
+        className={selected ? "hidden" : "flex min-h-0 flex-1 flex-col overflow-y-auto"}
       >
-        <div className="flex items-start justify-between gap-4 px-4 pb-3 pt-5 sm:px-6">
-          <div>
-            <h1 className="text-xl font-semibold tracking-tight">
-              {copy("clisessions.title")}
-            </h1>
-            <p className="mt-1 text-sm text-oai-gray-500">
-              {copy("clisessions.subtitle")}
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => void loadSessions(activeApp)}
-            disabled={loading || apps === null}
-            aria-label={copy("clisessions.refresh")}
-            title={copy("clisessions.refresh")}
-            className={sessionIconButton}
-          >
-            <RefreshCw
-              size={16}
-              className={
-                loading ? "animate-spin motion-reduce:animate-none" : ""
-              }
-            />
-          </button>
-        </div>
-        <div className="flex gap-1 overflow-x-auto px-4 sm:px-6">
-          {availableApps.length !== 1 && availableApps.length !== 0 ? (
-            <button
+        <div className="shrink-0">
+          <PageHeader
+            title={copy("clisessions.title")}
+            description={copy("clisessions.subtitle")}
+            actions={<Button
               type="button"
-              aria-pressed={activeApp === "all"}
-              onClick={() => {
-                setActiveApp("all");
-                setSearch("");
-              }}
-              className={`min-h-10 shrink-0 border-b-2 px-3 text-sm ${activeApp === "all" ? "border-oai-brand-500 text-oai-brand-600" : "border-transparent text-oai-gray-500"}`}
+              variant="secondary"
+              size="sm"
+              onClick={() => void loadSessions(activeApp)}
+              disabled={loading || apps === null}
+              aria-label={copy("clisessions.refresh")}
+              title={copy("clisessions.refresh")}
             >
-              {copy("clisessions.all_apps")}
-            </button>
-          ) : null}
-          {availableApps.map((app) => (
-            <button
-              key={app.id}
-              type="button"
-              aria-pressed={activeApp === app.id}
-              onClick={() => {
-                setActiveApp(app.id);
-                setSearch("");
-              }}
-              className={`min-h-10 shrink-0 border-b-2 px-3 text-sm ${activeApp === app.id ? "border-oai-brand-500 text-oai-brand-600 dark:text-oai-brand-400" : "border-transparent text-oai-gray-500"}`}
-            >
-              {sessionAppLabel(app.id)}
-            </button>
-          ))}
-          {apps !== null && availableApps.length === 0 ? (
-            <span className="py-2 text-xs text-oai-gray-500">
-              {copy("clisessions.no_apps")}
-            </span>
-          ) : null}
-        </div>
-        <div className="flex flex-wrap items-center gap-2 px-4 py-3 sm:px-6">
-          <div className="relative min-w-0 flex-1 basis-48">
-            <Search
-              size={15}
-              className="pointer-events-none absolute left-3 top-3 text-oai-gray-400"
-            />
-            <Input
-              aria-label={copy("clisessions.search")}
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder={copy("clisessions.search")}
-              className="h-10 w-full pl-9"
-            />
-          </div>
-          <div className="inline-flex shrink-0 rounded-lg bg-oai-gray-100 p-0.5 dark:bg-oai-gray-800">
-            {["project", "time"].map((value) => (
-              <button
-                key={value}
-                type="button"
-                aria-pressed={mode === value}
-                onClick={() => {
-                  setMode(value);
-                  writePreference(SESSION_PREFS.group, value);
+              <RefreshCw
+                size={16}
+                className={
+                  loading ? "animate-spin motion-reduce:animate-none" : ""
+                }
+              />
+              {copy("clisessions.refresh")}
+            </Button>}
+          />
+          <div className="mb-5">
+            {availableApps.length > 0 ? (
+              <PageTabs
+                options={[
+                  ...(availableApps.length > 1 ? [{ id: "all", label: copy("clisessions.all_apps") }] : []),
+                  ...availableApps.map((app) => ({ id: app.id, label: sessionAppLabel(app.id) })),
+                ]}
+                value={activeApp}
+                onChange={(app) => {
+                  setActiveApp(app);
+                  setSearch("");
                 }}
-                className={`min-h-10 rounded-md px-3 text-xs ${mode === value ? "bg-oai-white shadow-sm dark:bg-oai-gray-700" : "text-oai-gray-500"}`}
-              >
-                {copy(`clisessions.group.${value}`)}
-              </button>
-            ))}
+                label={copy("clisessions.title")}
+                panelId="cli-sessions-panel"
+              />
+            ) : null}
+            {apps !== null && availableApps.length === 0 ? (
+              <span className="py-2 text-xs text-oai-gray-500">
+                {copy("clisessions.no_apps")}
+              </span>
+            ) : null}
           </div>
-          <span
-            role="status"
-            className="text-xs tabular-nums text-oai-gray-500"
-          >
-            {sessions !== null
-              ? copy("clisessions.count", { count: filtered.length })
-              : ""}
-          </span>
+          <div className="mb-4 flex flex-wrap items-center gap-3">
+            <div className="relative min-w-0 flex-1 basis-48">
+              <Search
+                size={15}
+                className="pointer-events-none absolute left-3 top-3 text-oai-gray-500"
+              />
+              <Input
+                aria-label={copy("clisessions.search")}
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder={copy("clisessions.search")}
+                className="h-10 w-full pl-9"
+              />
+            </div>
+            <div className="inline-flex shrink-0 rounded-lg bg-oai-gray-100 p-0.5 dark:bg-oai-gray-800">
+              {["project", "time"].map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  aria-pressed={mode === value}
+                  onClick={() => {
+                    setMode(value);
+                    writePreference(SESSION_PREFS.group, value);
+                  }}
+                  className={`min-h-10 rounded-md px-3 text-xs font-medium transition-colors ${mode === value ? "bg-oai-white shadow-sm dark:bg-oai-gray-700" : "text-oai-gray-600 hover:text-oai-black dark:text-oai-gray-400 dark:hover:text-oai-white"}`}
+                >
+                  {copy(`clisessions.group.${value}`)}
+                </button>
+              ))}
+            </div>
+            <span
+              role="status"
+              className="text-xs tabular-nums text-oai-gray-500"
+            >
+              {sessions !== null
+                ? copy("clisessions.count", { count: filtered.length })
+                : ""}
+            </span>
+          </div>
+          {listError ? (
+            <p role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+              {listError}
+            </p>
+          ) : null}
         </div>
-        {listError ? (
-          <p role="alert" className="px-4 pb-3 text-sm text-red-600 sm:px-6">
-            {listError}
-          </p>
-        ) : null}
+        <div
+          id="cli-sessions-panel"
+          role={availableApps.length > 0 ? "tabpanel" : undefined}
+          aria-labelledby={availableApps.length > 0 ? `cli-sessions-panel-${activeApp}` : undefined}
+          className="flex min-h-64 flex-1 flex-col overflow-hidden rounded-xl border border-oai-gray-200 bg-oai-white dark:border-oai-gray-800 dark:bg-oai-gray-900"
+        >
+          {!selected && (sessions === null || filtered.length === 0) ? (
+            <div className="px-5 py-16 text-center text-sm text-oai-gray-600 dark:text-oai-gray-400">
+              <History size={28} className="mx-auto mb-4 text-oai-gray-400 dark:text-oai-gray-500" aria-hidden />
+              {copy(
+                sessions === null
+                  ? "clisessions.loading"
+                  : query
+                    ? "clisessions.no_matches"
+                    : "clisessions.empty",
+              )}
+            </div>
+          ) : null}
+          <SessionList
+            sessions={filtered}
+            query={query}
+            mode={mode}
+            hidden={Boolean(selected)}
+            onOpen={openSession}
+            onCopy={handleCopy}
+          />
+        </div>
       </div>
-      {!selected && (sessions === null || filtered.length === 0) ? (
-        <div className="px-5 py-16 text-center text-sm text-oai-gray-400">
-          <History size={28} className="mx-auto mb-3" />
-          {copy(
-            sessions === null
-              ? "clisessions.loading"
-              : query
-                ? "clisessions.no_matches"
-                : "clisessions.empty",
-          )}
-        </div>
-      ) : null}
-      <SessionList
-        sessions={filtered}
-        query={query}
-        mode={mode}
-        hidden={Boolean(selected)}
-        onOpen={openSession}
-        onCopy={handleCopy}
-      />
       {selected ? (
         <SessionReader
           key={sessionKey(selected)}

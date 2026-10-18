@@ -12,18 +12,18 @@ export function Card({
   bodyClassName = "",
 }) {
   return (
-    <div className={cn("rounded-xl border border-oai-gray-200 dark:border-oai-gray-800 bg-white dark:bg-oai-gray-900 transition-colors duration-200", className)}>
+    <div className={cn("min-w-0 rounded-xl border border-oai-gray-200 bg-oai-white dark:border-oai-gray-800 dark:bg-oai-gray-900", className)}>
       {(title || subtitle) && (
-        <div className="px-5 py-4 border-b border-oai-gray-200 dark:border-oai-gray-800 transition-colors duration-200">
+        <div className="border-b border-oai-gray-200 px-4 py-4 dark:border-oai-gray-800 sm:px-5">
           {title && (
-            <h3 className="text-sm font-medium text-oai-gray-500 dark:text-oai-gray-300 uppercase tracking-wide transition-colors duration-200">{title}</h3>
+            <h3 className="text-sm font-semibold text-oai-gray-800 dark:text-oai-gray-200">{title}</h3>
           )}
           {subtitle && (
             <p className="text-sm text-oai-gray-500 dark:text-oai-gray-300 mt-1 transition-colors duration-200">{subtitle}</p>
           )}
         </div>
       )}
-      <div className={`p-5 ${bodyClassName}`}>{children}</div>
+      <div className={cn("p-4 sm:p-5", bodyClassName)}>{children}</div>
     </div>
   );
 }

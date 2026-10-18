@@ -26,15 +26,15 @@ export function PageTabs({ options, value, onChange, label, panelId }) {
     event.preventDefault();
     const next = options[nextIndex].id;
     onChange(next);
-    buttons.current.get(next)?.focus();
+    buttons.current.get(next)?.focus({ preventScroll: true });
   };
   return (
-    <div ref={track} role="tablist" aria-label={label} className="relative flex w-fit max-w-full shrink-0 overflow-x-auto rounded-xl border border-oai-gray-200 bg-oai-gray-50 p-1 dark:border-oai-gray-800 dark:bg-oai-gray-800/60">
+    <div ref={track} role="tablist" aria-label={label} className="relative flex w-fit max-w-full shrink-0 gap-1 overflow-x-auto rounded-xl border border-oai-gray-200 bg-oai-gray-100/70 p-1 dark:border-oai-gray-800 dark:bg-oai-gray-900">
       {options.map(({ id, label: text, icon: Icon }, index) => (
         <button key={id} ref={(node) => { if (node) buttons.current.set(id, node); else buttons.current.delete(id); }}
           id={panelId ? `${panelId}-${id}` : undefined} aria-controls={panelId} type="button" role="tab" aria-selected={value === id} tabIndex={value === id ? 0 : -1}
           onClick={() => onChange(id)} onKeyDown={(event) => onKeyDown(event, index)}
-          className={`inline-flex min-h-10 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-oai-brand-500 sm:min-h-8 ${value === id ? "bg-white text-oai-black shadow-sm dark:bg-oai-gray-900 dark:text-white" : "text-oai-gray-500 hover:text-oai-black dark:text-oai-gray-400 dark:hover:text-white"}`}>
+          className={`inline-flex min-h-10 shrink-0 items-center gap-2 whitespace-nowrap rounded-lg px-3 text-sm font-medium transition-colors duration-150 motion-reduce:transition-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-oai-brand-500 ${value === id ? "bg-oai-white text-oai-brand-700 shadow-sm dark:bg-oai-gray-800 dark:text-oai-brand-300" : "text-oai-gray-600 hover:bg-oai-gray-200/60 hover:text-oai-black dark:text-oai-gray-400 dark:hover:bg-oai-gray-800/60 dark:hover:text-oai-white"}`}>
           {Icon ? <Icon className="h-4 w-4 shrink-0" /> : null}{text}
         </button>
       ))}

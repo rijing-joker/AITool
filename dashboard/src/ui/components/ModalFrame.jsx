@@ -11,7 +11,7 @@ export function ModalFrame({ open, onClose, busy = false, label, children, class
         <Dialog.Viewport className="fixed inset-0 z-[101] flex items-center justify-center p-3 sm:p-4">
           <Dialog.Popup
             aria-label={label}
-            className={cn("flex max-h-[92dvh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-oai-gray-200 dark:bg-oai-gray-950 dark:ring-oai-gray-800", className)}
+            className={cn("flex max-h-[92dvh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-oai-white shadow-2xl ring-1 ring-oai-gray-200 dark:bg-oai-gray-900 dark:ring-oai-gray-700", className)}
           >
             {children}
           </Dialog.Popup>

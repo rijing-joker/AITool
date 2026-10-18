@@ -10,10 +10,10 @@ import { cn } from "../../lib/cn";
 // which renders it above the page so it escapes ancestor `overflow` clipping.
 
 const TRIGGER_BASE =
-  "relative inline-flex items-center justify-between gap-2 rounded-lg border " +
-  "border-oai-gray-200 bg-white text-oai-black transition-colors " +
+  "relative inline-flex h-10 items-center justify-between gap-2 rounded-lg border px-3 text-sm " +
+  "border-oai-gray-200 bg-oai-white text-oai-black transition-colors " +
   "hover:border-oai-gray-300 focus:outline-none focus-visible:ring-2 " +
-  "focus-visible:ring-oai-brand-500 dark:border-oai-gray-800 " +
+  "focus-visible:ring-inset focus-visible:ring-oai-brand-500 dark:border-oai-gray-700 " +
   "dark:bg-oai-gray-900 dark:text-white dark:hover:border-oai-gray-700";
 
 /**
@@ -78,14 +78,14 @@ export function Select({
           align={align}
           side="bottom"
           sideOffset={4}
-          className="z-50"
+          className="z-[120]"
         >
           <BaseSelect.Popup
             className={cn(
               "max-h-[min(18rem,var(--available-height))] origin-[var(--transform-origin)] overflow-y-auto",
-              "rounded-xl border border-oai-gray-200 bg-white p-1 shadow-lg ring-1 ring-black/[0.04]",
-              "dark:border-oai-gray-700 dark:bg-oai-gray-900 dark:ring-white/[0.05]",
-              "transition-[opacity,transform] duration-150 ease-out",
+              "rounded-xl border border-oai-gray-200 bg-oai-white p-1 shadow-lg",
+              "dark:border-oai-gray-700 dark:bg-oai-gray-900",
+              "transition-[opacity,transform] duration-150 ease-out motion-reduce:transition-none",
               "data-[starting-style]:scale-95 data-[starting-style]:opacity-0",
               "data-[ending-style]:scale-95 data-[ending-style]:opacity-0",
               matchTriggerWidth && "min-w-[var(--anchor-width)]",
@@ -100,8 +100,8 @@ export function Select({
                   disabled={opt.disabled}
                   className={({ selected, disabled: itemDisabled }) =>
                     cn(
-                      "flex w-full cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-lg py-1.5 pl-1.5 pr-6",
-                      "text-left text-xs outline-none transition-colors",
+                      "flex min-h-10 w-full cursor-pointer items-center gap-2 whitespace-nowrap rounded-lg py-2 pl-2 pr-6",
+                      "text-left text-sm outline-none transition-colors data-[highlighted]:bg-oai-gray-100 dark:data-[highlighted]:bg-oai-gray-800",
                       selected
                         ? "bg-oai-gray-100 text-oai-black dark:bg-oai-gray-800/70 dark:text-white"
                         : "text-oai-gray-600 hover:bg-oai-gray-50 dark:text-oai-gray-300 dark:hover:bg-oai-gray-800/60",

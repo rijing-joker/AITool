@@ -153,10 +153,10 @@ function NavItem({ item, collapsed, active, onClick }) {
       aria-label={collapsed ? item.label : undefined}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "flex items-center gap-2 rounded-md px-2 py-1.5 text-[13px] no-underline transition-colors",
+        "flex min-h-10 items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] no-underline transition-colors duration-150 motion-reduce:transition-none",
         collapsed && "justify-center px-0 py-2",
         active
-          ? "bg-oai-gray-200/70 text-oai-black font-medium dark:bg-oai-gray-800 dark:text-white"
+          ? "bg-oai-brand-100/70 text-oai-brand-800 font-medium dark:bg-oai-brand-950/60 dark:text-oai-brand-300"
           : "text-oai-gray-600 dark:text-oai-gray-400 hover:bg-oai-gray-200/50 hover:text-oai-black dark:hover:bg-oai-gray-800/60 dark:hover:text-white",
       )}
     >
@@ -651,7 +651,7 @@ export function AppLayout({ children }) {
         <div className="flex-1 min-w-0 min-h-0 p-2 lg:pl-0 lg:pr-3 lg:pb-3 flex flex-col">
           <div
             className={cn(
-              "flex-1 min-h-0 flex flex-col bg-oai-white dark:bg-oai-gray-900 border border-oai-gray-200 dark:border-oai-gray-800 overflow-hidden",
+              "flex-1 min-h-0 flex flex-col bg-oai-gray-50 dark:bg-oai-gray-950 border border-oai-gray-200 dark:border-oai-gray-800 overflow-hidden",
               nativeEmbed ? "tt-native-main-card" : "rounded-2xl",
               !nativeEmbed && "shadow-sm",
             )}

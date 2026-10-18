@@ -6,8 +6,8 @@ import { cn } from "../../lib/cn";
  *
  * @param {Object} props
  * @param {React.ReactNode} props.children - 按钮内容
- * @param {'primary'|'secondary'|'ghost'} [props.variant='primary'] - 按钮变体
- * @param {'sm'|'md'|'lg'} [props.size='md'] - 按钮尺寸
+ * @param {'primary'|'secondary'|'ghost'|'danger'} [props.variant='primary'] - 按钮变体
+ * @param {'sm'|'md'|'lg'|'icon'} [props.size='md'] - 按钮尺寸
  * @param {function} [props.onClick] - 点击事件处理函数
  * @param {boolean} [props.disabled=false] - 是否禁用
  * @param {string} [props.className] - 额外的 CSS 类名
@@ -24,21 +24,24 @@ export function Button({
   ...props
 }) {
   const baseStyles =
-    "inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap font-medium transition-all duration-200 motion-reduce:transition-none rounded-lg focus:outline-none focus:ring-2 focus:ring-oai-blue/30 active:scale-[0.98] active:duration-100";
+    "inline-flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-lg border font-medium transition-colors duration-150 motion-reduce:transition-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-oai-brand-500 disabled:pointer-events-none";
 
   const variantStyles = {
     primary:
-      "bg-oai-black dark:bg-oai-white text-white dark:text-oai-black border border-transparent hover:bg-oai-gray-800 dark:hover:bg-oai-gray-200 active:bg-oai-gray-900 dark:active:bg-oai-gray-300 disabled:bg-oai-gray-300 dark:disabled:bg-oai-gray-700 disabled:text-oai-gray-500 dark:disabled:text-oai-gray-400 focus:ring-oai-brand/30 transition-colors duration-200",
+      "border-transparent bg-oai-brand-700 text-oai-white hover:bg-oai-brand-800 active:bg-oai-brand-900 focus-visible:outline-oai-white focus-visible:outline-offset-[-4px]",
     secondary:
-      "bg-oai-white dark:bg-oai-gray-900 text-oai-black dark:text-oai-white border border-oai-gray-300 dark:border-oai-gray-700 hover:border-oai-brand hover:text-oai-brand active:bg-oai-gray-50 dark:active:bg-oai-gray-800 active:border-oai-brand-dark disabled:text-oai-gray-400 dark:disabled:text-oai-gray-500 disabled:border-oai-gray-200 dark:disabled:border-oai-gray-700 focus:ring-oai-brand/30 transition-colors duration-200",
+      "border-oai-gray-200 bg-oai-white text-oai-gray-700 hover:border-oai-gray-300 hover:bg-oai-gray-100 active:bg-oai-gray-200 dark:border-oai-gray-700 dark:bg-oai-gray-900 dark:text-oai-gray-200 dark:hover:bg-oai-gray-800 dark:active:bg-oai-gray-700",
     ghost:
-      "bg-transparent text-oai-gray-600 dark:text-oai-gray-300 border border-transparent hover:text-oai-brand hover:bg-oai-brand-50/50 dark:hover:bg-oai-brand-950/30 active:bg-oai-brand-50 dark:active:bg-oai-brand-900/50 disabled:text-oai-gray-400 dark:disabled:text-oai-gray-500 focus:ring-oai-brand/30 transition-colors duration-200",
+      "border-transparent bg-transparent text-oai-gray-600 hover:bg-oai-gray-100 hover:text-oai-black active:bg-oai-gray-200 dark:text-oai-gray-400 dark:hover:bg-oai-gray-800 dark:hover:text-oai-white dark:active:bg-oai-gray-700",
+    danger:
+      "border-red-200 bg-red-50 text-red-700 hover:bg-red-100 active:bg-red-200 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-950 dark:active:bg-red-900",
   };
 
   const sizeStyles = {
-    sm: "h-10 sm:h-8 px-3 text-sm",
+    sm: "h-10 sm:h-9 px-3 text-sm",
     md: "h-10 px-4 text-sm",
     lg: "h-12 px-6 text-base",
+    icon: "h-10 w-10 p-0 text-sm",
   };
 
   const disabledStyles = disabled

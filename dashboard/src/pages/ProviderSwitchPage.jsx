@@ -76,7 +76,7 @@ const APPS = [
 function SectionTitle({ children, action = null }) {
   return (
     <div className="mb-3 flex items-center justify-between gap-3">
-      <h2 className="text-sm font-semibold text-oai-gray-500 dark:text-oai-gray-400">{children}</h2>
+      <h2 className="text-sm font-semibold text-oai-gray-800 dark:text-oai-gray-200">{children}</h2>
       {action}
     </div>
   );
@@ -350,16 +350,16 @@ function SortableProviderCard({ app, provider, isCurrent, busy, dragLabel, coold
     <div
       ref={setNodeRef}
       style={style}
-      className={`rounded-xl border bg-white px-4 py-3.5 transition-colors dark:bg-oai-gray-900 ${
+      className={`rounded-xl border bg-oai-white p-4 transition-colors dark:bg-oai-gray-900 ${
         isCurrent
-          ? "border-oai-brand-500 ring-1 ring-oai-brand-500/30"
-          : "border-oai-gray-200 dark:border-oai-gray-800"
+          ? "border-oai-brand-500 dark:border-oai-brand-700"
+          : "border-oai-gray-200 hover:border-oai-gray-300 dark:border-oai-gray-800 dark:hover:border-oai-gray-700"
       } ${isDragging ? "shadow-lg" : ""}`}
     >
       <div className="flex flex-wrap items-start gap-3 sm:flex-nowrap">
         <button
           type="button"
-          className="-ml-1 mt-0.5 cursor-grab touch-none rounded-md p-1 text-oai-gray-300 transition-colors hover:bg-oai-gray-100 hover:text-oai-gray-500 active:cursor-grabbing disabled:opacity-40 dark:text-oai-gray-600 dark:hover:bg-oai-gray-800 dark:hover:text-oai-gray-300"
+          className="-ml-2 flex h-10 w-10 shrink-0 cursor-grab touch-none items-center justify-center rounded-lg text-oai-gray-400 transition-colors hover:bg-oai-gray-100 hover:text-oai-gray-600 active:cursor-grabbing disabled:opacity-40 dark:text-oai-gray-500 dark:hover:bg-oai-gray-800 dark:hover:text-oai-gray-300"
           disabled={busy}
           aria-label={dragLabel}
           title={dragLabel}
@@ -424,13 +424,13 @@ function SortableProviderCard({ app, provider, isCurrent, busy, dragLabel, coold
           >
             {copy("pswitch.action.switch")}
           </Button>
-          <Button variant="ghost" size="sm" aria-label={copy("pswitch.action.edit")} onClick={onEdit}>
+          <Button variant="ghost" size="icon" aria-label={copy("pswitch.action.edit")} disabled={busy} onClick={onEdit}>
             <Pencil className="h-4 w-4" />
           </Button>
-          <Button variant="ghost" size="sm" aria-label={copy("pswitch.action.duplicate")} onClick={onDuplicate}>
+          <Button variant="ghost" size="icon" aria-label={copy("pswitch.action.duplicate")} disabled={busy} onClick={onDuplicate}>
             <Copy className="h-4 w-4" />
           </Button>
-          <Button variant="ghost" size="sm" aria-label={copy("pswitch.action.delete")} onClick={onDelete}>
+          <Button variant="ghost" size="icon" aria-label={copy("pswitch.action.delete")} disabled={busy} onClick={onDelete}>
             <Trash2 className="h-4 w-4 text-red-500 dark:text-red-400" />
           </Button>
         </div>
@@ -870,7 +870,7 @@ export function ProviderSwitchPage() {
         />
       ) : null}
 
-      {!utilityEditor.open ? <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+      {!utilityEditor.open ? <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <PageTabs
           options={[
             ...visibleApps.map((item) => ({ ...item, label: copy(item.labelKey) })),
@@ -884,10 +884,10 @@ export function ProviderSwitchPage() {
           panelId="provider-panel"
         />
         {!isUtilityTab ? (
-          <div className="flex items-center gap-2">
+          <div className="flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto">
             <Button
               variant={searchOpen ? "primary" : "secondary"}
-              size="sm"
+              size="icon"
               aria-label={copy("pswitch.search.toggle_aria")}
               aria-expanded={searchOpen}
               title={copy("pswitch.search.toggle_aria")}

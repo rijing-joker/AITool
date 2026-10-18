@@ -23,7 +23,7 @@ import { proxyApi } from "../lib/proxy-api";
 import { useVisiblePolling } from "../hooks/use-visible-polling";
 import { PageHeader } from "../ui/components/PageHeader";
 import { PageTabs } from "../ui/components/PageTabs";
-import { ConfirmModal } from "../ui/components";
+import { Button, Card, ConfirmModal } from "../ui/components";
 import { showToast } from "../ui/components/Toast";
 import { UpstreamsTab } from "./upstreams-tab";
 import { AuthFilesTab } from "./auth-files-tab";
@@ -76,16 +76,6 @@ function StatusDot({ state }) {
   );
 }
 
-function Card({ children, className = "" }) {
-  return (
-    <div
-      className={`rounded-xl border border-oai-gray-200 dark:border-oai-gray-800 bg-white dark:bg-oai-gray-900 p-4 sm:p-5 ${className}`}
-    >
-      {children}
-    </div>
-  );
-}
-
 const compactTokens = new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 });
 const fullTokens = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
 
@@ -99,13 +89,13 @@ function formatLatency(ms) {
   return `${Math.round(ms)} ms`;
 }
 
-function MetricTile({ label, value, hint, tone }) {
+function MetricTile({ label, value, hint, tone, className = "" }) {
   return (
-    <Card className="!p-3 sm:!p-4">
-      <p className="text-xs font-semibold tracking-wide text-oai-gray-500 dark:text-oai-gray-400">{label}</p>
-      <p className={`mt-1.5 text-2xl font-semibold tabular-nums tracking-tight ${tone ?? ""}`}>{value}</p>
+    <div className={`min-w-0 bg-oai-white p-4 dark:bg-oai-gray-900 sm:p-5 ${className}`}>
+      <dt className="text-xs font-medium text-oai-gray-600 dark:text-oai-gray-400">{label}</dt>
+      <dd className={`mt-2 break-words text-2xl font-semibold tabular-nums tracking-tight ${tone ?? ""}`}>{value}</dd>
       {hint ? <p className="mt-1 text-xs text-oai-gray-400 dark:text-oai-gray-500">{hint}</p> : null}
-    </Card>
+    </div>
   );
 }
 
@@ -123,8 +113,8 @@ function CopyButton({ text }) {
   const timeout = useRef(null);
   useEffect(() => { return () => { clearTimeout(timeout.current); }; }, []);
   return (
-    <button
-      type="button"
+    <Button
+      type="button" variant="ghost" size="icon"
       aria-label={copy("proxy.action.copy")}
       title={copy("proxy.action.copy")}
       onClick={async () => {
@@ -139,10 +129,9 @@ function CopyButton({ text }) {
         clearTimeout(timeout.current);
         timeout.current = setTimeout(() => setCopied(false), 1200);
       }}
-      className="inline-flex h-10 w-10 sm:h-7 sm:w-7 shrink-0 items-center justify-center rounded-md text-oai-gray-400 hover:bg-oai-gray-100 dark:hover:bg-oai-gray-800 hover:text-oai-black dark:hover:text-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500"
     >
       {copied ? <Check className="h-3.5 w-3.5 text-oai-brand-600" /> : <CopyIcon className="h-3.5 w-3.5" />}
-    </button>
+    </Button>
   );
 }
 
@@ -235,49 +224,46 @@ function OverviewTab({ status, statusError, onRefresh, onInstallCore, onSelectTa
               {status ? (status.core.installed ? copy("proxy.core.installed_hint") : copy("proxy.core.missing_hint")) : copy("proxy.status.waiting")}
             </p>
             {running ? (
-              <div className="mt-2.5 flex items-center gap-1.5 text-sm">
+              <div className="mt-2.5 flex min-w-0 flex-wrap items-center gap-1.5 text-sm">
                 <span className="text-oai-gray-500 dark:text-oai-gray-400">{copy("proxy.core.endpoint")}:</span>
-                <code className="rounded bg-oai-gray-100 dark:bg-oai-gray-800 px-1.5 py-0.5 font-mono text-xs">{endpoint}</code>
+                <code className="min-w-0 break-all rounded bg-oai-gray-100 dark:bg-oai-gray-800 px-1.5 py-0.5 font-mono text-xs">{endpoint}</code>
                 <CopyButton text={endpoint} />
               </div>
             ) : null}
           </div>
           <div className="flex items-center gap-2">
             {!status ? null : !status.core.installed ? (
-              <button
+              <Button
                 type="button"
                 onClick={onInstallCore}
                 disabled={!!statusError}
-                className="inline-flex h-10 items-center gap-1.5 rounded-lg bg-oai-brand-600 px-3.5 text-sm font-medium text-white transition-colors hover:bg-oai-brand-700 disabled:opacity-50"
               >
                 <Upload className="h-4 w-4" />
                 {copy("proxy.action.install_core")}
-              </button>
+              </Button>
             ) : (
               <>
                 {running ? (
-                  <button
+                  <Button
                     type="button"
+                    variant="secondary" size="icon"
                     onClick={() => void restartCore()}
                     disabled={actionBusy || !!statusError}
                     title={copy("proxy.action.restart")}
                     aria-label={copy("proxy.action.restart")}
-                    className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-oai-gray-200 text-oai-gray-600 transition-colors hover:bg-oai-gray-100 disabled:opacity-50 dark:border-oai-gray-700 dark:text-oai-gray-300 dark:hover:bg-oai-gray-800"
                   >
                     <RefreshCw className="h-4 w-4" />
-                  </button>
+                  </Button>
                 ) : null}
-                <button
+                <Button
                   type="button"
+                  variant={running ? "danger" : "primary"}
                   onClick={() => void toggleCore()}
                   disabled={actionBusy || !!statusError}
-                  className={`inline-flex h-10 items-center gap-1.5 rounded-lg px-3.5 text-sm font-medium text-white transition-colors disabled:opacity-50 ${
-                    running ? "bg-red-600 hover:bg-red-700" : "bg-oai-brand-600 hover:bg-oai-brand-700"
-                  }`}
                 >
                   {running ? <PauseCircle className="h-4 w-4" /> : <PlayCircle className="h-4 w-4" />}
                   {running ? copy("proxy.action.stop") : copy("proxy.action.start")}
-                </button>
+                </Button>
               </>
             )}
           </div>
@@ -306,7 +292,7 @@ function OverviewTab({ status, statusError, onRefresh, onInstallCore, onSelectTa
         ) : null}
       </Card>
 
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+      <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-oai-gray-200 bg-oai-gray-200 dark:border-oai-gray-800 dark:bg-oai-gray-800 md:grid-cols-5">
         <MetricTile label={copy("proxy.metric.requests")} value={overview ? fullTokens.format(overview.total_requests) : "—"} />
         <MetricTile
           label={copy("proxy.metric.success_rate")}
@@ -315,16 +301,16 @@ function OverviewTab({ status, statusError, onRefresh, onInstallCore, onSelectTa
         />
         <MetricTile label={copy("proxy.metric.rpm")} value={overview ? overview.rpm.toFixed(1) : "—"} />
         <MetricTile label={copy("proxy.metric.tpm")} value={formatTokens(overview?.tpm)} />
-        <MetricTile label={copy("proxy.metric.avg_latency")} value={formatLatency(overview?.average_latency_ms)} />
-      </div>
+        <MetricTile className="col-span-2 md:col-span-1" label={copy("proxy.metric.avg_latency")} value={formatLatency(overview?.average_latency_ms)} />
+      </dl>
 
       {overview?.total_requests === 0 && running && !statusError ? (
         <Card>
           <p className="text-sm font-semibold">{copy("proxy.setup.title")}</p>
           <p className="mt-1 text-sm text-oai-gray-500 dark:text-oai-gray-400">{copy("proxy.setup.description")}</p>
           <div className="mt-3 flex flex-wrap gap-2">
-            <button type="button" className="rounded-lg bg-oai-brand-600 px-3 py-2 text-sm font-medium text-white" onClick={() => onSelectTab("upstreams")}>{copy("proxy.setup.upstream")}</button>
-            <button type="button" className="rounded-lg border border-oai-gray-200 px-3 py-2 text-sm dark:border-oai-gray-700" onClick={() => onSelectTab("keys")}>{copy("proxy.setup.connect")}</button>
+            <Button type="button" onClick={() => onSelectTab("upstreams")}>{copy("proxy.setup.upstream")}</Button>
+            <Button type="button" variant="secondary" onClick={() => onSelectTab("keys")}>{copy("proxy.setup.connect")}</Button>
           </div>
         </Card>
       ) : null}
@@ -358,14 +344,14 @@ function OverviewTab({ status, statusError, onRefresh, onInstallCore, onSelectTa
             {copy("proxy.metric.by_model")}
           </p>
           {overview?.models.length ? (
-            <table className="mt-3 w-full text-left text-xs">
+            <table className="mt-3 w-full table-fixed text-left text-xs">
               <thead>
                 <tr className="text-oai-gray-500 dark:text-oai-gray-400">
-                  <th className="py-1 font-semibold">{copy("proxy.requests.model")}</th>
+                  <th className="w-2/5 py-1 font-semibold">{copy("proxy.requests.model")}</th>
                   <th className="py-1 text-right font-semibold">{copy("proxy.requests.tokens")}</th>
                   <th className="py-1 text-right font-semibold">{copy("proxy.metric.requests")}</th>
-                  <th className="py-1 text-right font-semibold">{copy("proxy.metric.success_rate")}</th>
-                  <th className="py-1 text-right font-semibold" title={copy("proxy.metric.speed_hint")}>{copy("proxy.metric.speed")}</th>
+                  <th className="hidden py-1 text-right font-semibold sm:table-cell">{copy("proxy.metric.success_rate")}</th>
+                  <th className="hidden py-1 text-right font-semibold sm:table-cell" title={copy("proxy.metric.speed_hint")}>{copy("proxy.metric.speed")}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-oai-gray-100 dark:divide-oai-gray-800">
@@ -380,11 +366,11 @@ function OverviewTab({ status, statusError, onRefresh, onInstallCore, onSelectTa
                     : successRateTone(model.success_rate);
                   return (
                     <tr key={model.model} className="text-oai-gray-700 dark:text-oai-gray-300">
-                      <td className="max-w-0 truncate py-1.5 font-mono text-xs" title={model.model}>{model.model}</td>
+                      <td className="break-words py-2 pr-3 font-mono text-xs [overflow-wrap:anywhere]" title={model.model}>{model.model}</td>
                       <td className="py-1.5 text-right tabular-nums text-oai-gray-500 dark:text-oai-gray-400" title={cacheTitle}>{formatTokens(model.total_tokens)}</td>
                       <td className="py-1.5 text-right tabular-nums text-oai-gray-500 dark:text-oai-gray-400">{model.requests}</td>
-                      <td className={`py-1.5 text-right tabular-nums ${rateTone}`}>{model.success_rate == null ? "—" : `${model.success_rate}%`}</td>
-                      <td className="py-1.5 text-right tabular-nums text-oai-gray-500 dark:text-oai-gray-400">{speed ?? "—"}</td>
+                      <td className={`hidden py-1.5 text-right tabular-nums sm:table-cell ${rateTone}`}>{model.success_rate == null ? "—" : `${model.success_rate}%`}</td>
+                      <td className="hidden py-1.5 text-right tabular-nums text-oai-gray-500 dark:text-oai-gray-400 sm:table-cell">{speed ?? "—"}</td>
                     </tr>
                   );
                 })}

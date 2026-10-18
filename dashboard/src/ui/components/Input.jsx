@@ -1,4 +1,5 @@
 import React, { useId } from "react";
+import { cn } from "../../lib/cn";
 
 /**
  * Input - OpenAI 风格的输入框组件
@@ -31,17 +32,17 @@ export function Input({
   const errorId = error ? `${inputId}-error` : undefined;
 
   const baseStyles =
-    "w-full bg-oai-white dark:bg-oai-gray-900 border border-oai-gray-300 dark:border-oai-gray-700 rounded-md text-oai-black dark:text-oai-white placeholder-oai-gray-400 dark:placeholder-oai-gray-500 transition-all duration-200 focus:outline-none focus:border-oai-brand dark:focus:border-oai-brand focus:ring-1 focus:ring-oai-brand/30";
+    "h-10 w-full rounded-lg border border-oai-gray-200 bg-oai-white px-3 text-sm text-oai-black placeholder:text-oai-gray-500 transition-colors duration-150 motion-reduce:transition-none hover:border-oai-gray-300 focus:border-oai-brand-600 focus:ring-2 focus:ring-inset focus:ring-oai-brand-600/20 dark:border-oai-gray-700 dark:bg-oai-gray-900 dark:text-oai-white dark:placeholder:text-oai-gray-400 dark:hover:border-oai-gray-600 dark:focus:border-oai-brand-500";
 
   const disabledStyles = disabled
     ? "bg-oai-gray-50 dark:bg-oai-gray-800 text-oai-gray-400 dark:text-oai-gray-400 cursor-not-allowed"
     : "";
 
   const errorStyles = error
-    ? "border-oai-error focus:border-oai-error focus:ring-oai-error/30"
+    ? "border-oai-error focus:border-oai-error focus:ring-oai-error/30 dark:border-oai-error dark:focus:border-oai-error"
     : "";
 
-  const mergedClassName = `${baseStyles} ${disabledStyles} ${errorStyles} h-10 px-3 text-sm ${className}`;
+  const mergedClassName = cn(baseStyles, disabledStyles, errorStyles, className);
 
   return (
     <div className="w-full">

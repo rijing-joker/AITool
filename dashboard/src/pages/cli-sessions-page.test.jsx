@@ -281,7 +281,7 @@ it.each([
     render(<CliSessionsPage />);
     await screen.findByText(session.title);
     fireEvent.click(screen.getByLabelText("clisessions.refresh"));
-    fireEvent.click(screen.getByRole("button", { name: "pswitch.tab.codex" }));
+    fireEvent.click(screen.getByRole("tab", { name: "pswitch.tab.codex" }));
 
     if (order === "before") {
       await act(async () => {
@@ -298,8 +298,8 @@ it.each([
         finishRefresh();
       });
     expect(
-      screen.getByRole("button", { name: "pswitch.tab.codex" }),
-    ).toHaveAttribute("aria-pressed", "true");
+      screen.getByRole("tab", { name: "pswitch.tab.codex" }),
+    ).toHaveAttribute("aria-selected", "true");
     expect(screen.getByText(codexSession.title)).toBeInTheDocument();
     expect(screen.queryByText(session.title)).not.toBeInTheDocument();
     expect(screen.getByLabelText("clisessions.refresh")).not.toBeDisabled();

@@ -2,7 +2,7 @@ import React from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { maskIdentifier, maskSensitiveText } from "../lib/privacy-mask";
-import { setProxyPrivacy } from "../lib/proxy-privacy";
+import { ProxyPrivacyNotice, ProxyPrivacyToggle, setProxyPrivacy } from "../lib/proxy-privacy";
 import { managementApi } from "../lib/easy-providers";
 import { AuthFilesTab } from "./auth-files-tab";
 import { showToast } from "../ui/components/Toast";
@@ -11,6 +11,38 @@ vi.mock("../lib/copy", () => ({ copy: (key, vars) => vars ? `${key} ${JSON.strin
 vi.mock("../lib/local-api-auth", () => ({ getLocalApiAuthHeaders: async () => ({}) }));
 vi.mock("../ui/components/Toast", () => ({ showToast: vi.fn() }));
 afterEach(() => { cleanup(); setProxyPrivacy(false); vi.restoreAllMocks(); vi.clearAllMocks(); vi.unstubAllGlobals(); });
+
+it("shows the saved privacy state and a visible explanation after enabling", async () => {
+  const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true, enabled: false }) });
+  vi.stubGlobal("fetch", fetchMock);
+  render(<><ProxyPrivacyToggle /><ProxyPrivacyNotice /></>);
+  const button = await screen.findByRole("button", { name: "proxy.privacy.off" });
+  expect(button).toHaveAttribute("aria-pressed", "false");
+  expect(screen.queryByText("proxy.privacy.activeHint")).not.toBeInTheDocument();
+  await waitFor(() => expect(button).toBeEnabled());
+  fireEvent.click(button);
+  await waitFor(() => expect(button).toHaveTextContent("proxy.privacy.on"));
+  expect(button).toHaveAttribute("aria-pressed", "true");
+  expect(screen.getByRole("status")).toHaveTextContent("proxy.privacy.activeHint");
+  expect(screen.getByRole("status")).toHaveTextContent("proxy.privacy.example");
+  expect(JSON.parse(fetchMock.mock.calls.at(-1)[1].body)).toEqual({ enabled: true });
+  fireEvent.click(button);
+  await waitFor(() => expect(button).toHaveTextContent("proxy.privacy.off"));
+  expect(screen.queryByText("proxy.privacy.activeHint")).not.toBeInTheDocument();
+});
+
+it("retains the displayed privacy state when saving fails", async () => {
+  vi.stubGlobal("fetch", vi.fn()
+    .mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true, enabled: false }) })
+    .mockResolvedValueOnce({ ok: false, json: async () => ({ ok: false }) }));
+  render(<><ProxyPrivacyToggle /><ProxyPrivacyNotice /></>);
+  const button = await screen.findByRole("button", { name: "proxy.privacy.off" });
+  await waitFor(() => expect(button).toBeEnabled());
+  fireEvent.click(button);
+  await waitFor(() => expect(showToast).toHaveBeenCalledWith({ title: "proxy.privacy.saveFailed", type: "error" }));
+  expect(button).toHaveAttribute("aria-pressed", "false");
+  expect(screen.queryByText("proxy.privacy.activeHint")).not.toBeInTheDocument();
+});
 
 it("masks embedded identity variants, project IDs, emails and URL userinfo", () => {
   const identities = ["alice@example.com", "my-gcp-project-123456"];

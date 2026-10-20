@@ -1644,10 +1644,10 @@
   "proxy.alias.sourceHint": "소스 모델을 선택하면 추론 단계의 출처를 표시합니다.",
   "proxy.creds.copyFailed": "복사 실패",
   "proxy.requests.col.replay": "재테스트",
-  "proxy.requests.replay.action": "재테스트",
-  "proxy.requests.replay.running": "재테스트 중…",
+  "proxy.requests.replay.action": "이 업스트림 테스트",
+  "proxy.requests.replay.running": "업스트림 테스트 중…",
   "proxy.requests.replay.result": "업스트림 {{status}}",
-  "proxy.requests.replay.failed": "재테스트 실패",
+  "proxy.requests.replay.failed": "업스트림 테스트 실패",
   "proxy.requests.replay.no_credential": "현재 구성에서 자격 증명을 찾을 수 없습니다 (삭제되었거나 OAuth 계정)",
   "proxy.upstream.groups.summary": "공급자 그룹 {{count}}개",
   "proxy.upstream.groups.add": "그룹 추가",
@@ -1722,5 +1722,13 @@
   "proxy.accounts.count": "계정 {{count}}개",
   "proxy.accounts.more": "{{count}}개 더 보기",
   "pswitch.preset.badge.local": "로컬",
-  "pswitch.hint.local": "로컬 서버에 로드된 모델을 사용합니다. 필요에 따라 엔드포인트와 모델을 변경하세요."
+  "pswitch.hint.local": "로컬 서버에 로드된 모델을 사용합니다. 필요에 따라 엔드포인트와 모델을 변경하세요.",
+  "proxy.requests.detail.toggle": "{{model}} 상세 보기",
+  "proxy.requests.replay.hint": "이 기록의 모델과 업스트림 인증 정보로 최소 요청을 새로 보내 연결을 확인합니다. 할당량이 소모될 수 있으며 원래 요청을 재전송하지 않습니다.",
+  "proxy.requests.pagination.top": "목록 위 페이지 탐색",
+  "proxy.requests.pagination.bottom": "목록 아래 페이지 탐색",
+  "proxy.privacy.on": "개인정보 보호: 켜짐",
+  "proxy.privacy.off": "개인정보 보호: 꺼짐",
+  "proxy.privacy.activeHint": "개인정보 보호가 켜져 있습니다. 화면의 계정 이름, 이메일, ID가 가려집니다. 복사와 CSV 내보내기는 원래 값을 유지합니다.",
+  "proxy.privacy.example": "예: al***@e***.com"
 }

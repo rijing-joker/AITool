@@ -1,5 +1,6 @@
 import React from "react";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { RequestsTab } from "./requests-tab";
 import { setProxyPrivacy } from "../lib/proxy-privacy";
@@ -17,6 +18,10 @@ afterEach(() => { cleanup(); setProxyPrivacy(false); vi.useRealTimers(); vi.rest
 // requests specifically so assertions stay independent of that poll.
 function recordsCalls() {
   return fetch.mock.calls.filter(([url]) => String(url).includes("usage/records"));
+}
+async function chooseOption(label, option) {
+  await userEvent.click(screen.getByRole("combobox", { name: label }));
+  await userEvent.click(await screen.findByRole("option", { name: option }));
 }
 async function setup(overrides = {}) {
   if (Object.keys(overrides).length > 0) {
@@ -168,6 +173,9 @@ it.each([
   vi.spyOn(providerGroupsApi, "get").mockImplementation(async (section) => section === "codex-api-key" ? [group] : []);
   const post = vi.spyOn(managementApi, "post").mockResolvedValue({ status_code: 200, body: "replay succeeded" });
   await setup({ records: [{ ...response.records[0], auth_index: authIndex }] });
+  expect(screen.queryByRole("button", { name: "proxy.requests.replay.action" })).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "proxy.requests.detail.toggle" }));
+  expect(screen.getByText("proxy.requests.replay.hint")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "proxy.requests.replay.action" }));
   await waitFor(() => expect(post).toHaveBeenCalledTimes(1));
   const [endpoint, request, options] = post.mock.calls[0];
@@ -198,9 +206,8 @@ it("skips the stats recompute on page changes but keeps it for polls and filters
   await waitFor(() => expect(recordsCalls().length).toBeGreaterThanOrEqual(1));
   expect(includeParam(recordsCalls()[0])).toBe("1");
   // A page-size change loads without stats (identical aggregation).
-  await act(async () => {
-    fireEvent.change(screen.getByRole("combobox", { name: "proxy.requests.page_size", size: 50 }), { target: { value: "20" } });
-  });
+  await userEvent.click(screen.getByRole("combobox", { name: "proxy.requests.page_size" }));
+  await userEvent.click((await screen.findAllByRole("option", { name: "proxy.requests.page_size" }))[0]);
   await waitFor(() => expect(recordsCalls()).toHaveLength(recordsCalls().length));
   const last = recordsCalls()[recordsCalls().length - 1];
   expect(String(last[0])).toContain("pageSize=20");
@@ -273,7 +280,8 @@ it("restores the saved row height on mount and clamps bad values", async () => {
 it("remembers the chosen page size across mounts", async () => {
   clearDisplayPrefs();
   await setup();
-  fireEvent.change(screen.getByRole("combobox", { name: "proxy.requests.page_size" }), { target: { value: "100" } });
+  await userEvent.click(screen.getByRole("combobox", { name: "proxy.requests.page_size" }));
+  await userEvent.click((await screen.findAllByRole("option", { name: "proxy.requests.page_size" }))[2]);
   await waitFor(() => { expect(String(recordsCalls().at(-1)[0])).toContain("pageSize=100"); });
   expect(localStorage.getItem(PAGE_SIZE_KEY)).toBe("100");
   cleanup();
@@ -341,19 +349,37 @@ it("keeps the table actions in the footer next to the pagination", async () => {
   expect(footer).toContainElement(screen.getByRole("combobox", { name: "proxy.requests.page_size" }));
 });
 
+it("allows pagination above and below the list and resets the list scroll after loading", async () => {
+  await setup({ total: 150 });
+  const top = screen.getByRole("navigation", { name: "proxy.requests.pagination.top" });
+  const bottom = screen.getByRole("navigation", { name: "proxy.requests.pagination.bottom" });
+  const wrap = document.querySelector(".usage-table-wrap");
+  expect(within(top).getByRole("button", { name: "proxy.requests.prev" })).toBeDisabled();
+  wrap.scrollTop = 800;
+  await userEvent.click(within(top).getByRole("button", { name: "proxy.requests.next" }));
+  await waitFor(() => expect(recordsCalls().at(-1)[0]).toContain("page=1"));
+  await waitFor(() => expect(wrap.scrollTop).toBe(0));
+  expect(top).toHaveTextContent("2 / 3");
+  expect(bottom).toHaveTextContent("2 / 3");
+  await userEvent.click(within(bottom).getByRole("button", { name: "proxy.requests.prev" }));
+  await waitFor(() => expect(top).toHaveTextContent("1 / 3"));
+});
+
 it("refreshes filter labels while retaining exact key and upstream selections", async () => {
   let label = "Old note";
   fetch.mockImplementation(async () => ({ json: async () => ({ ...response, filterOptions: { keys: [{ key: "hash-a", label }], upstreams: [{ key: "auth:AccountA", label }], models: [], providers: [] } }) }));
   await setup();
-  fireEvent.change(screen.getByRole("combobox", { name: "proxy.requests.filter.key" }), { target: { value: "hash-a" } });
-  fireEvent.change(screen.getByRole("combobox", { name: "proxy.requests.filter.upstream" }), { target: { value: "auth:AccountA" } });
+  await chooseOption("proxy.requests.filter.key", label);
+  await chooseOption("proxy.requests.filter.upstream", label);
   await waitFor(() => expect(recordsCalls().at(-1)[0]).toContain("upstream=auth%3AAccountA"));
   await waitFor(() => expect(screen.getByRole("button", { name: "proxy.upstream.common.refresh" })).toBeEnabled());
   label = "Renamed note";
   fireEvent.click(screen.getByRole("button", { name: "proxy.upstream.common.refresh" }));
-  await waitFor(() => expect(screen.getAllByRole("option", { name: label })).toHaveLength(2));
-  expect(screen.getByRole("combobox", { name: "proxy.requests.filter.key" })).toHaveValue("hash-a");
-  expect(screen.getByRole("combobox", { name: "proxy.requests.filter.upstream" })).toHaveValue("auth:AccountA");
+  await waitFor(() => expect(screen.getByRole("combobox", { name: "proxy.requests.filter.key" })).toHaveTextContent(label));
+  expect(screen.getByRole("combobox", { name: "proxy.requests.filter.upstream" })).toHaveTextContent(label);
+  fireEvent.click(screen.getByRole("button", { name: "proxy.upstream.common.refresh" }));
+  await waitFor(() => expect(recordsCalls().at(-1)[0]).toContain("api_key_hash=hash-a"));
+  expect(recordsCalls().at(-1)[0]).toContain("upstream=auth%3AAccountA");
 });
 
 it("masks displayed errors but copies and exports the original details", async () => {
@@ -374,4 +400,36 @@ it("masks displayed errors but copies and exports the original details", async (
   vi.stubGlobal("URL", Object.assign(DownloadURL, { createObjectURL, revokeObjectURL: vi.fn() }));
   fireEvent.click(screen.getByRole("button", { name: "proxy.requests.export" }));
   expect(await createObjectURL.mock.calls[0][0].text()).toContain(failure);
+});
+
+
+it("opens complete request metadata inline and preserves it across refreshes", async () => {
+  const record = { ...response.records[0], endpoint: "/v1/responses", source_display: "Work account", api_key_remark: "Editor", tokens: { inputTokens: 120, outputTokens: 3, totalTokens: 123 } };
+  await setup({ records: [record] });
+  expect(screen.queryByRole("region", { name: "proxy.requests.detail.title" })).not.toBeInTheDocument();
+  const toggle = screen.getByRole("button", { name: "proxy.requests.detail.toggle" });
+  await userEvent.click(toggle);
+  expect(toggle).toHaveAttribute("aria-expanded", "true");
+  const detail = screen.getByRole("region", { name: "proxy.requests.detail.title" });
+  expect(detail.id).toBe(toggle.getAttribute("aria-controls"));
+  expect(within(detail).getByText("/v1/responses")).toBeInTheDocument();
+  expect(within(detail).getByText("proxy.requests.detail.input").nextElementSibling).toHaveTextContent("120");
+  await userEvent.click(screen.getByRole("button", { name: "proxy.upstream.common.refresh" }));
+  await waitFor(() => expect(showToast).toHaveBeenCalled());
+  expect(toggle).toHaveAttribute("aria-expanded", "true");
+  await userEvent.click(toggle);
+  expect(screen.queryByRole("region", { name: "proxy.requests.detail.title" })).not.toBeInTheDocument();
+});
+
+it("masks identities in expanded details while retaining the original error for copying", async () => {
+  setProxyPrivacy(true);
+  const failure = "Expired account alice@example.com";
+  const writeText = vi.fn().mockResolvedValue();
+  vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+  await setup({ records: [{ ...response.records[0], failed: true, failure_status: 401, failure_body: failure, source_display: "alice@example.com", api_key_remark: "alice@example.com" }] });
+  await userEvent.click(screen.getByRole("button", { name: "proxy.requests.detail.toggle" }));
+  const detail = screen.getByRole("region", { name: "proxy.requests.detail.title" });
+  expect(detail).not.toHaveTextContent("alice@example.com");
+  await userEvent.click(within(detail).getByRole("button", { name: "proxy.requests.copyError" }));
+  expect(writeText).toHaveBeenCalledWith(`HTTP 401 · ${failure}`);
 });

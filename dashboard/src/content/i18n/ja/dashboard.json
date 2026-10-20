@@ -1644,10 +1644,10 @@
   "proxy.alias.sourceHint": "ソースモデルを選択すると、その推論レベルの提供元が表示されます。",
   "proxy.creds.copyFailed": "コピーに失敗しました",
   "proxy.requests.col.replay": "再テスト",
-  "proxy.requests.replay.action": "再テスト",
-  "proxy.requests.replay.running": "再テスト中…",
+  "proxy.requests.replay.action": "この接続先をテスト",
+  "proxy.requests.replay.running": "接続先をテスト中…",
   "proxy.requests.replay.result": "上流 {{status}}",
-  "proxy.requests.replay.failed": "再テストに失敗しました",
+  "proxy.requests.replay.failed": "接続先のテストに失敗",
   "proxy.requests.replay.no_credential": "認証情報が現在の設定に見つかりません（削除済み、または OAuth アカウント）",
   "proxy.upstream.groups.summary": "{{count}} 件のプロバイダーグループ",
   "proxy.upstream.groups.add": "グループを追加",
@@ -1722,5 +1722,13 @@
   "proxy.accounts.count": "{{count}} アカウント",
   "proxy.accounts.more": "ほか {{count}} 件",
   "pswitch.preset.badge.local": "ローカル",
-  "pswitch.hint.local": "ローカルサーバーで読み込んだモデルを使用します。必要に応じて接続先とモデルを変更してください。"
+  "pswitch.hint.local": "ローカルサーバーで読み込んだモデルを使用します。必要に応じて接続先とモデルを変更してください。",
+  "proxy.requests.detail.toggle": "{{model}} の詳細",
+  "proxy.requests.replay.hint": "この記録のモデルと接続先の認証情報で、疎通確認用の最小リクエストを新しく送信します。利用枠を消費する場合があります。元のリクエストは再送しません。",
+  "proxy.requests.pagination.top": "一覧上部のページ切り替え",
+  "proxy.requests.pagination.bottom": "一覧下部のページ切り替え",
+  "proxy.privacy.on": "プライバシー：オン",
+  "proxy.privacy.off": "プライバシー：オフ",
+  "proxy.privacy.activeHint": "プライバシーモードがオンです。画面上のアカウント名、メールアドレス、IDをマスクします。コピーとCSVエクスポートは元の値を保持します。",
+  "proxy.privacy.example": "例：al***@e***.com"
 }

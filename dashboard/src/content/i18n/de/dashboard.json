@@ -1655,10 +1655,10 @@
   "proxy.alias.sourceHint": "Wähle ein Quellmodell, um zu sehen, woher dessen Reasoning-Stufen kommen.",
   "proxy.creds.copyFailed": "Kopieren fehlgeschlagen",
   "proxy.requests.col.replay": "Erneut testen",
-  "proxy.requests.replay.action": "Erneut testen",
-  "proxy.requests.replay.running": "Wird erneut getestet…",
+  "proxy.requests.replay.action": "Diesen Anbieter testen",
+  "proxy.requests.replay.running": "Anbieter wird getestet…",
   "proxy.requests.replay.result": "Upstream {{status}}",
-  "proxy.requests.replay.failed": "Erneuter Test fehlgeschlagen",
+  "proxy.requests.replay.failed": "Anbietertest fehlgeschlagen",
   "proxy.requests.replay.no_credential": "Anmeldedaten in der aktuellen Konfiguration nicht gefunden (gelöscht oder OAuth-Konto)",
   "proxy.upstream.groups.summary": "{{count}} Anbietergruppen",
   "proxy.upstream.groups.add": "Gruppe hinzufügen",
@@ -1733,5 +1733,13 @@
   "proxy.accounts.count": "{{count}} Konten",
   "proxy.accounts.more": "{{count}} weitere",
   "pswitch.preset.badge.local": "Lokal",
-  "pswitch.hint.local": "Verwendet ein auf Ihrem lokalen Server geladenes Modell. Passen Sie Endpunkt und Modell nach Bedarf an."
+  "pswitch.hint.local": "Verwendet ein auf Ihrem lokalen Server geladenes Modell. Passen Sie Endpunkt und Modell nach Bedarf an.",
+  "proxy.requests.detail.toggle": "Details für {{model}}",
+  "proxy.requests.replay.hint": "Sendet eine neue minimale Anfrage mit dem Modell und den Zugangsdaten dieses Eintrags, um die Verbindung zu prüfen. Dies kann Kontingent verbrauchen; die ursprüngliche Anfrage wird nicht erneut gesendet.",
+  "proxy.requests.pagination.top": "Seitennavigation über der Liste",
+  "proxy.requests.pagination.bottom": "Seitennavigation unter der Liste",
+  "proxy.privacy.on": "Privatsphäre: an",
+  "proxy.privacy.off": "Privatsphäre: aus",
+  "proxy.privacy.activeHint": "Privatsphäre ist aktiviert: Kontonamen, E-Mail-Adressen und IDs werden auf dem Bildschirm maskiert. Kopieren und CSV-Export behalten die Originalwerte.",
+  "proxy.privacy.example": "Beispiel: al***@e***.com"
 }

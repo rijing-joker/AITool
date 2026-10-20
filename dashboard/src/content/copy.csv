@@ -2567,10 +2567,10 @@ pswitch.catalog.instructions_set,pswitch,ProviderSwitchPage,ProviderEditDialog,c
 pswitch.catalog.instructions_placeholder,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_instructions_placeholder,"You are Codex, a coding agent…",,active
 pswitch.catalog.instructions_hint,pswitch,ProviderSwitchPage,ProviderEditDialog,catalog_instructions_hint,"Written to base_instructions and mirrored into model_messages.instructions_template. Custom models only — official entries keep their built-in prompt.",,active
 proxy.requests.col.replay,proxy,ProxyPage,RequestsTab,col_replay,Retest,,active
-proxy.requests.replay.action,proxy,ProxyPage,RequestsTab,replay_action,Retest,,active
-proxy.requests.replay.running,proxy,ProxyPage,RequestsTab,replay_running,Retesting…,,active
+proxy.requests.replay.action,proxy,ProxyPage,RequestsTab,replay_action,Test this upstream,,active
+proxy.requests.replay.running,proxy,ProxyPage,RequestsTab,replay_running,Testing upstream…,,active
 proxy.requests.replay.result,proxy,ProxyPage,RequestsTab,replay_result,Upstream {{status}},,active
-proxy.requests.replay.failed,proxy,ProxyPage,RequestsTab,replay_failed,Retest failed,,active
+proxy.requests.replay.failed,proxy,ProxyPage,RequestsTab,replay_failed,Upstream test failed,,active
 proxy.requests.replay.no_credential,proxy,ProxyPage,RequestsTab,replay_no_credential,"Credential not found in the current config (deleted, or an OAuth account)",,active
 pswitch.encrypted.export,pswitch,ProviderSwitchPage,EncryptedBackupDialog,encrypted_export,Export encrypted,,active
 pswitch.encrypted.import,pswitch,ProviderSwitchPage,EncryptedBackupDialog,encrypted_import,Import backup,,active
@@ -3108,3 +3108,11 @@ limits.window.five_hour,limits,*,Integration,label,5 hours,,active
 limits.bar.blocked,limits,*,Integration,label,Blocked,,active
 limits.antigravity.weekly_exhausted,limits,*,Integration,label,The weekly allowance is exhausted. This five-hour window cannot be used until the weekly allowance resets.,,active
 proxy.copilot.catalog_count,proxy,*,Integration,label,{{count}} models connected,,active
+proxy.requests.detail.toggle,proxy,ProxyPage,RequestsTab,detail_toggle,Details for {{model}},,active
+proxy.requests.replay.hint,proxy,ProxyPage,RequestsTab,hint,Send a new minimal request using this record’s model and upstream credential to check connectivity. This may use quota; the original request is not replayed.,,active
+proxy.requests.pagination.top,proxy,ProxyPage,RequestsTab,top,Request pagination above the list,,active
+proxy.requests.pagination.bottom,proxy,ProxyPage,RequestsTab,bottom,Request pagination below the list,,active
+proxy.privacy.on,proxy,ProxyPage,Proxy,on,Privacy: on,,active
+proxy.privacy.off,proxy,ProxyPage,Proxy,off,Privacy: off,,active
+proxy.privacy.activeHint,proxy,ProxyPage,Proxy,activeHint,"Privacy mode is on: account names, emails and IDs are masked on screen. Copy and CSV export keep the original values.",,active
+proxy.privacy.example,proxy,ProxyPage,Proxy,example,Example: al***@e***.com,,active

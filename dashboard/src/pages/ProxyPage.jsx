@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { copy } from "../lib/copy";
-import { ProxyPrivacyToggle } from "../lib/proxy-privacy";
+import { ProxyPrivacyNotice, ProxyPrivacyToggle } from "../lib/proxy-privacy";
 import { formatAggregateSpeed } from "../lib/usage-speed";
 import { proxyApi } from "../lib/proxy-api";
 import { useVisiblePolling } from "../hooks/use-visible-polling";
@@ -316,10 +316,10 @@ function OverviewTab({ status, statusError, onRefresh, onInstallCore, onSelectTa
       ) : null}
       {timeline.length > 0 && overview?.total_requests > 0 ? (
         <Card>
-          <p className="text-xs font-semibold tracking-wide text-oai-gray-500 dark:text-oai-gray-400">
+          <h2 className="text-sm font-semibold">
             {copy("proxy.metric.timeline_24h")}
-          </p>
-          <div className="mt-3 flex h-20 items-end gap-[3px]">
+          </h2>
+          <div className="mt-5 flex h-28 items-end gap-[3px]">
             {timeline.map((point) => {
               const height = Math.max(
                 point.total_tokens > 0 ? 6 : 2,
@@ -335,14 +335,17 @@ function OverviewTab({ status, statusError, onRefresh, onInstallCore, onSelectTa
               );
             })}
           </div>
+          <div className="mt-2 flex justify-between text-xs tabular-nums text-oai-gray-600 dark:text-oai-gray-400">
+            {[timeline[0], timeline[Math.floor(timeline.length / 2)], timeline[timeline.length - 1]].map((point, index) => <span key={index}>{new Date(point.hour_start).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })}</span>)}
+          </div>
         </Card>
       ) : null}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Card>
-          <p className="text-xs font-semibold tracking-wide text-oai-gray-500 dark:text-oai-gray-400">
+          <h2 className="text-sm font-semibold">
             {copy("proxy.metric.by_model")}
-          </p>
+          </h2>
           {overview?.models.length ? (
             <table className="mt-3 w-full table-fixed text-left text-xs">
               <thead>
@@ -381,9 +384,9 @@ function OverviewTab({ status, statusError, onRefresh, onInstallCore, onSelectTa
           )}
         </Card>
         <Card>
-          <p className="text-xs font-semibold tracking-wide text-oai-gray-500 dark:text-oai-gray-400">
+          <h2 className="text-sm font-semibold">
             {copy("proxy.metric.by_provider")}
-          </p>
+          </h2>
           {overview?.providers.length ? (
             <ul className="mt-3 divide-y divide-oai-gray-100 dark:divide-oai-gray-800">
               {overview.providers.slice(0, 8).map((provider) => (
@@ -495,7 +498,14 @@ export function ProxyPage() {
     <div className="flex flex-col flex-1 text-oai-black dark:text-oai-white font-oai antialiased">
       <main className="flex-1 pt-6 sm:pt-8 pb-10 sm:pb-12">
         <div className="mx-auto max-w-6xl px-4 sm:px-6">
-          <PageHeader title={copy("nav.proxy")} description={copy("proxy.page.subtitle")} actions={<ProxyPrivacyToggle />} />
+          <PageHeader title={copy("nav.proxy")} description={copy("proxy.page.subtitle")} actions={<>
+            <span className="hidden min-h-10 items-center gap-2 rounded-lg border border-oai-gray-200 px-3 text-xs text-oai-gray-600 dark:border-oai-gray-800 dark:text-oai-gray-400 sm:inline-flex">
+              <StatusDot state={statusError ? "warn" : status?.core.running ? "ok" : "idle"} />
+              {copy(statusError ? "proxy.state.unknown" : !status ? "proxy.loading" : status.core.running ? "proxy.state.running" : "proxy.state.stopped")}
+              {status?.core.version ? <span className="font-mono text-oai-gray-500">v{status.core.version}</span> : null}
+            </span>
+            <ProxyPrivacyToggle />
+          </>}><ProxyPrivacyNotice /></PageHeader>
           <div className="mb-6">
             <PageTabs options={TABS.map((item) => ({ ...item, label: copy(item.labelKey) }))} value={tab} onChange={selectTab} label={copy("nav.proxy")} panelId="proxy-panel" />
           </div>

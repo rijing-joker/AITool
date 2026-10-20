@@ -20,13 +20,14 @@ const text = [
   event("01", 1000),
 ].map(JSON.stringify).join("\n") + "\n";
 
-test("Codex compression, sibling overlap, resume and archive preserve usage", async (t) => {
+for (const suffix of ["zst", "zstd"]) {
+test(`Codex .${suffix} compression, sibling overlap, resume and archive preserve usage`, async (t) => {
   const home = await fs.mkdtemp(path.join(os.tmpdir(), "aitool-zstd-"));
   t.after(() => fs.rm(home, { recursive: true, force: true }));
   const root = path.join(home, ".codex", "sessions");
   await fs.mkdir(root, { recursive: true });
   const plain = path.join(root, `rollout-2026-10-10-${id}.jsonl`);
-  const packed = `${plain}.zst`;
+  const packed = `${plain}.${suffix}`;
   const queuePath = path.join(home, "queue.jsonl");
   const cursors = { version: 1, files: {} };
   const sync = async (paths = null) => parseRolloutIncremental({ rolloutFiles: paths || await listRolloutFilesDeep(root), cursors, queuePath });
@@ -56,12 +57,12 @@ test("Codex compression, sibling overlap, resume and archive preserve usage", as
   assert.equal(await fs.readFile(queuePath, "utf8"), updated);
 });
 
-test("bad compressed snapshots leave cursors and queues unchanged; sibling escape is rejected", async (t) => {
+test(`bad .${suffix} snapshots leave cursors and queues unchanged; sibling escape is rejected`, async (t) => {
   const home = await fs.mkdtemp(path.join(os.tmpdir(), "aitool-zstd-invalid-"));
   t.after(() => fs.rm(home, { recursive: true, force: true }));
   const root = path.join(home, ".codex", "sessions");
   await fs.mkdir(root, { recursive: true });
-  const packed = path.join(root, `rollout-2026-10-10-${id}.jsonl.zst`);
+  const packed = path.join(root, `rollout-2026-10-10-${id}.jsonl.${suffix}`);
   const queuePath = path.join(home, "queue.jsonl");
   await fs.writeFile(queuePath, "previous\n");
   await fs.writeFile(packed, await compress(Buffer.from(text + "broken\n")));
@@ -71,8 +72,29 @@ test("bad compressed snapshots leave cursors and queues unchanged; sibling escap
   assert.equal(await fs.readFile(queuePath, "utf8"), "previous\n");
   await assert.rejects(files.readSnapshot(packed, { maxOutputBytes: 1 }), /exceeds/);
   await fs.unlink(packed);
-  const outside = path.join(home, "outside.jsonl.zst");
+  const outside = path.join(home, `outside.jsonl.${suffix}`);
   await fs.writeFile(outside, await compress(Buffer.from(text)));
   await fs.symlink(outside, packed);
   await assert.rejects(readSession({ app: "codex", home, sourcePath: files.logicalPath(packed) }), /outside/);
+});
+}
+
+test("zst and zstd siblings share identity and missing paths resolve either compressed form", async (t) => {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), "aitool-zstd-siblings-"));
+  t.after(() => fs.rm(home, { recursive: true, force: true }));
+  const root = path.join(home, ".codex", "sessions");
+  await fs.mkdir(root, { recursive: true });
+  const pageId = "22222222-2222-4222-8222-222222222222";
+  const plain = path.join(root, `rollout-2026-10-10-${id}_${pageId}.jsonl`);
+  const zst = `${plain}.zst`;
+  const zstd = `${plain}.zstd`;
+  assert.deepEqual(files.rolloutIds(zstd), { thread: id, rollout: pageId, paginated: true });
+  const packed = await compress(Buffer.from(text));
+  await fs.writeFile(zst, packed);
+  await fs.writeFile(zstd, packed);
+  assert.deepEqual(await listRolloutFilesDeep(root), [zst]);
+  assert.equal((await listSessions({ app: "codex", home })).length, 1);
+  await fs.unlink(zst);
+  assert.equal((await readSession({ app: "codex", home, sourcePath: zst })).usage.totalTokens, 1050);
+  assert.equal((await readSession({ app: "codex", home, sourcePath: plain })).usage.totalTokens, 1050);
 });

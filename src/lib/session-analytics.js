@@ -2062,7 +2062,7 @@ function sessionFileCacheKey(source, filePath) {
   const filePaths = (Array.isArray(filePath) ? filePath : [filePath]).filter(Boolean);
   return crypto
     .createHash("sha256")
-    .update(`${source}\0${filePaths.map((value) => source === "codex" ? (path.basename(value).match(/([0-9a-f-]{36})\.jsonl(?:\.zst)?$/i)?.[1] || path.resolve(codexFiles.logicalPath(value))) : path.resolve(value)).filter((value, index, values) => values.indexOf(value) === index).join("\0")}`)
+    .update(`${source}\0${filePaths.map((value) => source === "codex" ? (path.basename(value).match(/([0-9a-f-]{36})\.jsonl(?:\.zstd?)?$/i)?.[1] || path.resolve(codexFiles.logicalPath(value))) : path.resolve(value)).filter((value, index, values) => values.indexOf(value) === index).join("\0")}`)
     .digest("hex")
     .slice(0, 24);
 }

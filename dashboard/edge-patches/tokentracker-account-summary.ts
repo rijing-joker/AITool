@@ -424,6 +424,7 @@ function getModelPricing(model: string, source = "") {
     const iFlytekMaasPricing = IFLYTEK_MAAS_MODEL_PRICING[normalized];
     if (iFlytekMaasPricing) return iFlytekMaasPricing;
   }
+  if (source.toLowerCase() === "opencode" && model.toLowerCase().endsWith("-free")) return ZERO_PRICING;
   const exact = MODEL_PRICING[model];
   if (exact) return exact;
   const lower = model.toLowerCase();

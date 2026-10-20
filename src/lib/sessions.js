@@ -230,10 +230,10 @@ async function collectJsonlFiles(root, files = [], { compressed = false } = {}) 
     } else if (
       compressed &&
       entry.isFile() &&
-      entry.name.endsWith(".jsonl.zst") &&
+      codexFiles.isCompressed(entry.name) &&
       // When Codex compression briefly leaves both forms in place, the plain
       // file is the source of truth (cc-switch 8641cd1).
-      !plainNames.has(entry.name.slice(0, -".zst".length))
+      !plainNames.has(codexFiles.logicalPath(entry.name))
     ) {
       files.push(fullPath);
     }
@@ -1137,9 +1137,16 @@ async function readSession({ app, sourcePath, home, env = process.env } = {}) {
   let realPath;
   try { realPath = await resolveSessionPath(resolved, rootsForApp(app, resolvedHome)); }
   catch (error) {
-    const sibling = app === "codex" && error.code === "ENOENT" ? codexFiles.siblingPath(resolved) : null;
-    if (!sibling) throw error;
-    realPath = await resolveSessionPath(sibling, rootsForApp(app, resolvedHome));
+    if (app !== "codex" || error.code !== "ENOENT") throw error;
+    for (const sibling of codexFiles.siblingPaths(resolved)) {
+      try {
+        realPath = await resolveSessionPath(sibling, rootsForApp(app, resolvedHome));
+        break;
+      } catch (siblingError) {
+        if (siblingError.code !== "ENOENT") throw siblingError;
+      }
+    }
+    if (!realPath) throw error;
   }
   if (app === "gemini" && path.extname(realPath) !== ".json" && path.extname(realPath) !== ".jsonl") {
     throw new Error("Not a gemini session file");

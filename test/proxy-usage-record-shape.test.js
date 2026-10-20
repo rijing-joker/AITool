@@ -49,7 +49,7 @@ const rawCoreRecord = {
   request_id: "req-1",
   latency_ms: 1500,
   ttft_ms: 220,
-  source: "codex",
+  source: "upstream-secret-fixture",
   model: "gpt-5.5",
   alias: "",
   provider: "up-a",
@@ -88,6 +88,9 @@ test("normalizes the core's raw snake_case payload onto canonical camelCase rows
   assert.equal(row.api_key, undefined);
   assert.equal(row.apiKey, undefined);
   assert.equal(row.response_headers, undefined);
+  assert.equal(row.source, undefined);
+  assert.match(row.source_hash, /^[0-9a-f]{64}$/);
+  assert.equal(JSON.stringify(row).includes(rawCoreRecord.source), false);
   assert.equal(row.api_key_display, "sk-t••••abcd");
   assert.equal(row.api_key_hash, normalizeRecord(rawCoreRecord).api_key_hash);
   assert.match(row.api_key_hash, /^[0-9a-f]{64}$/);
@@ -96,6 +99,7 @@ test("normalizes the core's raw snake_case payload onto canonical camelCase rows
 test("normalization is idempotent and derives canceled failures like the upstream GUI", () => {
   const once = normalizeRecord(rawCoreRecord);
   const twice = normalizeRecord(once);
+  assert.deepEqual(twice, once);
   assert.deepEqual(twice.tokens, once.tokens);
   assert.equal(twice.canceled, once.canceled);
   assert.equal(twice.api_key_hash, once.api_key_hash);
@@ -140,6 +144,8 @@ test("bridge fusion accumulates snake_case tokens into half-hour buckets", (t) =
   const [stored] = fs.readFileSync(path.join(paths.usageDir, dayFile), "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line));
   assert.equal(stored.tokens.inputTokens, 100, "persisted records are canonical");
   assert.equal(stored.api_key, undefined, "raw credentials are stripped before persisting");
+  assert.equal(stored.source, undefined, "upstream credentials are stripped before persisting");
+  assert.equal(JSON.stringify(stored).includes(rawCoreRecord.source), false);
 
   const row = JSON.parse(fs.readFileSync(queuePath, "utf8").split("\n").filter(Boolean).at(-1));
   assert.equal(row.conversation_count, 1);
@@ -158,10 +164,14 @@ test("the record store normalizes legacy raw rows on read", async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "aitool-legacy-records-"));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const file = path.join(dir, "records-2026-10-02.jsonl");
-  fs.writeFileSync(file, JSON.stringify(rawCoreRecord) + "\n");
+  fs.writeFileSync(file, JSON.stringify(rawCoreRecord) + '\n{"refresh":true}\n');
   const store = createUsageRecordStore();
-  const [row] = await store.readRecords(dir);
+  const rows = await store.readRecords(dir);
+  assert.equal(rows.length, 1, "legacy refresh notifications are not requests");
+  const [row] = rows;
   assert.equal(row.tokens.inputTokens, 100);
   assert.equal(row.api_key, undefined);
   assert.equal(row.api_key_display, "sk-t••••abcd");
+  assert.equal(row.source, undefined);
+  assert.equal(JSON.stringify(row).includes(rawCoreRecord.source), false);
 });

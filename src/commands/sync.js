@@ -6,6 +6,7 @@ const fs = require("node:fs/promises");
 const fssync = require("node:fs");
 const cp = require("node:child_process");
 const readline = require("node:readline");
+const { readSqliteJsonRows } = require("../lib/sqlite-reader");
 const { functionUrlFor, fetchFunctionResponse } = require("../lib/function-url");
 
 const { resolveInstallPaths, resolveZcodeNativeDbPath, resolveMimoNativeDbPath, ensureFlatCursor } = require("../lib/install-resolver");
@@ -148,6 +149,7 @@ const {
   toUtcHalfHourStart,
   totalsKey,
   claudeMessageDedupKey,
+  coerceEpochMs,
 } = require("../lib/rollout");
 const { computeClaudeGroundTruthBuckets } = require("../lib/claude-categorizer");
 const { createProgress, renderBar, formatNumber, formatBytes } = require("../lib/progress");
@@ -309,6 +311,7 @@ const MIMO_PROVIDER_REPAIR_KEY = "mimoClaudeMislabelRepair_2026_06";
 const DSH_LEGACY_SOURCE_MIGRATION_KEY = "deepseekHarnessSourceMigration_2026_08";
 const ZCODE_NATIVE_USAGE_REPAIR_KEY = "zcodeNativeUsageRepair_2026_08";
 const ZCODE_INCLUSIVE_TOKEN_REPAIR_KEY = "zcodeInclusiveTokenRepair_2026_09";
+const ZCODE_PRUNE_WINDOW_RESTORE_KEY = "zcodePruneWindowRestore_2026_10";
 const AUTO_SYNC_SOURCE_ALIASES = new Map([
   ["code", "every-code"],
   ["commandcode", "command-code"],
@@ -1778,22 +1781,12 @@ async function cmdSync(argv, context = {}) {
           const nativeUsageAvailable = [zcodePaths.native, zcodePaths.wsl]
             .filter(Boolean)
             .some((dbPath) => hasZcodeNativeUsageSchema(dbPath));
-          if (nativeUsageAvailable) {
-            await repairZcodeNativeUsageMigration({
-              cursors,
-              queuePath,
-              queueStatePath,
-              projectQueuePath,
-              projectQueueStatePath,
-            });
-          }
-          await repairZcodeInclusiveTokenMigration({
-            cursors,
-            queuePath,
-            queueStatePath,
-            projectQueuePath,
-            projectQueueStatePath,
-          });
+          const zcodeDbPaths = [zcodePaths.native, zcodePaths.wsl].filter(Boolean);
+          const zcodeRebuildFloorMs = resolveZcodeRebuildFloorMs(zcodeDbPaths);
+          const repairOptions = { cursors, queuePath, queueStatePath, projectQueuePath, projectQueueStatePath, rebuildFloorMs: zcodeRebuildFloorMs };
+          if (nativeUsageAvailable) await repairZcodeNativeUsageMigration(repairOptions);
+          await repairZcodeInclusiveTokenMigration(repairOptions);
+          await repairZcodePruneWindowRestore({ ...repairOptions, dbPaths: zcodeDbPaths });
           zcodeResult = await multiInstallParse({
             paths: zcodePaths, parserFn: parseOpencodeDbForInstall, providerName: "zcode",
             cursors, getParams: (p) => ({ dbPath: p, readFn: readZcodeDbMessages, source: "zcode", cursorKey: "zcode" }),
@@ -3850,6 +3843,9 @@ module.exports = {
   repairMimoClaudeMislabel,
   repairZcodeNativeUsageMigration,
   repairZcodeInclusiveTokenMigration,
+  repairZcodePruneWindowRestore,
+  resolveZcodeRebuildFloorMs,
+  ZCODE_PRUNE_WINDOW_RESTORE_KEY,
   reincludeClaudeMemObserverFiles,
   repairGrokQueueFromSessionSnapshots,
   applyCloudConversationsBackfill,
@@ -4855,63 +4851,232 @@ async function resetUploadOffsetForZcodeRepair(queueStatePath, note) {
   return true;
 }
 
-async function dropZcodeQueueRows(filePath, { retainRetractions = false } = {}) {
+function zcodeHourStartMs(hourStart) {
+  if (typeof hourStart !== "string" || !hourStart.trim()) return null;
+  const ms = Date.parse(hourStart);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function zcodeHourFromMainBucketKey(key) {
+  if (typeof key !== "string" || !key.startsWith("zcode|")) return null;
+  const parts = key.split("|");
+  return parts.length >= 3 ? parts.slice(2).join("|") : null;
+}
+
+function zcodeHourFromProjectBucketKey(key) {
+  if (typeof key !== "string") return null;
+  const marker = "|zcode|";
+  const idx = key.indexOf(marker);
+  if (idx < 0) return null;
+  const hour = key.slice(idx + marker.length);
+  return hour || null;
+}
+
+function zcodeHourFromGroupQueuedKey(key) {
+  if (typeof key !== "string" || !key.startsWith("zcode|")) return null;
+  return key.slice("zcode|".length) || null;
+}
+
+function zcodeHourIsPreWindow(hourStart, preserveBeforeMs) {
+  if (!Number.isFinite(preserveBeforeMs)) return false;
+  const hourMs = zcodeHourStartMs(hourStart);
+  return hourMs != null && hourMs < preserveBeforeMs;
+}
+
+function zcodeHourMustBePreserved(hourStart, preserveBeforeMs) {
+  return zcodeHourStartMs(hourStart) == null || zcodeHourIsPreWindow(hourStart, preserveBeforeMs);
+}
+
+// Per-install rebuild floor. Prefer native model_usage MIN(started_at) when the
+// native schema exists — an ancient legacy message does not prove continuous
+// coverage through pruned native gaps (#828).
+function resolveZcodeDbRebuildFloorMs(dbPath) {
+  if (!dbPath || !fssync.existsSync(dbPath)) return null;
+  if (hasZcodeNativeUsageSchema(dbPath)) {
+    try {
+      const rows = readSqliteJsonRows(
+        dbPath,
+        `SELECT MIN(started_at) AS floor
+           FROM model_usage
+          WHERE status = 'completed'
+            AND trim(model_id) != ''
+            AND (
+              input_tokens > 0 OR output_tokens > 0 OR reasoning_tokens > 0 OR
+              cache_creation_input_tokens > 0 OR cache_read_input_tokens > 0
+            )`,
+        { label: "ZCode", timeout: 10_000, maxBuffer: 1024 * 1024, readOnly: true },
+      );
+      const floor = coerceEpochMs(Array.isArray(rows) ? rows[0]?.floor : null);
+      return floor > 0 ? floor : null;
+    } catch (_error) {
+      return null;
+    }
+  }
+  let messages;
+  try {
+    messages = readZcodeDbMessages(dbPath, { readOnly: true });
+  } catch (_error) {
+    return null;
+  }
+  let floor = Number.POSITIVE_INFINITY;
+  for (const message of Array.isArray(messages) ? messages : []) {
+    const ms = coerceEpochMs(
+      message?.timeUpdated ?? message?.data?.time?.completed ?? message?.data?.time?.created,
+    );
+    if (ms > 0) floor = Math.min(floor, ms);
+  }
+  return Number.isFinite(floor) ? floor : null;
+}
+
+// Shared wipe window across installs: the LATEST per-install floor (most
+// conservative). Any listed install that exists but cannot report a floor
+// defers the wipe — silently taking min() would erase another install's history.
+function resolveZcodeRebuildFloorMs(dbPaths = []) {
+  const paths = [...new Set((Array.isArray(dbPaths) ? dbPaths : []).filter(Boolean))];
+  if (paths.length === 0) return null;
+  let latestFloor = 0;
+  for (const dbPath of paths) {
+    if (!fssync.existsSync(dbPath)) continue;
+    const floor = resolveZcodeDbRebuildFloorMs(dbPath);
+    if (!Number.isFinite(floor)) return null;
+    latestFloor = Math.max(latestFloor, floor);
+  }
+  return latestFloor > 0 ? latestFloor : null;
+}
+
+// Wipe starts at the half-hour bucket that contains the first live message so
+// that bucket is rebuilt (not preserved) and cannot be double-counted after
+// cursors.zcode is cleared.
+function zcodePreserveBeforeMsFromFloor(floorMs) {
+  if (!Number.isFinite(floorMs)) return null;
+  const iso = toUtcHalfHourStart(floorMs);
+  const ms = iso ? Date.parse(iso) : floorMs;
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function hasZcodeCursorHistory(cursors) {
+  return [cursors?.zcode, cursors?.zcode?.native, cursors?.zcode?.wsl].some((state) => Object.keys(state?.messages || {}).length > 0)
+    || Object.keys(cursors?.hourly?.buckets || {}).some((key) => key.startsWith("zcode|"))
+    || Object.keys(cursors?.projectHourly?.buckets || {}).some((key) => key.includes("|zcode|"));
+}
+
+function pruneZcodeMessageIndexForRebuild(messages, preserveBeforeMs) {
+  if (!messages || typeof messages !== "object") return 0;
+  let removed = 0;
+  for (const key of Object.keys(messages)) {
+    const entry = messages[key];
+    const attribution = typeof entry?.attribution === "string"
+      ? entry.attribution.split("	")[0]
+      : entry?.attribution?.bucketStart;
+    const bucketStart = typeof attribution === "string" ? attribution : "";
+    // Keep unattributed entries: older cursors omit attribution, and deleting
+    // them re-adds still-present pre-window legacy messages onto preserved
+    // buckets (5000→10000). Prefer a possible in-window under-correction over
+    // permanent double-count (#828).
+    if (!bucketStart) continue;
+    if (zcodeHourMustBePreserved(bucketStart, preserveBeforeMs)) continue;
+    delete messages[key];
+    removed += 1;
+  }
+  return removed;
+}
+
+function pruneZcodeMessageCursorForRebuild(cursors, preserveBeforeMs) {
+  if (!cursors || typeof cursors !== "object") return;
+  if (!Number.isFinite(preserveBeforeMs)) {
+    delete cursors.zcode;
+    return;
+  }
+  const root = cursors.zcode;
+  if (!root || typeof root !== "object") {
+    delete cursors.zcode;
+    return;
+  }
+  pruneZcodeMessageIndexForRebuild(root.messages, preserveBeforeMs);
+  for (const nestedKey of ["native", "wsl"]) {
+    const nested = root[nestedKey];
+    if (nested && typeof nested === "object") {
+      pruneZcodeMessageIndexForRebuild(nested.messages, preserveBeforeMs);
+    }
+  }
+  const hasMessages = Object.keys(root.messages || {}).length > 0
+    || Object.keys(root.native?.messages || {}).length > 0
+    || Object.keys(root.wsl?.messages || {}).length > 0;
+  if (!hasMessages) delete cursors.zcode;
+}
+
+async function queueFileHasZcodeRows(filePath) {
+  if (typeof filePath !== "string" || !filePath) return false;
   let raw;
   try {
     raw = await fs.readFile(filePath, "utf8");
   } catch (error) {
-    if (error?.code === "ENOENT") return { removed: 0, retractions: 0 };
+    if (error?.code === "ENOENT") return false;
     throw error;
   }
-  const kept = [];
-  const retractions = new Map();
-  let removed = 0;
   for (const line of raw.split("\n")) {
     if (!line.trim()) continue;
-    let row;
     try {
-      row = JSON.parse(line);
+      const row = JSON.parse(line);
+      if (row?.source === "zcode") return true;
     } catch (_error) {
-      kept.push(line);
-      continue;
+      // keep scanning
     }
-    if (row?.source === "zcode") {
-      removed += 1;
-      const model = typeof row.model === "string" && row.model.trim()
-        ? row.model.trim()
-        : "unknown";
-      const hourStart = typeof row.hour_start === "string" ? row.hour_start : "";
-      if (retainRetractions && hourStart) {
-        retractions.set(`${model}|${hourStart}`, {
-          source: "zcode",
-          model,
-          hour_start: hourStart,
-          input_tokens: 0,
-          cached_input_tokens: 0,
-          cache_creation_input_tokens: 0,
-          output_tokens: 0,
-          reasoning_output_tokens: 0,
-          total_tokens: 0,
-          conversation_count: 0,
-        });
-      }
-      continue;
-    }
-    kept.push(line);
   }
-  if (removed === 0) return { removed: 0, retractions: 0 };
-  await backupExistingFile(filePath);
-  const tmp = `${filePath}.zcoderepair.${process.pid}.${Date.now()}`;
-  const rewritten = [
-    ...kept,
-    ...[...retractions.values()].map((row) => JSON.stringify(row)),
-  ];
-  await fs.writeFile(tmp, rewritten.length ? rewritten.join("\n") + "\n" : "", "utf8");
-  await fs.rename(tmp, filePath);
-  return { removed, retractions: retractions.size };
+  return false;
 }
 
-async function repairZcodeUsageMigration({
+function isCompletedZcodeMigration(entry) {
+  return Boolean(entry) && !(typeof entry === "object" && entry.skipped);
+}
+
+async function appendZcodeSnapshots(filePath, rows, needsNewline) {
+  // appendFile splits large buffers into writes. Keep each write at a row
+  // boundary so the independent proxy bridge cannot land inside a JSON row.
+  for (const row of rows) {
+    await fs.appendFile(filePath, `${needsNewline ? "\n" : ""}${row}\n`, "utf8");
+    needsNewline = false;
+  }
+}
+
+// Append zero snapshots instead of replacing the shared queue: the proxy
+// bridge appends outside sync.lock, and readers already use last-row-wins.
+async function dropZcodeQueueRows(filePath, { preserveBeforeMs = null } = {}) {
+  let raw;
+  try { raw = await fs.readFile(filePath, "utf8"); }
+  catch (error) {
+    if (error.code === "ENOENT") return { removed: 0, retractions: 0, preserved: 0 };
+    throw error;
+  }
+  const latest = new Map();
+  let preserved = 0;
+  for (const line of raw.split("\n")) {
+    let row;
+    try { row = JSON.parse(line); } catch { continue; }
+    if (row?.source !== "zcode") continue;
+    if (!Number.isFinite(zcodeHourStartMs(row.hour_start)) || zcodeHourIsPreWindow(row.hour_start, preserveBeforeMs)) {
+      preserved++;
+      continue;
+    }
+    const model = typeof row.model === "string" && row.model.trim() ? row.model.trim() : "unknown";
+    const key = `${row.project_key || ""}|${model}|${row.hour_start}`;
+    latest.set(key, { ...row, model });
+  }
+  const zeroRows = [...latest.values()].map((row) => {
+    const zero = { ...row };
+    for (const key of Object.keys(zero)) {
+      if (key.endsWith("_tokens") || key === "total_cost_usd" || key === "conversation_count") zero[key] = 0;
+    }
+    return JSON.stringify(zero);
+  });
+  if (zeroRows.length) {
+    await backupExistingFile(filePath);
+    await appendZcodeSnapshots(filePath, zeroRows, raw && !raw.endsWith("\n"));
+  }
+  return { removed: latest.size, retractions: latest.size, preserved };
+}
+
+async function applyZcodeUsageMigration({
   migrationKey,
   queueStateNote,
   cursors,
@@ -4919,25 +5084,51 @@ async function repairZcodeUsageMigration({
   queueStatePath,
   projectQueuePath,
   projectQueueStatePath,
+  rebuildFloorMs = null,
 } = {}) {
   if (!cursors || typeof cursors !== "object") return false;
   const migrations = (cursors.migrations ||= {});
-  if (migrations[migrationKey]) return false;
+  // Mirror Codex: a prior {skipped:true} must retry once the live ledger can
+  // establish a rebuild floor (or the pre-window history is gone).
+  const prior = migrations[migrationKey];
+  if (isCompletedZcodeMigration(prior)) return false;
 
-  const mainRepair = await dropZcodeQueueRows(queuePath, { retainRetractions: true });
+  const preserveBeforeMs = zcodePreserveBeforeMsFromFloor(rebuildFloorMs);
+  // Empty / unreadable live ledger + existing history => refuse the wipe. The
+  // forward reader still works; only this historical correction defers (#828).
+  if (preserveBeforeMs == null) {
+    const hasQueueHistory = await queueFileHasZcodeRows(queuePath)
+      || await queueFileHasZcodeRows(projectQueuePath);
+    if (hasZcodeCursorHistory(cursors) || hasQueueHistory) {
+      migrations[migrationKey] = {
+        skipped: true,
+        reason: "zcode_rebuild_floor_unavailable",
+        at: new Date().toISOString(),
+      };
+      return false;
+    }
+  }
+
+  const mainRepair = await dropZcodeQueueRows(queuePath, {
+    preserveBeforeMs,
+  });
   const projectRepair = projectQueuePath
-    ? await dropZcodeQueueRows(projectQueuePath)
-    : { removed: 0, retractions: 0 };
+    ? await dropZcodeQueueRows(projectQueuePath, { preserveBeforeMs })
+    : { removed: 0, retractions: 0, preserved: 0 };
 
   const hourly = cursors.hourly && typeof cursors.hourly === "object" ? cursors.hourly : null;
   if (hourly?.buckets) {
     for (const key of Object.keys(hourly.buckets)) {
-      if (key.startsWith("zcode|")) delete hourly.buckets[key];
+      if (!key.startsWith("zcode|")) continue;
+      if (zcodeHourMustBePreserved(zcodeHourFromMainBucketKey(key), preserveBeforeMs)) continue;
+      delete hourly.buckets[key];
     }
   }
   if (hourly?.groupQueued) {
     for (const key of Object.keys(hourly.groupQueued)) {
-      if (key.startsWith("zcode|")) delete hourly.groupQueued[key];
+      if (!key.startsWith("zcode|")) continue;
+      if (zcodeHourMustBePreserved(zcodeHourFromGroupQueuedKey(key), preserveBeforeMs)) continue;
+      delete hourly.groupQueued[key];
     }
   }
   const projectHourly = cursors.projectHourly && typeof cursors.projectHourly === "object"
@@ -4945,10 +5136,15 @@ async function repairZcodeUsageMigration({
     : null;
   if (projectHourly?.buckets) {
     for (const key of Object.keys(projectHourly.buckets)) {
-      if (key.includes("|zcode|")) delete projectHourly.buckets[key];
+      if (!key.includes("|zcode|")) continue;
+      if (zcodeHourMustBePreserved(zcodeHourFromProjectBucketKey(key), preserveBeforeMs)) continue;
+      delete projectHourly.buckets[key];
     }
   }
-  delete cursors.zcode;
+  // Keep pre-window message dedup so preserved buckets are not double-counted
+  // when legacy rows still exist in the live DB. Clear only attributed,
+  // in-window entries so the rescan can rebuild those hours.
+  pruneZcodeMessageCursorForRebuild(cursors, preserveBeforeMs);
 
   if (mainRepair.removed > 0) {
     await resetUploadOffsetForZcodeRepair(queueStatePath, queueStateNote);
@@ -4961,8 +5157,265 @@ async function repairZcodeUsageMigration({
     removedMain: mainRepair.removed,
     removedProject: projectRepair.removed,
     retractions: mainRepair.retractions,
+    preservedMain: mainRepair.preserved || 0,
+    preservedProject: projectRepair.preserved || 0,
+    rebuildFloorMs: preserveBeforeMs,
   };
   return true;
+}
+
+function zcodeRowTotals(row) {
+  const totals = {};
+  for (const key of ["input_tokens", "cached_input_tokens", "cache_creation_input_tokens", "output_tokens", "reasoning_output_tokens", "total_tokens", "billable_total_tokens", "total_cost_usd", "conversation_count"]) {
+    const value = Number(row?.[key] ?? (key === "billable_total_tokens" ? row?.total_tokens : 0));
+    totals[key] = Number.isFinite(value) && value >= 0 ? value : 0;
+  }
+  for (const [key, value] of Object.entries(row || {})) {
+    if ((key.startsWith("priority_") || key === "cache_creation_1h_input_tokens") && Number.isFinite(Number(value)) && Number(value) > 0) totals[key] = Number(value);
+  }
+  return totals;
+}
+
+function zcodeTotalsDominate(candidate, baseline) {
+  if (!candidate) return false;
+  if (!baseline) return (candidate.total_tokens || 0) > 0;
+  return (candidate.total_tokens || 0) > (baseline.total_tokens || 0);
+}
+
+async function collectZcodeQueuePeaks(filePath, { beforeMs = null } = {}) {
+  const peaks = new Map();
+  let raw;
+  try {
+    raw = await fs.readFile(filePath, "utf8");
+  } catch (error) {
+    if (error?.code === "ENOENT") return peaks;
+    throw error;
+  }
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    let row;
+    try {
+      row = JSON.parse(line);
+    } catch (_error) {
+      continue;
+    }
+    if (row?.source !== "zcode") continue;
+    const model = typeof row.model === "string" && row.model.trim()
+      ? row.model.trim()
+      : "unknown";
+    const hourStart = typeof row.hour_start === "string" ? row.hour_start : "";
+    if (!hourStart) continue;
+    if (beforeMs != null && !zcodeHourIsPreWindow(hourStart, beforeMs)) continue;
+    const key = `${model}|${hourStart}`;
+    const totals = zcodeRowTotals(row);
+    const prev = peaks.get(key);
+    if (!prev || zcodeTotalsDominate(totals, prev.totals)) {
+      peaks.set(key, { model, hour_start: hourStart, totals });
+    }
+  }
+  return peaks;
+}
+
+// Last-wins per key (cloud replay semantics). A historical peak of 9000 followed
+// by a repair retraction of 0 must report 0 so restore still re-appends.
+async function collectZcodeQueueLatest(filePath, { beforeMs = null } = {}) {
+  const latest = new Map();
+  let raw;
+  try {
+    raw = await fs.readFile(filePath, "utf8");
+  } catch (error) {
+    if (error?.code === "ENOENT") return latest;
+    throw error;
+  }
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    let row;
+    try {
+      row = JSON.parse(line);
+    } catch (_error) {
+      continue;
+    }
+    if (row?.source !== "zcode") continue;
+    const model = typeof row.model === "string" && row.model.trim()
+      ? row.model.trim()
+      : "unknown";
+    const hourStart = typeof row.hour_start === "string" ? row.hour_start : "";
+    if (!hourStart) continue;
+    if (beforeMs != null && !zcodeHourIsPreWindow(hourStart, beforeMs)) continue;
+    latest.set(`${model}|${hourStart}`, {
+      model,
+      hour_start: hourStart,
+      totals: zcodeRowTotals(row),
+    });
+  }
+  return latest;
+}
+
+async function listZcodeQueueBackupPaths(queuePath) {
+  if (typeof queuePath !== "string" || !queuePath) return [];
+  const dir = path.dirname(queuePath);
+  const base = path.basename(queuePath);
+  let names;
+  try {
+    names = await fs.readdir(dir);
+  } catch (error) {
+    if (error?.code === "ENOENT") return [];
+    throw error;
+  }
+  return names
+    .filter((name) => name.startsWith(`${base}.bak.`))
+    .map((name) => path.join(dir, name))
+    .sort();
+}
+
+async function applyZcodePruneWindowRestore({
+  cursors,
+  queuePath,
+  queueStatePath,
+  dbPaths = [],
+  rebuildFloorMs: rebuildFloorMsOption = null,
+} = {}) {
+  if (!cursors || typeof cursors !== "object") return false;
+  const migrations = (cursors.migrations ||= {});
+  const prior = migrations[ZCODE_PRUNE_WINDOW_RESTORE_KEY];
+  if (isCompletedZcodeMigration(prior)) return false;
+
+  const rebuildFloorMs = Number.isFinite(rebuildFloorMsOption)
+    ? rebuildFloorMsOption
+    : resolveZcodeRebuildFloorMs(dbPaths);
+  if (!Number.isFinite(rebuildFloorMs)) {
+    migrations[ZCODE_PRUNE_WINDOW_RESTORE_KEY] = {
+      skipped: true,
+      reason: "zcode_rebuild_floor_unavailable",
+      at: new Date().toISOString(),
+    };
+    return false;
+  }
+
+  const backupPaths = await listZcodeQueueBackupPaths(queuePath);
+  if (backupPaths.length === 0) {
+    migrations[ZCODE_PRUNE_WINDOW_RESTORE_KEY] = {
+      skipped: true,
+      reason: "zcode_queue_backup_missing",
+      at: new Date().toISOString(),
+      rebuildFloorMs,
+    };
+    return false;
+  }
+
+  const preserveBeforeMs = zcodePreserveBeforeMsFromFloor(rebuildFloorMs);
+  const backupPeaks = new Map();
+  for (const backupPath of backupPaths) {
+    const peaks = await collectZcodeQueuePeaks(backupPath, { beforeMs: preserveBeforeMs });
+    for (const [key, peak] of peaks) {
+      const prev = backupPeaks.get(key);
+      if (!prev || zcodeTotalsDominate(peak.totals, prev.totals)) {
+        backupPeaks.set(key, peak);
+      }
+    }
+  }
+  if (backupPeaks.size === 0) {
+    migrations[ZCODE_PRUNE_WINDOW_RESTORE_KEY] = {
+      appliedAt: new Date().toISOString(),
+      restored: 0,
+      rebuildFloorMs,
+      preserveBeforeMs,
+      note: "no_pre_window_peaks_in_backups",
+    };
+    return true;
+  }
+
+  const liveLatest = await collectZcodeQueueLatest(queuePath, { beforeMs: preserveBeforeMs });
+  const hourly = (cursors.hourly ||= { buckets: {}, groupQueued: {} });
+  hourly.buckets ||= {};
+  const restorations = [];
+  for (const [key, peak] of backupPeaks) {
+    const bucketKeyName = bucketKey("zcode", peak.model, peak.hour_start);
+    const live = liveLatest.get(key)?.totals || null;
+    // Compare against the latest queue emission (last-wins), not historical peaks
+    // or cursor buckets — a 9000→0 retraction must still restore.
+    if (!zcodeTotalsDominate(peak.totals, live)) {
+      const bucketTotals = hourly.buckets[bucketKeyName]?.totals
+        ? zcodeRowTotals(hourly.buckets[bucketKeyName].totals)
+        : null;
+      const restoredTotals = zcodeTotalsDominate(live, peak.totals) ? live : peak.totals;
+      if (!bucketTotals || zcodeTotalsDominate(restoredTotals, bucketTotals)) {
+        hourly.buckets[bucketKeyName] = {
+          ...(hourly.buckets[bucketKeyName] || {}),
+          totals: { ...restoredTotals },
+          hour_start: peak.hour_start,
+          source: "zcode",
+          model: peak.model,
+        };
+      }
+      continue;
+    }
+    restorations.push(peak);
+    hourly.buckets[bucketKeyName] = {
+      ...(hourly.buckets[bucketKeyName] || {}),
+      totals: { ...peak.totals },
+      hour_start: peak.hour_start,
+      source: "zcode",
+      model: peak.model,
+    };
+  }
+
+  if (restorations.length === 0) {
+    // A previous append may have succeeded before the upload-state write
+    // failed. Retry the reset before committing this migration's marker.
+    await resetUploadOffsetForZcodeRepair(queueStatePath, "reset_after_zcode_prune_window_restore_2026_10");
+    migrations[ZCODE_PRUNE_WINDOW_RESTORE_KEY] = {
+      appliedAt: new Date().toISOString(),
+      restored: 0,
+      rebuildFloorMs,
+      backupsConsidered: backupPaths.length,
+      note: "backup_peaks_not_higher",
+    };
+    return true;
+  }
+
+  await backupExistingFile(queuePath);
+  const append = restorations.map((peak) => JSON.stringify({
+    source: "zcode",
+    model: peak.model,
+    hour_start: peak.hour_start,
+    ...peak.totals,
+  }));
+  const raw = await fs.readFile(queuePath, "utf8").catch((error) => {
+    if (error.code === "ENOENT") return "";
+    throw error;
+  });
+  await appendZcodeSnapshots(queuePath, append, raw && !raw.endsWith("\n"));
+  await resetUploadOffsetForZcodeRepair(
+    queueStatePath,
+    "reset_after_zcode_prune_window_restore_2026_10",
+  );
+  migrations[ZCODE_PRUNE_WINDOW_RESTORE_KEY] = {
+    appliedAt: new Date().toISOString(),
+    restored: restorations.length,
+    rebuildFloorMs,
+    backupsConsidered: backupPaths.length,
+  };
+  return true;
+}
+
+async function repairZcodePruneWindowRestore(options = {}) {
+  if (!options.cursors || typeof options.cursors !== "object") return false;
+  if (isCompletedZcodeMigration(options.cursors.migrations?.[ZCODE_PRUNE_WINDOW_RESTORE_KEY])) return false;
+  const staged = structuredClone(options.cursors);
+  const result = await applyZcodePruneWindowRestore({ ...options, cursors: staged });
+  Object.assign(options.cursors, staged);
+  return result;
+}
+
+async function repairZcodeUsageMigration(options = {}) {
+  if (!options.cursors || typeof options.cursors !== "object") return false;
+  if (isCompletedZcodeMigration(options.cursors.migrations?.[options.migrationKey])) return false;
+  const staged = structuredClone(options.cursors);
+  const result = await applyZcodeUsageMigration({ ...options, cursors: staged });
+  if (!Object.hasOwn(staged, "zcode")) delete options.cursors.zcode;
+  Object.assign(options.cursors, staged);
+  return result;
 }
 
 async function repairZcodeNativeUsageMigration(options = {}) {

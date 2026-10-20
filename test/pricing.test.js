@@ -15,6 +15,17 @@ const fetcher = require("../src/lib/pricing/litellm-fetcher");
 const pricing = require("../src/lib/pricing");
 const curatedPricing = require("../src/lib/pricing/curated-overrides.json");
 
+test("OpenCode free suffixes stay zero-priced before paid fuzzy matches, only for OpenCode", () => {
+  const tables = { curated: { exact: {} }, litellm: { "gpt-4o": { input: 2.5, output: 10 } } };
+  for (const model of ["gpt-4o-free", "vendor/unknown-free", "vendor/UNKNOWN-FREE"]) {
+    const result = matcher.lookupPricing(model, { ...tables, source: "opencode" });
+    assert.equal(result.hit, true);
+    assert.deepEqual(result.value, { input: 0, output: 0, cache_read: 0, cache_write: 0 });
+  }
+  assert.equal(matcher.lookupPricing("gpt-4o-free", { ...tables, source: "codex" }).value.input, 2.5);
+  assert.equal(matcher.lookupPricing("gpt-4o", { ...tables, source: "opencode" }).value.input, 2.5);
+});
+
 test("Claude 5.5 SKUs use official rates and Claude thinking is already billed in output (#762)", () => {
   pricing.resetPricingForTests();
   for (const [model, expected] of [

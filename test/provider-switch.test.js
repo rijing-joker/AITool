@@ -1990,10 +1990,11 @@ test("provider-switch codex catalog: official models match like Codex", () => {
   assert.equal(found("gpt-6-sol"), "gpt-6-sol");
   assert.equal(found("gpt-6-sol-high"), "gpt-6-sol");
   assert.equal(found("gpt-6-luna"), "gpt-6");
-  // one simple namespace segment may be stripped
+  // Relay namespaces resolve capabilities while routing IDs remain untouched.
   assert.equal(found("openai/gpt-5.5"), "gpt-5.5");
   assert.equal(found("my_relay-1/gpt-6-sol"), "gpt-6-sol");
-  assert.equal(found("a/b/gpt-5.5"), null);
+  assert.equal(found("a/b/gpt-5.5"), "gpt-5.5");
+  assert.equal(found("team/vendor/GPT-5.5"), "gpt-5.5");
   assert.equal(found("bad ns/gpt-5.5"), null);
   assert.equal(found("/gpt-5.5"), null);
   // case-sensitive, no partial-slug hits
@@ -2030,7 +2031,7 @@ test("provider-switch codex catalog: GPT rows mirror the official entry", () => 
   ];
   const content = catalog.buildCodexCatalog(
     [
-      // the row's own overrides must NOT apply to an official hit
+      // Harness/capabilities remain official; an explicit window applies.
       { model: "gpt-6-sol", displayName: "My Relay Name", contextWindow: "128000", reasoningLevels: ["none"] },
       { model: "gpt-6-sol-high", displayName: "Prefixed" },
       { model: "glm-5", displayName: "Template Row" },
@@ -2042,10 +2043,12 @@ test("provider-switch codex catalog: GPT rows mirror the official entry", () => 
 
   const direct = models[0];
   assert.equal(direct.slug, "gpt-6-sol");
-  // official values win: no user display name, no overridden window/levels
+  // Official harness and levels survive the explicit window override.
   assert.equal(direct.display_name, "GPT-6 SOL");
   assert.equal(direct.base_instructions, "gpt-6-sol harness prompt");
-  assert.equal(direct.context_window, 272000);
+  assert.equal(direct.context_window, 128000);
+  assert.equal(direct.max_context_window, 128000);
+  assert.equal(direct.auto_compact_token_limit, 115200);
   assert.deepEqual(
     direct.supported_reasoning_levels.map((level) => level.effort),
     ["low", "xhigh"],
@@ -2102,6 +2105,45 @@ test("provider-switch codex catalog: pure mirrors collapse on import, edited clo
   assert.equal(editedRows.length, 1);
   assert.equal(editedRows[0].model, "gpt-6-sol");
   assert.equal(editedRows[0].displayName, "My Relay Name");
+});
+
+test("Codex context overrides survive catalog import and projected global settings take precedence", () => {
+  const catalog = require("../src/lib/provider-switch/catalog");
+  const { projectCodex } = require("../src/lib/provider-switch/targets");
+  const official = [{
+    slug: "gpt-5.5", display_name: "GPT-5.5", context_window: 272000,
+    max_context_window: 1048576, auto_compact_token_limit: 244800,
+    model_messages: { instructions_template: "official harness" },
+    supports_parallel_tool_calls: true, input_modalities: ["text", "image"],
+  }];
+  const rows = [{ model: "team/vendor/gpt-5.5", contextWindow: "2000000" }];
+  const initial = catalog.buildCodexCatalog(rows, official);
+  const imported = catalog.parseCodexCatalog(initial, official);
+  assert.deepEqual(imported, rows);
+  assert.deepEqual(JSON.parse(catalog.buildCodexCatalog(imported, official)), JSON.parse(initial));
+  const entry = JSON.parse(initial).models[0];
+  assert.equal(entry.slug, "team/vendor/gpt-5.5");
+  assert.equal(entry.max_context_window, 2000000);
+  assert.equal(entry.auto_compact_token_limit, 1800000);
+  assert.equal(entry.model_messages.instructions_template, "official harness");
+  assert.equal(entry.supports_parallel_tool_calls, true);
+
+  const projected = projectCodex({
+    target: { meta: { codexCatalogModels: rows } },
+    // These settings are user-owned live-file edits rather than provider floor keys.
+    liveToml: "model_context_window = 400000\nmodel_auto_compact_token_limit = 350000\n", liveAuth: null,
+  });
+  const overridden = JSON.parse(catalog.buildCodexCatalog(projected.catalog.models, official, projected.catalog.options)).models[0];
+  assert.equal(overridden.context_window, 400000);
+  assert.equal(overridden.max_context_window, 400000);
+  assert.equal(overridden.auto_compact_token_limit, 350000);
+  const inherited = projectCodex({ target: { meta: { codexCatalogModels: rows } }, liveToml: "model_context_window = 500000\n", liveAuth: null });
+  assert.equal(inherited.catalog.options.contextWindow, 500000);
+  for (const window of ["400000oops", -1, 1.5, "Infinity"]) {
+    const invalid = JSON.parse(catalog.buildCodexCatalog([{ model: "gpt-5.5", contextWindow: window }], official)).models[0];
+    assert.equal(invalid.context_window, 272000);
+    assert.equal(invalid.max_context_window, 1048576);
+  }
 });
 
 // Guard for the porting rule learned from the codex_commandcode fix (0a0b709):

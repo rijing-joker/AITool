@@ -2299,7 +2299,7 @@ function openclawUsageEventIdentity(obj, msg, usage, model) {
 function codexSessionIdFromPath(filePath) {
   if (typeof filePath !== "string") return null;
   const m = filePath.match(
-    /([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\.jsonl(?:\.zst)?$/,
+    /([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\.jsonl(?:\.zstd?)?$/,
   );
   return m ? m[1] : null;
 }

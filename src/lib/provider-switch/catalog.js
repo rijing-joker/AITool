@@ -54,8 +54,8 @@ const CODEX_REASONING_LEVELS = ["none", "minimal", "low", "medium", "high", "xhi
 // Once model_catalog_json is set Codex only knows the models in that file, so
 // a relay's GPT row built from the neutral template would lose the model's own
 // harness prompt, freeform apply_patch and reasoning levels. Rows that hit
-// Codex's bundled official list mirror that entry verbatim instead; row
-// overrides do not apply. The list comes from the local Codex CLI
+// Codex's bundled official list retain its harness and capabilities, with
+// explicit context windows applied separately. The list comes from the local Codex CLI
 // (`codex debug models --bundled`) with a vendored gpt-5.5 entry
 // (resources/gpt5_5-template.json, MIT, from cc-switch) as offline fallback.
 
@@ -234,8 +234,8 @@ function codexOfficialModelsReason() {
   return officialModelsReason;
 }
 
-// Codex's own lookup rule (codex-rs models-manager): longest case-sensitive
-// slug prefix, else strip ONE simple namespace segment ("openai/gpt-5.5").
+// Keep Codex's longest slug-prefix lookup, and resolve relay namespaces only
+// for capability lookup. Public routing IDs remain unchanged.
 function findCodexOfficialModel(model, candidates) {
   const longestPrefix = (text) => {
     let best = null;
@@ -252,16 +252,18 @@ function findCodexOfficialModel(model, candidates) {
   };
   const hit = longestPrefix(model);
   if (hit) return hit;
-  const slash = model.indexOf("/");
-  if (slash <= 0) return null;
-  const namespace = model.slice(0, slash);
-  const suffix = model.slice(slash + 1);
-  if (suffix.includes("/") || !/^[A-Za-z0-9_-]+$/.test(namespace)) return null;
-  return longestPrefix(suffix);
+  const parts = model.split("/");
+  if (parts.length < 2 || parts.slice(0, -1).some((part) => !/^[A-Za-z0-9_-]+$/.test(part))) return null;
+  for (let i = 1; i < parts.length; i++) {
+    const suffix = parts.slice(i).join("/");
+    const exact = candidates.find((candidate) => typeof candidate?.slug === "string" && candidate.slug.toLowerCase() === suffix.toLowerCase());
+    if (exact) return exact;
+  }
+  return longestPrefix(parts.at(-1));
 }
 
-// The mirrored row: official values win over row overrides; only fields owned
-// by the official account or backend are reset. (Direct-write is
+// The mirrored harness/capabilities remain official; context overrides are
+// applied separately. Account/backend fields are reset. (Direct-write is
 // native-responses only, so there is no ProxyChat image-detail tweak.)
 function codexOfficialModelEntry(official, model, priority) {
   const entry = JSON.parse(JSON.stringify(official && typeof official === "object" ? official : {}));
@@ -302,13 +304,13 @@ function sanitizeSpeedTiers(value) {
 }
 
 // A catalog row is a pure mirror when everything import keeps (display name,
-// window, modalities, parallel tool calls) matches a fresh mirror; such rows
+// modalities, parallel tool calls) matches a fresh mirror; such rows
 // collapse to their bare model name on import instead of storing the official
 // blob as if the user had typed it.
 function isCodexOfficialMirror(entry, model, official) {
   const expected = codexOfficialModelEntry(official, model, 0);
   // Deep comparison: input_modalities is an array (Rust's Value == is deep).
-  return ["display_name", "context_window", "input_modalities", "supports_parallel_tool_calls"]
+  return ["display_name", "input_modalities", "supports_parallel_tool_calls"]
     .every((key) => JSON.stringify(entry[key]) === JSON.stringify(expected[key]));
 }
 
@@ -336,30 +338,46 @@ function sanitizeLevels(levels) {
   return CODEX_REASONING_LEVELS.filter((level) => picked.includes(level));
 }
 
-// Build the catalog file content from provider meta rows. Rows without a
-// model slug are skipped; the file is only written when at least one remains.
-// Rows hitting the official list mirror that entry (their own overrides do
-// not apply); the rest come from the neutral template.
-function buildCodexCatalog(models, officialModels, { autoReviewModel, speedTiersEnabled = true } = {}) {
+function positiveWindow(value) {
+  const number = Number(value);
+  return Number.isSafeInteger(number) && number > 0 ? number : null;
+}
+
+function applyContextWindow(entry, window, compactLimit) {
+  if (window) {
+    entry.context_window = window;
+    entry.max_context_window = window;
+  }
+  if (compactLimit) entry.auto_compact_token_limit = compactLimit;
+  else if (window) entry.auto_compact_token_limit = Number(BigInt(window) * 9n / 10n);
+}
+
+// Use the official harness for known models and the neutral template otherwise.
+// Explicit windows apply to either, with global config taking precedence.
+function buildCodexCatalog(models, officialModels, { autoReviewModel, speedTiersEnabled = true, contextWindow, autoCompactTokenLimit } = {}) {
   const official = officialModels !== undefined ? officialModels || [] : codexOpenaiOfficialModels();
   const entries = [];
   for (const row of Array.isArray(models) ? models : []) {
     const slug = String((row && row.model) || "").trim();
     if (!slug) continue;
+    const configuredWindow = positiveWindow(contextWindow) || positiveWindow(row.contextWindow);
+    const compactLimit = positiveWindow(autoCompactTokenLimit);
     const found = findCodexOfficialModel(slug, official);
     if (found) {
-      entries.push(codexOfficialModelEntry(found, slug, entries.length));
+      const entry = codexOfficialModelEntry(found, slug, entries.length);
+      applyContextWindow(entry, configuredWindow, compactLimit);
+      entries.push(entry);
       continue;
     }
     const entry = JSON.parse(JSON.stringify(TEMPLATE));
     const displayName = String((row && row.displayName) || "").trim() || slug;
-    const contextWindow = Number.parseInt((row && row.contextWindow) || "", 10);
-    const window = Number.isFinite(contextWindow) && contextWindow > 0 ? contextWindow : TEMPLATE.context_window;
+    const window = configuredWindow || TEMPLATE.context_window;
     entry.slug = slug;
     entry.display_name = displayName;
     entry.description = displayName;
     entry.context_window = window;
     entry.max_context_window = window;
+    applyContextWindow(entry, configuredWindow, compactLimit);
     entry.priority = 1000 + entries.length;
     if (row.serviceTiers) entry.service_tiers = sanitizeServiceTiers(row.serviceTiers);
     if (row.additionalSpeedTiers) entry.additional_speed_tiers = sanitizeSpeedTiers(row.additionalSpeedTiers);
@@ -436,7 +454,10 @@ function parseCodexCatalog(text, officialModels) {
     if (official.length > 0 && hasOwnPrompt) {
       const found = findCodexOfficialModel(slug, official);
       if (found && isCodexOfficialMirror(entry, slug, found)) {
-        rows.push({ model: slug.slice(0, 200) });
+        const row = { model: slug.slice(0, 200) };
+        const window = positiveWindow(entry.context_window);
+        if (window && window !== found.context_window) row.contextWindow = String(window);
+        rows.push(row);
         continue;
       }
     }

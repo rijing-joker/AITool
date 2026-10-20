@@ -29,7 +29,7 @@ function createUsageLabeler({ keys = [], remarks = {}, providerRemarks = [], cre
     const index = text(row.auth_index);
     const provider = text(row.provider);
     const section = sections[provider.toLowerCase()] || "openai-compatibility";
-    const keyHash = sha256Hex(text(row.source));
+    const keyHash = text(row.source_hash) || sha256Hex(text(row.source));
     const candidates = new Set(providerRemarks.filter((entry) => entry.section === section && entry.keyHash === keyHash).map((entry) => text(entry.remark)).filter(Boolean));
     // Unknown/custom routes cannot resolve a group note from key alone.
     const apiNote = sections[provider.toLowerCase()] && candidates.size === 1 ? [...candidates][0] : "";

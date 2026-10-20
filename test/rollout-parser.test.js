@@ -9119,7 +9119,9 @@ test("resolveKiroCliSessionFiles discovers Kiro CLI 2.13 messages.jsonl sessions
   }
 });
 
-test("parseKiroCliIncremental parses Kiro CLI 2.13 event sessions with per-turn model and reasoning attribution", async () => {
+test("parseKiroCliIncremental parses Kiro CLI 2.13 event sessions with per-turn model and reasoning attribution", async (t) => {
+  // Exercise rewrites inside the 90-day cursor window regardless of test date.
+  t.mock.method(Date, "now", () => Date.parse("2026-07-23T00:00:00.000Z"));
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-kirocli-v2-"));
   try {
     const sessionDir = path.join(

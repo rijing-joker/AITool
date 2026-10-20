@@ -1,11 +1,12 @@
 const crypto = require("node:crypto");
 
 // The RESP usage channel also carries capability/control notifications on
-// subscribe and reconnect. Zero tokens alone do not identify a control frame:
+// subscribe, reconnect and config saves (support_refresh / refresh).
+// Zero tokens alone do not identify a control frame:
 // real failed, canceled and even successful requests can have zero usage.
 function isControlNotification(record) {
   return record !== null && typeof record === "object" &&
-    Object.hasOwn(record, "support_refresh");
+    (Object.hasOwn(record, "support_refresh") || Object.hasOwn(record, "refresh"));
 }
 
 function isUsageRecord(record) {
@@ -25,7 +26,8 @@ function isUsageRecord(record) {
 //
 // It also strips secrets the way EasyCLIProxyAPI's collector does: the raw
 // api_key never survives normalization — only a sha256 hash and a masked
-// display form — and upstream response_headers are dropped.
+// display form. The upstream credential in source becomes a hash for note
+// matching, and upstream response_headers are dropped.
 // ---------------------------------------------------------------------------
 
 const API_KEY_HASH = (key) => sha256Hex(key);
@@ -126,6 +128,12 @@ function normalizeRecord(record) {
   delete row.api_key;
   delete row.apiKey;
   delete row.response_headers;
+  // API-key executors publish their upstream key as source, while OAuth
+  // executors may publish an account identity. Neither belongs in raw logs
+  // or the records API; labels use auth_index/provider and this digest.
+  const source = pickString(record, "source", "source").trim();
+  delete row.source;
+  if (source) row.source_hash = sha256Hex(source);
   if (apiKey) {
     row.api_key_hash = API_KEY_HASH(apiKey);
     row.api_key_display = maskApiKey(apiKey);

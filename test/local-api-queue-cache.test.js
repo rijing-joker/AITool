@@ -83,10 +83,11 @@ test("local usage endpoints reuse one parsed queue until the file changes", asyn
     assert.equal(daily.data[0].total_tokens, 100);
     const coldReadBytes = queueBytes;
     await callEndpoint(handler, "/functions/tokentracker-usage-summary?tz=UTC");
-    assert.equal(queueBytes, coldReadBytes, "unchanged snapshots do not reread queue bytes");
+    assert.equal(queueBytes - coldReadBytes, (await fs.promises.stat(queuePath)).size,
+      "unchanged snapshots validate all bytes before reusing parsed rows");
 
-    // Appending invalidates the signature, but the queue is append-only, so
-    // the refresh reads just the new tail instead of the whole file.
+    // Growth verifies the old prefix before parsing the new tail, since
+    // historical rows may have been rewritten at the same time.
     await fs.promises.appendFile(queuePath, `${JSON.stringify(queueRow(250))}\n`);
     const refreshed = await callEndpoint(
       handler,
@@ -126,7 +127,7 @@ test("cached day aggregation preserves IANA time-zone day boundaries", async () 
   }
 });
 
-test("pricing revision invalidates cached daily cost without rereading the queue", async () => {
+test("pricing revision invalidates cached daily cost with unchanged queue content", async () => {
   const tmp = await fs.promises.mkdtemp(path.join(os.tmpdir(), "tt-pricing-revision-cache-"));
   const queuePath = path.join(tmp, "queue.jsonl");
   const cachePath = path.join(tmp, "pricing.json");

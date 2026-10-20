@@ -81,7 +81,7 @@ function writeHistory({ queuePath, recordPath }, records, count = records.length
 test("control payloads never change request counters, raw records or queue", (t) => {
   const f = fixture(t);
   const before = bridge.bridgeStatus();
-  for (const value of [control, { support_refresh: false }, null, [], [control], "ping"]) {
+  for (const value of [control, { support_refresh: false }, { refresh: true }, { refresh: false }, null, [], [control], "ping"]) {
     bridge.handleUsagePayload(JSON.stringify(value));
   }
   bridge.handleUsagePayload("invalid JSON");
@@ -298,6 +298,8 @@ test("RESP backfill, subscribe and reconnect ignore controls but accept the next
   const deadline = Date.now() + 3000;
   while (sockets.length < 2 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
   assert.equal(sockets.length, 2);
+  assert.equal(bridge.bridgeStatus().eventsSeenSinceConnect, 0);
+  sockets[1].emit("data", message({ refresh: true }));
   assert.equal(bridge.bridgeStatus().eventsSeenSinceConnect, 0);
   sockets[1].emit("data", message(zeroRequest));
   assert.equal(bridge.bridgeStatus().eventsSeenSinceConnect, 1);

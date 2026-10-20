@@ -159,10 +159,13 @@ function projectCodex({ prev, target, liveToml, liveAuth, stash }) {
 
   // Sidecar action for the caller: write the catalog file for the target,
   // remove ours when only the previous provider had one, or leave it alone.
+  const catalogConfig = require("smol-toml").parse(text || "");
   const catalogAction = targetCatalog.length > 0
     ? { action: "write", models: targetCatalog, options: {
       autoReviewModel: target.meta?.codexAutoReviewModel,
       speedTiersEnabled: target.meta?.codexSpeedTiersEnabled !== false,
+      ...(catalogConfig.model_context_window !== undefined ? { contextWindow: catalogConfig.model_context_window } : {}),
+      ...(catalogConfig.model_auto_compact_token_limit !== undefined ? { autoCompactTokenLimit: catalogConfig.model_auto_compact_token_limit } : {}),
     } }
     : prevCatalog.length > 0
       ? { action: "remove" }

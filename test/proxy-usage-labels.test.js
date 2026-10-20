@@ -4,7 +4,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { createUsageLabeler, usageFilterOptions } = require("../src/lib/proxy/usage-labels");
-const { sha256Hex } = require("../src/lib/proxy/usage-record");
+const { sha256Hex, normalizeRecord } = require("../src/lib/proxy/usage-record");
 const paths = require("../src/lib/proxy/paths");
 const config = require("../src/lib/proxy/config");
 const management = require("../src/lib/proxy/management");
@@ -29,6 +29,9 @@ test("client labels refresh independently of upstream notes and never expose sou
   assert.equal(createUsageLabeler({ ...options, keys: [] })(row).api_key_remark, "Old client");
   const withoutAccount = createUsageLabeler({ ...options, credentials: [] })(row);
   assert.equal(withoutAccount.source_display, "codex · Codex API · AuthA");
+  const sanitized = createUsageLabeler({ ...options, credentials: [] })(normalizeRecord(row));
+  assert.equal(sanitized.source_display, withoutAccount.source_display);
+  assert.equal(JSON.stringify(sanitized).includes("sk-secret"), false);
   assert.equal(createUsageLabeler(options)({ ...row, provider: "grok", auth_index: "AuthB" }).source_display, "grok · Grok API · AuthB");
   const conflicting = createUsageLabeler({ credentials: [{ auth_index: "AuthA", note: "A" }, { auth_index: "AuthA", note: "B" }] })(row);
   assert.equal(conflicting.source_display, "codex · AuthA");
@@ -59,6 +62,7 @@ test("records API filters exact upstream identities, keeps range options and wor
     return body;
   }
   const all = await read("");
+  assert.equal(JSON.stringify(all).includes("sk-shared-secret"), false);
   assert.equal(all.filterOptions.upstreams.length, 4);
   for (const option of all.filterOptions.upstreams) {
     const result = await read(`upstream=${encodeURIComponent(option.key)}`);

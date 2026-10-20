@@ -280,6 +280,14 @@ function lookupPricing(model, { curated, litellm, source } = {}) {
       value: { input: 0, output: 0, cache_read: 0, cache_write: 0 },
     };
   }
+  // OpenCode's free SKU must not inherit the paid base model's fuzzy price.
+  if (sourceKey === "opencode" && lower.endsWith("-free")) {
+    return {
+      hit: true,
+      source: "curated:opencode-free-suffix",
+      value: { input: 0, output: 0, cache_read: 0, cache_write: 0 },
+    };
+  }
   // AStudio does not disclose its routed model. Stop before generic aliases
   // and fuzzy matching can turn an unresolved router into a priced model.
   if (sourceKey === "acode" && (lower === "auto" || lower.endsWith("-auto"))) {

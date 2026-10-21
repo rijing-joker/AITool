@@ -164,7 +164,14 @@ function isManagedLinkOrCopy(targetPath, managedLinks = {}) {
 async function copySkill(sourceDir, targetPath) {
   // Do not copy through a link that appeared after the symlink attempt.
   await fsp.mkdir(targetPath);
-  await fsp.cp(sourceDir, targetPath, { recursive: true, force: false, errorOnExist: true });
+  // Reserve the root exclusively, then copy its children. Node 24 rejects an
+  // existing root with errorOnExist, even when it is the directory we created.
+  for (const name of await fsp.readdir(sourceDir)) {
+    if (name === COPY_STAMP_FILE) continue;
+    await fsp.cp(path.join(sourceDir, name), path.join(targetPath, name), {
+      recursive: true, force: false, errorOnExist: true,
+    });
+  }
   await fsp.writeFile(path.join(targetPath, COPY_STAMP_FILE), new Date().toISOString());
 }
 

@@ -244,6 +244,8 @@ test("skills: copy fallback remains removable and preserves a stamped source", a
   const skills = require("../src/lib/provider-switch/skills");
   const source = makeSkill(path.join(tmpHome, ".claude", "skills"), "demo");
   fs.writeFileSync(path.join(source, skills.COPY_STAMP_FILE), "old installation");
+  fs.mkdirSync(path.join(source, "nested"));
+  fs.writeFileSync(path.join(source, "nested", "helper.txt"), "nested content");
   const target = path.join(tmpHome, ".gemini", "skills", "demo");
   fs.mkdirSync(path.dirname(target), { recursive: true });
   await skills.importSkills();
@@ -253,10 +255,32 @@ test("skills: copy fallback remains removable and preserves a stamped source", a
   const result = await skills.toggleSkill("demo", "gemini", true);
   assert.deepEqual(result.failures, []);
   assert.equal(fs.lstatSync(target).isDirectory(), true);
+  assert.equal(fs.readFileSync(path.join(target, "helper.txt"), "utf8"), "x");
+  assert.equal(fs.readFileSync(path.join(target, "nested", "helper.txt"), "utf8"), "nested content");
+  assert.notEqual(fs.readFileSync(path.join(target, skills.COPY_STAMP_FILE), "utf8"), "old installation");
   await skills.toggleSkill("demo", "gemini", false);
   await skills.toggleSkill("demo", "claude", false);
   assert.equal(fs.existsSync(target), false);
   assert.equal(fs.existsSync(path.join(source, "SKILL.md")), true);
+});
+
+test("skills: copy fallback preserves an entry created during the symlink attempt", async (t) => {
+  const skills = require("../src/lib/provider-switch/skills");
+  makeSkill(path.join(tmpHome, ".claude", "skills"), "demo");
+  const target = path.join(tmpHome, ".gemini", "skills", "demo");
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  await skills.importSkills();
+  t.mock.method(require("node:fs/promises"), "symlink", async () => {
+    fs.mkdirSync(target);
+    fs.writeFileSync(path.join(target, "mine.txt"), "user content");
+    throw Object.assign(new Error("Symlinks unavailable"), { code: "EPERM" });
+  });
+  const result = await skills.toggleSkill("demo", "gemini", true);
+  assert.equal(result.failures.length, 1);
+  assert.equal(fs.existsSync(path.join(target, "SKILL.md")), false);
+  assert.equal(fs.existsSync(path.join(target, skills.COPY_STAMP_FILE)), false);
+  await skills.toggleSkill("demo", "gemini", false);
+  assert.equal(fs.readFileSync(path.join(target, "mine.txt"), "utf8"), "user content");
 });
 
 test("skills: a concurrent disable waits for link creation and leaves the stored state applied", async (t) => {

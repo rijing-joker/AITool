@@ -31,6 +31,7 @@ import {
   usableModelAlias,
 } from "../lib/easy-aliases";
 import { Button, ConfirmModal } from "../ui/components";
+import { useGuardedDialog } from "../hooks/use-guarded-dialog";
 import { showToast } from "../ui/components/Toast";
 
 // ---------------------------------------------------------------------------
@@ -92,7 +93,7 @@ function AliasSwitch({ checked, onChange, disabled, label }) {
   );
 }
 
-function AliasEditorDialog({ editor, onClose, onSaved }) {
+function AliasEditorDialog({ editor, onClose, onSaved, onEditorStateChange }) {
   const {
     sources,
     editingEntry,
@@ -111,6 +112,12 @@ function AliasEditorDialog({ editor, onClose, onSaved }) {
   const generatedAliasRef = useRef("");
 
   const editingSource = editor.editingSource;
+  const closeGuard = useGuardedDialog({
+    dirty: selectedSourceId !== (editingSource?.id ?? "") ||
+      effort !== (editor.initialEffort ?? "") || fastEnabled !== (editor.initialFast ?? false) ||
+      alias !== (editingEntry?.alias ?? ""),
+    busy: Boolean(busyAlias), onClose, onEditorStateChange,
+  });
   const baseSources = useMemo(() => {
     if (!editingSource) return sources;
     return [{
@@ -282,7 +289,8 @@ function AliasEditorDialog({ editor, onClose, onSaved }) {
   const dialogTitle = copy(editingEntry ? "proxy.upstream.common.edit" : "proxy.alias.create.title");
 
   return (
-    <Dialog.Root open onOpenChange={(next) => { if (!next && !busyAlias) onClose(); }}>
+    <Dialog.Root open onOpenChange={(next) => { if (!next) closeGuard.requestClose(); }}>
+      {closeGuard.confirmation}
       <Dialog.Portal>
         <Dialog.Backdrop className="fixed inset-0 z-[100] bg-black/40 backdrop-blur-[2px] transition-opacity duration-200 ease-out data-[ending-style]:opacity-0 data-[starting-style]:opacity-0" />
         <Dialog.Viewport className="fixed inset-0 z-[101] flex items-center justify-center p-4">
@@ -299,7 +307,7 @@ function AliasEditorDialog({ editor, onClose, onSaved }) {
               </div>
               <button
                 type="button"
-                onClick={onClose}
+                onClick={closeGuard.requestClose}
                 disabled={Boolean(busyAlias)}
                 className="shrink-0 rounded-md p-1.5 text-oai-gray-400 transition-colors hover:bg-oai-gray-100 hover:text-oai-black disabled:opacity-50 dark:hover:bg-oai-gray-800 dark:hover:text-white"
                 aria-label={copy("proxy.upstream.common.close")}
@@ -527,7 +535,7 @@ function AliasEditorDialog({ editor, onClose, onSaved }) {
             </div>
 
             <div className="flex items-center justify-end gap-2 border-t border-oai-gray-100 px-5 py-3.5 dark:border-oai-gray-800">
-              <Button variant="secondary" disabled={Boolean(busyAlias)} onClick={onClose}>
+              <Button variant="secondary" disabled={Boolean(busyAlias)} onClick={closeGuard.requestClose}>
                 {copy("proxy.upstream.common.cancel")}
               </Button>
               <Button onClick={() => void createAlias()} disabled={Boolean(busyAlias)}>
@@ -544,7 +552,7 @@ function AliasEditorDialog({ editor, onClose, onSaved }) {
   );
 }
 
-export function ModelAliasesTab() {
+export function ModelAliasesTab({ onEditorStateChange } = {}) {
   const [state, setState] = useState(null);
   const [loading, setLoading] = useState(true);
   const [busyAlias, setBusyAlias] = useState("");
@@ -736,6 +744,7 @@ export function ModelAliasesTab() {
 
       {editorOpen ? (
         <AliasEditorDialog
+          onEditorStateChange={onEditorStateChange}
           editor={{
             sources,
             entries,
@@ -759,13 +768,14 @@ export function ModelAliasesTab() {
 
       <ConfirmModal
         open={deleteEntry !== null}
+        error={error}
         title={copy("proxy.upstream.common.delete")}
         description={copy("proxy.alias.deleteConfirm", { alias: deleteEntry?.alias ?? "" })}
         confirmLabel={copy("proxy.upstream.common.delete")}
         destructive
         busy={Boolean(busyAlias)}
         onConfirm={() => void confirmDelete(deleteEntry)}
-        onCancel={() => setDeleteEntry(null)}
+        onCancel={() => { setDeleteEntry(null); setError(""); }}
       />
     </div>
   );

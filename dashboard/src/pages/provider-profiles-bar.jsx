@@ -17,17 +17,18 @@ const PROFILE_APPS = ["claude", "codex", "gemini", "grokbuild", "opencode", "her
 
 const inputClass = "h-10 w-full rounded-lg border border-oai-gray-200 bg-transparent px-3 text-sm placeholder:text-oai-gray-400 focus:outline-none focus:ring-2 focus:ring-oai-brand-500 dark:border-oai-gray-700";
 
-function ManageDialog({ open, profiles, currentId, busy, onClose, onRename, onDelete }) {
+function ManageDialog({ open, profiles, currentId, busy, error, onClose, onRename, onDelete }) {
   const [renaming, setRenaming] = useState({});
   return (
-    <ModalFrame open={open} onClose={onClose} label={copy("pswitch.profile.manage_title")}>
+    <ModalFrame open={open} onClose={onClose} busy={busy} label={copy("pswitch.profile.manage_title")}>
       <div className="flex items-center justify-between border-b border-oai-gray-100 px-5 py-3.5 dark:border-oai-gray-800">
         <h2 className="text-sm font-semibold">{copy("pswitch.profile.manage_title")}</h2>
-        <button type="button" onClick={onClose} aria-label={copy("pswitch.action.close")} className="rounded-lg p-1.5 text-oai-gray-500 hover:bg-oai-gray-100 dark:hover:bg-oai-gray-800">
+        <button type="button" onClick={onClose} disabled={busy} aria-label={copy("pswitch.action.close")} className="rounded-lg p-1.5 text-oai-gray-500 hover:bg-oai-gray-100 dark:hover:bg-oai-gray-800">
           <span aria-hidden="true" className="text-base leading-none">×</span>
         </button>
       </div>
       <div className="max-h-[60vh] space-y-2 overflow-y-auto px-5 py-4 text-sm">
+        {error ? <p role="alert" className="text-sm text-red-600 dark:text-red-400">{error}</p> : null}
         {profiles.length === 0 ? (
           <p className="text-oai-gray-500 dark:text-oai-gray-400">{copy("pswitch.profile.empty")}</p>
         ) : (
@@ -36,7 +37,11 @@ function ManageDialog({ open, profiles, currentId, busy, onClose, onRename, onDe
               <div className="flex min-w-0 items-center gap-2">
                 <input
                   value={renaming[profile.id] ?? profile.name}
-                  onChange={(event) => setRenaming((current) => ({ ...current, [profile.id]: event.currentTarget.value }))}
+                  onChange={(event) => {
+                    const value = event.currentTarget.value;
+                    setRenaming((current) => ({ ...current, [profile.id]: value }));
+                  }}
+                  disabled={busy}
                   aria-label={copy("pswitch.profile.name_label")}
                   className="h-8 min-w-0 flex-1 rounded-md border border-transparent bg-transparent px-1.5 text-sm hover:border-oai-gray-200 focus:border-oai-gray-300 focus:outline-none dark:hover:border-oai-gray-700"
                 />
@@ -48,9 +53,10 @@ function ManageDialog({ open, profiles, currentId, busy, onClose, onRename, onDe
                 <button
                   type="button"
                   disabled={busy || (renaming[profile.id] ?? profile.name) === profile.name || !(renaming[profile.id] ?? "").trim()}
-                  onClick={() => {
-                    void onRename(profile.id, renaming[profile.id] ?? profile.name);
-                    setRenaming((current) => ({ ...current, [profile.id]: undefined }));
+                  onClick={async () => {
+                    if (await onRename(profile.id, renaming[profile.id] ?? profile.name)) {
+                      setRenaming((current) => ({ ...current, [profile.id]: undefined }));
+                    }
                   }}
                   className="min-h-8 rounded-md border border-oai-gray-200 px-2 text-xs font-medium hover:bg-oai-gray-50 disabled:opacity-50 dark:border-oai-gray-700 dark:hover:bg-oai-gray-800"
                 >
@@ -82,6 +88,8 @@ export function ProviderProfilesBar({ activeApp, onNotice, onChanged }) {
   const [applyTarget, setApplyTarget] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [operationError, setOperationError] = useState("");
+  useEffect(() => { setOperationError(""); }, [creating, manageOpen, applyTarget, deleteTarget]);
 
   const load = useCallback(async () => {
     try {
@@ -99,14 +107,17 @@ export function ProviderProfilesBar({ activeApp, onNotice, onChanged }) {
 
   const run = useCallback(async (action) => {
     setBusy(true);
+    setOperationError("");
     try {
       await action();
+      return true;
     } catch (error) {
-      onNotice?.(error instanceof Error ? error.message : String(error));
+      setOperationError(error instanceof Error ? error.message : String(error));
+      return false;
     } finally {
       setBusy(false);
     }
-  }, [onNotice]);
+  }, []);
 
   if (!PROFILE_APPS.includes(activeApp)) return null;
 
@@ -177,22 +188,23 @@ export function ProviderProfilesBar({ activeApp, onNotice, onChanged }) {
       </div>
 
       {creating ? (
-        <ModalFrame open onClose={() => setCreating(false)} label={copy("pswitch.profile.new")}>
+        <ModalFrame open onClose={() => setCreating(false)} busy={busy} label={copy("pswitch.profile.new")}>
           <div className="flex items-center justify-between border-b border-oai-gray-100 px-5 py-3.5 dark:border-oai-gray-800">
             <h2 className="text-sm font-semibold">{copy("pswitch.profile.new")}</h2>
-            <button type="button" onClick={() => setCreating(false)} aria-label={copy("pswitch.action.close")} className="rounded-lg p-1.5 text-oai-gray-500 hover:bg-oai-gray-100 dark:hover:bg-oai-gray-800">
+            <button type="button" onClick={() => setCreating(false)} disabled={busy} aria-label={copy("pswitch.action.close")} className="rounded-lg p-1.5 text-oai-gray-500 hover:bg-oai-gray-100 dark:hover:bg-oai-gray-800">
               <span aria-hidden="true" className="text-base leading-none">×</span>
             </button>
           </div>
           <div className="space-y-3 px-5 py-4 text-sm">
             <label className="block space-y-1">
               <span className="text-xs font-medium text-oai-gray-500 dark:text-oai-gray-400">{copy("pswitch.profile.name_label")}</span>
-              <input autoFocus value={newName} onChange={(e) => setNewName(e.currentTarget.value)} className={inputClass} placeholder={copy("pswitch.profile.name_placeholder")} />
+              <input autoFocus disabled={busy} value={newName} onChange={(e) => setNewName(e.currentTarget.value)} className={inputClass} placeholder={copy("pswitch.profile.name_placeholder")} />
             </label>
             <p className="text-xs text-oai-gray-400 dark:text-oai-gray-500">{copy("pswitch.profile.hint")}</p>
+            {operationError ? <p role="alert" className="text-sm text-red-600 dark:text-red-400">{operationError}</p> : null}
           </div>
           <div className="flex justify-end gap-2 border-t border-oai-gray-100 px-5 py-3 dark:border-oai-gray-800">
-            <button type="button" onClick={() => setCreating(false)} className="min-h-10 rounded-lg border border-oai-gray-200 px-3 font-medium hover:bg-oai-gray-50 dark:border-oai-gray-700 dark:hover:bg-oai-gray-800">{copy("pswitch.action.cancel")}</button>
+            <button type="button" onClick={() => setCreating(false)} disabled={busy} className="min-h-10 rounded-lg border border-oai-gray-200 px-3 font-medium hover:bg-oai-gray-50 dark:border-oai-gray-700 dark:hover:bg-oai-gray-800">{copy("pswitch.action.cancel")}</button>
             <button type="button" disabled={busy || !newName.trim()} onClick={() => void createProfile()} className="min-h-10 rounded-lg bg-oai-black px-3 font-medium text-white hover:bg-oai-gray-800 disabled:opacity-50 dark:bg-white dark:text-oai-black dark:hover:bg-oai-gray-200">{copy("pswitch.profile.create")}</button>
           </div>
         </ModalFrame>
@@ -206,11 +218,8 @@ export function ProviderProfilesBar({ activeApp, onNotice, onChanged }) {
           confirmLabel={copy("pswitch.profile.apply")}
           cancelLabel={copy("pswitch.action.cancel")}
           busy={busy}
-          onConfirm={() => {
-            const target = applyTarget;
-            setApplyTarget(null);
-            void applyProfile(target);
-          }}
+          error={operationError}
+          onConfirm={() => void applyProfile(applyTarget)}
           onCancel={() => setApplyTarget(null)}
         />
       ) : null}
@@ -224,6 +233,7 @@ export function ProviderProfilesBar({ activeApp, onNotice, onChanged }) {
           confirmLabel={copy("pswitch.action.delete")}
           cancelLabel={copy("pswitch.action.cancel")}
           busy={busy}
+          error={operationError}
           onConfirm={() => void deleteProfile()}
           onCancel={() => setDeleteTarget(null)}
         />
@@ -235,8 +245,9 @@ export function ProviderProfilesBar({ activeApp, onNotice, onChanged }) {
           profiles={profiles}
           currentId={currentId}
           busy={busy}
+          error={operationError}
           onClose={() => setManageOpen(false)}
-          onRename={(id, name) => void renameProfile(id, name)}
+          onRename={renameProfile}
           onDelete={(profile) => setDeleteTarget(profile)}
         />
       ) : null}

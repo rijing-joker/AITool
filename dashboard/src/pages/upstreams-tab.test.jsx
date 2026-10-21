@@ -182,3 +182,17 @@ it("uses the chosen credential's proxy, headers and models for batch health chec
     proxyUrl: "http://key.test:8001",
   }), "key-model"));
 });
+
+it("keeps an edited upstream until the user explicitly discards it", async () => {
+  await openEditDialog();
+  const endpoint = screen.getByLabelText("proxy.upstream.field.baseUrl");
+  fireEvent.change(endpoint, { target: { value: "https://changed.example" } });
+  fireEvent.click(screen.getByRole("button", { name: "proxy.upstream.common.close" }));
+  await screen.findByText("shared.unsaved.title");
+  fireEvent.click(screen.getByRole("button", { name: "shared.unsaved.keep_editing" }));
+  expect(endpoint).toHaveValue("https://changed.example");
+  fireEvent.click(screen.getByRole("button", { name: "proxy.upstream.common.close" }));
+  fireEvent.click(screen.getByRole("button", { name: "shared.unsaved.discard" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(providerGroupsApi.put).not.toHaveBeenCalled();
+});

@@ -102,6 +102,7 @@ import {
 import { Button, Card, ConfirmModal } from "../ui/components";
 import { showToast } from "../ui/components/Toast";
 import { ProviderGroupKeysEditor } from "./provider-group-keys-editor";
+import { useGuardedDialog } from "../hooks/use-guarded-dialog";
 
 // ---------------------------------------------------------------------------
 // Upstreams tab (API 接入) — EasyCLIProxyAPI's provider management, ported
@@ -277,7 +278,7 @@ function SortableUpstreamRow({ row, disabled, dragLabel, isDragOver, children })
   );
 }
 
-export function UpstreamsTab() {
+export function UpstreamsTab({ onEditorStateChange } = {}) {
   const display = usePrivacyText();
   const [records, setRecords] = useState(emptyRecords);
   const [activeCategory, setActiveCategory] = useState("codex-api-key");
@@ -1021,6 +1022,7 @@ export function UpstreamsTab() {
 
       {dialogOpen ? (
         <UpstreamFormDialog
+          onEditorStateChange={onEditorStateChange}
           activeCategory={activeCategory}
           editingRow={editingRow}
           initialDraft={dialogDraft}
@@ -1282,10 +1284,15 @@ function UpstreamFormDialog({
   busy,
   onClose,
   onSave,
+  onEditorStateChange,
 }) {
   const definition = definitionFor(activeCategory);
   const activeSection = definition.section;
   const [draft, setDraft] = useState(initialDraft);
+  const closeGuard = useGuardedDialog({
+    dirty: JSON.stringify(draft) !== JSON.stringify(initialDraft),
+    busy, onClose, onEditorStateChange,
+  });
   const grouped = Boolean(draft.groupKeys);
   const [discoveryKeyId, setDiscoveryKeyId] = useState(initialDraft.groupKeys?.[0]?.id ?? "");
   const [modelLoading, setModelLoading] = useState(false);
@@ -1534,7 +1541,7 @@ function UpstreamFormDialog({
   const modelSummaryDetail = configuredModels.length > 0
     ? deepSeekModelsStale
       ? copy("proxy.upstream.models.staleHint")
-      : configuredModels.slice(0, 3).map((model) => model.name).join("、")
+      : configuredModels.slice(0, 3).map((model) => { return model.name; }).join("、")
     : activeCategory === "deepseek"
       ? copy("proxy.upstream.models.selectionRequiredHint")
       : hasModelExclusions
@@ -1543,7 +1550,7 @@ function UpstreamFormDialog({
           ? copy("proxy.upstream.models.autoHint")
           : copy("proxy.upstream.models.allHint");
 
-  const inputClass = "w-full rounded-md border border-oai-gray-300 bg-oai-white px-3 text-sm text-oai-black placeholder-oai-gray-400 transition-colors focus:border-oai-brand focus:outline-none focus:ring-1 focus:ring-oai-brand/30 disabled:cursor-not-allowed disabled:bg-oai-gray-50 disabled:text-oai-gray-400 dark:border-oai-gray-700 dark:bg-oai-gray-900 dark:text-oai-white dark:placeholder-oai-gray-500 dark:disabled:bg-oai-gray-800";
+  const inputClass = "min-h-10 w-full rounded-lg border border-oai-gray-300 bg-oai-white px-3 py-2 text-sm text-oai-black placeholder-oai-gray-400 transition-colors focus:border-oai-brand focus:outline-none focus:ring-1 focus:ring-oai-brand/30 disabled:cursor-not-allowed disabled:bg-oai-gray-50 disabled:text-oai-gray-400 dark:border-oai-gray-700 dark:bg-oai-gray-900 dark:text-oai-white dark:placeholder-oai-gray-500 dark:disabled:bg-oai-gray-800";
   const fieldLabelClass = "mb-1.5 block text-sm font-medium text-oai-gray-700 dark:text-oai-gray-300";
 
   return (
@@ -1551,12 +1558,13 @@ function UpstreamFormDialog({
       <UpstreamModal
         open
         busy={busy}
-        onClose={onClose}
+        onClose={closeGuard.requestClose}
         title={copy(grouped
           ? editingRow ? "proxy.upstream.groups.edit" : "proxy.upstream.groups.add"
           : editingRow ? "proxy.upstream.dialog.edit" : "proxy.upstream.dialog.add")}
         subtitle={copy(CATEGORY_LABEL_KEYS[activeCategory])}
       >
+        {closeGuard.confirmation}
         <form onSubmit={(event) => void submit(event)} className="flex min-h-0 flex-1 flex-col">
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-5 py-4">
             {grouped ? (
@@ -1940,7 +1948,7 @@ function UpstreamFormDialog({
             {formError ? <UpstreamNotice message={formError} onDismiss={() => setFormError("")} /> : null}
           </div>
           <div className="flex justify-end gap-2 border-t border-oai-gray-100 px-5 py-4 dark:border-oai-gray-800">
-            <Button type="button" variant="secondary" onClick={onClose} disabled={busy}>
+            <Button type="button" variant="secondary" onClick={closeGuard.requestClose} disabled={busy}>
               {copy("proxy.upstream.common.cancel")}
             </Button>
             <Button type="submit" disabled={busy}>

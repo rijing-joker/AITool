@@ -17,6 +17,7 @@ import { copy } from "../lib/copy";
 import { proxyApi } from "../lib/proxy-api";
 import { Button, Card, ConfirmModal } from "../ui/components";
 import { CopilotClients } from "./copilot-clients";
+import { useGuardedDialog } from "../hooks/use-guarded-dialog";
 
 // ---------------------------------------------------------------------------
 // Keys tab (客户端密钥) — EasyCLIProxyAPI's ConfigPanel key list, ported
@@ -36,11 +37,15 @@ function maskApiKey(apiKey) {
 
 const inputClass = "h-9 w-full rounded-lg border border-oai-gray-200 bg-transparent px-3 font-mono text-sm placeholder:text-oai-gray-400 focus:outline-none focus:ring-2 focus:ring-oai-brand-500 dark:border-oai-gray-700";
 
-function KeyDialog({ open, editing, keys, onClose, onSubmit, busy }) {
+function KeyDialog({ open, editing, keys, onClose, onSubmit, busy, error, onEditorStateChange }) {
   const [apiKey, setApiKey] = useState("");
   const [remark, setRemark] = useState("");
   const [showApiKey, setShowApiKey] = useState(false);
   const [formError, setFormError] = useState("");
+  const closeGuard = useGuardedDialog({
+    open, dirty: apiKey !== (editing?.apiKey ?? "") || remark !== (editing?.remark ?? ""),
+    busy, onClose, onEditorStateChange,
+  });
 
   useEffect(() => {
     if (!open) return;
@@ -87,9 +92,10 @@ function KeyDialog({ open, editing, keys, onClose, onSubmit, busy }) {
     <Dialog.Root
       open={open}
       onOpenChange={(next) => {
-        if (!next && !busy) onClose();
+        if (!next) closeGuard.requestClose();
       }}
     >
+      {closeGuard.confirmation}
       <Dialog.Portal>
         <Dialog.Backdrop className="fixed inset-0 z-[100] bg-black/40 backdrop-blur-[2px] transition-opacity duration-200 ease-out data-[ending-style]:opacity-0 data-[starting-style]:opacity-0" />
         <Dialog.Viewport className="fixed inset-0 z-[101] flex items-center justify-center p-4">
@@ -100,7 +106,7 @@ function KeyDialog({ open, editing, keys, onClose, onSubmit, busy }) {
               </Dialog.Title>
               <button
                 type="button"
-                onClick={onClose}
+                onClick={closeGuard.requestClose}
                 disabled={busy}
                 className="rounded-md p-1 text-oai-gray-400 hover:bg-oai-gray-100 hover:text-oai-black disabled:opacity-50 dark:hover:bg-oai-gray-800 dark:hover:text-white"
                 aria-label={copy("proxy.upstream.common.close")}
@@ -149,8 +155,9 @@ function KeyDialog({ open, editing, keys, onClose, onSubmit, busy }) {
                 <span className="block text-xs text-oai-gray-400 dark:text-oai-gray-500">{copy("proxy.keys.remarkHint")}</span>
               </label>
               {formError ? <p className="text-sm text-red-600 dark:text-red-400" role="alert">{formError}</p> : null}
+              {error ? <p className="text-sm text-red-600 dark:text-red-400" role="alert">{error}</p> : null}
               <div className="flex justify-end gap-2 pt-1">
-                <Button type="button" variant="secondary" disabled={busy} onClick={onClose}>
+                <Button type="button" variant="secondary" disabled={busy} onClick={closeGuard.requestClose}>
                   {copy("proxy.upstream.common.cancel")}
                 </Button>
                 <Button type="submit" disabled={busy}>
@@ -166,7 +173,7 @@ function KeyDialog({ open, editing, keys, onClose, onSubmit, busy }) {
   );
 }
 
-export function KeysTab({ status }) {
+export function KeysTab({ status, onEditorStateChange }) {
   const [keys, setKeys] = useState(null);
   const [etag, setEtag] = useState(null);
   const [remarks, setRemarks] = useState({});
@@ -280,7 +287,7 @@ export function KeysTab({ status }) {
 
   return (
     <div className="flex flex-col gap-4">
-      {error ? (
+      {error && !dialogOpen && deleteEntry === null ? (
         <div className="flex items-start gap-2 rounded-lg border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/40 px-3.5 py-2.5 text-sm text-amber-800 dark:text-amber-300">
           <span className="break-words">{error}</span>
         </div>
@@ -313,7 +320,7 @@ export function KeysTab({ status }) {
             <span className="text-xs text-oai-gray-400">{copy("proxy.keys.count", { count: keys?.length ?? 0 })}</span>
             <Button
               size="sm"
-              onClick={() => { setEditing(null); setDialogOpen(true); }}
+              onClick={() => { setError(null); setEditing(null); setDialogOpen(true); }}
               disabled={keys === null || busy}
             >
               <Plus className="h-4 w-4" />
@@ -349,7 +356,7 @@ export function KeysTab({ status }) {
                 </button>
                 <button
                   type="button"
-                  onClick={() => { setEditing({ apiKey: entry, remark: remarks[entry] ?? "" }); setDialogOpen(true); }}
+                  onClick={() => { setError(null); setEditing({ apiKey: entry, remark: remarks[entry] ?? "" }); setDialogOpen(true); }}
                   disabled={busy}
                   aria-label={copy("proxy.upstream.common.edit")}
                   title={copy("proxy.upstream.common.edit")}
@@ -359,7 +366,7 @@ export function KeysTab({ status }) {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setDeleteEntry(entry)}
+                  onClick={() => { setError(null); setDeleteEntry(entry); }}
                   disabled={busy}
                   aria-label={copy("proxy.action.delete_key")}
                   title={copy("proxy.action.delete_key")}
@@ -375,6 +382,8 @@ export function KeysTab({ status }) {
 
       <CopilotClients keys={keys} remarks={remarks} />
       <KeyDialog
+        error={error}
+        onEditorStateChange={onEditorStateChange}
         open={dialogOpen}
         editing={editing}
         keys={(keys ?? []).map((entry) => ({ apiKey: entry }))}
@@ -384,6 +393,7 @@ export function KeysTab({ status }) {
       />
       <ConfirmModal
         open={deleteEntry !== null}
+        error={error}
         title={copy("proxy.action.delete_key")}
         description={copy("proxy.keys.deleteConfirm", { key: deleteEntry ? maskApiKey(deleteEntry) : "" })}
         confirmLabel={copy("proxy.action.delete_key")}

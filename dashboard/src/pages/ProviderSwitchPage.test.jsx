@@ -1,6 +1,6 @@
 import React from "react";
 import { MemoryRouter } from "react-router";
-import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { beforeEach, it, vi } from "vitest";
 import { ProviderSwitchPage } from "./ProviderSwitchPage";
 import { providerSwitchApi } from "../lib/provider-switch-api";
@@ -122,4 +122,73 @@ it("the provider search resets when the app tab changes and matches website URLs
   fireEvent.click(screen.getByRole("tab", { name: "pswitch.tab.codex" }));
   await waitFor(() => expect(screen.getByText("Beta Relay")).toBeTruthy());
   expect(screen.queryByLabelText("pswitch.search.aria")).toBeNull();
+});
+
+function providerStatus(current = "a") {
+  return {
+    apps: [{ app: "claude", current, providers: [
+      { id: "a", name: "Primary", category: "custom", settingsConfig: {} },
+      { id: "b", name: "Backup", category: "custom", settingsConfig: {} },
+    ] }],
+    visibleApps: { claude: true }, storagePath: "/tmp/providers",
+  };
+}
+
+it("shows a failed switch inside its confirmation and lets the user retry", async () => {
+  providerSwitchApi.getStatus.mockResolvedValue(providerStatus());
+  providerSwitchApi.switchProvider.mockRejectedValueOnce(new Error("Write denied"))
+    .mockResolvedValueOnce({ wrote: ["settings.json"] });
+  render(<MemoryRouter><ProviderSwitchPage /></MemoryRouter>);
+  await screen.findByText("Backup");
+  fireEvent.click(screen.getAllByRole("button", { name: "pswitch.action.switch" }).find(button => !button.disabled));
+  const dialog = screen.getByRole("dialog");
+  fireEvent.click(within(dialog).getByRole("button", { name: "pswitch.action.switch" }));
+  expect(await within(dialog).findByRole("alert")).toHaveTextContent("Write denied");
+  fireEvent.click(within(dialog).getByRole("button", { name: "pswitch.action.switch" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(providerSwitchApi.switchProvider).toHaveBeenCalledTimes(2);
+});
+
+it("keeps a failed failover save and its error inside the editor", async () => {
+  providerSwitchApi.getStatus.mockResolvedValue(providerStatus());
+  providerSwitchApi.updateFailover.mockRejectedValue(new Error("Settings unavailable"));
+  render(<MemoryRouter><ProviderSwitchPage /></MemoryRouter>);
+  fireEvent.click(await screen.findByRole("button", { name: "pswitch.failover.settings" }));
+  const dialog = screen.getByRole("dialog");
+  const window = within(dialog).getByLabelText("pswitch.failover.window");
+  fireEvent.change(window, { target: { value: "15" } });
+  fireEvent.click(within(dialog).getByRole("button", { name: "shared.action.save" }));
+  expect(await within(dialog).findByRole("alert")).toHaveTextContent("Settings unavailable");
+  expect(window).toHaveValue("15");
+});
+
+it("closes a successfully imported backup and refreshes provider status", async () => {
+  providerSwitchApi.getStatus.mockResolvedValue(providerStatus());
+  providerSwitchApi.importEncryptedBackup.mockResolvedValue({ restored: ["providers.json"] });
+  render(<MemoryRouter><ProviderSwitchPage /></MemoryRouter>);
+  await screen.findByText("Backup");
+  fireEvent.click(screen.getByRole("button", { name: "pswitch.encrypted.import" }));
+  const dialog = screen.getByRole("dialog");
+  fireEvent.change(within(dialog).getByLabelText("pswitch.encrypted.passphrase"), { target: { value: "password123" } });
+  fireEvent.change(within(dialog).getByLabelText("pswitch.encrypted.file"), { target: { files: [{ text: async () => "{}" }] } });
+  const submit = within(dialog).getByRole("button", { name: "pswitch.encrypted.import" });
+  await waitFor(() => expect(submit).toBeEnabled());
+  const reads = providerSwitchApi.getStatus.mock.calls.length;
+  fireEvent.click(submit);
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(providerSwitchApi.getStatus.mock.calls.length).toBeGreaterThan(reads);
+  expect(screen.queryByText(/showToast is not defined/)).not.toBeInTheDocument();
+});
+
+it("refreshes the current provider after an automatic failover", async () => {
+  let switched = false;
+  providerSwitchApi.getStatus.mockImplementation(async () => providerStatus(switched ? "b" : "a"));
+  providerSwitchApi.getFailover.mockImplementation(async () => ({ failover: {
+    config: { enabled: true, autoSwitch: true }, apps: {}, cooldowns: [],
+    suggestions: switched ? [] : [{ app: "claude", id: "b", name: "Backup" }],
+  } }));
+  providerSwitchApi.runFailoverEvaluation.mockImplementation(async () => { switched = true; return { actions: [] }; });
+  render(<MemoryRouter><ProviderSwitchPage /></MemoryRouter>);
+  await waitFor(() => expect(screen.getByText("pswitch.current_badge").parentElement).toHaveTextContent("Backup"));
+  expect(providerSwitchApi.runFailoverEvaluation).toHaveBeenCalledTimes(1);
 });

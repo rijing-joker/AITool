@@ -21,6 +21,7 @@ import { ProxyPrivacyNotice, ProxyPrivacyToggle } from "../lib/proxy-privacy";
 import { formatAggregateSpeed } from "../lib/usage-speed";
 import { proxyApi } from "../lib/proxy-api";
 import { useVisiblePolling } from "../hooks/use-visible-polling";
+import { UnsavedChangesGuard } from "../ui/components/UnsavedChangesGuard";
 import { PageHeader } from "../ui/components/PageHeader";
 import { PageTabs } from "../ui/components/PageTabs";
 import { Button, Card, ConfirmModal } from "../ui/components";
@@ -419,6 +420,7 @@ export function ProxyPage() {
   const tab = TABS.some((entry) => entry.id === hash) ? hash : "overview";
   const [statusError, setStatusError] = useState(null);
   const [status, setStatus] = useState(null);
+  const [editorState, setEditorState] = useState({ dirty: false, busy: false });
   // Core-binary install flow (EasyCLIProxyAPI's stop-and-update): confirm →
   // background task → progress dialog polling GET /api/proxy/install.
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -496,6 +498,7 @@ export function ProxyPage() {
 
   return (
     <div className="flex flex-col flex-1 text-oai-black dark:text-oai-white font-oai antialiased">
+      {tab !== "settings" ? <UnsavedChangesGuard dirty={editorState.dirty} busy={editorState.busy} /> : null}
       <main className="flex-1 pt-6 sm:pt-8 pb-10 sm:pb-12">
         <div className="mx-auto max-w-6xl px-4 sm:px-6">
           <PageHeader title={copy("nav.proxy")} description={copy("proxy.page.subtitle")} actions={<>
@@ -518,10 +521,10 @@ export function ProxyPage() {
             </div>
           ) : null}
           {tab === "overview" ? <OverviewTab status={status} statusError={statusError} onRefresh={refreshStatus} onInstallCore={openCoreInstall} onSelectTab={selectTab} /> : null}
-          {tab === "upstreams" ? <UpstreamsTab /> : null}
+          {tab === "upstreams" ? <UpstreamsTab onEditorStateChange={setEditorState} /> : null}
           {tab === "providers" ? <AuthFilesTab onDirty={refreshStatus} /> : null}
-          {tab === "keys" ? <KeysTab status={status} /> : null}
-          {tab === "aliases" ? <ModelAliasesTab /> : null}
+          {tab === "keys" ? <KeysTab status={status} onEditorStateChange={setEditorState} /> : null}
+          {tab === "aliases" ? <ModelAliasesTab onEditorStateChange={setEditorState} /> : null}
           {tab === "requests" ? <RequestsTab /> : null}
           {tab === "settings" ? <SettingsTab status={statusError ? null : status} onRefresh={refreshStatus} onInstallCore={openCoreInstall} /> : null}
           </section>

@@ -7,13 +7,19 @@ import {
   act,
   cleanup,
   fireEvent,
-  render,
+  render as rtlRender,
   screen,
   waitFor,
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { CliSessionsPage } from "./CliSessionsPage";
+
+function render(ui, initialEntries = ["/cli-sessions"]) {
+  const router = createMemoryRouter([{ path: "*", element: ui }], { initialEntries });
+  return { ...rtlRender(<RouterProvider router={router} />), router };
+}
 
 const { readSession } = createRequire(import.meta.url)("../../../src/lib/sessions.js");
 
@@ -454,13 +460,12 @@ it("renders thinking rows, auto-opens search hits inside collapsed blocks, and e
   );
 
   const urls = [];
-  vi.stubGlobal("URL", {
-    ...URL,
-    createObjectURL: (blob) => {
+  vi.stubGlobal("URL", class extends URL {
+    static createObjectURL(blob) {
       urls.push(blob);
       return "blob:x";
-    },
-    revokeObjectURL: () => {},
+    }
+    static revokeObjectURL() {}
   });
   const clickSpy = vi
     .spyOn(HTMLAnchorElement.prototype, "click")
@@ -649,4 +654,55 @@ it("cancels a transcript on return and ignores it after a different session is o
   await act(async () => finishOld());
   expect(screen.queryByText("Stale transcript")).not.toBeInTheDocument();
   expect(screen.getByText("Current transcript")).toBeInTheDocument();
+});
+
+
+function mockSessionNavigation() {
+  const fetchMock = vi.fn(async (url) => {
+    if (url === "/api/cli-sessions") return { json: async () => ({ ok: true, apps: [{ id: "claude", available: true }] }) };
+    if (url.startsWith("/api/cli-sessions/list")) return { json: async () => ({ ok: true, sessions: [session] }) };
+    if (url.startsWith("/api/cli-sessions/read")) return { json: async () => ({ ok: true, messages: [{ role: "assistant", content: "Navigation transcript" }] }) };
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+it("returns to the filtered list with browser back and restores the reader with forward", async () => {
+  mockSessionNavigation();
+  const { router } = render(<CliSessionsPage />);
+  await screen.findByText(session.title);
+  fireEvent.change(screen.getByLabelText("clisessions.search"), { target: { value: "login" } });
+  fireEvent.click(screen.getByRole("button", { name: /Fix the login bug/ }));
+  await screen.findByText("Navigation transcript");
+  expect(new URLSearchParams(router.state.location.search).get("session")).toBe(session.sessionId);
+  expect(router.state.location.search).not.toContain(encodeURIComponent(session.sourcePath));
+  await act(async () => router.navigate(-1));
+  expect(screen.getByLabelText("clisessions.search")).toHaveValue("login");
+  expect(screen.queryByText("Navigation transcript")).not.toBeInTheDocument();
+  await act(async () => router.navigate(1));
+  await screen.findByText("Navigation transcript");
+  fireEvent.click(screen.getByLabelText("clisessions.back"));
+  expect(screen.getByLabelText("clisessions.search")).toHaveValue("login");
+});
+
+it("restores a directly opened reader and returns to its list without leaving the page", async () => {
+  const fetchMock = mockSessionNavigation();
+  const { router } = render(<CliSessionsPage />, ["/cli-sessions?app=claude&sessionApp=claude&session=s-1"]);
+  await screen.findByText("Navigation transcript");
+  expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining(encodeURIComponent(session.sourcePath)), expect.anything());
+  fireEvent.click(screen.getByLabelText("clisessions.back"));
+  expect(router.state.location.pathname).toBe("/cli-sessions");
+  expect(new URLSearchParams(router.state.location.search).has("session")).toBe(false);
+  expect(screen.getByText(session.title)).toBeVisible();
+});
+
+it("offers recovery for an unknown session without reading a URL-supplied file path", async () => {
+  const fetchMock = mockSessionNavigation();
+  const { router } = render(<CliSessionsPage />, ["/cli-sessions?app=claude&sessionApp=claude&session=%2Ftmp%2Fprivate.jsonl"]);
+  await screen.findByText("clisessions.unavailable");
+  expect(fetchMock.mock.calls.some(([url]) => url.startsWith("/api/cli-sessions/read"))).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: "clisessions.back" }));
+  expect(new URLSearchParams(router.state.location.search).has("session")).toBe(false);
+  expect(screen.queryByText("clisessions.unavailable")).not.toBeInTheDocument();
 });

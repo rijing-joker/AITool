@@ -43,7 +43,7 @@ const overrideFieldLabel = (field) => {
   }
 };
 
-const inputClass = "w-full rounded-md border border-oai-gray-300 bg-oai-white px-3 text-sm text-oai-black placeholder-oai-gray-400 transition-colors focus:border-oai-brand focus:outline-none focus:ring-1 focus:ring-oai-brand/30 disabled:cursor-not-allowed disabled:bg-oai-gray-50 disabled:text-oai-gray-400 dark:border-oai-gray-700 dark:bg-oai-gray-900 dark:text-oai-white dark:placeholder-oai-gray-500 dark:disabled:bg-oai-gray-800";
+const inputClass = "min-h-10 w-full rounded-lg border border-oai-gray-300 bg-oai-white px-3 py-2 text-sm text-oai-black placeholder-oai-gray-400 transition-colors focus:border-oai-brand focus:outline-none focus:ring-1 focus:ring-oai-brand/30 disabled:cursor-not-allowed disabled:bg-oai-gray-50 disabled:text-oai-gray-400 dark:border-oai-gray-700 dark:bg-oai-gray-900 dark:text-oai-white dark:placeholder-oai-gray-500 dark:disabled:bg-oai-gray-800";
 const labelClass = "block text-sm font-medium text-oai-gray-700 dark:text-oai-gray-300";
 
 export function ProviderGroupKeysEditor({ keys, shared, section, disabled, onChange }) {

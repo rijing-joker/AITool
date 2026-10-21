@@ -1,8 +1,9 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { copy } from "../lib/copy";
 import { universalProvidersApi } from "../lib/provider-switch-api";
 import { Card, ConfirmModal } from "../ui/components";
 import { ModalFrame } from "../ui/components/ModalFrame";
+import { useGuardedDialog } from "../hooks/use-guarded-dialog";
 
 // ---------------------------------------------------------------------------
 // Universal providers (cc-switch's 统一供应商, ported from
@@ -71,21 +72,24 @@ const PRESET_TYPES = [
   { providerType: "custom", models: null },
 ];
 
-function UniversalFormModal({ draft, setDraft, saving, onClose, onSave, onSaveAndSync }) {
+function UniversalFormModal({ draft, setDraft, saving, error, onClose, onSave, onSaveAndSync, onEditorStateChange }) {
+  const initial = useRef(JSON.stringify(draft));
+  const closeGuard = useGuardedDialog({ dirty: JSON.stringify(draft) !== initial.current, busy: saving, onClose, onEditorStateChange });
   const set = (key, value) => setDraft((current) => ({ ...current, [key]: value }));
   const setModel = (app, key, value) =>
     setDraft((current) => ({ ...current, models: { ...current.models, [app]: { ...current.models[app], [key]: value } } }));
   const invalid = !draft.name.trim() || !draft.baseUrl.trim() || !draft.apiKey.trim();
 
   return (
-    <ModalFrame open onClose={onClose} label={copy(draft.id ? "pswitch.universal.edit" : "pswitch.universal.add")}>
+    <ModalFrame open onClose={closeGuard.requestClose} busy={saving} label={copy(draft.id ? "pswitch.universal.edit" : "pswitch.universal.add")}>
+      {closeGuard.confirmation}
       <div className="flex items-center justify-between border-b border-oai-gray-100 px-5 py-3.5 dark:border-oai-gray-800">
         <h2 className="text-sm font-semibold">{copy(draft.id ? "pswitch.universal.edit" : "pswitch.universal.add")}</h2>
-        <button type="button" onClick={onClose} aria-label={copy("pswitch.action.close")} className="rounded-lg p-1.5 text-oai-gray-500 hover:bg-oai-gray-100 dark:hover:bg-oai-gray-800">
+        <button type="button" onClick={closeGuard.requestClose} disabled={saving} aria-label={copy("pswitch.action.close")} className="rounded-lg p-1.5 text-oai-gray-500 hover:bg-oai-gray-100 dark:hover:bg-oai-gray-800">
           <span aria-hidden="true" className="text-base leading-none">×</span>
         </button>
       </div>
-      <div className="max-h-[70vh] space-y-3 overflow-y-auto px-5 py-4 text-sm">
+      <fieldset disabled={saving} className="min-h-0 space-y-3 overflow-y-auto px-5 py-4 text-sm">
         {!draft.id ? (
           <label className="block space-y-1">
             <span className="text-xs font-medium text-oai-gray-500 dark:text-oai-gray-400">{copy("pswitch.universal.select_preset")}</span>
@@ -179,9 +183,10 @@ function UniversalFormModal({ draft, setDraft, saving, onClose, onSave, onSaveAn
           <input value={draft.notes} onChange={(e) => set("notes", e.currentTarget.value)} className={inputClass} placeholder={copy("pswitch.provider.notes_placeholder")} />
         </label>
         <p className="text-xs text-oai-gray-400 dark:text-oai-gray-500">{copy("pswitch.universal.form_hint")}</p>
-      </div>
+        {error ? <p role="alert" className="text-sm text-red-600 dark:text-red-400">{error}</p> : null}
+      </fieldset>
       <div className="flex justify-end gap-2 border-t border-oai-gray-100 px-5 py-3 dark:border-oai-gray-800">
-        <button type="button" onClick={onClose} className="min-h-10 rounded-lg border border-oai-gray-200 px-3 font-medium hover:bg-oai-gray-50 sm:min-h-0 dark:border-oai-gray-700 dark:hover:bg-oai-gray-800">{copy("pswitch.action.cancel")}</button>
+        <button type="button" onClick={closeGuard.requestClose} disabled={saving} className="min-h-10 rounded-lg border border-oai-gray-200 px-3 font-medium hover:bg-oai-gray-50 dark:border-oai-gray-700 dark:hover:bg-oai-gray-800">{copy("pswitch.action.cancel")}</button>
         {draft.id ? (
           <button type="button" onClick={onSaveAndSync} disabled={saving || invalid} className="min-h-10 rounded-lg border border-oai-gray-200 px-3 font-medium hover:bg-oai-gray-50 disabled:opacity-50 sm:min-h-0 dark:border-oai-gray-700 dark:hover:bg-oai-gray-800">{copy("pswitch.universal.save_and_sync")}</button>
         ) : null}
@@ -191,13 +196,15 @@ function UniversalFormModal({ draft, setDraft, saving, onClose, onSave, onSaveAn
   );
 }
 
-export function ProviderUniversalPanel({ onNotice, onChanged }) {
+export function ProviderUniversalPanel({ onNotice, onChanged, onEditorStateChange }) {
   const [providers, setProviders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState(null);
   const [saving, setSaving] = useState(false);
   const [syncTarget, setSyncTarget] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [dialogError, setDialogError] = useState("");
+  useEffect(() => { setDialogError(""); }, [draft, syncTarget, deleteTarget]);
 
   const load = useCallback(async () => {
     try {
@@ -216,20 +223,26 @@ export function ProviderUniversalPanel({ onNotice, onChanged }) {
   }, [load]);
 
   const syncProvider = useCallback(async (id) => {
+    setSaving(true);
+    setDialogError("");
     try {
       const res = await universalProvidersApi.sync(id);
       if (!res.ok) throw new Error("sync failed");
       onNotice?.(copy("pswitch.universal.synced"));
+      setSyncTarget(null);
       await load();
       await onChanged?.();
     } catch (error) {
-      onNotice?.(error instanceof Error ? error.message : String(error));
+      setDialogError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSaving(false);
     }
   }, [load, onChanged, onNotice]);
 
   const saveDraft = useCallback(async (alsoSync) => {
     if (!draft || saving) return;
     setSaving(true);
+    setDialogError("");
     try {
       const payload = {
         ...(draft.id ? { id: draft.id } : {}),
@@ -261,7 +274,7 @@ export function ProviderUniversalPanel({ onNotice, onChanged }) {
       await load();
       await onChanged?.();
     } catch (error) {
-      onNotice?.(error instanceof Error ? error.message : String(error));
+      setDialogError(error instanceof Error ? error.message : String(error));
     } finally {
       setSaving(false);
     }
@@ -270,6 +283,7 @@ export function ProviderUniversalPanel({ onNotice, onChanged }) {
   const deleteProvider = useCallback(async () => {
     if (!deleteTarget) return;
     setSaving(true);
+    setDialogError("");
     try {
       await universalProvidersApi.remove(deleteTarget.id);
       onNotice?.(copy("pswitch.universal.deleted"));
@@ -277,7 +291,7 @@ export function ProviderUniversalPanel({ onNotice, onChanged }) {
       await load();
       await onChanged?.();
     } catch (error) {
-      onNotice?.(error instanceof Error ? error.message : String(error));
+      setDialogError(error instanceof Error ? error.message : String(error));
     } finally {
       setSaving(false);
     }
@@ -337,6 +351,8 @@ export function ProviderUniversalPanel({ onNotice, onChanged }) {
 
       {draft ? (
         <UniversalFormModal
+          error={dialogError}
+          onEditorStateChange={onEditorStateChange}
           draft={draft}
           setDraft={setDraft}
           saving={saving}
@@ -354,11 +370,8 @@ export function ProviderUniversalPanel({ onNotice, onChanged }) {
           confirmLabel={copy("pswitch.universal.sync")}
           cancelLabel={copy("pswitch.action.cancel")}
           busy={saving}
-          onConfirm={() => {
-            const target = syncTarget;
-            setSyncTarget(null);
-            void syncProvider(target.id);
-          }}
+          error={dialogError}
+          onConfirm={() => void syncProvider(syncTarget.id)}
           onCancel={() => setSyncTarget(null)}
         />
       ) : null}
@@ -372,6 +385,7 @@ export function ProviderUniversalPanel({ onNotice, onChanged }) {
           confirmLabel={copy("pswitch.action.delete")}
           cancelLabel={copy("pswitch.action.cancel")}
           busy={saving}
+          error={dialogError}
           onConfirm={() => void deleteProvider()}
           onCancel={() => setDeleteTarget(null)}
         />

@@ -1734,6 +1734,7 @@
   "clisessions.expand_groups": "展开分组",
   "clisessions.collapse_groups": "折叠分组",
   "clisessions.no_matches": "没有匹配的会话。",
+  "clisessions.unavailable": "本地历史中已找不到此会话。请返回列表或重新扫描。",
   "clisessions.load_failed": "无法加载会话，请重新扫描。",
   "clisessions.copy_resume": "复制恢复命令",
   "clisessions.copy_id": "复制会话 ID",

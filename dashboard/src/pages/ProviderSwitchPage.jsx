@@ -38,6 +38,8 @@ import { PageHeader } from "../ui/components/PageHeader";
 import { PageTabs } from "../ui/components/PageTabs";
 import { UnsavedChangesGuard } from "../ui/components/UnsavedChangesGuard";
 import { ModalFrame } from "../ui/components/ModalFrame";
+import { showToast } from "../ui/components/Toast";
+import { useGuardedDialog } from "../hooks/use-guarded-dialog";
 import { useVisiblePolling } from "../hooks/use-visible-polling";
 import { PresetIcon, providerTileClass, ProviderEditDialog } from "./provider-edit-dialog";
 import { ProviderMcpPanel } from "./provider-mcp-panel";
@@ -82,7 +84,9 @@ function SectionTitle({ children, action = null }) {
   );
 }
 
-function FailoverEditDialog({ draft, setDraft, saving, onClose, onSave }) {
+function FailoverEditDialog({ draft, setDraft, saving, error, onClose, onSave, onEditorStateChange }) {
+  const initial = useRef(JSON.stringify(draft));
+  const closeGuard = useGuardedDialog({ dirty: JSON.stringify(draft) !== initial.current, busy: saving, onClose, onEditorStateChange });
   // Read currentTarget synchronously — React nulls it before a setState
   // updater runs, and StrictMode replays updaters.
   const numberField = (key) => ({
@@ -96,14 +100,15 @@ function FailoverEditDialog({ draft, setDraft, saving, onClose, onSave }) {
     className: "h-10 w-24 rounded-lg border border-oai-gray-200 bg-transparent px-2 text-sm tabular-nums dark:border-oai-gray-700",
   });
   return (
-    <ModalFrame open onClose={onClose} label={copy("pswitch.failover.settings")}>
+    <ModalFrame open onClose={closeGuard.requestClose} busy={saving} label={copy("pswitch.failover.settings")}>
+      {closeGuard.confirmation}
       <div className="flex items-center justify-between border-b border-oai-gray-100 px-5 py-3.5 dark:border-oai-gray-800">
         <h2 className="text-sm font-semibold">{copy("pswitch.failover.settings")}</h2>
-        <button type="button" onClick={onClose} aria-label={copy("pswitch.action.close")} className="rounded-lg p-1.5 text-oai-gray-500 hover:bg-oai-gray-100 dark:hover:bg-oai-gray-800">
+        <button type="button" onClick={closeGuard.requestClose} disabled={saving} aria-label={copy("pswitch.action.close")} className="rounded-lg p-1.5 text-oai-gray-500 hover:bg-oai-gray-100 dark:hover:bg-oai-gray-800">
           <span aria-hidden="true" className="text-base leading-none">×</span>
         </button>
       </div>
-      <div className="space-y-3 px-5 py-4 text-sm">
+      <fieldset disabled={saving} className="min-h-0 space-y-3 overflow-y-auto px-5 py-4 text-sm">
         <label className="flex min-h-8 items-center gap-2">
           <input
             type="checkbox"
@@ -133,10 +138,11 @@ function FailoverEditDialog({ draft, setDraft, saving, onClose, onSave }) {
         <div className="flex items-center justify-between gap-4"><span>{copy("pswitch.failover.rate")}</span><input {...numberField("failureRatePct")} /></div>
         <div className="flex items-center justify-between gap-4"><span>{copy("pswitch.failover.cooldown_minutes")}</span><input {...numberField("cooldownMinutes")} /></div>
         <p className="text-xs text-oai-gray-400 dark:text-oai-gray-500">{copy("pswitch.failover.hint")}</p>
-      </div>
+        {error ? <p role="alert" className="text-sm text-red-600 dark:text-red-400">{error}</p> : null}
+      </fieldset>
       <div className="flex justify-end gap-2 border-t border-oai-gray-100 px-5 py-3 dark:border-oai-gray-800">
-        <button type="button" onClick={onClose} className="min-h-10 rounded-lg border border-oai-gray-200 px-3 font-medium hover:bg-oai-gray-50 sm:min-h-0 dark:border-oai-gray-700 dark:hover:bg-oai-gray-800">{copy("shared.action.cancel")}</button>
-        <button type="button" onClick={onSave} disabled={saving} className="min-h-10 rounded-lg bg-oai-black px-3 font-medium text-white hover:bg-oai-gray-800 disabled:opacity-50 sm:min-h-0 dark:bg-white dark:text-oai-black dark:hover:bg-oai-gray-200">{copy("shared.action.save")}</button>
+        <Button variant="secondary" disabled={saving} onClick={closeGuard.requestClose}>{copy("shared.action.cancel")}</Button>
+        <Button onClick={onSave} disabled={saving}>{copy("shared.action.save")}</Button>
       </div>
     </ModalFrame>
   );
@@ -145,13 +151,14 @@ function FailoverEditDialog({ draft, setDraft, saving, onClose, onSave }) {
 // Failover strip: per-app health of the active provider, cooldown alerts and
 // the settings entry. Self-contained — the monitor runs server-side, this
 // only polls GET /failover and renders it.
-function FailoverBar({ failover, activeApp, busy, onEdit, onSwitchTo }) {
+function FailoverBar({ failover, activeApp, busy, onEdit, onSwitchTo, alertsOnly = false, settingsOnly = false }) {
   if (!failover?.config) return null;
   const config = failover.config;
   const appInfo = failover.apps?.[activeApp] || null;
+  if (alertsOnly && !(config.enabled && appInfo?.cooldown)) return null;
   return (
     <div className="mb-6 space-y-2">
-      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-oai-gray-500 dark:text-oai-gray-400">
+      {!alertsOnly ? <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-oai-gray-500 dark:text-oai-gray-400">
         <span className="inline-flex items-center gap-1.5">
           <ShieldAlert className="h-3.5 w-3.5" aria-hidden="true" />
           {config.enabled && appInfo?.health
@@ -172,8 +179,8 @@ function FailoverBar({ failover, activeApp, busy, onEdit, onSwitchTo }) {
         >
           {copy("pswitch.failover.settings")}
         </button>
-      </div>
-      {config.enabled && appInfo?.cooldown ? (
+      </div> : null}
+      {!settingsOnly && config.enabled && appInfo?.cooldown ? (
         <div
           role="alert"
           className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg bg-amber-50 px-3 py-2 text-xs font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-300"
@@ -218,13 +225,14 @@ function downloadJsonBlob(filename, data) {
 // Passphrase-encrypted export/import of the provider-switch stores. The
 // passphrase lives only in this dialog; the export downloads an opaque JSON
 // blob the user keeps wherever they keep dotfiles.
-function EncryptedBackupDialog({ mode, onClose, onImported }) {
+function EncryptedBackupDialog({ mode, onClose, onImported, onEditorStateChange }) {
   const [passphrase, setPassphrase] = useState("");
   const [confirmPassphrase, setConfirmPassphrase] = useState("");
   const [payloadText, setPayloadText] = useState("");
   const [working, setWorking] = useState(false);
   const [error, setError] = useState("");
   const isExport = mode === "export";
+  const closeGuard = useGuardedDialog({ dirty: Boolean(passphrase || confirmPassphrase || payloadText), busy: working, onClose, onEditorStateChange });
 
   const run = async () => {
     if (working) return;
@@ -259,21 +267,24 @@ function EncryptedBackupDialog({ mode, onClose, onImported }) {
       return;
     }
     setWorking(true);
+    let result;
     try {
-      const res = await providerSwitchApi.importEncryptedBackup(passphrase, payload);
-      showToast({ title: copy("pswitch.encrypted.imported", { count: res.restored.length }) });
-      await onImported();
+      result = await providerSwitchApi.importEncryptedBackup(passphrase, payload);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : String(requestError));
+      return;
     } finally {
       setWorking(false);
     }
+    await onImported();
+    showToast({ title: copy("pswitch.encrypted.imported", { count: result.restored.length }) });
   };
 
   const canRun = !working && passphrase.length >= 8 && (isExport || payloadText.trim() !== "");
   return (
-    <ModalFrame open onClose={onClose} label={isExport ? copy("pswitch.encrypted.export") : copy("pswitch.encrypted.import")}>
-      <div className="flex min-w-0 flex-col gap-3">
+    <ModalFrame open onClose={closeGuard.requestClose} busy={working} label={isExport ? copy("pswitch.encrypted.export") : copy("pswitch.encrypted.import")}>
+      {closeGuard.confirmation}
+      <fieldset disabled={working} className="flex min-h-0 min-w-0 flex-col gap-3 overflow-y-auto p-5">
         <h2 className="text-sm font-semibold">{isExport ? copy("pswitch.encrypted.export") : copy("pswitch.encrypted.import")}</h2>
         <p className="text-xs text-oai-gray-500 dark:text-oai-gray-400">
           {isExport ? copy("pswitch.encrypted.export_hint") : copy("pswitch.encrypted.import_hint")}
@@ -322,14 +333,14 @@ function EncryptedBackupDialog({ mode, onClose, onImported }) {
             />
           </label>
         )}
-        {error ? <p className="text-xs text-red-600 dark:text-red-400">{error}</p> : null}
+        {error ? <p role="alert" className="text-xs text-red-600 dark:text-red-400">{error}</p> : null}
         <div className="flex items-center justify-end gap-2 border-t border-oai-gray-100 pt-3 dark:border-oai-gray-800">
-          <Button variant="secondary" size="sm" disabled={working} onClick={onClose}>{copy("pswitch.action.cancel")}</Button>
+          <Button variant="secondary" size="sm" disabled={working} onClick={closeGuard.requestClose}>{copy("pswitch.action.cancel")}</Button>
           <Button size="sm" disabled={!canRun} onClick={() => void run()}>
             {isExport ? copy("pswitch.encrypted.export") : copy("pswitch.encrypted.import")}
           </Button>
         </div>
-      </div>
+      </fieldset>
     </ModalFrame>
   );
 }
@@ -479,6 +490,7 @@ export function ProviderSwitchPage() {
   const [dialogDirty, setDialogDirty] = useState(false);
   const [dialogSaving, setDialogSaving] = useState(false);
   const [utilityEditor, setUtilityEditor] = useState({ open: false, dirty: false, busy: false });
+  const [auxEditor, setAuxEditor] = useState({ dirty: false, busy: false });
   const onUtilityEditorState = useCallback((next) => setUtilityEditor(next), []);
   const onDialogDirty = useCallback((dirty, saving) => { setDialogDirty(dirty); setDialogSaving(saving); }, []);
   const [editingProvider, setEditingProvider] = useState(null);
@@ -487,18 +499,21 @@ export function ProviderSwitchPage() {
   // confirm dialogs
   const [switchTarget, setSwitchTarget] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [actionError, setActionError] = useState("");
 
   // failover monitor (server-side evaluation, polled)
   const [failover, setFailover] = useState(null);
   const [failoverDialogOpen, setFailoverDialogOpen] = useState(false);
   const [failoverDraft, setFailoverDraft] = useState(null);
   const [failoverSaving, setFailoverSaving] = useState(false);
+  const [failoverError, setFailoverError] = useState("");
   // encrypted backup (export downloads a blob; import restores the stores)
   const [backupDialog, setBackupDialog] = useState(null);
 
   // backups
   const [backups, setBackups] = useState([]);
   const [restoreTarget, setRestoreTarget] = useState(null);
+  useEffect(() => { setActionError(""); }, [switchTarget, deleteTarget, restoreTarget]);
 
   // env conflicts (cc-switch's EnvWarningBanner): session-scoped dismiss.
   const [envConflicts, setEnvConflicts] = useState(null);
@@ -620,6 +635,8 @@ export function ProviderSwitchPage() {
     runAutoEvaluate.current = true;
     try {
       await providerSwitchApi.runFailoverEvaluation();
+      await refreshStatus();
+      if (!["mcp", "prompts", "skills"].includes(activeApp)) await refreshBackups(activeApp);
       const res = await providerSwitchApi.getFailover();
       if (!res.failover.config.autoSwitch || (res.failover.suggestions || []).length === 0) {
         setFailover(res.failover);
@@ -629,7 +646,7 @@ export function ProviderSwitchPage() {
     } finally {
       runAutoEvaluate.current = false;
     }
-  }, []);
+  }, [activeApp, refreshStatus, refreshBackups]);
 
   // Visible-polling keeps one non-overlapping loop that pauses on hidden tabs.
   // Declared after evaluateAutoSwitch — the deps array is evaluated at render.
@@ -654,6 +671,7 @@ export function ProviderSwitchPage() {
   }, [pollFailover]);
 
   const openFailoverEdit = useCallback(() => {
+    setFailoverError("");
     const source = failover?.config || {};
     setFailoverDraft({
       enabled: source.enabled === true,
@@ -669,6 +687,7 @@ export function ProviderSwitchPage() {
   const saveFailover = useCallback(async () => {
     if (!failoverDraft || failoverSaving) return;
     setFailoverSaving(true);
+    setFailoverError("");
     try {
       const res = await providerSwitchApi.updateFailover({
         enabled: failoverDraft.enabled,
@@ -682,7 +701,7 @@ export function ProviderSwitchPage() {
       setFailoverDialogOpen(false);
       void refreshFailover();
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : String(error));
+      setFailoverError(error instanceof Error ? error.message : String(error));
     } finally {
       setFailoverSaving(false);
     }
@@ -741,6 +760,7 @@ export function ProviderSwitchPage() {
   const confirmSwitch = useCallback(async () => {
     if (!switchTarget) return;
     setBusy(true);
+    setActionError("");
     try {
       const res = await providerSwitchApi.switchProvider(activeApp, switchTarget.id);
       setNotice(copy("pswitch.switch.done", { name: switchTarget.name, files: res.wrote.join(", ") }));
@@ -749,7 +769,7 @@ export function ProviderSwitchPage() {
       await refreshBackups(activeApp);
       await refreshFailover();
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : String(error));
+      setActionError(error instanceof Error ? error.message : String(error));
     } finally {
       setBusy(false);
     }
@@ -758,12 +778,13 @@ export function ProviderSwitchPage() {
   const confirmDelete = useCallback(async () => {
     if (!deleteTarget) return;
     setBusy(true);
+    setActionError("");
     try {
       await providerSwitchApi.deleteProvider(activeApp, deleteTarget.id);
       setDeleteTarget(null);
       await refreshStatus();
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : String(error));
+      setActionError(error instanceof Error ? error.message : String(error));
     } finally {
       setBusy(false);
     }
@@ -826,13 +847,14 @@ export function ProviderSwitchPage() {
   const confirmRestore = useCallback(async () => {
     if (!restoreTarget) return;
     setBusy(true);
+    setActionError("");
     try {
       await providerSwitchApi.restoreBackup(activeApp, restoreTarget.name);
       setRestoreTarget(null);
       setNotice(copy("pswitch.backups.restored"));
       await refreshBackups(activeApp);
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : String(error));
+      setActionError(error instanceof Error ? error.message : String(error));
     } finally {
       setBusy(false);
     }
@@ -840,7 +862,7 @@ export function ProviderSwitchPage() {
 
   return (
     <div className={`mx-auto w-full px-4 py-6 sm:px-6 sm:py-8 ${utilityEditor.open ? "flex flex-1 flex-col" : "max-w-6xl"}`}>
-      <UnsavedChangesGuard dirty={(dialogOpen && dialogDirty) || utilityEditor.dirty} busy={(dialogOpen && dialogSaving) || utilityEditor.busy} />
+      <UnsavedChangesGuard dirty={(dialogOpen && dialogDirty) || utilityEditor.dirty || auxEditor.dirty} busy={(dialogOpen && dialogSaving) || utilityEditor.busy || auxEditor.busy} />
       {!utilityEditor.open ? <PageHeader title={copy("pswitch.title")} description={copy("pswitch.subtitle")}
         actions={<Button variant="secondary" size="sm" onClick={() => void refreshStatus()} disabled={busy}>
           <RefreshCw className="h-4 w-4" />{copy("pswitch.action.refresh")}
@@ -913,6 +935,7 @@ export function ProviderSwitchPage() {
       ) : (
       <>
       <FailoverBar
+        alertsOnly
         failover={failover}
         activeApp={activeApp}
         busy={busy}
@@ -934,7 +957,6 @@ export function ProviderSwitchPage() {
           />
         </div>
       ) : null}
-      <ProviderProfilesBar activeApp={activeApp} onNotice={setNotice} onChanged={refreshStatus} />
       {activeApp === "codex" ? <ProviderCodexClient revision={status} /> : null}
       <section className="mb-8">
         <SectionTitle>{copy("pswitch.section.providers")}</SectionTitle>
@@ -979,9 +1001,13 @@ export function ProviderSwitchPage() {
         )}
       </section>
 
+      <div className="mb-8">
+        <FailoverBar settingsOnly failover={failover} activeApp={activeApp} busy={busy} onEdit={openFailoverEdit} />
+        <ProviderProfilesBar activeApp={activeApp} onNotice={setNotice} onChanged={refreshStatus} />
+      </div>
       <section className="mb-8">
         <SectionTitle>{copy("pswitch.universal.section")}</SectionTitle>
-        <ProviderUniversalPanel onNotice={setNotice} onChanged={refreshStatus} />
+        <ProviderUniversalPanel onNotice={setNotice} onChanged={refreshStatus} onEditorStateChange={setAuxEditor} />
       </section>
 
       <section className="mb-8">
@@ -1032,6 +1058,7 @@ export function ProviderSwitchPage() {
 
       {backupDialog ? (
         <EncryptedBackupDialog
+          onEditorStateChange={setAuxEditor}
           mode={backupDialog.mode}
           busy={busy}
           onClose={() => setBackupDialog(null)}
@@ -1044,6 +1071,8 @@ export function ProviderSwitchPage() {
       ) : null}
       {failoverDialogOpen && failoverDraft ? (
         <FailoverEditDialog
+          error={failoverError}
+          onEditorStateChange={setAuxEditor}
           draft={failoverDraft}
           setDraft={setFailoverDraft}
           saving={failoverSaving}
@@ -1069,6 +1098,7 @@ export function ProviderSwitchPage() {
 
       <ConfirmModal
         open={!!switchTarget}
+        error={actionError}
         title={copy("pswitch.switch.confirm_title")}
         description={
           switchTarget
@@ -1087,6 +1117,7 @@ export function ProviderSwitchPage() {
 
       <ConfirmModal
         open={!!deleteTarget}
+        error={actionError}
         title={copy("pswitch.delete.confirm_title")}
         description={deleteTarget ? copy("pswitch.delete.confirm_desc", { name: deleteTarget.name }) : ""}
         confirmLabel={copy("pswitch.action.delete")}
@@ -1099,6 +1130,7 @@ export function ProviderSwitchPage() {
 
       <ConfirmModal
         open={!!restoreTarget}
+        error={actionError}
         title={copy("pswitch.backups.restore_confirm_title")}
         description={
           restoreTarget

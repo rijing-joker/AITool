@@ -102,3 +102,18 @@ it("renames and deletes profiles from the manage dialog", async () => {
   await waitFor(() => expect(profilesApi.remove).toHaveBeenCalledWith("pr_1"));
   await waitFor(() => expect(onChanged).toHaveBeenCalled());
 });
+
+it("retains a failed rename and shows its error in the management dialog", async () => {
+  mocks.profiles = [aProfile];
+  profilesApi.update.mockRejectedValueOnce(new Error("Rename failed"));
+  render(<ProviderProfilesBar activeApp="claude" onNotice={vi.fn()} onChanged={vi.fn()} />);
+  await screen.findByText("Work");
+  fireEvent.click(screen.getByRole("button", { name: "pswitch.profile.manage" }));
+  const name = screen.getByLabelText("pswitch.profile.name_label");
+  fireEvent.change(name, { target: { value: "Renamed" } });
+  fireEvent.change(name, { target: { value: "Renamed again" } });
+  fireEvent.click(screen.getByRole("button", { name: "pswitch.profile.rename" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Rename failed");
+  expect(name).toHaveValue("Renamed again");
+  expect(screen.getByRole("dialog")).toContainElement(screen.getByRole("alert"));
+});

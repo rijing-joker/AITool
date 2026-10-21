@@ -7,6 +7,7 @@ import React, {
   useState,
 } from "react";
 import { History, RefreshCw, Search } from "lucide-react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { copy } from "../lib/copy";
 import { Button, Input } from "../ui/components";
 import { PageHeader } from "../ui/components/PageHeader";
@@ -36,8 +37,10 @@ async function readApi(url, signal) {
 }
 
 function LocalCliSessionsPage() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const routeParams = new URLSearchParams(location.search);
   const [apps, setApps] = useState(null);
-  const [activeApp, setActiveApp] = useState("claude");
   const [sessions, setSessions] = useState(null);
   const [search, setSearch] = useState("");
   const query = useDeferredValue(search.trim().toLowerCase());
@@ -46,7 +49,6 @@ function LocalCliSessionsPage() {
       ? "time"
       : "project",
   );
-  const [selected, setSelected] = useState(null);
   const [messages, setMessages] = useState(null);
   const [usage, setUsage] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -60,6 +62,22 @@ function LocalCliSessionsPage() {
     () => (apps ?? []).filter((app) => app.available),
     [apps],
   );
+  const requestedApp = routeParams.get("app");
+  const defaultApp = availableApps.find((app) => app.id === "claude")?.id ?? availableApps[0]?.id ?? "claude";
+  const activeApp = requestedApp === "all" || availableApps.some((app) => app.id === requestedApp)
+    ? requestedApp : defaultApp;
+  const selectedId = routeParams.get("session");
+  const selectedApp = routeParams.get("sessionApp") || activeApp;
+  // Resolve the opaque native ID against the scanner's list; never accept a
+  // transcript path from the URL or put conversation contents in history.
+  const selected = sessions?.find((session) => session.appId === selectedApp && session.sessionId === selectedId) ?? null;
+
+  const listLocation = () => {
+    const params = new URLSearchParams(location.search);
+    params.delete("session");
+    params.delete("sessionApp");
+    return { pathname: location.pathname, search: params.toString(), hash: location.hash };
+  };
 
   useEffect(() => {
     const controller = new AbortController();
@@ -68,9 +86,6 @@ function LocalCliSessionsPage() {
         if (controller.signal.aborted) return;
         const next = data.apps ?? [];
         setApps(next);
-        const first = next.find((app) => app.available);
-        if (first && !next.some((app) => app.id === "claude" && app.available))
-          setActiveApp(first.id);
       })
       .catch((error) => {
         if (!controller.signal.aborted) {
@@ -134,12 +149,10 @@ function LocalCliSessionsPage() {
       setNotice(copy("clisessions.copy_failed"));
     }
   };
-  const openSession = async (session) => {
-    if (!selected) opener.current = document.activeElement;
+  const loadTranscript = useCallback(async (session) => {
     transcriptController.current?.abort();
     const controller = new AbortController();
     transcriptController.current = controller;
-    setSelected(session);
     setMessages(null);
     setUsage(null);
     setReadError(null);
@@ -161,18 +174,36 @@ function LocalCliSessionsPage() {
         setReadError(error.message);
       }
     }
+  }, []);
+  useEffect(() => {
+    if (selected) {
+      void loadTranscript(selected);
+    } else {
+      transcriptController.current?.abort();
+      setMessages(null);
+      setUsage(null);
+      setReadError(null);
+      const frame = requestAnimationFrame(() => {
+        if (opener.current?.isConnected) opener.current.focus({ preventScroll: true });
+      });
+      return () => cancelAnimationFrame(frame);
+    }
+    return () => transcriptController.current?.abort();
+  }, [selected, loadTranscript]);
+  const openSession = (session) => {
+    opener.current = document.activeElement;
+    const params = new URLSearchParams(location.search);
+    params.set("app", activeApp);
+    params.set("sessionApp", session.appId);
+    params.set("session", session.sessionId);
+    navigate({ pathname: location.pathname, search: params.toString(), hash: location.hash }, {
+      state: { cliSessionFromList: true },
+    });
   };
   const backToList = () => {
     transcriptController.current?.abort();
-    setSelected(null);
-    setMessages(null);
-    setUsage(null);
-    setReadError(null);
-    requestAnimationFrame(
-      () =>
-        opener.current?.isConnected &&
-        opener.current.focus({ preventScroll: true }),
-    );
+    if (location.state?.cliSessionFromList) navigate(-1);
+    else navigate(listLocation(), { replace: true });
   };
   const filtered = useMemo(() => {
     return filterSessions(sessions ?? [], query);
@@ -224,7 +255,10 @@ function LocalCliSessionsPage() {
                 ]}
                 value={activeApp}
                 onChange={(app) => {
-                  setActiveApp(app);
+                  const next = listLocation();
+                  const params = new URLSearchParams(next.search);
+                  params.set("app", app);
+                  navigate({ ...next, search: params.toString() }, { replace: true });
                   setSearch("");
                 }}
                 label={copy("clisessions.title")}
@@ -281,6 +315,12 @@ function LocalCliSessionsPage() {
               {listError}
             </p>
           ) : null}
+          {selectedId && sessions !== null && !loading && !listError && !selected ? (
+            <div role="alert" className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
+              <span>{copy("clisessions.unavailable")}</span>
+              <Button variant="secondary" size="sm" onClick={() => navigate(listLocation(), { replace: true })}>{copy("clisessions.back")}</Button>
+            </div>
+          ) : null}
         </div>
         <div
           id="cli-sessions-panel"
@@ -318,7 +358,7 @@ function LocalCliSessionsPage() {
           usage={usage}
           error={readError}
           onBack={backToList}
-          onReload={() => void openSession(selected)}
+          onReload={() => void loadTranscript(selected)}
           onCopy={handleCopy}
         />
       ) : null}

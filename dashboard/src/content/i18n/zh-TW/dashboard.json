@@ -1793,6 +1793,7 @@
   "clisessions.expand_groups": "展開群組",
   "clisessions.collapse_groups": "摺疊群組",
   "clisessions.no_matches": "沒有符合的工作階段。",
+  "clisessions.unavailable": "本機歷史記錄中已找不到此工作階段。請返回清單或重新掃描。",
   "clisessions.load_failed": "無法載入工作階段，請重新掃描。",
   "clisessions.copy_resume": "複製恢復命令",
   "clisessions.copy_id": "複製工作階段 ID",

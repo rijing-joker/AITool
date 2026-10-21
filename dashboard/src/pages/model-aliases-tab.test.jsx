@@ -25,3 +25,25 @@ it("renders each mapping and explains the shared protocol scope when editing", a
   fireEvent.click(screen.getByRole("button", { name: "proxy.upstream.common.save" }));
   await waitFor(() => expect(submitCreateAlias).toHaveBeenCalledWith(expect.objectContaining({ editingEntry: expect.objectContaining({ mappingId: "mapping-1", revision: "fresh" }), editingRevision: "fresh" })));
 });
+
+it("closes an untouched alias immediately but protects an edited alias", async () => {
+  const source = { id: "source", model: "model", provider: "relay", kind: "codex-api", protocol: "codex", reasoningLevels: ["high"] };
+  const entry = { mappingId: "mapping", revision: "revision", alias: "original", sourceModel: "model", provider: "relay", kind: "codex-api", protocol: "codex", effort: "high" };
+  loadAliasState.mockResolvedValue({ thinkingEntries: [entry], speedEntries: [], baseSources: [source], thinkingSources: [source], speedSources: [source] });
+  fetchAliasEditContext.mockResolvedValue({ mappingId: "mapping", revision: "revision", source, effort: "high", fast: false });
+  render(<ModelAliasesTab />);
+  fireEvent.click(await screen.findByRole("button", { name: "proxy.upstream.common.edit" }));
+  fireEvent.click(await screen.findByRole("button", { name: "proxy.upstream.common.close" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(screen.queryByText("shared.unsaved.title")).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "proxy.upstream.common.edit" }));
+  const name = await screen.findByDisplayValue("original");
+  fireEvent.change(name, { target: { value: "modified" } });
+  fireEvent.click(screen.getByRole("button", { name: "proxy.upstream.common.cancel" }));
+  fireEvent.click(screen.getByRole("button", { name: "shared.unsaved.keep_editing" }));
+  expect(name).toHaveValue("modified");
+  fireEvent.click(screen.getByRole("button", { name: "proxy.upstream.common.cancel" }));
+  fireEvent.click(screen.getByRole("button", { name: "shared.unsaved.discard" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(submitCreateAlias).not.toHaveBeenCalled();
+});

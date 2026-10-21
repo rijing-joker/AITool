@@ -3116,3 +3116,4 @@ proxy.privacy.on,proxy,ProxyPage,Proxy,on,Privacy: on,,active
 proxy.privacy.off,proxy,ProxyPage,Proxy,off,Privacy: off,,active
 proxy.privacy.activeHint,proxy,ProxyPage,Proxy,activeHint,"Privacy mode is on: account names, emails and IDs are masked on screen. Copy and CSV export keep the original values.",,active
 proxy.privacy.example,proxy,ProxyPage,Proxy,example,Example: al***@e***.com,,active
+clisessions.unavailable,clisessions,CliSessionsPage,CliSessionsPage,unavailable,This session is no longer in the local history. Return to the list or rescan.,,active

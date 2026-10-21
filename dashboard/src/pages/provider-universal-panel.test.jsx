@@ -123,3 +123,17 @@ it("deletes through the confirm dialog", async () => {
   fireEvent.click(confirm);
   await waitFor(() => expect(universalProvidersApi.remove).toHaveBeenCalledWith("u_1"));
 });
+
+it("keeps a failed sync confirmation open for retry", async () => {
+  mocks.providers = [{ id: "u_1", name: "Shared Gateway", providerType: "newapi", apps: { claude: true }, baseUrl: "https://gw.example.com", apiKey: "sk-shared" }];
+  universalProvidersApi.sync.mockRejectedValueOnce(new Error("Sync failed"));
+  render(<ProviderUniversalPanel onNotice={vi.fn()} onChanged={vi.fn()} />);
+  fireEvent.click(await screen.findByRole("button", { name: "pswitch.universal.sync" }));
+  const confirm = screen.getByRole("dialog").querySelector("button:last-child");
+  fireEvent.click(confirm);
+  expect(await screen.findByRole("alert")).toHaveTextContent("Sync failed");
+  expect(screen.getByRole("dialog")).toContainElement(screen.getByRole("alert"));
+  fireEvent.click(confirm);
+  await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  expect(universalProvidersApi.sync).toHaveBeenCalledTimes(2);
+});

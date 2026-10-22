@@ -101,6 +101,7 @@ describe("normalizeGrokBillingResponse", () => {
 
     assert.equal(result.period_type, "weekly");
     assert.equal(result.credit_usage_percent, 18);
+    assert.deepEqual(result.product_shares, [{ product: "GrokBuild", used_percent: 17 }, { product: "GrokChat", used_percent: 1 }]);
     // Overall pool percent (not GrokBuild-only attribution) is the quota bar.
     assert.deepEqual(result.primary_window, {
       used_percent: 18,

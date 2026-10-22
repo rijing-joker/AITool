@@ -202,13 +202,14 @@ async function restore(client, options = {}) {
 }
 async function status(options = {}) {
   const clients = [];
+  const code = await resolveBinaryPath("code", options).catch(() => null);
   for (const client of ["cli", "vscode"]) {
     const files = locations(client, options);
     try {
       const value = parse(client, await optionalText(files.target));
       const baseline = await json(files.baseline);
       const entry = client === "cli" ? value.provider === MARKER ? value : null : value.find(managedGroup);
-      clients.push({ client, path: files.target, configured: !!entry, canRestore: !!(baseline?.applied || baseline?.pendingApplied),
+      clients.push({ client, installed: client === "vscode" ? Boolean(code) : undefined, path: files.target, configured: !!entry, canRestore: !!(baseline?.applied || baseline?.pendingApplied),
         model: client === "cli" ? entry?.model || null : entry?.models?.[0]?.id || null,
         modelCount: client === "cli" ? entry ? 1 : 0 : entry?.models?.length || 0,
         keyHash: JSON.stringify(owned(client, value)) === JSON.stringify(baseline?.pendingApplied)

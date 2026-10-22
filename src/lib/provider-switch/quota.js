@@ -31,6 +31,9 @@ const CACHE_TTL_MS = 60_000;
 // must not be mistaken for Command Code and leak the key to a host the user
 // never pointed that row at.
 const QUOTA_PROVIDERS = [
+  { id: "zhipu", label: "Zhipu GLM", apps: ["claude", "codex", "gemini"], hostname: "open.bigmodel.cn", pathPrefix: "/" },
+  { id: "zhipu_en", label: "Z.ai", apps: ["claude", "codex", "gemini"], hostname: "api.z.ai", pathPrefix: "/" },
+  { id: "volcengine", label: "Volcengine", apps: ["claude", "codex", "gemini"], hostname: "volces.com", pathPrefix: "/" },
   {
     id: "command_code",
     label: "Command Code",
@@ -48,7 +51,7 @@ function hostMatches(hostname, expected) {
 }
 
 function pathMatches(pathname, prefix) {
-  return pathname === prefix || pathname.startsWith(`${prefix}/`);
+  return prefix === "/" || pathname === prefix || pathname.startsWith(`${prefix}/`);
 }
 
 function detectQuotaProvider(baseUrl, app) {
@@ -378,10 +381,12 @@ function parseCommandCodeQuota({ creditsBody, subscriptionBody, summaryBody }) {
   };
 }
 
-async function queryQuotaProvider({ provider: quotaProvider, baseUrl, apiKey, fetchImpl }) {
+async function queryQuotaProvider({ provider: quotaProvider, baseUrl, apiKey, fetchImpl, row }) {
   // Validate the row's base URL (https / loopback-only) even though the
   // /alpha calls below go to the fixed control-plane host.
   resolveCommandcodeOrigin(baseUrl);
+  if (quotaProvider.id === "volcengine") return require("./plan-quota").volc({ baseUrl, provider: row, fetchImpl });
+  if (["zhipu", "zhipu_en"].includes(quotaProvider.id)) return require("./plan-quota").zhipu({ baseUrl, apiKey, fetchImpl });
   // Resolve the org off the /alpha control plane, not the data-plane origin.
   const fetcher = async (path, params) => fetchCommandcodeJson({
     url: `${quotaProvider.apiBase}${path}${params?.length ? `?${new URLSearchParams(params)}` : ""}`,
@@ -454,6 +459,7 @@ async function queryProviderQuota({ app, provider, fetchImpl, bypassCache = fals
       baseUrl: credential.baseUrl,
       apiKey: credential.apiKey,
       fetchImpl,
+      row: provider,
     });
     quota = { ok: true, provider: quotaProvider.id, credentialStatus: "valid", ...parsed };
   } catch (error) {

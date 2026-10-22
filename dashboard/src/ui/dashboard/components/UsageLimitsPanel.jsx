@@ -16,6 +16,8 @@ import { buildCreditsBalanceLine } from "./usage-limits-credits-balance.js";
 import { PROVIDER_LIMIT_SPECS } from "./usage-limits-provider-specs.js";
 import { HoverTooltip } from "../../components/HoverTooltip.jsx";
 import { cycleView, countdownText, remainingLabel } from "../../../lib/subscription-display.js";
+import { isPageVisible } from "../../../lib/page-visibility";
+import { ProviderKeyInput } from "./ProviderKeyInput";
 
 const LIMITS_PROVIDER_ICON_CLASS = "shrink-0 text-oai-black dark:text-oai-white";
 
@@ -751,6 +753,11 @@ function renderConfiguredProvider(id, data, title, mode, expanded, onToggle, bad
       <LimitWindowSection mode={mode} rows={rows} extra={extra} />
       {subscription ? <SubscriptionBar subscription={subscription} now={now} mode={mode} /> : null}
       {expanded ? <LimitDetail rows={rows} mode={mode} now={now} /> : null}
+      {id === "grok" && data.product_shares?.length ? <div className="mt-2 space-y-1 border-t border-oai-gray-200 pt-2 text-xs dark:border-oai-gray-800">
+        <p className="text-oai-gray-500">{copy("limits.grok.sharedProducts")}</p>
+        {data.product_shares.map(row => <div key={row.product} className="flex justify-between gap-3"><span>{row.product}</span><span className="font-mono tabular-nums">{copy("shared.unit.percent_value", { value: row.used_percent.toFixed(1) })}</span></div>)}
+      </div> : null}
+      {id === "opencodeGo" || id === "commandCode" ? <details className="mt-2"><summary className="cursor-pointer text-xs text-oai-gray-500" onClick={event => event.stopPropagation()}>{copy("limits.key.manage")}</summary><ProviderKeyInput provider={id === "opencodeGo" ? "opencode-go" : "command-code"} /></details> : null}
       {expanded && subscription ? (
         <SubscriptionDetail subscription={subscription} now={now} />
       ) : null}
@@ -965,151 +972,24 @@ function ExternalArrow() {
   );
 }
 
-// OpenCode Go limits come from OpenCode's official authenticated usage API
-// (GET /zen/go/v1/usage, Bearer OPENCODE_GO_API_KEY) once the user subscribes.
-// The macOS/Windows apps have no settings field for it yet, so this inline
-// guide shows up wherever OpenCode Go is enabled but unconfigured (or errored):
-// sign in, create an API key in the console, paste it into a copyable command.
-// No credential ever passes through TokenTracker itself.
 function OpenCodeGoSetupHint() {
-  const [copied, setCopied] = useState(false);
-  const snippet = [
-    "read -r -s OPENCODE_GO_API_KEY",
-    "export OPENCODE_GO_API_KEY",
-    'launchctl setenv OPENCODE_GO_API_KEY "$OPENCODE_GO_API_KEY"',
-  ].join("\n");
-
-  const onCopy = async (e) => {
-    e.stopPropagation();
-    try {
-      await navigator.clipboard.writeText(snippet);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1600);
-    } catch (_e) {
-      // Clipboard can be unavailable in embedded or restricted contexts.
-    }
-  };
-
-  return (
-    <div className="mt-1.5 rounded-lg border border-oai-gray-200 dark:border-oai-gray-700/60 bg-oai-gray-50/50 dark:bg-oai-gray-900/20 p-3 text-[11px] text-oai-gray-600 dark:text-oai-gray-300">
-      <div className="text-[12px] font-semibold text-oai-gray-800 dark:text-oai-gray-100">{copy("limits.opencodeGo.setupHint.title")}</div>
-      <div className="mt-0.5 leading-snug text-oai-gray-500 dark:text-oai-gray-400">{copy("limits.opencodeGo.setupHint.subtitle")}</div>
-
-      <ol className="mt-2.5 space-y-2.5">
-        <HintStep n="1">
-          <div>{copy("limits.opencodeGo.setupHint.step1")}</div>
-          <a
-            href="https://opencode.ai"
-            target="_blank"
-            rel="noreferrer"
-            onClick={(e) => e.stopPropagation()}
-            className="mt-1 inline-flex items-center gap-1 rounded-md bg-oai-brand/10 px-2 py-1 font-medium text-oai-brand hover:bg-oai-brand/15 transition-colors"
-          >
-            {copy("limits.opencodeGo.setupHint.cta")}
-            <ExternalArrow />
-          </a>
-        </HintStep>
-        <HintStep n="2">
-          <div>{copy("limits.opencodeGo.setupHint.step2")}</div>
-        </HintStep>
-        <HintStep n="3">
-          <div className="flex items-center gap-2">
-            <span>{copy("limits.opencodeGo.setupHint.step3")}</span>
-            <button
-              type="button"
-              onClick={onCopy}
-              className="shrink-0 rounded-md border border-oai-gray-300 dark:border-oai-gray-700 px-2 py-0.5 text-[10.5px] text-oai-gray-700 dark:text-oai-gray-200 hover:bg-oai-gray-100 dark:hover:bg-oai-gray-800 transition-colors"
-            >
-              {copied ? copy("limits.opencodeGo.setupHint.copied") : copy("limits.opencodeGo.setupHint.copy")}
-            </button>
-          </div>
-          <pre className="mt-1.5 overflow-x-auto rounded-md bg-oai-gray-100 dark:bg-oai-gray-900/60 px-2 py-1.5 font-mono text-[10.5px] leading-relaxed whitespace-pre">{snippet}</pre>
-          <div className="mt-1 text-[10px] text-oai-gray-400 dark:text-oai-gray-500">{copy("limits.opencodeGo.setupHint.note_app")}</div>
-        </HintStep>
-      </ol>
-    </div>
-  );
+  return <div className="mt-2 space-y-2 rounded-lg border border-oai-gray-200 p-3 dark:border-oai-gray-700">
+    <h3 className="text-sm font-medium">{copy("limits.opencodeGo.setupHint.title")}</h3>
+    <p className="text-xs text-oai-gray-500">{copy("limits.opencodeGo.setupHint.step1")}</p>
+    <a href="https://opencode.ai" target="_blank" rel="noreferrer" className="text-xs underline">{copy("limits.opencodeGo.setupHint.cta")}</a>
+    <p className="text-xs text-oai-gray-500">{copy("limits.opencodeGo.setupHint.step2")}</p>
+    <ProviderKeyInput provider="opencode-go" />
+  </div>;
 }
 
-// Command Code subscription usage comes from the CLI's own alpha endpoints,
-// authenticated exactly like the `cmd` CLI itself. Two supported logins: the
-// `cmd login` session the CLI stores in ~/.commandcode/auth.json (picked up
-// with no restart), or a COMMAND_CODE_API_KEY env var. TokenTracker never
-// exposes the credential to the dashboard; the local backend sends it only to
-// Command Code's API.
 function CommandCodeSetupHint() {
-  const [copied, setCopied] = useState(false);
-  // Command lines stay identical across locales; they are copy keys per the
-  // repo i18n convention (review 594) so the setup guide and the reauth
-  // tooltip share one source of truth for `cmd login`.
-  const platform = commandCodeSetupPlatform();
-  const loginSnippet = commandCodeLoginSnippet();
-  const snippet = platform === "windows"
-    ? copy("limits.commandCode.setupHint.snippet_env_windows").replaceAll("\\n", "\n")
-    : [
-    copy("limits.commandCode.setupHint.snippet_read"),
-    copy("limits.commandCode.setupHint.snippet_export"),
-    ...(platform === "macos" ? [copy("limits.commandCode.setupHint.snippet_setenv")] : []),
-  ].join("\n");
-
-  const onCopy = async (e) => {
-    e.stopPropagation();
-    try {
-      await navigator.clipboard.writeText(snippet);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1600);
-    } catch (_e) {
-      // Clipboard can be unavailable in embedded or restricted contexts.
-    }
-  };
-
-  return (
-    <div className="mt-1.5 rounded-lg border border-oai-gray-200 dark:border-oai-gray-700/60 bg-oai-gray-50/50 dark:bg-oai-gray-900/20 p-3 text-[11px] text-oai-gray-600 dark:text-oai-gray-300">
-      <div className="text-[12px] font-semibold text-oai-gray-800 dark:text-oai-gray-100">
-        {copy("limits.commandCode.setupHint.title")}
-      </div>
-      <div className="mt-0.5 leading-snug text-oai-gray-500 dark:text-oai-gray-400">
-        {copy("limits.commandCode.setupHint.subtitle")}
-      </div>
-
-      <ol className="mt-2.5 space-y-2.5">
-        <HintStep n="1">
-          <div>{copy("limits.commandCode.setupHint.step1")}</div>
-          <pre className="mt-1.5 overflow-x-auto rounded-md bg-oai-gray-100 dark:bg-oai-gray-900/60 px-2 py-1.5 font-mono text-[10.5px] leading-relaxed whitespace-pre">
-            {loginSnippet}
-          </pre>
-        </HintStep>
-        <HintStep n="2">
-          <div>{copy("limits.commandCode.setupHint.step2")}</div>
-          <div className="mt-1.5 flex items-center gap-2">
-            <button
-              type="button"
-              onClick={onCopy}
-              className="shrink-0 rounded-md border border-oai-gray-300 dark:border-oai-gray-700 px-2 py-0.5 text-[10.5px] text-oai-gray-700 dark:text-oai-gray-200 hover:bg-oai-gray-100 dark:hover:bg-oai-gray-800 transition-colors"
-            >
-              {copied
-                ? copy("limits.commandCode.setupHint.copied")
-                : copy("limits.commandCode.setupHint.copy")}
-            </button>
-          </div>
-          <pre className="mt-1.5 overflow-x-auto rounded-md bg-oai-gray-100 dark:bg-oai-gray-900/60 px-2 py-1.5 font-mono text-[10.5px] leading-relaxed whitespace-pre">
-            {snippet}
-          </pre>
-          <div className="mt-1 text-[10px] text-oai-gray-400 dark:text-oai-gray-500">
-            {platform === "windows" ? copy("limits.commandCode.setupHint.note_windows")
-              : platform === "linux" ? copy("limits.commandCode.setupHint.note_linux")
-                : copy("limits.commandCode.setupHint.note_app")}
-          </div>
-        </HintStep>
-      </ol>
-    </div>
-  );
+  return <div className="mt-2 space-y-2 rounded-lg border border-oai-gray-200 p-3 dark:border-oai-gray-700">
+    <h3 className="text-sm font-medium">{copy("limits.commandCode.setupHint.title")}</h3>
+    <p className="text-xs text-oai-gray-500">{copy("limits.commandCode.setupHint.subtitle")}</p>
+    <ProviderKeyInput provider="command-code" />
+  </div>;
 }
 
-// Devin quota is read through the Devin CLI's saved sign-in on this machine
-// — the backend reuses the session token the CLI wrote to its credentials
-// file, so all the row needs is the CLI installed and signed in once.
-// TokenTracker only ever sends that token to Devin's official quota endpoint.
 function DevinSetupHint() {
   const loginSnippet = devinLoginSnippet();
 
@@ -1317,7 +1197,7 @@ export function UsageLimitsPanel({ claude, codex, cursor, gemini, kimi, kiro, gr
 
   // Refresh countdowns/remaining labels once a minute without re-fetching.
   useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 60000);
+    const timer = setInterval(() => { if (isPageVisible()) setNow(Date.now()); }, 60000);
     return () => clearInterval(timer);
   }, []);
 

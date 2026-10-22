@@ -28,6 +28,7 @@ internal static class Program
                 var ok = SingleInstance.TryForwardToPrimary(deepLink);
                 Diag.Log("program", $"forwarded deepLink to primary: {ok}");
             }
+            if (deepLink is null && !launchedAtStartup) SingleInstance.TryForwardToPrimary("activate");
             return;
         }
 

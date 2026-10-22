@@ -1,18 +1,39 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   Brain,
+  FileText,
+  FilePenLine,
+  Terminal,
+  Search,
+  CheckCircle2,
+  Clock,
   ChevronRight,
   Coins,
   Copy,
   Image as ImageIcon,
   Timer,
   Wrench,
+  Globe,
+  Network,
+  Bot,
 } from "lucide-react";
+import { ProviderIcon } from "../ui/dashboard/components/ProviderIcon";
+import { ContentLoadControl, useSessionText } from "./cli-session-lazy";
 import { copy } from "../lib/copy";
 import { useCostFormatter } from "../hooks/useCostFormatter";
 import { toolCallPayloadText } from "../lib/session-export";
+import {
+  toolCategory,
+  toolDiff,
+  toolPath,
+  toolTarget,
+  toolStatus,
+  shortPath,
+  mcpTool,
+  toolFacts,
+} from "./cli-session-tools";
 import { isFailedStep, stepText } from "./cli-sessions-model";
 
 export function formatTime(ms) {
@@ -103,7 +124,7 @@ export function UsageChips({ usage }) {
   }
   if (chips.length === 0) return null;
   return (
-    <div className="flex shrink-0 flex-wrap items-center justify-end gap-x-2 gap-y-0.5 text-[11px] tabular-nums text-oai-gray-500 dark:text-oai-gray-400">
+    <div className="flex shrink-0 flex-wrap items-center justify-end gap-x-2 gap-y-0.5 text-xs tabular-nums text-oai-gray-600 dark:text-oai-gray-400">
       {chips.map((chip) => (
         <span
           key={chip.key}
@@ -117,6 +138,14 @@ export function UsageChips({ usage }) {
           </span>
         </span>
       ))}
+      {usage.pricedModels < usage.totalModels ? (
+        <span className="w-full text-right">
+          {copy("clisessions.usage.partial", {
+            priced: usage.pricedModels,
+            total: usage.totalModels,
+          })}
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -196,7 +225,7 @@ function TranscriptImage({ image, index }) {
     );
   }
   return (
-    <span className="inline-flex items-center gap-1 rounded-lg border border-dashed border-oai-gray-300 px-2 py-1 text-[11px] text-oai-gray-500 dark:border-oai-gray-700 dark:text-oai-gray-400">
+    <span className="inline-flex items-center gap-1 rounded-lg border border-dashed border-oai-gray-300 px-2 py-1 text-xs text-oai-gray-500 dark:border-oai-gray-700 dark:text-oai-gray-400">
       <ImageIcon size={11} aria-hidden="true" />
       {copy(
         failed
@@ -207,42 +236,63 @@ function TranscriptImage({ image, index }) {
   );
 }
 
-function PatchDiff({ patch, query }) {
+function PatchDiff({ patch, query, onCopy }) {
   const [showAll, setShowAll] = useState(false);
-  const lines = patch.body.split("\n");
   const truncated =
-    !showAll && !textHits(patch.body, query) && 400 < lines.length;
+    !showAll && !textHits(patch.body, query) && 400 < patch.rows.length;
+  const numbered = patch.rows.some((row) => {
+    return row.old != null || row.new != null;
+  });
   return (
-    <>
-      {Array.isArray(patch.files) && patch.files.length !== 0 ? (
-        <div className="mt-1 flex flex-wrap gap-1">
-          {patch.files.map((file, index) => (
+    <div className="mt-1">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-oai-gray-600 dark:text-oai-gray-400">
+        {patch.files.map((file, index) => (
+          <button
+            type="button"
+            key={index}
+            title={file.path}
+            aria-label={copy("clisessions.copy_file_path", { path: file.path })}
+            onClick={() => onCopy(file.path)}
+            className="inline-flex min-h-10 min-w-0 items-center gap-2 text-left hover:text-oai-brand-600 dark:hover:text-oai-brand-400"
+          >
+            <FileText size={13} className="shrink-0" />
+            <span className="break-all font-mono">{shortPath(file.path)}</span>
+            <Copy size={12} className="shrink-0" />
+          </button>
+        ))}
+        {patch.estimated ? (
+          <span>{copy("clisessions.diff.proposed")}</span>
+        ) : null}
+      </div>
+      <pre className="max-h-96 max-w-full overflow-auto rounded-md bg-oai-gray-50 py-2 font-mono text-xs leading-6 dark:bg-oai-gray-900/60">
+        {(truncated ? patch.rows.slice(0, 400) : patch.rows).map(
+          (row, index) => (
             <span
               key={index}
-              className="break-all rounded bg-oai-gray-100 px-1.5 py-0.5 font-mono text-[10px] text-oai-gray-600 dark:bg-oai-gray-900 dark:text-oai-gray-300"
+              className={`flex min-w-max ${row.kind === "add" ? "bg-emerald-50 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300" : row.kind === "remove" ? "bg-red-50 text-red-800 dark:bg-red-950/30 dark:text-red-300" : row.kind === "header" || row.kind === "hunk" ? "font-medium text-oai-gray-700 dark:text-oai-gray-300" : "text-oai-gray-600 dark:text-oai-gray-400"}`}
             >
-              {file.path}
+              {numbered ? (
+                <>
+                  <span
+                    aria-hidden="true"
+                    className="sticky left-0 w-10 shrink-0 bg-oai-gray-100 pr-2 text-right tabular-nums text-oai-gray-600 dark:bg-oai-gray-800 dark:text-oai-gray-400"
+                  >
+                    {row.old ?? ""}
+                  </span>
+                  <span
+                    aria-hidden="true"
+                    className="sticky left-10 mr-3 w-10 shrink-0 bg-oai-gray-100 pr-2 text-right tabular-nums text-oai-gray-600 dark:bg-oai-gray-800 dark:text-oai-gray-400"
+                  >
+                    {row.new ?? ""}
+                  </span>
+                </>
+              ) : null}
+              <span className="whitespace-pre px-3">
+                <HighlightedText text={row.text} query={query} />
+              </span>
             </span>
-          ))}
-        </div>
-      ) : null}
-      <pre className="mt-1.5 max-h-72 max-w-full overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-5">
-        {(truncated ? lines.slice(0, 400) : lines).map((line, index) => (
-          <span
-            key={index}
-            className={`block ${
-              line.startsWith("+")
-                ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300"
-                : line.startsWith("-")
-                  ? "bg-red-50 text-red-700 dark:bg-red-950/30 dark:text-red-300"
-                  : line.startsWith("***")
-                    ? "font-semibold text-oai-gray-700 dark:text-oai-gray-200"
-                    : "text-oai-gray-500 dark:text-oai-gray-400"
-            }`}
-          >
-            <HighlightedText text={line} query={query} />
-          </span>
-        ))}
+          ),
+        )}
       </pre>
       {truncated ? (
         <button
@@ -250,10 +300,45 @@ function PatchDiff({ patch, query }) {
           onClick={() => setShowAll(true)}
           className="min-h-10 text-xs text-oai-brand-600 dark:text-oai-brand-400"
         >
-          {copy("clisessions.patch.show_more", { count: lines.length - 400 })}
+          {copy("clisessions.patch.show_more", {
+            count: patch.rows.length - 400,
+          })}
         </button>
       ) : null}
-    </>
+    </div>
+  );
+}
+
+function codeText(node) {
+  if (typeof node === "string") return node;
+  if (Array.isArray(node)) return node.map(codeText).join("");
+  return node?.props ? codeText(node.props.children) : "";
+}
+
+function SessionCodeBlock({ children, onCopy, complete }) {
+  const element = React.Children.toArray(children)[0];
+  const language =
+    element?.props?.className?.replace(/^language-/, "") ||
+    copy("clisessions.code");
+  return (
+    <div className="my-3 max-w-full overflow-hidden rounded-lg bg-oai-gray-50 dark:bg-oai-gray-800/60">
+      <div className="flex items-center justify-between px-3 text-xs text-oai-gray-600 dark:text-oai-gray-400">
+        <span>{language}</span>
+        <button
+          type="button"
+          aria-label={copy("clisessions.copy_code")}
+          disabled={!complete}
+          title={complete ? copy("clisessions.copy_code") : copy("clisessions.expand_content")}
+          onClick={() => onCopy(codeText(children).replace(/\n$/, ""))}
+          className="inline-flex h-10 w-10 items-center justify-center rounded-md hover:bg-oai-gray-100 disabled:opacity-40 dark:hover:bg-oai-gray-700"
+        >
+          <Copy size={14} />
+        </button>
+      </div>
+      <pre className="max-h-96 overflow-auto whitespace-pre px-3 pb-3 text-xs leading-6">
+        {children}
+      </pre>
+    </div>
   );
 }
 
@@ -321,28 +406,47 @@ export function MessageContent({
   query = "",
   onCopy,
   compact = false,
+  appId,
 }) {
   const [expanded, setExpanded] = useState(false);
-  const full = message.content || "";
-  const long = full.length > 3000;
+  const lazy = useSessionText(message.content, message.contentRef, expanded);
+  const full = lazy.text;
+  const long = (message.contentRef?.length ?? full.length) > 3000;
   const forced = textHits(full, query);
   const text = long && !expanded && !forced ? `${full.slice(0, 1500)}…` : full;
   const plugins = useMemo(() => {
     return [highlightMarkdown(query)];
   }, [query]);
   const user = message.role === "user";
+  const contentRef = useRef(null);
+  const [rawHit, setRawHit] = useState(false);
+  useEffect(() => {
+    setRawHit(
+      Boolean(
+        forced && !contentRef.current?.querySelector("[data-session-hit]"),
+      ),
+    );
+  }, [text, query, forced]);
+  const hitAt = forced ? full.toLowerCase().indexOf(query.toLowerCase()) : -1;
   return (
     <div
       className={`group min-w-0 ${user ? "ml-auto flex max-w-[92%] flex-col items-end" : "w-full"}`}
     >
       <div
-        className={`mb-1 flex min-h-6 items-center gap-2 text-[11px] text-oai-gray-400 ${user ? "justify-end" : ""}`}
+        className={`mb-1 flex min-h-6 items-center gap-2 text-xs text-oai-gray-600 dark:text-oai-gray-400 ${user ? "justify-end" : ""}`}
       >
+        {!user && appId ? <ProviderIcon provider={appId} size={16} /> : null}
         <span className={compact ? "sr-only" : ""}>
           {copy(`clisessions.role.${roleKey(message.role)}`)}
         </span>
         {message.ts != null ? (
-          <span className="tabular-nums">{formatTime(message.ts)}</span>
+          <span className="tabular-nums" title={formatTime(message.ts)}>
+            {new Date(message.ts).toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+              hour12: false,
+            })}
+          </span>
         ) : null}
         {message.model ? (
           <span className="max-w-44 truncate">{message.model}</span>
@@ -368,7 +472,7 @@ export function MessageContent({
             type="button"
             aria-label={copy("clisessions.copy_message")}
             title={copy("clisessions.copy_message")}
-            onClick={() => onCopy(full)}
+            onClick={() => { void lazy.load(true).then(onCopy).catch(() => {}); }}
             className="inline-flex h-10 w-10 items-center justify-center rounded-md hover:bg-oai-gray-100 focus-visible:opacity-100 sm:opacity-0 sm:group-hover:opacity-100 dark:hover:bg-oai-gray-800"
           >
             <Copy size={13} aria-hidden="true" />
@@ -376,24 +480,49 @@ export function MessageContent({
         ) : null}
       </div>
       <div
-        className={`min-w-0 max-w-full text-sm leading-7 [overflow-wrap:anywhere] ${user ? "rounded-2xl rounded-tr-sm bg-oai-brand-50 px-4 py-2.5 dark:bg-oai-brand-950/40" : compact ? "text-oai-gray-500 dark:text-oai-gray-400" : ""}`}
+        className={`min-w-0 max-w-full text-sm leading-7 [overflow-wrap:anywhere] ${user ? "rounded-2xl rounded-tr-sm bg-oai-brand-50 px-4 py-2.5 dark:bg-oai-brand-950/40" : compact ? "text-oai-gray-600 dark:text-oai-gray-400" : ""}`}
       >
-        {user || 60000 < full.length ? (
-          <p className="whitespace-pre-wrap">
-            <HighlightedText text={text} query={query} />
-          </p>
-        ) : (
-          <div className="[&_p]:my-2 [&_p:first-child]:mt-0 [&_h1]:my-3 [&_h1]:text-xl [&_h2]:my-3 [&_h2]:text-lg [&_h3]:my-2 [&_h3]:font-semibold [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-1 [&_pre]:my-3 [&_pre]:max-w-full [&_pre]:overflow-auto [&_pre]:rounded-lg [&_pre]:bg-oai-gray-50 [&_pre]:p-3 dark:[&_pre]:bg-oai-gray-800/60 [&_code]:font-mono [&_code]:text-xs [&_blockquote]:border-l-2 [&_blockquote]:border-oai-gray-300 [&_blockquote]:pl-3 [&_a]:text-oai-brand-600 [&_a]:underline dark:[&_a]:text-oai-brand-400 [&_table]:w-full [&_th]:border [&_th]:border-oai-gray-200 [&_th]:p-2 [&_td]:border [&_td]:border-oai-gray-200 [&_td]:p-2 dark:[&_td]:border-oai-gray-700 dark:[&_th]:border-oai-gray-700 [&_mark]:rounded-sm [&_mark]:bg-amber-200 [&_mark]:text-oai-black dark:[&_mark]:bg-amber-500/40 dark:[&_mark]:text-oai-white">
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              rehypePlugins={plugins}
-              components={markdownComponents}
-              urlTransform={safeLink}
-            >
-              {text}
-            </ReactMarkdown>
+        <div ref={contentRef}>
+          {60000 < full.length ? (
+            <p className="whitespace-pre-wrap">
+              <HighlightedText text={text} query={query} />
+            </p>
+          ) : (
+            <div className="[&_p]:my-2 [&_p:first-child]:mt-0 [&_h1]:my-3 [&_h1]:text-xl [&_h2]:my-3 [&_h2]:text-lg [&_h3]:my-2 [&_h3]:font-semibold [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-1 [&_pre]:my-3 [&_pre]:max-w-full [&_pre]:overflow-auto [&_pre]:rounded-lg [&_pre]:bg-oai-gray-50 [&_pre]:p-3 dark:[&_pre]:bg-oai-gray-800/60 [&_code]:font-mono [&_code]:text-xs [&_blockquote]:border-l-2 [&_blockquote]:border-oai-gray-300 [&_blockquote]:pl-3 [&_a]:text-oai-brand-600 [&_a]:underline dark:[&_a]:text-oai-brand-400 [&_table]:w-full [&_th]:border [&_th]:border-oai-gray-200 [&_th]:p-2 [&_td]:border [&_td]:border-oai-gray-200 [&_td]:p-2 dark:[&_td]:border-oai-gray-700 dark:[&_th]:border-oai-gray-700 [&_mark]:rounded-sm [&_mark]:bg-amber-200 [&_mark]:text-oai-black dark:[&_mark]:bg-amber-500/40 dark:[&_mark]:text-oai-white">
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                rehypePlugins={plugins}
+                components={{
+                  ...markdownComponents,
+                  pre: ({ children }) => (
+                    <SessionCodeBlock onCopy={onCopy} complete={lazy.complete && text === full}>
+                      {children}
+                    </SessionCodeBlock>
+                  ),
+                }}
+                urlTransform={safeLink}
+              >
+                {text}
+              </ReactMarkdown>
+            </div>
+          )}
+        </div>
+        {rawHit ? (
+          <div className="mt-2 rounded-md bg-oai-gray-50 px-3 py-2 text-xs dark:bg-oai-gray-800">
+            <p className="mb-1 text-oai-gray-600 dark:text-oai-gray-400">
+              {copy("clisessions.find_raw")}
+            </p>
+            <pre className="overflow-auto whitespace-pre-wrap">
+              <HighlightedText
+                text={full.slice(
+                  Math.max(0, hitAt - 70),
+                  hitAt + query.length + 100,
+                )}
+                query={query}
+              />
+            </pre>
           </div>
-        )}
+        ) : null}
         {long && !forced ? (
           <button
             type="button"
@@ -408,6 +537,7 @@ export function MessageContent({
             )}
           </button>
         ) : null}
+        {expanded || lazy.error || lazy.busy ? <ContentLoadControl content={lazy} /> : null}
         {message.images?.length ? (
           <div className="mt-2 flex flex-wrap gap-2">
             {message.images.map((image, index) => (
@@ -420,9 +550,51 @@ export function MessageContent({
   );
 }
 
-export function ProcessStep({ step, query, onCopy }) {
+export function ProcessStep(props) {
+  return props.step.kind === "group" ? <ProcessGroup {...props} /> : <SingleProcessStep {...props} />;
+}
+
+function ProcessGroup({ step, query, onCopy, projectDir }) {
   const [expanded, setExpanded] = useState(false);
+  const forced = step.children.some(child => { return textHits(stepText(child), query); });
+  const Icon = step.category === "mcp" ? Network : Search;
+  const targets = step.children.map(child => { return toolTarget(child.call, projectDir); }).filter(Boolean).join(" · ");
+  return (
+    <details open={expanded || forced} data-session-group=""
+      onToggle={event => { if (!forced) setExpanded(event.currentTarget.open); }}
+      className="min-w-0">
+      <summary className="flex min-h-10 cursor-pointer list-none items-center gap-2 rounded-lg px-2 text-xs text-oai-gray-600 hover:bg-oai-gray-50 dark:text-oai-gray-400 dark:hover:bg-oai-gray-800/50 [&::-webkit-details-marker]:hidden">
+        <ChevronRight size={12} className={`shrink-0 ${expanded || forced ? "rotate-90" : ""}`} />
+        <Icon size={14} className="shrink-0" />
+        <span className="max-w-[65%] shrink-0 truncate font-medium" title={step.server}>{copy(`clisessions.group_steps.${step.category}`, { count: step.children.length, server: step.server || "" })}</span>
+        <span className="min-w-0 flex-1 truncate" title={targets}><HighlightedText text={targets} query={query} /></span>
+        <CheckCircle2 size={14} className="shrink-0 text-emerald-700 dark:text-emerald-400" aria-label={copy("clisessions.status.success")} />
+      </summary>
+      {expanded || forced ? <div className="ml-4 border-l border-oai-gray-200 pl-2 dark:border-oai-gray-700">
+        {step.children.map(child => <ProcessStep key={child.key} step={child} query={query} onCopy={onCopy} projectDir={projectDir} />)}
+      </div> : null}
+    </details>
+  );
+}
+
+function ProcessOutput({ output, reference, query }) {
+  const content = useSessionText(output, reference, true);
+  return (
+    <>
+      <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-6 text-oai-gray-600 dark:text-oai-gray-400">
+        <HighlightedText text={content.text} query={query} />
+      </pre>
+      <ContentLoadControl content={content} />
+    </>
+  );
+}
+
+function SingleProcessStep({ step, query, onCopy, projectDir }) {
+  const [expanded, setExpanded] = useState(() => Boolean(isFailedStep(step)));
   const forced = textHits(stepText(step), query);
+  const thinkingContent = useSessionText(step.message?.thinking, step.message?.thinkingRef, expanded || forced);
+  const outputs = step.outputParts || [{ key: "output", output: step.output, reference: step.outputRef }];
+  const hasOutput = outputs.some(part => part.output || part.reference);
   if (step.kind === "message") {
     return (
       <MessageContent
@@ -434,12 +606,30 @@ export function ProcessStep({ step, query, onCopy }) {
     );
   }
   const thinking = step.kind === "thinking";
-  const patch = step.call?.patch;
-  const status = patch?.error ? "failed" : patch?.status || "pending";
+  const patch = toolDiff(step);
+  const status = toolStatus(step);
+  const target = toolTarget(step.call, projectDir);
+  const facts = toolFacts(step.call);
+  const mcp = mcpTool(step.call);
+  const category = toolCategory(step.call);
+  const StepIcon = thinking
+    ? Brain
+    : { command: Terminal, edit: FilePenLine, read: FileText, search: Search, mcp: Network, agent: Bot, web: Globe }[
+        category
+      ] || Wrench;
+  const StatusIcon =
+    !patch && status === "success"
+      ? CheckCircle2
+      : !patch && status === "pending"
+        ? Clock
+        : null;
+  const statusLabel = copy(
+    `clisessions.${patch && ["success", "failed", "pending"].includes(status) ? "patch" : "status"}.${status}`,
+  );
   const payload = step.call ? toolCallPayloadText(step.call) : "";
   const label = thinking
     ? copy("clisessions.thinking")
-    : step.call?.name || copy("clisessions.tool_output");
+    : mcp?.name || step.call?.name || copy("clisessions.tool_output");
   return (
     <details
       open={expanded || forced}
@@ -448,59 +638,116 @@ export function ProcessStep({ step, query, onCopy }) {
       }}
       className={`group min-w-0 rounded-lg ${isFailedStep(step) ? "bg-red-50/60 dark:bg-red-950/20" : ""}`}
     >
-      <summary className="flex min-h-10 cursor-pointer list-none items-center gap-2 rounded-lg px-2 text-xs text-oai-gray-500 hover:bg-oai-gray-50 dark:text-oai-gray-400 dark:hover:bg-oai-gray-800/50 [&::-webkit-details-marker]:hidden">
+      <summary className="flex min-h-10 cursor-pointer list-none items-center gap-2 rounded-lg px-2 text-xs text-oai-gray-600 hover:bg-oai-gray-50 dark:text-oai-gray-400 dark:hover:bg-oai-gray-800/50 [&::-webkit-details-marker]:hidden">
         <ChevronRight
           size={12}
           className="shrink-0 group-open:rotate-90"
           aria-hidden="true"
         />
-        {thinking ? (
-          <Brain size={14} aria-hidden="true" />
-        ) : (
-          <Wrench size={14} aria-hidden="true" />
-        )}
-        <span className="min-w-0 truncate font-medium">
+        <StepIcon size={14} className="shrink-0" aria-hidden="true" />
+        <span className="max-w-[40%] shrink-0 truncate font-medium" title={step.call?.name}>
           <HighlightedText text={label} query={query} />
         </span>
-        {patch ? (
-          <span className="ml-auto flex shrink-0 items-center gap-1.5 text-[10px]">
-            {status === "success" ? (
-              <>
-                <span className="text-emerald-600 dark:text-emerald-400">
-                  +{patch.additions}
+        {mcp ? <span className="hidden max-w-24 truncate sm:inline">{mcp.server}</span> : null}
+        {target ? (
+          <span
+            title={toolPath(step.call) || target}
+            className={`min-w-0 flex-1 truncate text-xs text-oai-gray-700 dark:text-oai-gray-300 ${["read", "edit", "command"].includes(category) ? "font-mono" : ""}`}
+          >
+            <HighlightedText text={target} query={query} />
+          </span>
+        ) : null}
+        {step.call ? (
+          <span className="ml-auto flex shrink-0 items-center gap-1.5 text-xs">
+            {patch ? (
+              <span className="hidden sm:inline">
+                <span className="text-emerald-700 dark:text-emerald-400">
+                  +{patch.rows.filter((row) => row.kind === "add").length}
+                </span>{" "}
+                <span className="text-red-700 dark:text-red-400">
+                  −{patch.rows.filter((row) => row.kind === "remove").length}
                 </span>
-                <span className="text-red-500 dark:text-red-400">
-                  −{patch.deletions}
-                </span>
-              </>
+              </span>
             ) : null}
-            <span className={status === "failed" ? "text-red-500" : ""}>
-              {copy(`clisessions.patch.${status}`)}
-            </span>
+            {step.exitCode != null ? (
+              <span className="tabular-nums">
+                {copy("clisessions.exit_code", { code: step.exitCode })}
+              </span>
+            ) : null}
+            {step.durationMs != null ? (
+              <span className="hidden tabular-nums sm:inline">
+                {(step.durationMs / 1000).toFixed(1)}s
+              </span>
+            ) : null}
+            {StatusIcon ? (
+              <StatusIcon
+                size={14}
+                className={
+                  status === "success"
+                    ? "text-emerald-700 dark:text-emerald-400"
+                    : ""
+                }
+                aria-label={copy(`clisessions.status.${status}`)}
+              />
+            ) : (
+              <span
+                className={
+                  status === "failed" ? "text-red-700 dark:text-red-400" : ""
+                }
+              >
+                {statusLabel}
+              </span>
+            )}
           </span>
         ) : null}
       </summary>
-      <div className="mb-2 ml-6 min-w-0 border-l border-oai-gray-200 pl-3 dark:border-oai-gray-700">
-        {patch ? <PatchDiff patch={patch} query={query} /> : null}
-        {thinking || (!patch && payload) ? (
-          <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-6 text-oai-gray-500 dark:text-oai-gray-400">
+      {expanded || forced ? <div className="mb-2 ml-6 min-w-0 border-l border-oai-gray-200 pl-3 dark:border-oai-gray-700">
+        {facts.length ? <dl className="mb-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs leading-6">
+          {facts.map(fact => <React.Fragment key={fact.key}>
+            <dt className="text-oai-gray-600 dark:text-oai-gray-400">{copy(`clisessions.fact.${fact.key}`)}</dt>
+            <dd className="break-all"><HighlightedText text={fact.value} query={query} /></dd>
+          </React.Fragment>)}
+        </dl> : null}
+        {patch ? (
+          <PatchDiff patch={patch} query={query} onCopy={onCopy} />
+        ) : null}
+        {thinking || (!patch && payload && !facts.length) ? (
+          <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-6 text-oai-gray-600 dark:text-oai-gray-400">
             <HighlightedText
-              text={thinking ? step.message.thinking : payload}
+              text={thinking ? thinkingContent.text : payload}
               query={query}
             />
           </pre>
         ) : null}
-        {step.output ? (
+        {thinking ? <ContentLoadControl content={thinkingContent} /> : null}
+        {facts.length && payload ? <details open={textHits(payload, query) || undefined}>
+          <summary className="min-h-10 cursor-pointer py-3 text-xs text-oai-gray-600 dark:text-oai-gray-400">{copy("clisessions.tool_parameters")}</summary>
+          <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-6"><HighlightedText text={payload} query={query} /></pre>
+        </details> : null}
+        {patch &&
+        payload &&
+        textHits(payload, query) &&
+        !textHits(patch.body, query) ? (
+          <pre className="max-h-72 overflow-auto whitespace-pre-wrap text-xs">
+            <HighlightedText text={payload} query={query} />
+          </pre>
+        ) : null}
+        {step.message?.thinkingTruncated ? (
+          <p className="text-xs text-oai-gray-600 dark:text-oai-gray-400">
+            {copy("clisessions.thinking_truncated")}
+          </p>
+        ) : null}
+        {hasOutput ? (
           <>
-            <p className="mt-2 text-[10px] font-medium text-oai-gray-400">
+            <p className="mt-2 text-xs font-medium text-oai-gray-600 dark:text-oai-gray-400">
               {copy("clisessions.tool_output")}
             </p>
-            <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words font-mono text-xs leading-6 text-oai-gray-500 dark:text-oai-gray-400">
-              <HighlightedText text={step.output} query={query} />
-            </pre>
+            {outputs.map(part => (
+              <ProcessOutput key={part.key} output={part.output} reference={part.reference} query={query} />
+            ))}
           </>
         ) : null}
-      </div>
+      </div> : null}
     </details>
   );
 }

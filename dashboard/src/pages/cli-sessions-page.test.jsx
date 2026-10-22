@@ -17,11 +17,18 @@ import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { CliSessionsPage } from "./CliSessionsPage";
 
 function render(ui, initialEntries = ["/cli-sessions"]) {
-  const router = createMemoryRouter([{ path: "*", element: ui }], { initialEntries });
+  const router = createMemoryRouter([{ path: "*", element: ui }], {
+    initialEntries,
+  });
   return { ...rtlRender(<RouterProvider router={router} />), router };
 }
 
-const { readSession } = createRequire(import.meta.url)("../../../src/lib/sessions.js");
+const { readSession } = createRequire(import.meta.url)(
+  "../../../src/lib/sessions.js",
+);
+const { previewTranscript, contentPage } = createRequire(import.meta.url)(
+  "../../../src/lib/session-transcript-cache.js",
+);
 
 vi.mock("../lib/copy", () => ({
   copy: (key, params) => (params ? `${key}:${JSON.stringify(params)}` : key),
@@ -51,7 +58,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-async function openTranscript(messages) {
+async function openTranscript(messages, read = null) {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url) => {
@@ -66,7 +73,9 @@ async function openTranscript(messages) {
       if (path.startsWith("/api/cli-sessions/list"))
         return { json: async () => ({ ok: true, sessions: [session] }) };
       if (path.startsWith("/api/cli-sessions/read"))
-        return { json: async () => ({ ok: true, messages }) };
+        return { json: async () => read ? read(new URL(path, "http://localhost")) : ({ ok: true, messages }) };
+      if (path.startsWith("/api/cli-sessions/content") && read)
+        return { json: async () => read(new URL(path, "http://localhost")) };
       throw new Error(`unexpected fetch: ${path}`);
     }),
   );
@@ -77,33 +86,233 @@ async function openTranscript(messages) {
   );
 }
 
+function expandStep(label) {
+  const details = screen.getByText(label).closest("details");
+  details.open = true;
+  fireEvent(details, new Event("toggle"));
+  return details;
+}
+
+it("keeps successful groups collapsed and opens matching children without merging failures", async () => {
+  await openTranscript([
+    { role: "user", content: "Inspect files" },
+    { role: "assistant", content: "", toolCalls: [
+      { id: "a", name: "Read", input: { path: "a.js" } },
+      { id: "b", name: "Grep", input: { pattern: "target" } },
+      { id: "c", name: "Read", input: { path: "broken.js" } },
+    ] },
+    { role: "tool", content: "", toolResults: [
+      { toolUseId: "a", content: "source" }, { toolUseId: "b", content: "GROUPNEEDLE" },
+      { toolUseId: "c", content: "failed read", isError: true },
+    ] },
+    { role: "assistant", content: "Done" },
+  ]);
+  expect(screen.getByText("failed read")).toBeInTheDocument();
+  fireEvent.click(screen.getByText("clisessions.expand_processes"));
+  const group = document.querySelector("[data-session-group]");
+  expect(group).not.toHaveAttribute("open");
+  expect(screen.queryByText("GROUPNEEDLE")).not.toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText("clisessions.find"), { target: { value: "GROUPNEEDLE" } });
+  await waitFor(() => expect(group).toHaveAttribute("open"));
+  expect(screen.getByText("GROUPNEEDLE")).toBeInTheDocument();
+  expect(screen.getByText("failed read").closest("details").closest("[data-session-group]")).toBeNull();
+});
+
+it("fetches long message pages on disclosure and copies the full field", async () => {
+  const text = "A".repeat(280000) + "COPYTAIL";
+  const pages = [];
+  const clipboard = { writeText: vi.fn(async () => {}) };
+  Object.defineProperty(navigator, "clipboard", { configurable: true, value: clipboard });
+  const messages = [{ role: "user", content: "Review" }, { role: "assistant", content: text }];
+  await openTranscript(messages, url => {
+    if (url.pathname.endsWith("/content")) {
+      const offset = Number(url.searchParams.get("offset"));
+      pages.push(offset);
+      const nextOffset = Math.min(text.length, offset + 128 * 1024);
+      return { ok: true, content: text.slice(offset, nextOffset), nextOffset };
+    }
+    return { ok: true, preview: true, revision: "v1", messages: [messages[0],
+      { ...messages[1], content: text.slice(0, 1200), contentRef: { id: "1:content", length: text.length } }] };
+  });
+  expect(pages).toEqual([]);
+  fireEvent.click(screen.getByText("clisessions.expand_content"));
+  await waitFor(() => expect(pages).toEqual([0]));
+  fireEvent.click(screen.getAllByLabelText("clisessions.copy_message").at(-1));
+  await waitFor(() => expect(clipboard.writeText).toHaveBeenCalledWith(text));
+  expect(pages).toEqual([0, 128 * 1024, 256 * 1024]);
+  expect(screen.getByText(/COPYTAIL$/)).toBeInTheDocument();
+});
+
+it("disables code copying until the complete message is displayed", async () => {
+  const code = "const value = 1;\n".repeat(600) + "// CODETAIL";
+  const text = `\`\`\`js\n${code}\n\`\`\``;
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+  const full = { revision: "v1", messages: [{ role: "user", content: text }] };
+  const pages = [];
+  await openTranscript(full.messages, url => {
+    if (url.pathname.endsWith("/content")) {
+      const options = Object.fromEntries(url.searchParams);
+      pages.push(options.ref);
+      return { ok: true, ...contentPage(full, options) };
+    }
+    return { ok: true, ...previewTranscript(full) };
+  });
+  const button = screen.getByRole("button", { name: "clisessions.copy_code" });
+  expect(button).toBeDisabled();
+  fireEvent.click(button);
+  expect(writeText).not.toHaveBeenCalled();
+  expect(pages).toEqual([]);
+  fireEvent.click(screen.getByText("clisessions.expand_content"));
+  await waitFor(() => expect(screen.getByRole("button", { name: "clisessions.copy_code" })).toBeEnabled());
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "clisessions.copy_code" }));
+  });
+  expect(writeText).toHaveBeenCalledWith(code);
+  expect(pages).toEqual(["0:content"]);
+  fireEvent.click(screen.getByText("clisessions.collapse_content"));
+  expect(screen.getByRole("button", { name: "clisessions.copy_code" })).toBeDisabled();
+});
+
+it("loads each result of a repeated call independently and keeps earlier and short output", async () => {
+  const outputs = ["FIRST_OUTPUT\n" + "a".repeat(270000) + "\nFIRSTTAIL", "SHORT_OUTPUT",
+    "SECOND_OUTPUT\n" + "b".repeat(5000) + "\nSECONDTAIL"];
+  const full = { revision: "v1", messages: [
+    { role: "user", content: "Review output" },
+    { role: "assistant", content: "", toolCalls: [{ id: "t", name: "Bash", input: { command: "npm test" } }] },
+    ...outputs.map(content => ({ role: "tool", content, toolResults: [{ toolUseId: "t", content }] })),
+    { role: "assistant", content: "Done" },
+  ] };
+  const pages = [];
+  await openTranscript(full.messages, url => {
+    if (url.pathname.endsWith("/content")) {
+      const options = Object.fromEntries(url.searchParams);
+      pages.push([options.ref, Number(options.offset)]);
+      return { ok: true, ...contentPage(full, options) };
+    }
+    return { ok: true, ...(url.searchParams.get("preview") === "1" ? previewTranscript(full) : full) };
+  });
+  fireEvent.click(screen.getByText("clisessions.expand_processes"));
+  expandStep("Bash");
+  await screen.findByText(/SECONDTAIL$/);
+  expect(screen.getByText(/^FIRST_OUTPUT/)).toBeInTheDocument();
+  expect(screen.getByText("SHORT_OUTPUT")).toBeInTheDocument();
+  expect(pages).toEqual(expect.arrayContaining([["2:result:0:content", 0], ["4:result:0:content", 0]]));
+  fireEvent.click(screen.getByText("clisessions.load_more"));
+  await waitFor(() => expect(pages).toContainEqual(["2:result:0:content", 128 * 1024]));
+  await waitFor(() => expect(screen.getByText("clisessions.load_more")).toBeEnabled());
+  fireEvent.click(screen.getByText("clisessions.load_more"));
+  await screen.findByText(/FIRSTTAIL$/);
+  expect(screen.getByText("SHORT_OUTPUT")).toBeInTheDocument();
+  expect(screen.getByText(/SECONDTAIL$/)).toBeInTheDocument();
+  expect(screen.queryByText("clisessions.load_more")).not.toBeInTheDocument();
+});
+
+it("does not report partial search results and retries complete transcript loading", async () => {
+  let fail = true;
+  const full = [{ role: "user", content: "Review" }, { role: "assistant", content: "prefix\n".repeat(1000) + "HIDDENTAIL" }];
+  await openTranscript(full, url => url.searchParams.get("preview") === "1"
+    ? { ok: true, revision: "v1", preview: true, messages: [full[0], { ...full[1], content: "prefix", contentRef: { id: "1:content", length: full[1].content.length } }] }
+    : fail ? { ok: false, error: "temporary read failure" } : { ok: true, revision: "v1", messages: full });
+  fireEvent.change(screen.getByLabelText("clisessions.find"), { target: { value: "HIDDENTAIL" } });
+  await screen.findByText("clisessions.content_failed");
+  expect(screen.queryByText('clisessions.find_count:{"current":0,"count":0}')).not.toBeInTheDocument();
+  fail = false;
+  fireEvent.click(screen.getByRole("button", { name: "clisessions.content_retry" }));
+  await screen.findByText('clisessions.find_count:{"current":1,"count":1}');
+  expect(document.querySelector("[data-session-hit]")).toHaveTextContent("HIDDENTAIL");
+});
+
+it("exports full content instead of the initial preview", async () => {
+  const full = [{ role: "assistant", content: "preview\n".repeat(1000) + "EXPORTTAIL" }];
+  const createUrl = vi.fn(() => "blob:fixture");
+  Object.defineProperty(URL, "createObjectURL", { configurable: true, value: createUrl });
+  Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: vi.fn() });
+  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+  await openTranscript(full, url => url.searchParams.get("preview") === "1"
+    ? { ok: true, revision: "v1", preview: true, messages: [{ ...full[0], content: "preview", contentRef: { id: "0:content", length: full[0].content.length } }] }
+    : { ok: true, revision: "v1", messages: full });
+  fireEvent.click(screen.getByLabelText("clisessions.export"));
+  await waitFor(() => expect(createUrl).toHaveBeenCalledOnce());
+  const text = await new Promise(resolve => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.readAsText(createUrl.mock.calls[0][0]);
+  });
+  expect(text).toContain(full[0].content);
+});
+
 it("counts and highlights failures parsed from native Claude tool results", async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "aitool-reader-errors-"));
   try {
-    const sourcePath = path.join(home, ".claude", "projects", "fixture", "errors.jsonl");
+    const sourcePath = path.join(
+      home,
+      ".claude",
+      "projects",
+      "fixture",
+      "errors.jsonl",
+    );
     fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
     const rows = [
       { role: "user", content: "Run the checks" },
-      { role: "assistant", content: [
-        { type: "tool_use", id: "failed", name: "Bash", input: { command: "npm test" } },
-        { type: "tool_use", id: "ok", name: "Read", input: { path: "errors.log" } },
-      ] },
-      { role: "user", content: [
-        { type: "tool_result", tool_use_id: "failed", is_error: true, content: "Exit code 1\nChecks failed" },
-        { type: "tool_result", tool_use_id: "ok", is_error: false, content: "Error text from a successful read" },
-        { type: "tool_result", tool_use_id: "orphan", is_error: true, content: "Unpaired tool failed" },
-      ] },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool_use",
+            id: "failed",
+            name: "Bash",
+            input: { command: "npm test" },
+          },
+          {
+            type: "tool_use",
+            id: "ok",
+            name: "Read",
+            input: { path: "errors.log" },
+          },
+        ],
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "failed",
+            is_error: true,
+            content: "Exit code 1\nChecks failed",
+          },
+          {
+            type: "tool_result",
+            tool_use_id: "ok",
+            is_error: false,
+            content: "Error text from a successful read",
+          },
+          {
+            type: "tool_result",
+            tool_use_id: "orphan",
+            is_error: true,
+            content: "Unpaired tool failed",
+          },
+        ],
+      },
     ];
-    fs.writeFileSync(sourcePath, rows.map((message) => JSON.stringify({ message })).join("\n"));
+    fs.writeFileSync(
+      sourcePath,
+      rows.map((message) => JSON.stringify({ message })).join("\n"),
+    );
     const { messages } = await readSession({ app: "claude", sourcePath, home });
     await openTranscript(messages);
 
-    expect(screen.getByText('clisessions.process_failed:{"count":2}')).toBeInTheDocument();
+    expect(
+      screen.getByText('clisessions.process_failed:{"count":2}'),
+    ).toBeInTheDocument();
     fireEvent.click(screen.getByText("clisessions.expand_processes"));
     const failed = screen.getByText("Bash").closest("details");
     expect(failed).toHaveClass("bg-red-50/60");
     expect(failed).toHaveTextContent("Checks failed");
-    expect(screen.getByText("Read").closest("details")).not.toHaveClass("bg-red-50/60");
+    expect(screen.getByText("Read").closest("details")).not.toHaveClass(
+      "bg-red-50/60",
+    );
     expect(screen.getByText("Unpaired tool failed")).toBeInTheDocument();
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
@@ -131,7 +340,7 @@ it("renders image-only messages with accessible previews and visible fallbacks",
   expect(screen.getByText("clisessions.image.unavailable")).toBeInTheDocument();
 });
 
-it("only shows applied patch counts and preserves failed and unconfirmed diffs", async () => {
+it("shows change counts with distinct applied, failed and unconfirmed states", async () => {
   const body =
     "*** Begin Patch\n*** Update File: file.txt\n+++literal plus\n---literal minus\n*** End Patch";
   await openTranscript([
@@ -157,23 +366,25 @@ it("only shows applied patch counts and preserves failed and unconfirmed diffs",
     screen.getByRole("button", { name: "clisessions.expand_processes" }),
   );
   const applied = screen.getByText("apply_patch_success").closest("details");
+  expandStep("apply_patch_success");
   expect(applied.querySelector("summary")).toHaveTextContent(
-    "+1−1clisessions.patch.success",
+    "+1 −1clisessions.patch.success",
   );
   for (const status of ["failed", "pending"]) {
+    expandStep(`apply_patch_${status}`);
     const details = screen
       .getByText(`apply_patch_${status}`)
       .closest("details");
-    expect(details.querySelector("summary")).not.toHaveTextContent("+1");
+    expect(details.querySelector("summary")).toHaveTextContent("+1 −1");
     expect(details.querySelector("summary")).toHaveTextContent(
       `clisessions.patch.${status}`,
     );
     expect(details.querySelector("pre")).toHaveTextContent("+++literal plus");
   }
-  expect(applied.querySelector("pre").children[2]).toHaveClass(
-    "text-emerald-700",
+  expect(applied.querySelector("pre").children[1]).toHaveClass(
+    "text-emerald-800",
   );
-  expect(applied.querySelector("pre").children[3]).toHaveClass("text-red-700");
+  expect(applied.querySelector("pre").children[2]).toHaveClass("text-red-800");
 });
 
 it("expands truncated patches and reveals search hits beyond the preview", async () => {
@@ -202,7 +413,7 @@ it("expands truncated patches and reveals search hits beyond the preview", async
   fireEvent.click(
     screen.getByRole("button", { name: "clisessions.expand_processes" }),
   );
-  fireEvent.click(screen.getByText("apply_patch"));
+  expandStep("apply_patch");
   expect(screen.queryByText("+deep-needle")).not.toBeInTheDocument();
   fireEvent.click(
     screen.getByRole("button", {
@@ -460,13 +671,16 @@ it("renders thinking rows, auto-opens search hits inside collapsed blocks, and e
   );
 
   const urls = [];
-  vi.stubGlobal("URL", class extends URL {
-    static createObjectURL(blob) {
-      urls.push(blob);
-      return "blob:x";
-    }
-    static revokeObjectURL() {}
-  });
+  vi.stubGlobal(
+    "URL",
+    class extends URL {
+      static createObjectURL(blob) {
+        urls.push(blob);
+        return "blob:x";
+      }
+      static revokeObjectURL() {}
+    },
+  );
   const clickSpy = vi
     .spyOn(HTMLAnchorElement.prototype, "click")
     .mockImplementation(() => {});
@@ -577,6 +791,7 @@ it("renders markdown, pairs tool results, filters changes and navigates matching
   );
   expect(screen.queryByText("paired output")).not.toBeInTheDocument();
   fireEvent.click(screen.getByText("clisessions.expand_processes"));
+  expandStep("apply_patch");
   expect(screen.getByText("apply_patch").closest("details")).toHaveTextContent(
     "paired output",
   );
@@ -602,6 +817,69 @@ it("renders markdown, pairs tool results, filters changes and navigates matching
   expect(
     within(outline).getByRole("button", { name: "1 First question" }),
   ).toHaveAttribute("aria-current", "location");
+});
+
+it("renders user code with independent copy and exposes matches hidden in Markdown syntax", async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  vi.stubGlobal("navigator", { clipboard: { writeText } });
+  await openTranscript([
+    { role: "user", content: "Check this:\n```js\nconst value = 1;\n```" },
+    {
+      role: "assistant",
+      content: "Read [reference](https://example.test/hidden-url-target).",
+    },
+  ]);
+  expect(
+    screen.getByText("const value = 1;").closest("pre"),
+  ).toBeInTheDocument();
+  fireEvent.click(
+    screen.getByRole("button", { name: "clisessions.copy_code" }),
+  );
+  expect(writeText).toHaveBeenCalledWith(
+    "const value = 1;",
+  );
+  fireEvent.change(screen.getByLabelText("clisessions.find"), {
+    target: { value: "hidden-url-target" },
+  });
+  await screen.findByText("clisessions.find_raw");
+  expect(document.querySelector("mark")).toHaveTextContent("hidden-url-target");
+  fireEvent.change(screen.getByLabelText("clisessions.find"), {
+    target: { value: "reference" },
+  });
+  await waitFor(() =>
+    expect(screen.queryByText("clisessions.find_raw")).not.toBeInTheDocument(),
+  );
+});
+
+it("offers localized transcript recovery without showing a zero-turn count", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url) => {
+      if (url.includes("/read?"))
+        throw new Error("ENOENT fixture log unavailable");
+      if (url.includes("/list?"))
+        return { json: async () => ({ ok: true, sessions: [session] }) };
+      return {
+        json: async () => ({
+          ok: true,
+          apps: [{ id: "claude", available: true }],
+        }),
+      };
+    }),
+  );
+  render(<CliSessionsPage />);
+  fireEvent.click(await screen.findByText(session.title));
+  const alert = await screen.findByRole("alert");
+  expect(alert).toHaveTextContent("clisessions.read_failed");
+  expect(
+    within(alert).getByRole("button", { name: "clisessions.reload" }),
+  ).toBeInTheDocument();
+  expect(
+    within(alert).getByRole("button", { name: "clisessions.back" }),
+  ).toBeInTheDocument();
+  expect(
+    screen.queryByText('clisessions.turn_count:{"count":0}'),
+  ).not.toBeInTheDocument();
 });
 
 it("cancels a transcript on return and ignores it after a different session is opened", async () => {
@@ -656,12 +934,24 @@ it("cancels a transcript on return and ignores it after a different session is o
   expect(screen.getByText("Current transcript")).toBeInTheDocument();
 });
 
-
 function mockSessionNavigation() {
   const fetchMock = vi.fn(async (url) => {
-    if (url === "/api/cli-sessions") return { json: async () => ({ ok: true, apps: [{ id: "claude", available: true }] }) };
-    if (url.startsWith("/api/cli-sessions/list")) return { json: async () => ({ ok: true, sessions: [session] }) };
-    if (url.startsWith("/api/cli-sessions/read")) return { json: async () => ({ ok: true, messages: [{ role: "assistant", content: "Navigation transcript" }] }) };
+    if (url === "/api/cli-sessions")
+      return {
+        json: async () => ({
+          ok: true,
+          apps: [{ id: "claude", available: true }],
+        }),
+      };
+    if (url.startsWith("/api/cli-sessions/list"))
+      return { json: async () => ({ ok: true, sessions: [session] }) };
+    if (url.startsWith("/api/cli-sessions/read"))
+      return {
+        json: async () => ({
+          ok: true,
+          messages: [{ role: "assistant", content: "Navigation transcript" }],
+        }),
+      };
     throw new Error(`Unexpected request: ${url}`);
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -672,11 +962,17 @@ it("returns to the filtered list with browser back and restores the reader with 
   mockSessionNavigation();
   const { router } = render(<CliSessionsPage />);
   await screen.findByText(session.title);
-  fireEvent.change(screen.getByLabelText("clisessions.search"), { target: { value: "login" } });
+  fireEvent.change(screen.getByLabelText("clisessions.search"), {
+    target: { value: "login" },
+  });
   fireEvent.click(screen.getByRole("button", { name: /Fix the login bug/ }));
   await screen.findByText("Navigation transcript");
-  expect(new URLSearchParams(router.state.location.search).get("session")).toBe(session.sessionId);
-  expect(router.state.location.search).not.toContain(encodeURIComponent(session.sourcePath));
+  expect(new URLSearchParams(router.state.location.search).get("session")).toBe(
+    session.sessionId,
+  );
+  expect(router.state.location.search).not.toContain(
+    encodeURIComponent(session.sourcePath),
+  );
   await act(async () => router.navigate(-1));
   expect(screen.getByLabelText("clisessions.search")).toHaveValue("login");
   expect(screen.queryByText("Navigation transcript")).not.toBeInTheDocument();
@@ -688,21 +984,36 @@ it("returns to the filtered list with browser back and restores the reader with 
 
 it("restores a directly opened reader and returns to its list without leaving the page", async () => {
   const fetchMock = mockSessionNavigation();
-  const { router } = render(<CliSessionsPage />, ["/cli-sessions?app=claude&sessionApp=claude&session=s-1"]);
+  const { router } = render(<CliSessionsPage />, [
+    "/cli-sessions?app=claude&sessionApp=claude&session=s-1",
+  ]);
   await screen.findByText("Navigation transcript");
-  expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining(encodeURIComponent(session.sourcePath)), expect.anything());
+  expect(fetchMock).toHaveBeenCalledWith(
+    expect.stringContaining(encodeURIComponent(session.sourcePath)),
+    expect.anything(),
+  );
   fireEvent.click(screen.getByLabelText("clisessions.back"));
   expect(router.state.location.pathname).toBe("/cli-sessions");
-  expect(new URLSearchParams(router.state.location.search).has("session")).toBe(false);
+  expect(new URLSearchParams(router.state.location.search).has("session")).toBe(
+    false,
+  );
   expect(screen.getByText(session.title)).toBeVisible();
 });
 
 it("offers recovery for an unknown session without reading a URL-supplied file path", async () => {
   const fetchMock = mockSessionNavigation();
-  const { router } = render(<CliSessionsPage />, ["/cli-sessions?app=claude&sessionApp=claude&session=%2Ftmp%2Fprivate.jsonl"]);
+  const { router } = render(<CliSessionsPage />, [
+    "/cli-sessions?app=claude&sessionApp=claude&session=%2Ftmp%2Fprivate.jsonl",
+  ]);
   await screen.findByText("clisessions.unavailable");
-  expect(fetchMock.mock.calls.some(([url]) => url.startsWith("/api/cli-sessions/read"))).toBe(false);
+  expect(
+    fetchMock.mock.calls.some(([url]) =>
+      url.startsWith("/api/cli-sessions/read"),
+    ),
+  ).toBe(false);
   fireEvent.click(screen.getByRole("button", { name: "clisessions.back" }));
-  expect(new URLSearchParams(router.state.location.search).has("session")).toBe(false);
+  expect(new URLSearchParams(router.state.location.search).has("session")).toBe(
+    false,
+  );
   expect(screen.queryByText("clisessions.unavailable")).not.toBeInTheDocument();
 });

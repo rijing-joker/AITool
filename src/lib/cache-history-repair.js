@@ -10,7 +10,7 @@ const { physicalJsonlRecords } = require("./jsonl-lines");
 const codexFiles = require("./codex-rollout-file");
 const { parseRolloutIncremental, parseClaudeIncremental, codexSessionIdFromPath } = require("./rollout");
 // v2 also repairs relays whose reported totals place writes outside input.
-const KEYS = { codex: "codexCacheWriteRepair_2026_10_v2", claude: "claudeCacheTtlRepair_2026_10_v1" };
+const KEYS = { codex: "codexCacheWriteRepair_2026_10_v3", claude: "claudeCacheTtlRepair_2026_10_v1" };
 const JOURNAL = "cache-history-repair.pending.json";
 const clone = (value) => JSON.parse(JSON.stringify(value));
 const digest = (value) => crypto.createHash("sha256").update(value).digest("hex");
@@ -153,13 +153,14 @@ async function publish({ journal, trackerDir, cursors, commitCursors, afterPubli
     let content = await fs.readFile(entry.staged, "utf8");
     if (digest(content) !== entry.digest) throw new Error("repair_stage_checksum_mismatch");
     if (entry.queue) {
-      // The proxy bridge may append another source while sync is stopped.
-      // Preserve those fresh rows even when replaying an interrupted journal.
-      const current = await readOptional(entry.target);
-      content = rows(current).filter((row) => row.source !== journal.source)
-        .concat(rows(content).filter((row) => row.source === journal.source)).map(JSON.stringify).join("\n") + "\n";
+      // Source snapshots are last-row-wins. Publish only correction rows by
+      // append; the proxy bridge writes outside sync.lock. Replaying a journal
+      // may append the same snapshot again, which is deliberately idempotent.
+      content = rows(content).filter((row) => row.source === journal.source).map(JSON.stringify).join("\n");
+      if (content) await fs.appendFile(entry.target, content + "\n", { mode: 0o600 });
+    } else {
+      await atomicWrite(entry.target, content);
     }
-    await atomicWrite(entry.target, content);
     if (afterPublish) await afterPublish(index);
   }
   // Opening the sharded store materializes its old generation. Clear its old

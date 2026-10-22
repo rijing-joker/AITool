@@ -2415,6 +2415,7 @@ async function parseRolloutFile({
     if (!bucketStart) return null;
     return {
       responseId: record.responseId,
+      rawUsage: record.usage,
       bucketStart,
       model,
       serviceTier,
@@ -2463,7 +2464,7 @@ async function parseRolloutFile({
     // the read stops before it and the next sync sees it whole.
     if (awaitsCompactedLine(usageRecordState)) {
       let next;
-      if (!record.terminated || line.includes('"compacted"')) {
+      if (!record.terminated || line.includes('"compacted"') || line.includes('"token_count"')) {
         try {
           next = JSON.parse(line);
         } catch {
@@ -2471,7 +2472,7 @@ async function parseRolloutFile({
         }
       }
       if (next !== undefined || record.terminated) {
-        noteLineAfterUsageRecord(usageRecordState, next?.type === "compacted");
+        noteLineAfterUsageRecord(usageRecordState, next?.type === "compacted", next?.type === "event_msg" && next?.payload?.type === "token_count");
       }
       if (next?.type === "compacted") {
         committedEndOffset = scannedEndOffset;
@@ -2596,8 +2597,9 @@ async function parseRolloutFile({
         usageRecordState,
         usageDeltaState.lastTotal,
         info.total_token_usage,
+        info.last_token_usage,
       );
-      if (compaction) addCompactionEvent(compaction);
+      if (compaction && !forkReplay?.hasUsageRecord?.(compaction.responseId)) addCompactionEvent(compaction);
     }
 
     const tokenTimestamp = typeof token.timestamp === "string" ? token.timestamp : null;

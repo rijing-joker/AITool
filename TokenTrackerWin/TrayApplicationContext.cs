@@ -30,6 +30,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly TrayMenuRenderer _menuRenderer;
     private readonly ToolStripMenuItem _summaryItem;
     private readonly ToolStripMenuItem _openDashboardItem;
+    private readonly ToolStripMenuItem _providersItem;
     private readonly ToolStripMenuItem _syncItem;
     private readonly ToolStripMenuItem _petItem;
     private readonly ToolStripMenuItem _petSizeItem;
@@ -107,6 +108,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
         _summaryItem = CreateMenuItem("", (_, _) => OpenDashboard());
         _openDashboardItem = CreateMenuItem("", (_, _) => OpenDashboard());
+        _providersItem = CreateMenuItem("", (_, _) => { EnsureDashboard(); _dashboard!.ShowProviders(); });
         _syncItem = CreateMenuItem("", (_, _) => _server.TriggerSync());
         _quotaItem = CreateMenuItem("", (_, _) => ToggleQuota());
         _petItem = CreateMenuItem("", (_, _) => TogglePet());
@@ -192,6 +194,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _menu.Items.Add(_summaryItem);
         _menu.Items.Add(CreateSeparator());
         _menu.Items.Add(_openDashboardItem);
+        _menu.Items.Add(_providersItem);
         _menu.Items.Add(_syncItem);
         _menu.Items.Add(_quotaItem);
         _menu.Items.Add(_petItem);
@@ -359,6 +362,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _summaryItem.Font = _summaryFont;
         _summaryItem.Text = $"{_strings.TodayTitle}: {_strings.NoData}";
         _openDashboardItem.Text = _strings.OpenDashboard;
+        _providersItem.Text = NativeLocalization.CurrentResolvedLocale switch { NativeLocalization.ChineseLocale => "切换供应商", NativeLocalization.TraditionalChineseLocale => "切換供應商", NativeLocalization.JapaneseLocale => "プロバイダーを切り替え", NativeLocalization.KoreanLocale => "공급자 전환", _ => "Switch provider" };
         _syncItem.Text = _strings.SyncNow;
         _quotaItem.Text = _strings.DesktopQuota;
         _quotaWindow?.ApplyLocale(NativeLocalization.ResolveLocale(_localePreference));
@@ -831,6 +835,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     /// </summary>
     public void HandleDeepLink(string url)
     {
+        if (url == "activate") { PostToUi(OpenDashboard); return; }
         DiagLog($"HandleDeepLink url={url}");
         string? code = null;
         try

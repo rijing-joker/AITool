@@ -16,7 +16,7 @@ const paths = require("./paths");
 // Scope notes vs cc-switch: no repo discovery/install/update yet — this v1
 // scans and projects locally present skills (import → toggle → sync).
 
-const SKILL_APPS = ["claude", "codex", "gemini", "grokbuild", "opencode", "hermes", "pi", "mcode"];
+const SKILL_APPS = ["claude", "codex", "gemini", "agy", "grokbuild", "opencode", "hermes", "pi", "mcode"];
 
 const COPY_STAMP_FILE = ".aitool-skill-copy";
 
@@ -28,6 +28,7 @@ function appSkillsDir(app) {
   switch (app) {
     case "claude": return path.join(home, ".claude", "skills");
     case "codex": return path.join(home, ".codex", "skills");
+    case "agy": return path.join(home, ".gemini", "config", "skills");
     case "gemini": return path.join(home, ".gemini", "skills");
     case "grokbuild": return path.join(home, ".grok", "skills");
     case "opencode": return path.join(home, ".config", "opencode", "skills");

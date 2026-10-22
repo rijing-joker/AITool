@@ -1,7 +1,7 @@
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const crypto = require("node:crypto");
-const { ensureDir, writeFileAtomic, chmod600IfPossible, readJson } = require("../fs");
+const { ensureDir, writeFileAtomic, chmod600IfPossible, readJson, withFileLock } = require("../fs");
 const store = require("./store");
 const targets = require("./targets");
 const presetsModule = require("./presets");
@@ -254,11 +254,17 @@ async function officialCodexRowAuths() {
     .filter((auth) => auth && typeof auth === "object" && !Array.isArray(auth));
 }
 
-async function switchProvider({ app, id }) {
+function switchProvider(payload) {
+  return withFileLock(path.join(paths.providerSwitchRoot(), `${payload.app}.projection`), () => switchProviderUnlocked(payload));
+}
+async function switchProviderUnlocked({ app, id }) {
   if (!store.isSupportedApp(app)) throw new Error(`Unsupported app: ${app}`);
   const state = await store.listProviders(app);
   const target = state.providers.find((p) => p.id === id);
   if (!target) throw new Error(`Provider not found: ${id}`);
+  if (app === "hermes" && require("./hermes-builtins").conflicts(target.settingsConfig?.slotKey)) {
+    throw new Error("HERMES_BUILTIN_ID_CONFLICT");
+  }
   const prev = state.current
     ? state.providers.find((p) => p.id === state.current) || null
     : null;
@@ -291,8 +297,16 @@ function switchProviderPositional(app, id) {
 
 const CONFLICT_POLICIES = ["keepMine", "keepTheirs"];
 
-async function saveProvider({ app, id, body }) {
+function saveProvider(payload) {
+  return withFileLock(path.join(paths.providerSwitchRoot(), `${payload.app}.projection`), () => saveProviderUnlocked(payload));
+}
+async function saveProviderUnlocked({ app, id, body }) {
   if (!store.isSupportedApp(app)) throw new Error(`Unsupported app: ${app}`);
+  if (app === "hermes" && body.settingsConfig && require("./hermes-builtins").conflicts(body.settingsConfig.slotKey)) throw new Error("HERMES_BUILTIN_ID_CONFLICT");
+  if (app === "agy") {
+    const provider = id ? await store.updateProvider(app, id, body) : await store.createProvider(app, body);
+    return { ok: true, provider, applied: null };
+  }
   const editorInput = body.editor && body.editor.base ? body.editor : null;
 
   if (!editorInput) {
@@ -306,7 +320,7 @@ async function saveProvider({ app, id, body }) {
       if (state.current === id) {
         // cc-switch interaction: editing the *current* provider takes effect
         // immediately — re-run the projection so the live files follow.
-        applied = await switchProvider({ app, id });
+        applied = await switchProviderUnlocked({ app, id });
       }
     }
     return { ok: true, provider, applied };
@@ -425,6 +439,49 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
   try {
     if (p === `${prefix}/status`) {
       json(res, await buildStatus());
+      return true;
+    }
+    if (p === `${prefix}/agy/launch` && method === "POST") {
+      if (!requireMutation()) return true;
+      const { id } = await readJsonBody(req);
+      const row = await store.getProvider("agy", id);
+      if (!row) throw new Error("Provider not found");
+      json(res, { ok: true, ...await require("./agy").launch(row) }); return true;
+    }
+    if (p.startsWith(`${prefix}/agy/accounts`)) {
+      if (!requireMutation()) return true;
+      const accounts = require("./agy-accounts").manager();
+      if (p === `${prefix}/agy/accounts` && method === "GET") json(res, { ok: true, ...await accounts.status() });
+      else if (p === `${prefix}/agy/accounts/login` && method === "POST") json(res, { ok: true, ...await accounts.startLogin() });
+      else if (p === `${prefix}/agy/accounts/login` && method === "GET") json(res, { ok: true, ...accounts.pollLogin(url.searchParams.get("flowId")) });
+      else if (p === `${prefix}/agy/accounts/login` && method === "DELETE") { accounts.cancel(); json(res, { ok: true }); }
+      else if (p === `${prefix}/agy/accounts/quota` && method === "GET") json(res, { ok: true, quota: await accounts.quota(url.searchParams.get("id")) });
+      else if (p === `${prefix}/agy/accounts/switch` && method === "POST") { const body = await readJsonBody(req); json(res, { ok: true, ...await accounts.switchAccount(body.id) }); }
+      else if (p === `${prefix}/agy/accounts` && method === "DELETE") { const body = await readJsonBody(req); await accounts.remove(body.id); json(res, { ok: true }); }
+      else return false;
+      return true;
+    }
+
+    if (p === `${prefix}/hermes/migrate-id` && method === "POST") {
+      if (!requireMutation()) return true;
+      const { id } = await readJsonBody(req);
+      await withFileLock(path.join(paths.providerSwitchRoot(), "hermes.projection"), async () => {
+        const state = await store.listProviders("hermes");
+        const row = state.providers.find(p => p.id === id);
+        if (!row) throw new Error("Provider not found");
+        const old = row.settingsConfig;
+        if (!require("./hermes-builtins").conflicts(old.slotKey)) throw new Error("Provider ID has no conflict");
+        let key = `aitool-${old.slotKey}`;
+        const lives = await readLives("hermes");
+        const live = lives.config.exists ? additive.parseLive("hermes", lives.config.content) : {};
+        const occupied = new Set([...state.providers.map(p => p.settingsConfig?.slotKey),
+          ...(live.custom_providers || []).map(p => p.name), ...Object.keys(live.providers || {})]);
+        for (let n = 2; occupied.has(key); n++) key = `aitool-${old.slotKey}-${n}`;
+        const next = { ...row, settingsConfig: { ...old, slotKey: key, provider: { ...old.provider, name: key } } };
+        if (state.current === id) await persistSwitchPlan("hermes", computeSwitchPlan("hermes", row, next, lives));
+        await store.updateProvider("hermes", id, { settingsConfig: next.settingsConfig });
+        json(res, { ok: true, slotKey: key });
+      });
       return true;
     }
 
@@ -970,7 +1027,7 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
     if (p === `${prefix}/fetch-models` && method === "POST") {
       if (!requireMutation()) return true;
       const body = await readJsonBody(req);
-      const result = await fetchModelList(body);
+      const result = body.app === "agy" ? await require("./agy").models() : await fetchModelList(body);
       json(res, { ok: true, ...result });
       return true;
     }
@@ -1225,6 +1282,7 @@ function annotateQuotaProviders(app, providers) {
     return {
       ...provider,
       quotaProvider: plan ?? balance,
+      ...(app === "hermes" && require("./hermes-builtins").conflicts(provider.settingsConfig?.slotKey) ? { builtinIdConflict: true } : {}),
       quotaKind: plan ? "plan" : balance ? "balance" : null,
     };
   });
@@ -1243,7 +1301,8 @@ async function buildStatus() {
     apps.push({
       app,
       current: appState.current,
-      providers: annotateQuotaProviders(app, appState.providers),
+      providers: annotateQuotaProviders(app, appState.providers).map(row => ({ ...row,
+        ...(app === "hermes" && require("./hermes-builtins").conflicts(row.settingsConfig?.slotKey) ? { builtinIdConflict: true } : {}) })),
       files,
     });
   }

@@ -34,6 +34,11 @@ const text = (key: string, vars?: Record<string, string | number>) => copy(key, 
 export const authFileName = (file: AuthFileRecord) =>
   readString(file, "name") || text("proxy.creds.unnamed");
 
+// Core file download, model and field APIs resolve by name alone. Runtime
+// indexes scope status/refresh but cannot scope these file operations.
+export const hasUniqueAuthFileName = (files: AuthFileRecord[], file: AuthFileRecord): boolean =>
+  files.filter(row => authFileName(row) === authFileName(file)).length === 1;
+
 export const isRuntimeOnlyAuthFile = (file: AuthFileRecord) =>
   readBoolean(file, "runtime_only", "runtimeOnly");
 
@@ -50,7 +55,7 @@ export const setOAuthCredentialFileDisabled = async (file: AuthFileRecord, disab
   if (!isOAuthCredentialFile(file)) {
     throw new Error(text("proxy.creds.fileOnly"));
   }
-  await managementApi.patch("/auth-files/status", { name: readString(file, "name"), disabled });
+  await managementApi.patch("/auth-files/status", { name: readString(file, "name"), auth_index: authFileCooldownResetIndex(file), disabled });
 };
 
 export const authFileCooldownResetIndex = (file: AuthFileRecord): string | undefined => {
@@ -206,7 +211,7 @@ const mergeDuplicateAuthFiles = (entries: AuthFileRecord[]) => {
 export const dedupeAuthFiles = (files: AuthFileRecord[]) => {
   const grouped = new Map<string, AuthFileRecord[]>();
   files.forEach((file, index) => {
-    const key = authFileName(file) || `unnamed-${index}`;
+    const key = `${authFileName(file) || `unnamed-${index}`}:${authFileCooldownResetIndex(file) || ""}`;
     const entries = grouped.get(key) ?? [];
     entries.push(file);
     grouped.set(key, entries);
@@ -399,6 +404,9 @@ export type AuthFileSettingsDraft = {
   excluded_models: string;
   headers: string;
   note: string;
+  request_retry?: string;
+  request_scoped_errors?: string;
+  using_api?: BooleanOverride;
 };
 
 const fail = (key: "metadata" | "headers" | "weight" | "priority") => {
@@ -452,6 +460,9 @@ export const authFileSettingsFromPayload = (payload: unknown): AuthFileSettingsD
     excluded_models: authFileExcludedRulesFromPayload(metadata).join("\n"),
     headers: JSON.stringify(headers, null, 2),
     note: asText(metadata.note),
+    request_retry: asText(metadata.request_retry),
+    request_scoped_errors: metadata.request_scoped_errors == null ? "" : JSON.stringify(metadata.request_scoped_errors, null, 2),
+    using_api: override(metadata.using_api),
   };
 };
 
@@ -478,6 +489,22 @@ export const buildAuthFileSettingsPatch = (
   }
   for (const key of ["disable_cooling", "websockets"] as const) {
     if (draft[key] !== original[key]) patch[key] = draft[key] === "" ? null : draft[key] === "true";
+  }
+  if (draft.request_retry !== original.request_retry) {
+    const raw = (draft.request_retry || "").trim();
+    if (raw && (!/^\d+$/.test(raw) || !Number.isSafeInteger(Number(raw)))) throw new Error(text("proxy.creds.settings.invalid.retry"));
+    patch.request_retry = raw ? Number(raw) : null;
+  }
+  if (draft.using_api !== original.using_api) patch.using_api = draft.using_api ? draft.using_api === "true" : null;
+  if (draft.request_scoped_errors !== original.request_scoped_errors) {
+    const raw = (draft.request_scoped_errors || "").trim();
+    let rules;
+    try { rules = raw ? JSON.parse(raw) : null; } catch { throw new Error(text("proxy.creds.settings.invalid.rules")); }
+    if (rules !== null && (!Array.isArray(rules) || rules.some(rule => !isRecord(rule)
+      || !Number.isInteger(rule.status) || Number(rule.status) < 100 || Number(rule.status) > 599
+      || !["stop", "stop-and-cooldown", "continue", "continue-and-cooldown"].includes(String(rule.action))
+      || ["match", "match-regexr"].some(key => rule[key] !== undefined && (!Array.isArray(rule[key]) || rule[key].some((value: unknown) => typeof value !== "string")))))) throw new Error(text("proxy.creds.settings.invalid.rules"));
+    patch.request_scoped_errors = rules;
   }
   const rules = (input: string) => normalizeOAuthExcludedRules(input.split(/\r?\n/));
   const nextRules = rules(draft.excluded_models);

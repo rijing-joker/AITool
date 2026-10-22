@@ -285,29 +285,7 @@ describe("UsageLimitsPanel", () => {
     expect(screen.getByText("Connect OpenCode Go")).toBeInTheDocument();
     expect(screen.getByText(/Sign in at opencode.ai and subscribe to Go\./)).toBeInTheDocument();
     expect(screen.getByText(/Create and copy an API key in the console\./)).toBeInTheDocument();
-    expect(screen.getByText(/Run this command, paste your API key \(input stays invisible\)/)).toBeInTheDocument();
-  });
-
-  it("copies an API-key setup snippet without sending the key anywhere", async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
-
-    render(<UsageLimitsPanel opencodeGo={{ configured: false }} order={["opencodeGo"]} />);
-
-    await fireEvent.click(screen.getByRole("button", { name: "Copy" }));
-
-    await vi.waitFor(() => {
-      expect(writeText).toHaveBeenCalledTimes(1);
-    });
-    const snippet = writeText.mock.calls[0][0];
-    // The snippet reads the key interactively (`read -r -s`) so it never lands
-    // in shell history, then exports it for both the shell profile path and
-    // the macOS app (launchctl) path. It is a template only: no real key.
-    expect(snippet).toContain("read -r -s OPENCODE_GO_API_KEY");
-    expect(snippet).toContain("export OPENCODE_GO_API_KEY");
-    expect(snippet).toContain('launchctl setenv OPENCODE_GO_API_KEY "$OPENCODE_GO_API_KEY"');
-    expect(snippet).not.toMatch(/sk-/);
-    expect(screen.getByRole("button", { name: "Copied" })).toBeInTheDocument();
+    expect(screen.getByLabelText(copy("limits.key.label"))).toHaveAttribute("type","password");
   });
 
   it("renders Command Code 5h / Weekly windows with the plan tier", () => {
@@ -337,59 +315,11 @@ describe("UsageLimitsPanel", () => {
     expect(screen.getByText("41%")).toBeInTheDocument();
   });
 
-  it("shows the two-option Command Code setup hint when not connected", () => {
-    render(
-      <UsageLimitsPanel commandCode={{ configured: false }} order={["commandCode"]} />,
-    );
-
-    expect(screen.getByText("Command Code")).toBeInTheDocument();
-    expect(screen.getByText("Not connected")).toBeInTheDocument();
+  it("offers a local key input for Command Code on every platform", () => {
+    render(<UsageLimitsPanel commandCode={{ configured: false }} order={["commandCode"]} />);
     expect(screen.getByText("Connect Command Code")).toBeInTheDocument();
-    expect(screen.getByText("cmd login")).toBeInTheDocument();
-    expect(screen.getByText(/COMMAND_CODE_API_KEY/)).toBeInTheDocument();
-  });
-
-  it("copies the Command Code API-key snippet without sending the key anywhere", async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
-
-    render(<UsageLimitsPanel commandCode={{ configured: false }} order={["commandCode"]} />);
-
-    await fireEvent.click(screen.getByRole("button", { name: "Copy" }));
-
-    await vi.waitFor(() => {
-      expect(writeText).toHaveBeenCalledTimes(1);
-    });
-    const snippet = writeText.mock.calls[0][0];
-    // The snippet reads the key interactively (`read -r -s`) so it never lands
-    // in shell history, then exports it for both the shell profile path and
-    // the macOS app (launchctl) path. It is a template only: no real key.
-    expect(snippet).toContain("read -r -s COMMAND_CODE_API_KEY");
-    expect(snippet).toContain("export COMMAND_CODE_API_KEY");
-    expect(snippet).toContain('launchctl setenv COMMAND_CODE_API_KEY "$COMMAND_CODE_API_KEY"');
-    expect(snippet).not.toMatch(/sk-/);
-    expect(screen.getByRole("button", { name: "Copied" })).toBeInTheDocument();
-  });
-
-  it("uses Command Code's Windows binary and PowerShell setup", async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)", clipboard: { writeText } });
-    render(<UsageLimitsPanel commandCode={{ configured: false }} order={["commandCode"]} />);
-    expect(screen.getByText("cmdc auth login")).toBeInTheDocument();
-    await fireEvent.click(screen.getByRole("button", { name: "Copy" }));
-    expect(writeText.mock.calls[0][0]).toContain("Read-Host -AsSecureString\n");
-    expect(writeText.mock.calls[0][0]).toContain("SetEnvironmentVariable");
-    expect(writeText.mock.calls[0][0]).not.toMatch(/launchctl|read -r/);
-  });
-
-  it("omits macOS launchctl from the Command Code Linux setup", async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 (X11; Linux x86_64)", clipboard: { writeText } });
-    render(<UsageLimitsPanel commandCode={{ configured: false }} order={["commandCode"]} />);
-    expect(screen.getByText("cmd login")).toBeInTheDocument();
-    await fireEvent.click(screen.getByRole("button", { name: "Copy" }));
-    expect(writeText.mock.calls[0][0]).toContain("export COMMAND_CODE_API_KEY");
-    expect(writeText.mock.calls[0][0]).not.toContain("launchctl");
+    expect(screen.getByLabelText(copy("limits.key.label"))).toHaveAttribute("type","password");
+    expect(screen.getByRole("button", {name:copy("limits.key.save")})).toBeDisabled();
   });
 
   it("does not describe a pace marker when the provider cannot render one (issue 445)", () => {

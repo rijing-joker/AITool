@@ -5,6 +5,7 @@ import {
   observeElementRect,
   useVirtualizer,
 } from "@tanstack/react-virtual";
+import { ProviderIcon } from "../ui/dashboard/components/ProviderIcon";
 import { copy } from "../lib/copy";
 import {
   formatTime,
@@ -51,7 +52,7 @@ export function SessionList({ sessions, query, mode, hidden, onOpen, onCopy }) {
   const virtualizer = useVirtualizer({
     count: virtual ? rows.length : 0,
     getScrollElement: () => scrollRef.current,
-    estimateSize: (index) => (rows[index].group ? 48 : 80),
+    estimateSize: (index) => (rows[index].group ? 48 : 72),
     getItemKey: (index) => rows[index].key,
     overscan: 8,
     // Hidden rows also report zero sizes. Retain their cached heights so the
@@ -79,7 +80,8 @@ export function SessionList({ sessions, query, mode, hidden, onOpen, onCopy }) {
       const open = Boolean(query) || !collapsed.has(row.key);
       const label =
         mode === "project"
-          ? baseName(row.group.projectDir) || copy("clisessions.unknown_project")
+          ? baseName(row.group.projectDir) ||
+            copy("clisessions.unknown_project")
           : copy(`clisessions.group.${row.group.key}`);
       return (
         <button
@@ -93,7 +95,7 @@ export function SessionList({ sessions, query, mode, hidden, onOpen, onCopy }) {
           }}
           disabled={Boolean(query)}
           title={mode === "project" ? row.group.projectDir : row.group.key}
-          className="flex min-h-12 w-full items-center gap-2 border-b border-oai-gray-200 bg-oai-gray-50 px-4 text-left text-xs text-oai-gray-500 transition-colors hover:bg-oai-gray-100 dark:border-oai-gray-800 dark:bg-oai-gray-800/40 dark:hover:bg-oai-gray-800 sm:px-5"
+          className="flex min-h-12 w-full items-center gap-2 border-b border-oai-gray-200 bg-oai-gray-50 px-4 text-left text-xs text-oai-gray-600 dark:text-oai-gray-400 transition-colors hover:bg-oai-gray-100 dark:border-oai-gray-800 dark:bg-oai-gray-800/40 dark:hover:bg-oai-gray-800 sm:px-5"
         >
           {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
           {mode === "project" ? (
@@ -103,7 +105,7 @@ export function SessionList({ sessions, query, mode, hidden, onOpen, onCopy }) {
             {label}
           </span>
           {mode === "project" ? (
-            <span className="hidden min-w-0 truncate text-[11px] text-oai-gray-400 sm:block">
+            <span className="hidden min-w-0 truncate text-xs text-oai-gray-600 dark:text-oai-gray-400 sm:block">
               {row.group.projectDir}
             </span>
           ) : null}
@@ -115,14 +117,21 @@ export function SessionList({ sessions, query, mode, hidden, onOpen, onCopy }) {
     }
     const { session } = row;
     return (
-      <div className="group flex min-h-20 items-center border-b border-oai-gray-100 px-4 transition-colors hover:bg-oai-gray-50 dark:border-oai-gray-800/70 dark:hover:bg-oai-gray-800/40 sm:px-5">
+      <div className="group flex min-h-16 items-center border-b border-oai-gray-100 px-4 transition-colors hover:bg-oai-gray-50 dark:border-oai-gray-800/70 dark:hover:bg-oai-gray-800/40 sm:px-5">
         <button
           type="button"
           data-session-key={sessionKey(session)}
+          disabled={!session.sourcePath}
           onClick={() => onOpen(session)}
           className="flex min-w-0 flex-1 flex-col gap-1.5 py-3 text-left focus-visible:outline-oai-brand-500"
         >
           <span className="flex w-full items-center gap-3">
+            <span
+              className="shrink-0 text-oai-gray-600 dark:text-oai-gray-400"
+              title={sessionAppLabel(session.appId)}
+            >
+              <ProviderIcon provider={session.appId} size={16} />
+            </span>
             <span className="min-w-0 flex-1 truncate text-sm font-medium">
               <HighlightedText
                 text={session.title || copy("clisessions.untitled")}
@@ -130,14 +139,14 @@ export function SessionList({ sessions, query, mode, hidden, onOpen, onCopy }) {
               />
             </span>
             <time
-              className="shrink-0 text-xs tabular-nums text-oai-gray-500 dark:text-oai-gray-400"
+              className="shrink-0 text-xs tabular-nums text-oai-gray-600 dark:text-oai-gray-400"
               title={formatTime(sessionTime(session))}
             >
               {relativeFrom(sessionTime(session)) ||
                 formatTime(sessionTime(session))}
             </time>
           </span>
-          <span className="flex w-full items-center gap-2 text-xs text-oai-gray-500 dark:text-oai-gray-400">
+          <span className="flex w-full items-center gap-2 text-xs text-oai-gray-600 dark:text-oai-gray-400">
             <span className="shrink-0">{sessionAppLabel(session.appId)}</span>
             {mode === "time" && session.projectDir ? (
               <span className="max-w-[35%] truncate" title={session.projectDir}>
@@ -186,7 +195,7 @@ export function SessionList({ sessions, query, mode, hidden, onOpen, onCopy }) {
                   : new Set(groups.map((group) => `${mode}:${group.key}`)),
               )
             }
-            className="min-h-10 text-xs text-oai-gray-500 disabled:opacity-40"
+            className="min-h-10 text-xs text-oai-gray-600 dark:text-oai-gray-400 disabled:opacity-40"
           >
             {copy(
               allCollapsed

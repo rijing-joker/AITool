@@ -55,10 +55,10 @@ it("renders profile chips, creates with a name and applies through the confirm",
   await waitFor(() => expect(onChanged).toHaveBeenCalled());
 });
 
-it("stays outside profiles for apps without MCP/skills support", () => {
-  render(<ProviderProfilesBar activeApp="openclaw" onNotice={vi.fn()} onChanged={vi.fn()} />);
-  // openclaw has no MCP/skills support — the bar does not render at all.
+it.each(["openclaw", "agy", "mcp", "prompts", "skills"])("skips profile requests for unsupported app %s", (activeApp) => {
+  render(<ProviderProfilesBar activeApp={activeApp} onNotice={vi.fn()} onChanged={vi.fn()} />);
   expect(screen.queryByText("pswitch.profile.bar_label")).toBeNull();
+  expect(profilesApi.list).not.toHaveBeenCalled();
 });
 
 it("creates a profile from the initiating app only", async () => {

@@ -1,4 +1,5 @@
 import { adaptiveRefreshDelay } from "./adaptive-refresh";
+import { isPageVisible } from "./page-visibility";
 
 export const LOCAL_USAGE_REFRESH_INTERVAL_MS = 30_000;
 
@@ -28,7 +29,7 @@ export function startLocalUsageAutoRefresh({
   let nextDueAt = 0;
 
   const run = () => {
-    if (stopped || documentRef.visibilityState !== "visible") return inFlight;
+    if (stopped || !isPageVisible(documentRef)) return inFlight;
     if (inFlight) return inFlight;
     const pending = Promise.resolve()
       .then(() => refresh())
@@ -44,14 +45,14 @@ export function startLocalUsageAutoRefresh({
     const now = Date.now();
     if (now < nextDueAt) return;
     nextDueAt = now + adaptiveRefreshDelay({
-      visible: documentRef.visibilityState === "visible",
+      visible: isPageVisible(documentRef),
       lastInteractionAt,
       now,
     }) * intervalMs / LOCAL_USAGE_REFRESH_INTERVAL_MS;
     void run();
   }, intervalMs);
   const handleVisible = () => {
-    if (documentRef.visibilityState === "visible") {
+    if (isPageVisible(documentRef)) {
       lastInteractionAt = Date.now();
       nextDueAt = 0;
       void run();
@@ -59,6 +60,7 @@ export function startLocalUsageAutoRefresh({
   };
   const handleInteraction = () => { lastInteractionAt = Date.now(); };
   windowRef.addEventListener("focus", handleVisible);
+  windowRef.addEventListener("page:visibility", handleVisible);
   windowRef.addEventListener("pointerdown", handleInteraction);
   windowRef.addEventListener("keydown", handleInteraction);
   documentRef.addEventListener("visibilitychange", handleVisible);
@@ -69,6 +71,7 @@ export function startLocalUsageAutoRefresh({
       stopped = true;
       windowRef.clearInterval(timer);
       windowRef.removeEventListener("focus", handleVisible);
+      windowRef.removeEventListener("page:visibility", handleVisible);
       windowRef.removeEventListener("pointerdown", handleInteraction);
       windowRef.removeEventListener("keydown", handleInteraction);
       documentRef.removeEventListener("visibilitychange", handleVisible);

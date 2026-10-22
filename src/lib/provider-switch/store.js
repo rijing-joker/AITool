@@ -29,7 +29,7 @@ const paths = require("./paths");
 
 const additive = require("./additive");
 
-const SUPPORTED_APPS = ["claude", "codex", "gemini", "opencode", "openclaw", "mcode", "hermes", "pi", "grokbuild"];
+const SUPPORTED_APPS = ["claude", "codex", "gemini", "agy", "opencode", "openclaw", "mcode", "hermes", "pi", "grokbuild"];
 const PROVIDER_CATEGORIES = ["official", "custom"];
 
 // Apps a universal provider (cc-switch's UniversalProvider) can project into.
@@ -133,6 +133,7 @@ async function mutateStore(update) {
 }
 
 function sanitizeSettingsConfig(app, settingsConfig, name) {
+  if (app === "agy") return require("./agy").sanitize(settingsConfig);
   if (!settingsConfig || typeof settingsConfig !== "object" || Array.isArray(settingsConfig)) {
     throw new Error("settingsConfig must be an object");
   }

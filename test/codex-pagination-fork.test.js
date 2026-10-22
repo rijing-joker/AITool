@@ -39,6 +39,44 @@ async function queueTotal(file) {
 test("paginated filenames share a thread while retaining distinct rollout IDs", () => {
   assert.deepEqual(rolloutIds(`rollout-date-${PARENT}_${PAGE}.jsonl.zst`), { thread: PARENT, rollout: PAGE, paginated: true });
 });
+
+test("native fork copied remote-compaction zero snapshot bills only each thread's new calls across splits",async t=>{
+  const x=await fixture(t);
+  const record=(time,id,input)=>({type:"token_usage_record",timestamp:ts(time),payload:{response_id:id,usage:usage(input)}});
+  const parent=[meta(PARENT,0),context(0),token(1,100),record(2,"parent-compaction",20),token(3,120,0),context(30)];
+  const child=[meta(CHILD,30,PARENT),context(30),token(1,100),record(2,"parent-compaction",20),token(3,120,0),record(31,"child-compaction",10),token(32,130,0),token(33,135,5)];
+  await x.write(x.root,parent);await fs.unlink(x.page);
+  for(let cut=1;cut<child.length;cut++){
+    await x.write(x.child,child.slice(0,cut));const cursors={files:{}};const queue=path.join(x.home,`remote-${cut}.jsonl`);const inventory=[x.child,x.root];
+    await parseRolloutIncremental({rolloutFiles:inventory,cursors,queuePath:queue});
+    await fs.appendFile(x.child,child.slice(cut).map(JSON.stringify).join("\n")+"\n");
+    await parseRolloutIncremental({rolloutFiles:inventory,cursors,queuePath:queue});
+    assert.equal(await queueTotal(queue),135,`cut ${cut}`);
+    assert.equal((await require("../src/lib/sessions").readSession({app:"codex",sourcePath:x.child,home:x.home})).usage.totalTokens,15);
+    assert.equal((await parseRolloutIncremental({rolloutFiles:inventory,cursors,queuePath:queue})).eventsAggregated,0);
+  }
+});
+test("transcript cache invalidates when pages or native fork parents appear and change", async t => {
+  const x = await fixture(t);
+  const reader = require("../src/lib/sessions");
+  const options = { app: "codex", home: x.home, sourcePath: x.child };
+  await x.write(x.child, x.childRows);
+  const first = await reader.readSession(options);
+  assert.equal(first.usage.totalTokens, 30);
+  await fs.unlink(x.root);
+  await fs.unlink(x.page);
+  assert.equal((await reader.readSession(options)).usage, null);
+  await x.write(x.root, [meta(PARENT, 0), context(0), token(1, 100)]);
+  await x.write(x.page, [meta(PARENT, 20), context(20), token(21, 300), context(40)]);
+  const restored = await reader.readSession(options);
+  assert.equal(restored.usage.totalTokens, 30);
+  await fs.appendFile(x.page, JSON.stringify(token(25, 320)) + "\n");
+  const changed = await reader.readSession(options);
+  assert.notEqual(changed.revision, restored.revision);
+  const nextPage = path.join(path.dirname(x.page), `rollout-2026-10-10T03-00-25-${PARENT}_44444444-4444-4444-8444-444444444444.jsonl`);
+  await x.write(nextPage, [meta(PARENT, 25), context(25), token(26, 325)]);
+  assert.notEqual((await reader.readSession(options)).revision, changed.revision);
+});
 test("analytics merges pages and bills only the child's new usage", async (t) => {
   const x = await fixture(t);
   await x.write(x.child, x.childRows);

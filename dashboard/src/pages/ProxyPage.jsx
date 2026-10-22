@@ -224,6 +224,7 @@ function OverviewTab({ status, statusError, onRefresh, onInstallCore, onSelectTa
             <p className="mt-2 text-sm text-oai-gray-500 dark:text-oai-gray-400">
               {status ? (status.core.installed ? copy("proxy.core.installed_hint") : copy("proxy.core.missing_hint")) : copy("proxy.status.waiting")}
             </p>
+            {status?.core.recovery?.armed ? <p className="mt-1 text-xs text-oai-gray-500">{copy("proxy.core.recovery", { state: status.core.recovery.state, count: status.core.recovery.attempts })}</p> : null}
             {running ? (
               <div className="mt-2.5 flex min-w-0 flex-wrap items-center gap-1.5 text-sm">
                 <span className="text-oai-gray-500 dark:text-oai-gray-400">{copy("proxy.core.endpoint")}:</span>

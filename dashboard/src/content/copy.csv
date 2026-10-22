@@ -3117,3 +3117,110 @@ proxy.privacy.off,proxy,ProxyPage,Proxy,off,Privacy: off,,active
 proxy.privacy.activeHint,proxy,ProxyPage,Proxy,activeHint,"Privacy mode is on: account names, emails and IDs are masked on screen. Copy and CSV export keep the original values.",,active
 proxy.privacy.example,proxy,ProxyPage,Proxy,example,Example: al***@e***.com,,active
 clisessions.unavailable,clisessions,CliSessionsPage,CliSessionsPage,unavailable,This session is no longer in the local history. Return to the list or rescan.,,active
+clisessions.status.success,clisessions,CliSessionsPage,SessionReader,status_success,Completed,,active
+clisessions.status.pending,clisessions,CliSessionsPage,SessionReader,status_pending,Unconfirmed,,active
+clisessions.status.failed,clisessions,CliSessionsPage,SessionReader,status_failed,Failed,,active
+clisessions.status.interrupted,clisessions,CliSessionsPage,SessionReader,status_interrupted,Interrupted,,active
+clisessions.diff.proposed,clisessions,CliSessionsPage,SessionReader,diff_proposed,Reconstructed from tool input · file line positions unavailable,,active
+clisessions.exit_code,clisessions,CliSessionsPage,SessionReader,exit_code,Exit {{code}},,active
+clisessions.process_commands,clisessions,CliSessionsPage,SessionReader,process_commands,{{count}} commands,,active
+clisessions.process_files,clisessions,CliSessionsPage,SessionReader,process_files,{{count}} files,,active
+clisessions.no_final,clisessions,CliSessionsPage,SessionReader,no_final,No final reply recorded,,active
+clisessions.code,clisessions,CliSessionsPage,SessionReader,code,Code,,active
+clisessions.copy_code,clisessions,CliSessionsPage,SessionReader,copy_code,Copy code,,active
+clisessions.copy_file_path,clisessions,CliSessionsPage,SessionReader,copy_file_path,Copy file path: {{path}},,active
+clisessions.find_raw,clisessions,CliSessionsPage,SessionReader,find_raw,Match in Markdown source,,active
+clisessions.read_failed,clisessions,CliSessionsPage,SessionReader,read_failed,Unable to read this session,,active
+clisessions.read_failed_hint,clisessions,CliSessionsPage,SessionReader,read_failed_hint,Reload the transcript or return to the list to rescan local history.,,active
+clisessions.error_details,clisessions,CliSessionsPage,SessionReader,error_details,Technical details,,active
+clisessions.close_outline,clisessions,CliSessionsPage,SessionReader,close_outline,Close outline,,active
+clisessions.jump_answer,clisessions,CliSessionsPage,SessionReader,jump_answer,Jump to reply in turn {{count}},,active
+clisessions.thinking_truncated,clisessions,CliSessionsPage,SessionReader,thinking_truncated,Thinking is limited to the first 32 KiB.,,active
+clisessions.usage.partial,clisessions,CliSessionsPage,UsageChips,usage_partial,Partial estimate · {{priced}}/{{total}} models priced,,active
+clisessions.group_steps.explore,dashboard,CliSessionsPage,SessionReader,group_steps.explore,Explored · {{count}} steps,,active
+clisessions.group_steps.mcp,dashboard,CliSessionsPage,SessionReader,group_steps.mcp,{{server}} · {{count}} calls,,active
+clisessions.tool_parameters,dashboard,CliSessionsPage,SessionReader,tool_parameters,Parameters,,active
+clisessions.load_more,dashboard,CliSessionsPage,SessionReader,load_more,Load more content,,active
+clisessions.content_retry,dashboard,CliSessionsPage,SessionReader,content_retry,Retry loading,,active
+clisessions.content_failed,dashboard,CliSessionsPage,SessionReader,content_failed,"Could not load full content. Retry, or reload if the session changed.",,active
+clisessions.fact.subagent_type,dashboard,CliSessionsPage,SessionReader,fact.subagent_type,Agent type,,active
+clisessions.fact.agent_type,dashboard,CliSessionsPage,SessionReader,fact.agent_type,Agent type,,active
+clisessions.fact.model,dashboard,CliSessionsPage,SessionReader,fact.model,Model,,active
+clisessions.fact.agent_id,dashboard,CliSessionsPage,SessionReader,fact.agent_id,Agent ID,,active
+clisessions.fact.target,dashboard,CliSessionsPage,SessionReader,fact.target,Target agent,,active
+clisessions.fact.run_in_background,dashboard,CliSessionsPage,SessionReader,fact.run_in_background,Background,,active
+clisessions.fact.url,dashboard,CliSessionsPage,SessionReader,fact.url,URL,,active
+clisessions.fact.path,dashboard,CliSessionsPage,SessionReader,fact.path,Path,,active
+clisessions.fact.limit,dashboard,CliSessionsPage,SessionReader,fact.limit,Limit,,active
+clisessions.fact.method,dashboard,CliSessionsPage,SessionReader,fact.method,Method,,active
+clisessions.fact.allowed_domains,dashboard,CliSessionsPage,SessionReader,fact.allowed_domains,Allowed domains,,active
+clisessions.fact.blocked_domains,dashboard,CliSessionsPage,SessionReader,fact.blocked_domains,Blocked domains,,active
+proxy.creds.batch.selectVisible,ui,*,*,selectVisible,Select visible,,active
+proxy.creds.batch.clear,ui,*,*,clear,Clear selection,,active
+proxy.creds.batch.refresh,ui,*,*,refresh,Refresh selected tokens,,active
+proxy.creds.batch.enable,ui,*,*,enable,Enable selected,,active
+proxy.creds.batch.disable,ui,*,*,disable,Disable selected,,active
+proxy.creds.batch.delete,ui,*,*,delete,Delete selected,,active
+proxy.creds.batch.all,ui,*,*,all,Refresh all tokens,,active
+proxy.creds.batch.success,ui,*,*,success,Succeeded,,active
+proxy.creds.batch.failure,ui,*,*,failure,Failed,,active
+proxy.creds.batch.select,ui,*,*,select,Select {{name}},,active
+proxy.creds.batch.deleteConfirm,ui,*,*,deleteConfirm,Delete the {{count}} selected credentials?,,active
+proxy.creds.filter.problem,ui,*,*,problem,Problem credentials,,active
+proxy.creds.settings.request_retry,ui,*,*,request_retry,Request retries,,active
+proxy.creds.settings.request_scoped_errors,ui,*,*,request_scoped_errors,Credential error rules (JSON),,active
+proxy.creds.settings.using_api,ui,*,*,using_api,Use the official xAI API,,active
+proxy.creds.settings.invalid.retry,ui,*,*,retry,Enter a non-negative integer or leave blank.,,active
+proxy.creds.settings.invalid.rules,ui,*,*,rules,Enter a JSON array of error rules or leave blank.,,active
+limits.key.label,ui,*,*,label,API Key,,active
+limits.key.save,ui,*,*,save,Save key locally,,active
+limits.key.saved,ui,*,*,saved,Key saved. Refreshing quota.,,active
+limits.key.local,ui,*,*,local,Stored on this computer with access limited to your user.,,active
+limits.key.error,ui,*,*,error,Could not save the key. Check it and retry.,,active
+pswitch.hermes.migrateId,ui,*,*,migrateId,Migrate provider ID,,active
+shared.cancel,ui,*,*,cancel,Cancel,,active
+shared.unit.percent_value,ui,*,*,percent_value,{{value}}%,,active
+pswitch.tab.agy,ui,*,*,agy,Antigravity CLI,,active
+pswitch.agy.launch,ui,*,*,launch,Launch,,active
+pswitch.preset.custom,ui,*,*,custom,Custom provider,,active
+pswitch.agy.account.title,ui,*,*,title,Antigravity accounts,,active
+pswitch.agy.account.add,ui,*,*,add,Add account,,active
+pswitch.agy.account.browser,ui,*,*,browser,Continue in browser,,active
+pswitch.agy.account.local,ui,*,*,local,Sign-ins stay on this device. Switch accounts explicitly; quota queries keep the active login.,,active
+pswitch.agy.account.macos,ui,*,*,macos,Official account switching currently requires macOS.,,active
+pswitch.agy.account.error,ui,*,*,error,Sign-in did not complete. Try adding the account again.,,active
+pswitch.agy.account.current,ui,*,*,current,Current,,active
+pswitch.agy.account.switch,ui,*,*,switch,Switch,,active
+pswitch.agy.account.quota,ui,*,*,quota,Query quota,,active
+pswitch.agy.account.remove,ui,*,*,remove,Remove,,active
+pswitch.agy.account.removeHint,ui,*,*,removeHint,Remove the saved copy from AiTool? The CLI stays signed in.,,active
+pswitch.agy.account.remaining,ui,*,*,remaining,{{value}}% left,,active
+limits.grok.sharedProducts,ui,*,*,sharedProducts,Used share of the shared pool,,active
+limits.key.manage,ui,*,*,manage,Manage quota API key,,active
+proxy.creds.quota.query,ui,*,*,query,Query plugin quota,,active
+proxy.creds.quota.error,ui,*,*,error,Plugin quota is unavailable. Check the plugin and credential.,,active
+pswitch.quota.volcCredentials,ui,*,*,volcCredentials,Volcengine quota credentials,,active
+pswitch.quota.accessKeyId,ui,*,*,accessKeyId,AccessKey ID,,active
+pswitch.quota.secretAccessKey,ui,*,*,secretAccessKey,Secret Access Key,,active
+pswitch.quota.volcHint,ui,*,*,volcHint,Use the account AK/SK with Ark usage-query permission. Saved locally for quota queries.,,active
+pswitch.codex.remoteCompaction,ui,*,*,remoteCompaction,Codex context compaction,,active
+pswitch.codex.localCompaction,ui,*,*,localCompaction,Local compaction,,active
+pswitch.codex.remoteCompactionV2,ui,*,*,remoteCompactionV2,Remote compaction v2,,active
+pswitch.codex.remoteCompactionHint,ui,*,*,remoteCompactionHint,Use v2 with a current Codex CLI and a provider supporting Responses compaction. Inherit preserves provider defaults.,,active
+pswitch.quick.title,ui,*,*,title,Switch provider,,active
+pswitch.quick.app,ui,*,*,app,App,,active
+pswitch.quick.empty,ui,*,*,empty,Add a provider on the Providers page first.,,active
+pswitch.quick.error,ui,*,*,error,Could not load or switch providers.,,active
+pswitch.hermes.idConflict,ui,*,*,idConflict,This ID is reserved by Hermes. Migrate it to use the endpoint and key on this card.,,active
+proxy.core.recovery,ui,*,*,recovery,Automatic recovery: {{state}} · {{count}} attempts,,active
+pswitch.agy.account.binding,ui,*,*,binding,Account,,active
+pswitch.agy.account.follow,ui,*,*,follow,Follow current agy login,,active
+pswitch.agy.account.missing,ui,*,*,missing,Account unavailable on this computer,,active
+pswitch.agy.account.bindingHint,ui,*,*,bindingHint,Launch switches to the selected account first. Add accounts above.,,active
+limits.key.env,ui,*,*,env,An environment key takes priority over the saved key.,,active
+pswitch.agy.account.reauth,shared,*,UpstreamIntegration,hint,This account needs a new login. Add it again to reconnect.,,active
+proxy.creds.duplicateName,shared,*,UpstreamIntegration,hint,"Several runtime credentials share this filename. File settings, models and deletion require a unique name.",,active
+proxy.copilot.notInstalled,shared,*,UpstreamIntegration,hint,VS Code was not found. Install it or make the code command available before connecting.,,active
+proxy.creds.refreshOne,shared,*,UpstreamIntegration,action,Refresh token,,active
+proxy.creds.settings.request_retryHint,shared,*,UpstreamIntegration,hint,Leave empty to inherit the global retry limit.,,active
+proxy.creds.settings.using_apiHint,shared,*,UpstreamIntegration,hint,Choose the xAI API mode for this credential or inherit the global setting.,,active

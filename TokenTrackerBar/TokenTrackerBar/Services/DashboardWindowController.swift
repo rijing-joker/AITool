@@ -451,6 +451,15 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
 
     // MARK: - NSWindowDelegate
 
+    private func pushVisibility() {
+        let visible = window?.isVisible == true && window?.isMiniaturized != true
+        webView?.evaluateJavaScript("window.dispatchEvent(new CustomEvent('native:visibility',{detail:{visible:\(visible ? "true" : "false")}}))", completionHandler: nil)
+    }
+    func windowDidMiniaturize(_ notification: Notification) { pushVisibility() }
+    func windowDidDeminiaturize(_ notification: Notification) { pushVisibility() }
+    func windowDidBecomeKey(_ notification: Notification) { pushVisibility() }
+    func windowDidChangeOcclusionState(_ notification: Notification) { pushVisibility() }
+
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         guard sender === window else { return true }
         return DashboardPresentationCoordinator.shared.dashboardWindowShouldClose()
@@ -459,6 +468,7 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
     func windowWillClose(_ notification: Notification) {
         guard let closingWindow = notification.object as? NSWindow,
               closingWindow === window else { return }
+        webView?.evaluateJavaScript("window.dispatchEvent(new CustomEvent('native:visibility',{detail:{visible:false}}))", completionHandler: nil)
         DashboardPresentationCoordinator.shared.dashboardWindowWillClose()
         if oauthInFlight {
             // The PKCE verifier lives in this WebView's sessionStorage. Keep the
@@ -561,6 +571,11 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
     }
 
     /// Open the dashboard and navigate directly to the Settings page.
+    func showProviders() {
+        DashboardPresentationCoordinator.shared.showDashboard()
+        if let url = URL(string: Constants.serverBaseURL + "/?quick=providers&app=1") { loadDashboard(url) }
+    }
+
     func showSettings() {
         DashboardPresentationCoordinator.shared.showDashboard()
         if let url = URL(string: Constants.serverBaseURL + "/settings?app=1") {
@@ -662,6 +677,7 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         retryCount = 0
+        pushVisibility()
         dismissLoadFailureOverlay()
         let completedNativeOAuth = webView.url?.path == "/dashboard" || webView.url?.path == "/"
         if oauthInFlight && completedNativeOAuth {

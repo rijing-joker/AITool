@@ -25,7 +25,7 @@ UI 全程使用 TokenTracker 的设计语言 —— 一个仪表盘覆盖两个�
 │  侧边栏                                                                                       │
 │  ├── AI Proxy        ← 新增：代理生命周期、服务提供方、密钥、请求级记录、配置                    │
 │  ├── Provider Configs ← 新增：一键切换 AI CLI 配置文件（cc-switch 移植）                         │
-│  ├── CLI Sessions     ← 新增：只读的 claude/codex/gemini 会话记录 + 成本（cc-switch 移植）       │
+│  ├── CLI Sessions     ← 九款 CLI 的只读会话记录 + 成本（cc-switch 移植）                       │
 │  └── Tokens / Sessions / Limits / …  ← TokenTracker 分析（45 款 CLI 工具），保持不变            │
 └──────────────┬──────────────────────────────────────────────────────────┬────────────────────┘
                │ /api/proxy/*                                             │ /functions/*（本地 API）
@@ -85,9 +85,13 @@ docker compose up -d --build
 
 [cc-switch](https://github.com/farion1231/cc-switch) 配置文件模块的 Node 移植。按工具保存命名的供应商预设，在仪表盘的**供应商配置**页（侧边栏 → AI Proxy 分组）一键切换 —— 不用手改 JSON / TOML / env 文件。
 
+支持 Claude Code、Codex CLI、Gemini CLI、Antigravity CLI（`agy`）、Grok Build、OpenCode、OpenClaw、Hermes、Pi 和 MiniMax Code。Antigravity CLI 使用独立供应商启动目录，Key 只传给子进程，MCP、Skills 和提示词共享 `~/.gemini/config`；官方账号绑定、切换目前需要 macOS，逐账号额度查询和删除已保存账号不会改动当前登录。
+
+桌面托盘的「切换供应商」打开共用快捷面板，沿用配置备份和冲突处理。额度扩展包括智谱/Z.ai 套餐及余额回退、使用独立 AK/SK 的火山套餐查询；OpenCode Go、Command Code 的 Key 可在额度页本地保存。
+
 | | |
 | --- | --- |
-| **覆盖工具** | Claude Code（`~/.claude/settings.json`）· Codex CLI（`~/.codex/config.toml` + `auth.json`）· Gemini CLI（`~/.gemini/.env`） |
+| **覆盖工具** | Claude Code · Codex CLI · Gemini CLI · Antigravity CLI · Grok Build · OpenCode · OpenClaw · Hermes · Pi · MiniMax Code |
 | **切换模型** | 最小补丁投影（cc-switch 的"关键字段"表）：只写入供应商的关键字段 —— 地址、凭据、模型名；用户自有内容（hooks、permissions、注释）一律不动，上一家供应商的残留仅在未被改动时清除 |
 | **编辑器** | 添加/编辑弹窗显示切换到该供应商之后的完整配置文件（cc-switch 的编辑器视图）；保存时关键字段写回供应商行，其余改动经三方比对写入本机配置文件（保留我的 / 保留对方的） |
 | **Codex 凭据** | 中转密钥写入 `config.toml` 中 `[model_providers.custom]` 的 `experimental_bearer_token` —— Codex CLI 0.149+ 不再从 `auth.json` 读取中转密钥，`auth.json` 只保存官方 ChatGPT 登录（添加/编辑弹窗的 Codex 编辑器相应拆分：`auth.json` JSON + `config.toml` TOML） |
@@ -98,6 +102,8 @@ docker compose up -d --build
 | **存储位置** | `~/.aitool/provider-switch/` —— `providers.json`（预设 + 当前指针）、`mcp-servers.json`（共享 MCP 服务器列表）、`prompts.json`（按应用的提示词列表）、`codex-auth-stash.json`、`backups/` |
 
 ## AI 代理能力（来自 EasyCLIProxyAPI）
+
+凭据页支持按运行索引单个/批量刷新 OAuth、批量启停/删除、逐项结果和问题筛选，并提供单凭据重试/错误规则、xAI 模式及受支持插件的额度查询。服务在自有核心异常退出后有限重试，手动停止或重启会取消旧恢复任务。原生窗口隐藏后暂停仪表盘轮询，后台采集继续运行。
 
 通过仪表盘的 **AI Proxy** 页（标签页）或 core 的管理 API 管理：
 
@@ -122,7 +128,7 @@ docker compose up -d --build
 | **支持的 AI 工具数** | **45** |
 | **仪表盘** | localhost:7680 —— 趋势、模型分解、成本、热力图 |
 | **代理用量来源** | `cliproxy` —— 自动汇入同一批视图 |
-| **CLI 会话历史** | `/cli-sessions` —— 只读的 Claude Code / Codex / Gemini 会话记录，附会话级成本估算 |
+| **CLI 会话历史** | `/cli-sessions` —— 只读 Claude Code / Codex / Gemini / Antigravity CLI / OpenCode / Hermes / Grok Build / Pi / MiniMax Code 会话，附逐模型成本估算；Antigravity 只有二进制记录时提供恢复命令 |
 
 并入的 TokenTracker CLI 全部功能继续可用：45 款 AI 编码工具（Claude Code、Codex、Gemini、Cursor、Droid、Cline、Command Code、TRAE 等）的 hook 安装、本地 JSONL 解析、成本引擎、sessions、限额、成就、技能面板、桌面宠物、小组件 —— 同一个仪表盘在 `localhost:7680`。代理用量以 `cliproxy` 来源出现在同一批视图中。
 

@@ -42,6 +42,115 @@ test("Windows USERPROFILE supports session discovery and reading without HOME", 
   assert.equal((await sessions.listSessions({ app: "claude", home: tmpHome, env: { HOME: "/missing", USERPROFILE: "/missing" } })).length, 1);
 });
 
+test("Codex separates injected context from real and IDE-wrapped questions and titles", async () => {
+  const dir = path.join(tmpHome, ".codex", "sessions");
+  fs.mkdirSync(dir, { recursive: true });
+  const sourcePath = path.join(dir, "injected.jsonl");
+  const rows = [
+    { type: "session_meta", payload: { id: "injected", cwd: "/project" } },
+    { type: "response_item", payload: { type: "message", role: "user", content: [
+      { type: "input_text", text: "# AGENTS.md instructions for /project\nFollow repository conventions." },
+      { type: "input_text", text: "<environment_context>cwd: /project</environment_context>" },
+      { type: "input_text", text: "Fix the session reader." },
+    ] } },
+    { type: "response_item", payload: { type: "message", role: "user", content: [
+      { type: "input_text", text: "<user_instructions><user_prompt>Also add keyboard navigation.</user_prompt></user_instructions>" },
+    ] } },
+  ];
+  fs.writeFileSync(sourcePath, rows.map(row => JSON.stringify(row)).join("\n"));
+  assert.equal((await sessions.listSessions({ app: "codex", home: tmpHome }))[0].title, "Fix the session reader.");
+  const { messages } = await sessions.readSession({ app: "codex", sourcePath, home: tmpHome });
+  assert.deepEqual(messages.filter(row => !row.injected).map(row => row.content), ["Fix the session reader.", "Also add keyboard navigation."]);
+  assert.equal(messages.filter(row => row.injected).length, 2);
+});
+
+test("Codex shell results unpack explicit exit codes without guessing from error words", async () => {
+  const dir = path.join(tmpHome, ".codex", "sessions");
+  fs.mkdirSync(dir, { recursive: true });
+  const sourcePath = path.join(dir, "shell.jsonl");
+  const outputs = [
+    JSON.stringify({ output: "1 failed", metadata: { exit_code: 1, duration_seconds: 0.25 } }),
+    "Chunk ID: fixture\nWall time: 0.1 seconds\nProcess exited with code 0\nOutput:\nTests for error handling passed",
+    "An error word without execution metadata",
+  ];
+  fs.writeFileSync(sourcePath, outputs.map((output, index) => JSON.stringify({ type: "response_item", payload: { type: "function_call_output", call_id: String(index), output } })).join("\n"));
+  const { messages } = await sessions.readSession({ app: "codex", sourcePath, home: tmpHome });
+  assert.deepEqual(messages[0].toolResults[0], { callId: "0", output: "1 failed", status: "failed", exitCode: 1, durationMs: 250 });
+  assert.equal(messages[1].toolResults[0].output, "Tests for error handling passed");
+  assert.equal(messages[1].toolResults[0].status, "success");
+  assert.equal(messages[2].toolResults[0].status, undefined);
+  assert.equal(messages[0].content, outputs[0], "raw envelope remains in the transcript");
+});
+
+test("Claude mixed user rows separate tool results from the actual question", async () => {
+  const sourcePath = writeClaudeSession(tmpHome, "mixed", [JSON.stringify({
+    type: "user", message: { role: "user", content: [
+      { type: "tool_result", tool_use_id: "edit", content: "Permission denied", is_error: true },
+      { type: "text", text: "Please continue." },
+    ] },
+  })]);
+  const { messages } = await sessions.readSession({ app: "claude", sourcePath, home: tmpHome });
+  assert.equal(messages[0].content, "Please continue.");
+  assert.deepEqual(messages[0].toolResults, [{ toolUseId: "edit", content: "Permission denied", isError: true }]);
+});
+
+test("Gemini preserves tool ids, statuses, native diffs, outputs and model", async () => {
+  const dir = path.join(tmpHome, ".gemini", "tmp", "project", "chats");
+  fs.mkdirSync(dir, { recursive: true });
+  const sourcePath = path.join(dir, "session-tools.json");
+  fs.writeFileSync(sourcePath, JSON.stringify({ sessionId: "tools", messages: [{ id: "m1", type: "gemini", model: "gemini-2.5-pro", content: "", toolCalls: [
+    { id: "edit", name: "replace", args: { file_path: "file.js" }, status: "success", resultDisplay: { filePath: "file.js", fileDiff: "--- file.js\n+++ file.js\n@@ -1 +1 @@\n-old\n+new" } },
+    { id: "shell", name: "run_shell_command", args: { command: "npm test" }, status: "error", result: [{ functionResponse: { response: { error: "Tests failed" } } }] },
+    { id: "wait", name: "read_file", status: "awaiting_approval" },
+    { id: "stop", name: "read_file", status: "cancelled" },
+  ] }] }));
+  const { messages } = await sessions.readSession({ app: "gemini", sourcePath, home: tmpHome });
+  assert.equal(messages[0].model, "gemini-2.5-pro");
+  assert.equal(messages[0].toolCalls[0].id, "edit");
+  assert.deepEqual(messages[0].toolResults.map(result => result.status), ["success", "failed", "pending", "interrupted"]);
+  assert.equal(messages[0].toolResults[1].output, "Tests failed");
+  assert.match(messages[0].toolResults[0].diff, /@@ -1 \+1 @@/);
+});
+
+test("session metadata refreshes on file changes and uses root-clamped Codex native titles", async () => {
+  const dir = path.join(tmpHome, ".codex", "sessions");
+  fs.mkdirSync(dir, { recursive: true });
+  const sourcePath = path.join(dir, "metadata.jsonl");
+  const write = (text) => fs.writeFileSync(sourcePath, [
+    JSON.stringify({ type: "session_meta", payload: { id: "metadata", cwd: "/project" } }),
+    JSON.stringify({ type: "response_item", payload: { type: "message", role: "user", content: text } }),
+  ].join("\n"));
+  write("First title");
+  const list = () => sessions.listSessions({ app: "codex", home: tmpHome });
+  assert.equal((await list())[0].title, "First title");
+  write("Changed title with a new length");
+  assert.equal((await list())[0].title, "Changed title with a new length");
+  const indexPath = path.join(tmpHome, ".codex", "session_index.jsonl");
+  fs.writeFileSync(indexPath, JSON.stringify({ id: "metadata", thread_name: "Named by Codex" }));
+  assert.equal((await list())[0].title, "Named by Codex");
+  fs.writeFileSync(indexPath, JSON.stringify({ id: "metadata", thread_name: "Renamed in Codex" }));
+  assert.equal((await list())[0].title, "Renamed in Codex");
+  fs.unlinkSync(indexPath);
+  const outside = path.join(tmpHome, "outside-title.jsonl");
+  fs.writeFileSync(outside, JSON.stringify({ id: "metadata", thread_name: "Outside root" }));
+  fs.symlinkSync(outside, indexPath);
+  assert.equal((await list())[0].title, "Changed title with a new length");
+});
+
+test("head/tail metadata reads preserve long UTF-8 JSON lines and the final reply", async () => {
+  const sourcePath = writeClaudeSession(tmpHome, "long-lines", [
+    JSON.stringify({ sessionId: "long-lines", cwd: "/project" }),
+    JSON.stringify({ type: "user", message: { role: "user", content: "中文问题" } }),
+    ...Array.from({ length: 100 }, (_, index) => JSON.stringify({ timestamp: "2026-10-01T10:00:00Z", message: { role: "assistant", content: `中${index}`.repeat(40000) } })),
+    JSON.stringify({ timestamp: "2026-10-01T10:02:00Z", message: { role: "assistant", content: "最终答复" } }),
+  ]);
+  const [row] = await sessions.listSessions({ app: "claude", home: tmpHome });
+  assert.equal(row.sourcePath, sourcePath);
+  assert.equal(row.title, "中文问题");
+  assert.equal(row.summary, "最终答复");
+  assert.equal(row.lastActiveAt, Date.parse("2026-10-01T10:02:00Z"));
+});
+
 test("claude sessions: scan derives title, project, timestamps and resume command", async () => {
   const filePath = writeClaudeSession(tmpHome, "session-abc", [
     JSON.stringify({ type: "file-history-snapshot", messageId: "m1", snapshot: {} }),
@@ -231,13 +340,13 @@ test("sessions sort newest first and app availability is reported", async () => 
   const list = await sessions.listSessions({ app: "claude", home: tmpHome });
   assert.deepEqual(list.map((meta) => meta.sessionId), ["new", "old"]);
 
-  const apps = sessions.listSessionApps({ home: tmpHome });
+  const apps = sessions.listSessionApps({ home: tmpHome }).filter(row => ["claude", "codex", "gemini"].includes(row.id));
   assert.deepEqual(apps, [
     { id: "claude", available: true },
     { id: "codex", available: false },
     { id: "gemini", available: false },
   ]);
-  assert.deepEqual(sessions.listSessionApps({ home: null, env: {} }), [
+  assert.deepEqual(sessions.listSessionApps({ home: null, env: {} }).filter(row => ["claude", "codex", "gemini"].includes(row.id)), [
     { id: "claude", available: false },
     { id: "codex", available: false },
     { id: "gemini", available: false },
@@ -300,7 +409,7 @@ test("readSession refuses paths outside the app roots and unsupported apps", asy
     /outside this app's session roots/,
   );
   await assert.rejects(
-    () => sessions.readSession({ app: "opencode", sourcePath: "/tmp/x.jsonl", home: tmpHome }),
+    () => sessions.readSession({ app: "unsupported", sourcePath: "/tmp/x.jsonl", home: tmpHome }),
     /Unsupported app/,
   );
   await assert.rejects(
@@ -601,7 +710,7 @@ test("claude transcripts carry structured tool calls/results and per-message usa
   assert.deepEqual(assistant.usage, { inputTokens: 10, outputTokens: 6, cacheReadTokens: 0, cacheCreationTokens: 0 });
   assert.equal(assistant.model, "claude-x");
   const tool = messages.find((msg) => msg.role === "tool");
-  assert.deepEqual(tool.toolResults, [{ toolUseId: "tu_1", content: "file.txt" }]);
+  assert.deepEqual(tool.toolResults, [{ toolUseId: "tu_1", content: "file.txt", durationMs: 2000 }]);
   assert.equal(usage.outputTokens, 6);
 });
 
@@ -741,7 +850,10 @@ test("codex patch outcomes unwrap native JSON results without replacing the tran
     assert.equal(patch.status, expected, id);
     assert.equal(patch.error, expected === "failed", id);
     assert.equal(messages[index * 2 + 1].content, results[index]);
-    assert.deepEqual(messages[index * 2 + 1].toolResults, [{ callId: id, output: results[index] }]);
+    const result = messages[index * 2 + 1].toolResults[0];
+    assert.equal(result.callId, id);
+    assert.equal(result.output, cases[index].output);
+    assert.equal(result.durationMs, 100);
   });
 });
 

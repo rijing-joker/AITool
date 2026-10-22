@@ -7,7 +7,10 @@ const ROLE_HEADINGS = {
   tool: "## Tool",
 };
 
-const THINKING_OPEN = "<details><summary>@@@</summary>".replace("@@@", "Thinking");
+const THINKING_OPEN = "<details><summary>@@@</summary>".replace(
+  "@@@",
+  "Thinking",
+);
 
 function roleHeading(role) {
   return ROLE_HEADINGS[role] || "## Message";
@@ -31,12 +34,15 @@ export function toolCallPayloadText(call) {
 }
 
 function stringifyPayload(payload) {
-  return typeof payload === "string" ? payload : JSON.stringify(payload, null, 2);
+  return typeof payload === "string"
+    ? payload
+    : JSON.stringify(payload, null, 2);
 }
 
 export function exportSessionMarkdown(session, messages, formatTime, roleKey) {
   const lines = [`# ${session?.title || "CLI session"}`, ""];
   for (const message of messages) {
+    if (message.injected) continue;
     lines.push(roleHeading(roleKey(message.role)));
     if (message.ts != null) lines.push(`_${formatTime(message.ts)}_`);
     if (message.thinking) {
@@ -45,9 +51,18 @@ export function exportSessionMarkdown(session, messages, formatTime, roleKey) {
       lines.push("</details>", "");
     }
     if (message.content) lines.push(message.content, "");
-    for (const call of Array.isArray(message.toolCalls) ? message.toolCalls : []) {
+    for (const call of Array.isArray(message.toolCalls)
+      ? message.toolCalls
+      : []) {
       const payloadText = toolCallPayloadText(call);
       lines.push(`**Tool: ${call.name}**`, "", "```", payloadText, "```", "");
+    }
+    // Claude mixed rows and Gemini embed results on user/assistant messages.
+    // Ordinary tool rows already carry their raw transcript output above.
+    if (message.role !== "tool") {
+      for (const result of message.toolResults || []) {
+        lines.push("", "```", result.output ?? result.content ?? "", "```", "");
+      }
     }
   }
   return lines.join("\n");

@@ -1110,6 +1110,8 @@ final class StatusBarController: NSObject {
         statusItem.menu = nil
     }
 
+    @objc private func openQuickProviders() { DashboardWindowController.shared.showProviders() }
+
     private func buildMenu() -> NSMenu {
         let menu = NSMenu()
 
@@ -1136,6 +1138,9 @@ final class StatusBarController: NSObject {
         let dashboardItem = NSMenuItem(title: Strings.openDashboard, action: #selector(openDashboard), keyEquivalent: "d")
         dashboardItem.target = self
         menu.addItem(dashboardItem)
+        let providersItem = NSMenuItem(title: Strings.switchProvider, action: #selector(openQuickProviders), keyEquivalent: "")
+        providersItem.target = self
+        menu.addItem(providersItem)
 
         let settingsItem = NSMenuItem(title: Strings.menuSettings, action: #selector(openDashboardSettings), keyEquivalent: ",")
         settingsItem.target = self

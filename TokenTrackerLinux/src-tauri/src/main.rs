@@ -429,6 +429,16 @@ fn main() {
             .initialization_script(NATIVE_OAUTH_BRIDGE)
             .initialization_script(desktop::init_script())
             .initialization_script(ui_zoom_bridge(zoom))
+            .on_page_load(|window, payload| {
+                if payload.event() == tauri::webview::PageLoadEvent::Finished
+                    && matches!(payload.url().host_str(), Some("127.0.0.1" | "localhost")) {
+                    tray::restore_pending_providers(window);
+                    if let Some(main) = window.app_handle().get_webview_window(window.label()) {
+                        let visible = main.is_visible().unwrap_or(false) && !main.is_minimized().unwrap_or(false);
+                        let _ = window.eval(&format!("window.dispatchEvent(new CustomEvent('native:visibility',{{detail:{{visible:{}}}}}))", visible));
+                    }
+                }
+            })
             // `target="_blank"` links (provider status pages, leaderboard
             // profiles) belong in the system browser. WebKitGTK opens nothing
             // at all unless this handler is installed.
@@ -462,9 +472,18 @@ fn main() {
             Ok(())
         })
         .on_window_event(|window, event| {
+            if let WindowEvent::Resized(_) | WindowEvent::Focused(_) = event {
+                let visible = window.is_visible().unwrap_or(false) && !window.is_minimized().unwrap_or(false);
+                if let Some(webview) = window.app_handle().get_webview_window(window.label()) {
+                    let _ = webview.eval(&format!("window.dispatchEvent(new CustomEvent('native:visibility',{{detail:{{visible:{}}}}}))", visible));
+                }
+            }
             if let WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
                 let _ = window.hide();
+                if let Some(webview) = window.app_handle().get_webview_window(window.label()) {
+                    let _ = webview.eval("window.dispatchEvent(new CustomEvent('native:visibility',{detail:{visible:false}}))");
+                }
             }
         })
         .build(context)

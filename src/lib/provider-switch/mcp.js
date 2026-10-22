@@ -46,7 +46,7 @@ const backup = require("./backup");
 // abort the batch — live files are independent, and the caller sees every
 // failure aggregated (cc-switch 81c0ff2).
 
-const MCP_APPS = ["claude", "codex", "gemini", "grokbuild", "opencode", "hermes", "mcode", "pi"];
+const MCP_APPS = ["claude", "codex", "gemini", "agy", "grokbuild", "opencode", "hermes", "mcode", "pi"];
 
 // The unified spec allows stdio/http/sse. Transport resolution follows
 // cc-switch's spec_transport_type: an explicit type wins, and a spec with a
@@ -499,6 +499,7 @@ const HOME_SUBDIRS = {
   claude: ".claude",
   codex: ".codex",
   gemini: ".gemini",
+  agy: ".gemini/config",
   grokbuild: ".grok",
   opencode: ".config/opencode",
   hermes: ".hermes",
@@ -512,6 +513,7 @@ function mcpLiveFiles() {
   return {
     claude: { path: path.join(home, ".claude.json"), mapKey: "mcpServers" },
     codex: { path: path.join(home, ".codex", "config.toml"), mapKey: "mcp_servers" },
+    agy: { path: path.join(home, ".gemini", "config", "mcp_config.json"), mapKey: "mcpServers" },
     gemini: { path: path.join(home, ".gemini", "settings.json"), mapKey: "mcpServers" },
     grokbuild: { path: path.join(home, ".grok", "config.toml"), mapKey: "mcp_servers" },
     opencode: { path: path.join(home, ".config", "opencode", "opencode.json"), mapKey: "mcp" },
@@ -528,6 +530,16 @@ async function upsertServerInApp(app, id, spec) {
 }
 
 async function upsertServerInFile(app, file, id, spec) {
+  if (app === "agy") {
+    if (specTransportType(spec) === "sse") throw new Error("Antigravity does not support SSE MCP");
+    await updateJsonFile(app, file.path, doc => {
+      if (!doc.mcpServers) doc.mcpServers = {};
+      const entry = { ...(doc.mcpServers[id] || {}) };
+      for (const field of ["command", "args", "env", "url", "headers", "type", "serverUrl", "enabled"]) delete entry[field];
+      Object.assign(entry, spec); delete entry.type; entry.disabled = false;
+      doc.mcpServers[id] = entry;
+    }); return;
+  }
   if (app === "claude" || app === "gemini") {
     await upsertJsonMap(app, file.path, file.mapKey, id, spec);
     return;
@@ -608,6 +620,12 @@ async function removeServerFromApp(app, id, { mode = "off" } = {}) {
 // the app: pi keeps the entry (marked disabled) so re-enabling restores the
 // user's own settings, while a delete removes it outright.
 async function removeServerFromFile(app, file, id, { mode = "off" } = {}) {
+  if (app === "agy") {
+    if (mode === "delete") { await removeFromJsonMap(app, file.path, file.mapKey, id); return; }
+    const doc = await readJsonDoc(file.path);
+    if (!doc?.mcpServers?.[id]) return;
+    await updateJsonFile(app, file.path, current => { if (current.mcpServers?.[id]) current.mcpServers[id].disabled = true; }); return;
+  }
   if (app === "claude" || app === "gemini" || app === "opencode") {
     await removeFromJsonMap(app, file.path, file.mapKey, id);
     return;
@@ -767,14 +785,14 @@ async function importFromApps(apps) {
 async function importFromApp(app) {
   const file = mcpLiveFiles()[app];
   let entries = null;
-  if (app === "claude" || app === "gemini" || app === "opencode" || app === "mcode" || app === "pi") {
+  if (app === "agy" || app === "claude" || app === "gemini" || app === "opencode" || app === "mcode" || app === "pi") {
     const doc = await readJsonDoc(file.path).catch(() => null);
     const map = doc ? jsonMapGet(doc, file.mapKey) : null;
     if (!map) return { changed: 0, skipped: [] };
     // mcode, opencode and pi entries carry their own `enabled` flag; claude
     // and gemini have none, so presence means enabled.
     const hasEnabledFlag = app === "mcode" || app === "opencode" || app === "pi";
-    entries = Object.entries(map).map(([id, value]) => ({ id, value, enabled: hasEnabledFlag ? value?.enabled !== false : true }));
+    entries = Object.entries(map).map(([id, value]) => ({ id, value, enabled: app === "agy" ? value?.disabled !== true : hasEnabledFlag ? value?.enabled !== false : true }));
   } else if (app === "hermes") {
     const text = await readText(file.path);
     if (text === null || !text.trim()) return { changed: 0, skipped: [] };
@@ -802,7 +820,8 @@ async function importFromApp(app) {
   for (const { id, value, enabled } of entries) {
     let spec = null;
     try {
-      if (app === "claude" || app === "gemini") spec = value;
+      if (app === "agy") { spec = { ...value }; delete spec.disabled; if (spec.serverUrl && !spec.url) spec.url = spec.serverUrl; delete spec.serverUrl; }
+      else if (app === "claude" || app === "gemini") spec = value;
       else if (app === "opencode") spec = fromOpencodeSpec(id, value);
       else if (app === "hermes") spec = fromHermesSpec(id, value);
       else if (app === "mcode") spec = mcodeUnifiedSpec(value);

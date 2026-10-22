@@ -92,6 +92,7 @@ export function ProviderProfilesBar({ activeApp, onNotice, onChanged }) {
   useEffect(() => { setOperationError(""); }, [creating, manageOpen, applyTarget, deleteTarget]);
 
   const load = useCallback(async () => {
+    if (!PROFILE_APPS.includes(activeApp)) return;
     try {
       const res = await profilesApi.list();
       setProfiles(res.profiles);

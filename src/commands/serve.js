@@ -252,14 +252,13 @@ async function cmdServe(argv) {
   try {
     const proxyConfig = require("../lib/proxy/config");
     const proxyManager = require("../lib/proxy/manager");
+    proxyManager.startRecoveryMonitor();
     const proxyBridge = require("../lib/proxy/usage-bridge");
     const settings = proxyConfig.readSettings();
     if (settings.autoStart !== false) {
       const coreStatus = await proxyManager.status();
       if (coreStatus.installed) {
-        if (!coreStatus.running) {
-          await proxyManager.start();
-        }
+        await proxyManager.start();
         proxyBridge.startBridge();
       }
     }
@@ -358,8 +357,11 @@ async function cmdServe(argv) {
   const shutdown = () => {
     process.stdout.write("\nShutting down...\n");
     nativeBackgroundSync?.stop();
-    server.close(() => process.exit(0));
-    setTimeout(() => process.exit(0), 3000);
+    Promise.allSettled([
+      require("../lib/proxy/manager").stop(),
+      new Promise(resolve => server.close(resolve)),
+    ]).then(() => process.exit(0));
+    setTimeout(() => process.exit(0), 10000).unref();
   };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);

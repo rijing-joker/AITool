@@ -61,6 +61,8 @@ function readCommandcodeApiKey({ home, env = process.env } = {}) {
   const fromEnv =
     env && typeof env === "object" ? env[COMMANDCODE_API_KEY_ENV] : null;
   if (isNonEmptyString(fromEnv)) return fromEnv.trim();
+  const stored = require("./provider-api-key-store").readStoredApiKey({ provider: "command-code", home: home || env?.HOME });
+  if (stored) return stored;
   const authPath = resolveCommandcodeAuthPath({ home, env });
   if (!authPath) return null;
   let raw;

@@ -482,6 +482,7 @@ async function buildEditorView(app, { settingsConfig, id, category } = {}) {
   const state = await store.listProviders(app);
   const row = id ? state.providers.find((p) => p.id === id) || null : null;
   const draft = settingsConfig !== undefined && settingsConfig !== null ? settingsConfig : row ? row.settingsConfig : {};
+  if (app === "agy") return { ok: true, app, settings: require("./agy").sanitize(draft), inactive: [], isCurrent: false };
   const prev = state.current ? state.providers.find((p) => p.id === state.current) || null : null;
   const isCurrent = !!id && state.current === id;
   // The projections read the provider shape ({settingsConfig, category}):

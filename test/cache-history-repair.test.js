@@ -34,14 +34,14 @@ async function fixture(t, source) {
 }
 
 for (const source of ["codex", "claude"]) {
-  test(`${source} repair replaces only its own source, backs up and is idempotent`, async (t) => {
+  test(`${source} repair appends only its own correction snapshots, backs up and is idempotent`, async (t) => {
     const { args } = await fixture(t, source);
     const original = await fs.readFile(args.queuePath, "utf8");
     assert.equal(await repairCacheHistory(args), true);
     const updated = await fs.readFile(args.queuePath, "utf8");
     const records = updated.trim().split("\n").map(JSON.parse);
     assert.equal(records.find((row) => row.source === "gemini").total_tokens, 999);
-    const row = records.find((row) => row.source === source);
+    const row = records.filter((row) => row.source === source).at(-1);
     if (source === "codex") assert.equal(row.input_tokens, 100);
     else assert.equal(row.cache_creation_1h_input_tokens, 1000);
     assert.equal(JSON.parse(await fs.readFile(args.queueStatePath)).offset, 0);
@@ -90,6 +90,15 @@ test("interrupted publication recovers queues, upload offsets and cursors togeth
   assert.match(await fs.readFile(args.queuePath, "utf8"), /"source":"cliproxy","total_tokens":456/);
   assert.equal(await recoverCacheHistoryRepair({ ...args, cursors: restarted }), false);
   assert.equal(await repairCacheHistory({ ...args, cursors: restarted }), false);
+});
+
+test("proxy appends between journal publications survive and corrections remain last-row-wins", async t => {
+  const {args}=await fixture(t,"codex");let appended=false;
+  args.afterPublish=async()=>{if(!appended){appended=true;await fs.appendFile(args.queuePath,'{"source":"cliproxy","total_tokens":777}\n');}};
+  await repairCacheHistory(args);
+  const rows=(await fs.readFile(args.queuePath,"utf8")).trim().split("\n").map(JSON.parse);
+  assert.equal(rows.find(row=>row.source==="cliproxy").total_tokens,777);
+  assert.equal(rows.filter(row=>row.source==="codex").at(-1).input_tokens,100);
 });
 
 test("compressed archive replaces a plain cursor and still repairs the same session", async (t) => {

@@ -3958,6 +3958,7 @@ function withPlanLabel(obj, raw, brand) {
 // hammered). Survives an external resetUsageLimitsCache() (refresh=1 path in
 // local-api.js): a refresh arriving while a fetch is already running reuses that
 // in-flight fetch and returns its result.
+let credentialGeneration = 0;
 const inFlightBySelection = {};
 for (const key of USAGE_LIMITS_SELECTION_KEYS) inFlightBySelection[key] = null;
 
@@ -4035,6 +4036,7 @@ async function fetchUsageLimitsUncached({
   // here would let an opt-out flipped mid-fetch store a pre-opt-out result in the
   // post-opt-out slot.
   selectionKey,
+  keyGeneration = credentialGeneration,
 } = {}) {
   const nowMs = Date.now();
 
@@ -4401,9 +4403,9 @@ async function fetchUsageLimitsUncached({
       stale: false,
       cached_at: new Date(nowMs).toISOString(),
     };
-    writeOpencodeGoLimitsCache(opencodeGo, { home, nowMs });
+    if (keyGeneration === credentialGeneration) writeOpencodeGoLimitsCache(opencodeGo, { home, nowMs });
   } else {
-    const cached = readOpencodeGoLimitsCache({ home, nowMs });
+    const cached = keyGeneration === credentialGeneration ? readOpencodeGoLimitsCache({ home, nowMs }) : null;
     if (cached) {
       opencodeGo = cached;
     } else {
@@ -4506,14 +4508,15 @@ async function fetchUsageLimitsUncached({
     };
   }
 
-  cacheBySelection[selectionKey || usageLimitsSelectionKey({ devinEnabled })] = {
+  if (keyGeneration === credentialGeneration) cacheBySelection[selectionKey || usageLimitsSelectionKey({ devinEnabled })] = {
     data,
     expiresAtMs: cacheExpiresAtMs(data, nowMs),
   };
   return data;
 }
 
-function resetUsageLimitsCache() {
+function resetUsageLimitsCache({ invalidateInFlight = false } = {}) {
+  if (invalidateInFlight) { credentialGeneration++; for (const key of USAGE_LIMITS_SELECTION_KEYS) inFlightBySelection[key] = null; }
   for (const key of USAGE_LIMITS_SELECTION_KEYS) {
     cacheBySelection[key] = { data: null, expiresAtMs: 0 };
   }

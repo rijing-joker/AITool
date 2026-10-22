@@ -69,6 +69,8 @@ export interface ProxyCoreStatus {
   managementAuthError: boolean;
   autoStart: boolean;
   logFile: string;
+  lifecycle?: string;
+  recovery?: { state: string; armed: boolean; attempts: number; nextAttemptAt: number | null };
 }
 
 export interface ProxyBridgeStatus {
@@ -178,7 +180,7 @@ export type CoreUpdateCheck = {
 };
 
 export const proxyApi = {
-  copilotStatus(): Promise<{ ok: true; clients: Array<{ client: "cli" | "vscode"; path: string; configured: boolean; canRestore: boolean; model?: string; error?: string }> }> {
+  copilotStatus(): Promise<{ ok: true; clients: Array<{ client: "cli" | "vscode"; installed?: boolean; path: string; configured: boolean; canRestore: boolean; model?: string; error?: string }> }> {
     return get("/api/proxy/copilot");
   },
   connectCopilot(client: "cli" | "vscode", apiKey: string, model: string): Promise<{ ok: true; path: string }> {

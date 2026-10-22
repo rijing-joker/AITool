@@ -17,6 +17,7 @@ const MCP_APPS = [
   { id: "claude", labelKey: "pswitch.tab.claude" },
   { id: "codex", labelKey: "pswitch.tab.codex" },
   { id: "gemini", labelKey: "pswitch.tab.gemini" },
+  { id: "agy", labelKey: "pswitch.tab.agy" },
   { id: "grokbuild", labelKey: "pswitch.tab.grokbuild" },
   { id: "opencode", labelKey: "pswitch.tab.opencode" },
   { id: "hermes", labelKey: "pswitch.tab.hermes" },

@@ -738,7 +738,7 @@ async function fetchOpencodeGoLimits({
   timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
   sqliteOptions = {},
 } = {}) {
-  const apiKey = readApiKey(env);
+  const apiKey = readApiKey(env) || require("./provider-api-key-store").readStoredApiKey({ provider: "opencode-go", home: home || env?.HOME });
   const cfg = readConfig(env);
   const allowLocalEstimate = localEstimateEnabled(env);
 

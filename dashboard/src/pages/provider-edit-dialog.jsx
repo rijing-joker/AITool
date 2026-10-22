@@ -1,3 +1,4 @@
+import { AgyAccountSelect } from "./provider-agy-accounts";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, Download, ExternalLink, Eye, EyeOff, Wand2, X } from "lucide-react";
 import { parse as tomlParse, stringify as tomlStringify } from "smol-toml";
@@ -242,6 +243,7 @@ const CLAUDE_MODEL_ROLES = [
 const DEFAULT_MODEL_PATH = {
   claude: "env.ANTHROPIC_MODEL",
   codex: "config.model",
+  agy: "config.model.name",
   gemini: "env.GEMINI_MODEL",
   // Additive apps: the model field edits where the tool reads "this
   // provider's model" from. opencode/openclaw use the sentinel (the
@@ -256,6 +258,7 @@ const DEFAULT_MODEL_PATH = {
 const ENDPOINT_PATH = {
   claude: "env.ANTHROPIC_BASE_URL",
   codex: "config.model_providers.custom.base_url",
+  agy: "env.GOOGLE_GEMINI_BASE_URL",
   gemini: "env.GOOGLE_GEMINI_BASE_URL",
   opencode: "provider.$slot.options.baseURL",
   openclaw: "models.providers.$slot.baseUrl",
@@ -267,6 +270,7 @@ const ENDPOINT_PATH = {
 const API_KEY_PATH = {
   claude: null,
   codex: "auth.OPENAI_API_KEY",
+  agy: "env.GEMINI_API_KEY",
   gemini: "env.GEMINI_API_KEY",
   opencode: "provider.$slot.options.apiKey",
   openclaw: "models.providers.$slot.apiKey",
@@ -371,7 +375,7 @@ function envTextOf(envObject) {
 // the projected settings.json object, codex is auth.json + the parsed full
 // config.toml, gemini is the parsed full .env.
 function viewToConfig(app, view) {
-  if (app === "claude") return JSON.parse(JSON.stringify(view.settings ?? {}));
+  if (app === "claude" || app === "agy") return JSON.parse(JSON.stringify(view.settings ?? {}));
   if (app === "codex") {
     return {
       auth: JSON.parse(JSON.stringify(view.authJson ?? {})),
@@ -410,6 +414,8 @@ function SecretInput({ value, onChange, placeholder, ariaLabel }) {
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder || ""}
         autoComplete="off"
+        autoCapitalize="none"
+        autoCorrect="off"
         spellCheck={false}
         aria-label={ariaLabel}
         className="w-full rounded-lg border border-oai-gray-200 bg-white px-3 py-2 pr-9 font-mono text-sm text-oai-black focus:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 dark:border-oai-gray-800 dark:bg-oai-gray-900 dark:text-white"
@@ -947,6 +953,7 @@ export function ProviderEditDialog({
     setFetchState("loading");
     try {
       const res = await providerSwitchApi.fetchModels({
+        app,
         baseUrl: currentEndpoint,
         apiKey: currentApiKey,
         modelsUrl: selectedPreset?.modelsUrl,
@@ -1278,11 +1285,11 @@ export function ProviderEditDialog({
   const collectIssues = () => {
     const issues = [];
     if (!name.trim()) issues.push(copy("pswitch.validate.name"));
-    if (!officialSelected && showEndpointField && !currentEndpoint.trim()) {
+    if (app !== "agy" && !officialSelected && showEndpointField && !currentEndpoint.trim()) {
       issues.push(copy(`pswitch.validate.endpoint.${app}`));
     }
     if (!officialSelected && showApiKeyField && !currentApiKey.trim()) {
-      issues.push(copy(`pswitch.validate.key.${app}`));
+      issues.push(copy(app === "agy" ? "pswitch.validate.key.gemini" : `pswitch.validate.key.${app}`));
     }
     // Pi entries are enabled by membership, but a provider without a model
     // id is inert — cc-switch's form requires at least one model, too.
@@ -1450,7 +1457,7 @@ export function ProviderEditDialog({
   for (const field of fields) {
     if (field.id === "api_key") showApiKeyField = true;
   }
-  const showEndpointField = !officialSelected && (app === "claude" || app === "codex" || app === "gemini" || isAdditiveApp(app));
+  const showEndpointField = !officialSelected && (app === "claude" || app === "codex" || app === "gemini" || app === "agy" || isAdditiveApp(app));
   const showAdvancedToggle = app === "claude" || app === "codex";
   const showQuickToggles = app === "claude";
   // Precomputed so the config-editor block below has no ternary chains after
@@ -1762,6 +1769,26 @@ export function ProviderEditDialog({
             />
           ) : null}
 
+          {app === "agy" && officialSelected ? <AgyAccountSelect value={meta.agyAccountId} onChange={value => setMetaValue("agyAccountId", value)} /> : null}
+
+          {/\.volces\.com(?:\/|$)/i.test(currentEndpoint) ? <div className="space-y-2">
+            <FieldLabel label={copy("pswitch.quota.volcCredentials")} />
+            {["accessKeyId", "secretAccessKey"].map(key => <SecretInput key={key} value={meta.quotaCredentials?.[key] || ""} onChange={value => setMetaValue("quotaCredentials", { ...meta.quotaCredentials, [key]: value })} placeholder={copy(`pswitch.quota.${key}`)} />)}
+            <p className="text-xs text-oai-gray-500">{copy("pswitch.quota.volcHint")}</p>
+          </div> : null}
+
+          {app === "codex" && !officialSelected ? (
+            <label className="block space-y-1 text-sm">
+              <FieldLabel label={copy("pswitch.codex.remoteCompaction")} />
+              <select className="w-full rounded-lg border border-oai-gray-200 bg-transparent p-2 dark:border-oai-gray-700" value={draft.config?.model_providers?.custom?.capabilities?.remote_compaction || ""}
+                onChange={event => setDraft(current => event.target.value ? setPath(current, "config.model_providers.custom.capabilities.remote_compaction", event.target.value) : deletePath(current, "config.model_providers.custom.capabilities.remote_compaction"))}>
+                <option value="">{copy("proxy.creds.settings.inherit")}</option>
+                <option value="unsupported">{copy("pswitch.codex.localCompaction")}</option>
+                <option value="v2">{copy("pswitch.codex.remoteCompactionV2")}</option>
+              </select>
+              <p className="text-xs text-oai-gray-500">{copy("pswitch.codex.remoteCompactionHint")}</p>
+            </label>
+          ) : null}
           {app === "codex" && !officialSelected ? (
             <CodexSubagentFields
               agents={draft.config?.agents}

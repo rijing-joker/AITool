@@ -16,6 +16,7 @@ use std::net::TcpListener;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -23,6 +24,7 @@ use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, Wind
 
 const PREFERRED_PORTS: [u16; 8] = [7680, 7681, 7682, 7683, 7684, 7685, 7686, 7687];
 const HEALTH_TIMEOUT: Duration = Duration::from_secs(60);
+static PROVIDERS_PENDING: AtomicBool = AtomicBool::new(false);
 
 struct ServerState {
     child: Mutex<Option<Child>>,
@@ -142,15 +144,29 @@ fn show_main_window(app: &AppHandle) {
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
+        let _ = window.eval("window.dispatchEvent(new CustomEvent('native:visibility',{detail:{visible:true}}))");
     }
 }
 
 fn build_main_window(app: &AppHandle, port: u16) -> tauri::Result<()> {
-    let url: tauri::Url = format!("http://127.0.0.1:{port}/").parse().unwrap();
+    let query = if PROVIDERS_PENDING.swap(false, Ordering::SeqCst) { "?quick=providers" } else { "" };
+    let url: tauri::Url = format!("http://127.0.0.1:{port}/{query}").parse().unwrap();
     WebviewWindowBuilder::new(app, "main", WebviewUrl::External(url))
         .title("AiTool")
         .inner_size(1280.0, 840.0)
         .min_inner_size(980.0, 640.0)
+        .on_page_load(|window, payload| {
+            if payload.event() == tauri::webview::PageLoadEvent::Finished
+                && matches!(payload.url().host_str(), Some("127.0.0.1" | "localhost")) {
+                if PROVIDERS_PENDING.swap(false, Ordering::SeqCst) {
+                    let _ = window.eval("window.__aitoolProvidersPending=true;window.dispatchEvent(new Event('native:providers'))");
+                }
+                if let Some(main) = window.app_handle().get_webview_window(window.label()) {
+                    let visible = main.is_visible().unwrap_or(false) && !main.is_minimized().unwrap_or(false);
+                    let _ = window.eval(&format!("window.dispatchEvent(new CustomEvent('native:visibility',{{detail:{{visible:{}}}}}))", visible));
+                }
+            }
+        })
         .build()?;
     Ok(())
 }
@@ -160,7 +176,8 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
     let start = MenuItem::with_id(app, "proxy_start", "Start proxy", true, None::<&str>)?;
     let stop = MenuItem::with_id(app, "proxy_stop", "Stop proxy", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit AiTool", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &start, &stop, &quit])?;
+    let providers = MenuItem::with_id(app, "providers", "Switch provider", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&open, &providers, &start, &stop, &quit])?;
 
     let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/icon.png"))?.to_owned();
 
@@ -171,6 +188,14 @@ fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id().as_ref() {
             "open" => show_main_window(app),
+            "providers" => {
+                show_main_window(app);
+                if let Some(window) = app.get_webview_window("main") {
+                    if window.url().map(|url| matches!(url.host_str(), Some("127.0.0.1" | "localhost"))).unwrap_or(false) {
+                        let _ = window.eval("window.__aitoolProvidersPending=true;window.dispatchEvent(new Event('native:providers'))");
+                    } else { PROVIDERS_PENDING.store(true, Ordering::SeqCst); }
+                } else { PROVIDERS_PENDING.store(true, Ordering::SeqCst); }
+            },
             "proxy_start" | "proxy_stop" => {
                 let app = app.clone();
                 let action = event.id().as_ref().trim_start_matches("proxy_").to_string();
@@ -209,11 +234,20 @@ fn main() {
             port: Mutex::new(port),
         })
         .on_window_event(|window, event| {
+            if let WindowEvent::Resized(_) | WindowEvent::Focused(_) = event {
+                let visible = window.is_visible().unwrap_or(false) && !window.is_minimized().unwrap_or(false);
+                if let Some(webview) = window.app_handle().get_webview_window(window.label()) {
+                    let _ = webview.eval(&format!("window.dispatchEvent(new CustomEvent('native:visibility',{{detail:{{visible:{}}}}}))", visible));
+                }
+            }
             // Closing the window hides to tray (proxy keeps running); real
             // exit is the tray menu's Quit.
             if let WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
                 let _ = window.hide();
+                if let Some(webview) = window.app_handle().get_webview_window(window.label()) {
+                    let _ = webview.eval("window.dispatchEvent(new CustomEvent('native:visibility',{detail:{visible:false}}))");
+                }
             }
         })
         .setup(move |app| {

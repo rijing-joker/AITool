@@ -43,6 +43,21 @@ const paths = require("../src/lib/provider-switch/paths");
 const presets = require("../src/lib/provider-switch/presets");
 const { handleProviderSwitchApiRequest, switchProvider } = require("../src/lib/provider-switch/api");
 
+for (const current of [false,true]) test(`Hermes conflicting ID migration preserves unrelated config (current=${current})`,async()=>{
+  const row=await store.createProvider("hermes",{name:"DeepSeek",settingsConfig:{slotKey:"deepseek",modelId:"deepseek-chat",provider:{name:"deepseek",base_url:"https://relay.test",api_key:"private-key"}}});
+  const dir=path.join(tmpHome,".hermes");fs.mkdirSync(dir,{recursive:true});const file=path.join(dir,"config.yaml");
+  const native={model:{provider:current?"deepseek":"mine",default:"deepseek-chat"},custom_providers:[row.settingsConfig.provider,{name:"aitool-deepseek",api_key:"keep"}],unrelated:{keep:true}};
+  fs.writeFileSync(file,require("yaml").stringify(native));if(current)await store.setCurrentProvider("hermes",row.id);
+  await assert.rejects(switchProvider({app:"hermes",id:row.id}),/BUILTIN/);
+  const request=Readable.from([Buffer.from(JSON.stringify({id:row.id}))]);request.method="POST";
+  let result,status;await handleProviderSwitchApiRequest(request,{writeHead:value=>{status=value;},end:body=>{result=JSON.parse(body);}},new URL("http://localhost/api/provider-switch/hermes/migrate-id"),{isAuthorizedLocalMutation:()=>true});
+  assert.equal(status,200,JSON.stringify(result));assert.equal(result.slotKey,"aitool-deepseek-2");
+  const live=require("yaml").parse(fs.readFileSync(file,"utf8"));assert.deepEqual(live.unrelated,{keep:true});assert.equal(live.custom_providers.find(row=>row.name==="aitool-deepseek").api_key,"keep");
+  assert.equal((await store.getProvider("hermes",row.id)).settingsConfig.slotKey,"aitool-deepseek-2");
+  if(current){assert.equal(live.model.provider,"aitool-deepseek-2");assert.equal(live.custom_providers.some(row=>row.name==="deepseek"),false);assert.ok(fs.readdirSync(paths.backupsDir("hermes")).some(name=>name.endsWith(".bak")));}
+  else assert.equal(live.model.provider,"mine");
+});
+
 async function saveViaApi(app, edited, base, slotKey, id, { onConflict, expectedStatus = 200 } = {}) {
   const url = `/api/provider-switch/providers${id ? `/${id}` : ""}`;
   const req = Readable.from([Buffer.from(JSON.stringify({
@@ -430,6 +445,7 @@ test("visible apps: normalized, persisted, last-visible guard", async () => {
     claude: true,
     codex: true,
     gemini: true,
+    agy: true,
     opencode: true,
     openclaw: true,
     mcode: true,
@@ -443,6 +459,7 @@ test("visible apps: normalized, persisted, last-visible guard", async () => {
     claude: false,
     codex: true,
     gemini: true,
+    agy: true,
     opencode: false,
     openclaw: true,
     mcode: true,

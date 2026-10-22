@@ -151,10 +151,10 @@ test("resolveRelease prefers the GitCode mirror's latest release", async () => {
   const urls = [];
   const fetchImpl = async (url) => {
     urls.push(String(url));
-    return jsonResponse({ tag_name: "v8.0.35" });
+    return jsonResponse({ tag_name: `v${core.pinnedVersion()}` });
   };
   const release = await core.resolveRelease({ fetchImpl });
-  assert.equal(release.version, "8.0.35");
+  assert.equal(release.version, core.pinnedVersion());
   assert.equal(release.source, "gitcode");
   assert.match(urls[0], /api\.gitcode\.com\/api\/v5\/repos\/lzt404\/CLIProxyAPI\/releases\/latest/);
 });
@@ -177,11 +177,11 @@ test("resolveRelease rejects stale, prerelease and malformed mirror tags", async
 test("resolveRelease falls back to GitHub's latest when the mirror lags or is down", async () => {
   const fetchImpl = async (url) => {
     if (String(url).includes("api.gitcode.com")) return { ok: false, status: 502, headers: new Headers(), body: null };
-    if (String(url).includes("api.github.com")) return githubApi({ tag_name: "v8.0.36" });
+    if (String(url).includes("api.github.com")) return githubApi({ tag_name: "v8.0.38" });
     throw new Error(`unexpected fetch: ${url}`);
   };
   const release = await core.resolveRelease({ fetchImpl });
-  assert.equal(release.version, "8.0.36");
+  assert.equal(release.version, "8.0.38");
   assert.equal(release.source, "github");
 });
 
@@ -190,11 +190,11 @@ test("resolveRelease uses the GitHub atom feed when the API is unreachable", asy
     if (String(url).includes("api.gitcode.com") || String(url).includes("api.github.com")) {
       return { ok: false, status: 503, headers: new Headers(), body: null };
     }
-    if (String(url).endsWith("releases.atom")) return atomFeed("8.0.35");
+    if (String(url).endsWith("releases.atom")) return atomFeed(core.pinnedVersion());
     throw new Error(`unexpected fetch: ${url}`);
   };
   const release = await core.resolveRelease({ fetchImpl });
-  assert.equal(release.version, "8.0.35");
+  assert.equal(release.version, core.pinnedVersion());
   assert.equal(release.source, "github");
 });
 
@@ -209,10 +209,10 @@ test("resolveRelease validates GitHub API and atom tags against the stable pin",
     assert.equal(release.source, "pinned");
   }
   const release = await core.resolveRelease({ fetchImpl: async (url) => {
-    if (String(url).endsWith("releases.atom")) return atomFeed("8.0.35");
+    if (String(url).endsWith("releases.atom")) return atomFeed(core.pinnedVersion());
     return jsonResponse({ tag_name: "v8.0.18" });
   } });
-  assert.equal(release.version, "8.0.35");
+  assert.equal(release.version, core.pinnedVersion());
   assert.equal(release.source, "github");
 });
 
@@ -221,12 +221,12 @@ test("resolveRelease carries GitHub asset digests for download verification", as
   const fetchImpl = async (url) => {
     if (String(url).includes("api.gitcode.com")) return { ok: false, status: 502, headers: new Headers(), body: null };
     return githubApi({
-      tag_name: "v8.0.36",
-      assets: [{ name: core.platformAsset("8.0.36").name, digest: `sha256:${digest}` }],
+      tag_name: "v8.0.38",
+      assets: [{ name: core.platformAsset("8.0.38").name, digest: `sha256:${digest}` }],
     });
   };
   const release = await core.resolveRelease({ fetchImpl });
-  assert.equal(release.digests[core.platformAsset("8.0.36").name], digest);
+  assert.equal(release.digests[core.platformAsset("8.0.38").name], digest);
 });
 
 test("resolveRelease rethrows aborts instead of falling back", async () => {
@@ -279,16 +279,16 @@ test("fetchCore reuses the installed binary when it already matches the latest r
   try {
     fs.mkdirSync(paths.binDir, { recursive: true });
     fs.writeFileSync(paths.binPath, "#!/bin/sh\nexit 0\n");
-    fs.writeFileSync(paths.coreVersionPath, "v8.0.35\n");
+    fs.writeFileSync(paths.coreVersionPath, `v${core.pinnedVersion()}\n`);
     let downloads = 0;
     const fetchImpl = async (url) => {
-      if (String(url).includes("releases/latest")) return jsonResponse({ tag_name: "v8.0.35" });
+      if (String(url).includes("releases/latest")) return jsonResponse({ tag_name: `v${core.pinnedVersion()}` });
       downloads += 1;
       throw new Error(`should not download: ${url}`);
     };
     const result = await core.fetchCore({ fetchImpl });
     assert.equal(result.skipped, true);
-    assert.equal(result.version, "8.0.35");
+    assert.equal(result.version, core.pinnedVersion());
     assert.equal(downloads, 0);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -447,13 +447,13 @@ test("checkUpdate reports installed, latest and hasUpdate", async () => {
     fs.writeFileSync(paths.coreVersionPath, "v8.0.9\n");
     const fetchImpl = async (url) => {
       if (String(url).includes("api.gitcode.com")) return { ok: false, status: 502, headers: new Headers(), body: null };
-      if (String(url).includes("api.github.com")) return githubApi({ tag_name: "v8.0.36" });
+      if (String(url).includes("api.github.com")) return githubApi({ tag_name: "v8.0.38" });
       throw new Error(`unexpected fetch: ${url}`);
     };
     assert.deepEqual(await core.checkUpdate({ fetchImpl }), {
-      installed: "8.0.9", latest: "8.0.36", source: "github", hasUpdate: true,
+      installed: "8.0.9", latest: "8.0.38", source: "github", hasUpdate: true,
     });
-    fs.writeFileSync(paths.coreVersionPath, "v8.0.36\n");
+    fs.writeFileSync(paths.coreVersionPath, "v8.0.38\n");
     assert.equal((await core.checkUpdate({ fetchImpl })).hasUpdate, false);
     fs.writeFileSync(paths.coreVersionPath, "dev-local+abc1234\n");
     assert.equal((await core.checkUpdate({ fetchImpl })).hasUpdate, false);

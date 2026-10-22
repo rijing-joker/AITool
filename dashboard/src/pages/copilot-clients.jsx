@@ -66,6 +66,7 @@ export function CopilotClients({ keys, remarks }) {
       <Button size="sm" disabled={busy || !key || !model.trim()} onClick={() => void act()}>{copy("proxy.copilot.connect")}</Button>
       {selected?.canRestore ? <Button size="sm" variant="secondary" disabled={busy} onClick={() => setRestoring(true)}>{copy("proxy.copilot.restore")}</Button> : null}
     </div>
+    {client === "vscode" && selected?.installed === false ? <p role="status" className="mt-2 text-xs text-amber-700 dark:text-amber-400">{copy("proxy.copilot.notInstalled")}</p> : null}
     {selected?.configured && client === "vscode" && selected.modelCount ? <p className="mt-2 text-xs text-oai-gray-500">{copy("proxy.copilot.catalog_count", { count: selected.modelCount })}</p> : null}
     {selected?.configured ? <p className="mt-2 text-xs text-oai-gray-500">{copy("proxy.copilot.current", { model: selected.model })}</p> : null}
     {busy && client === "vscode" ? <p className="mt-2 text-xs" role="status">{copy("proxy.copilot.preparing")}</p> : null}

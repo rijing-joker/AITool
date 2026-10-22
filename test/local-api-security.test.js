@@ -92,6 +92,15 @@ test("local device metadata exposes the system name separately from machine iden
   assert.doesNotMatch(getSystemDeviceName() || "", /^Token Tracker .*#/u);
 });
 
+test("local quota key endpoints require auth and never return the saved key",async()=>{
+  const handler=require("../src/lib/local-api").createLocalApiHandler({queuePath:path.join(os.homedir(),"queue.jsonl")});
+  const url=new URL("http://127.0.0.1/api/provider-api-key?provider=command-code");
+  const denied=createResponse();await handler(createRequest({method:"GET"}),denied,url);assert.equal(denied.statusCode,401);
+  const token=await getLocalAuthToken(handler);const headers={host:"127.0.0.1","x-tokentracker-local-auth":token};
+  const saved=createResponse();await handler(createRequest({method:"PUT",headers,body:JSON.stringify({apiKey:"fixture-private-key"})}),saved,url);assert.equal(saved.statusCode,200,saved.body.toString());
+  const read=createResponse();await handler(createRequest({method:"GET",headers}),read,url);const value=JSON.parse(read.body);assert.equal(value.configured,true);assert.equal(read.body.toString().includes("fixture-private-key"),false);
+});
+
 test("local auth reports the serve runtime version when provided", async (t) => {
   const { createLocalApiHandler } = require("../src/lib/local-api");
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "tt-local-auth-version-"));

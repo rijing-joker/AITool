@@ -555,6 +555,7 @@ async function parseCodexRolloutFile(filePath, {
   onObject = null,
   onUsage = null,
   resolveForkReplay = null,
+  allowUndatedUsage = false,
 } = {}) {
   const filePaths = (Array.isArray(filePath) ? filePath : [filePath]).filter(Boolean);
   const primaryFilePath = filePaths[0] || String(filePath || "");
@@ -996,9 +997,9 @@ async function parseCodexRolloutFile(filePath, {
     // one of two authorities on the same question.
     if (typeof onObject === "function") onObject(obj, attributedModel);
     const usageRecord = extractTokenUsageRecord(obj);
-    if (!usageRecord) noteLineAfterUsageRecord(usageRecordState, obj?.type === "compacted");
+    if (!usageRecord) noteLineAfterUsageRecord(usageRecordState, obj?.type === "compacted", obj?.type === "event_msg" && obj?.payload?.type === "token_count");
     const ts = typeof obj?.timestamp === "string" ? obj.timestamp : null;
-    if (!ts) continue;
+    if (!ts && !allowUndatedUsage) continue;
     const inRequestedRange = isTimestampInRequestedDayRange(ts, { from, to, timeZoneContext });
 
     if (obj.type === "session_meta") {
@@ -1085,6 +1086,7 @@ async function parseCodexRolloutFile(filePath, {
           usageRecordState,
           usageDeltaState.lastTotal,
           totalUsage,
+          lastUsage,
         );
       }
       const rawDelta = consumeUsageDelta(usageDeltaState, lastUsage, totalUsage);
@@ -1092,7 +1094,7 @@ async function parseCodexRolloutFile(filePath, {
       const delta = rawDelta ? normalizeUsage(rawDelta) : null;
       // Timing consumers receive canonical, deduplicated usage below. A null
       // delta is a snapshot, not another model response.
-      if (compaction) countCompactionRecord(compaction);
+      if (compaction && !forkReplay?.hasUsageRecord?.(compaction.responseId)) countCompactionRecord(compaction);
       const isNewResumeEvent = noteTokenEvent(ts, lastUsage, totalUsage);
       if (inRequestedRange) {
         const eventSessionId = sessionId || rolloutSessionIdFromPath(primaryFilePath) || primaryFilePath;

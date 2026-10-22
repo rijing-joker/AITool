@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { isPageVisible } from "../lib/page-visibility";
 import { getUsageLimits, isLocalhostHost } from "../lib/api";
 import { publishUsageLimitsPreloadState } from "../lib/dashboard-preload.js";
 import { LIMIT_ALERTS_PREF_KEY } from "./use-limit-alert-prefs";
@@ -267,19 +268,24 @@ export function useUsageLimits(options?: UseUsageLimitsOptions) {
     const MIN_GAP_MS = 15_000;
     let lastAt = Date.now(); // mount already fired the initial fetch below
     const maybeRefresh = () => {
-      if (document.visibilityState !== "visible") return;
+      if (!isPageVisible()) return;
       const nowMs = Date.now();
       if (nowMs - lastAt < MIN_GAP_MS) return;
       lastAt = nowMs;
       void refreshFromServerCache();
     };
     window.addEventListener("focus", maybeRefresh);
+    window.addEventListener("page:visibility", maybeRefresh);
+    const credentialChanged = () => { void refresh(); };
+    window.addEventListener("limits:credentialChanged", credentialChanged);
     document.addEventListener("visibilitychange", maybeRefresh);
     return () => {
       window.removeEventListener("focus", maybeRefresh);
+      window.removeEventListener("page:visibility", maybeRefresh);
+      window.removeEventListener("limits:credentialChanged", credentialChanged);
       document.removeEventListener("visibilitychange", maybeRefresh);
     };
-  }, [localEnabled, refreshFromServerCache]);
+  }, [localEnabled, refreshFromServerCache, refresh]);
 
   // A selection change invalidates in-flight work via the guard dependency,
   // drops retained Devin rows immediately when the provider was turned off,

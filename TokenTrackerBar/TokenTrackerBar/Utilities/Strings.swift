@@ -33,6 +33,7 @@ enum Strings {
     static var loadingData: String { t("Loading data…", "正在加载数据…", "正在載入資料…", "データを読み込み中…", "데이터 불러오는 중…") }
     static var noData: String { t("No data", "暂无数据", "暫無資料", "データなし", "데이터 없음") }
     static var retryButton: String { t("Retry", "重试", "重試", "再試行", "다시 시도") }
+    static var switchProvider: String { t("Switch provider", "切换供应商", "切換供應商", "プロバイダーを切り替え", "공급자 전환") }
     static var openDashboard: String { t("Open Dashboard", "打开仪表盘", "開啟儀表盤", "ダッシュボードを開く", "대시보드 열기") }
     static var menuDynamicIsland: String { t("Dynamic Island", "灵动岛", "靈動島", "ダイナミックアイランド", "다이나믹 아일랜드") }
     static var menuIconStyle: String { t("Icon Style", "图标样式", "圖標樣式", "アイコンスタイル", "아이콘 스타일") }

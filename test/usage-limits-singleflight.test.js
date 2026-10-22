@@ -40,6 +40,15 @@ function makeCountingDeps() {
 }
 
 describe("getUsageLimits single-flight", () => {
+  it("credential invalidation starts a new round and an old result cannot replace the new cache",async()=>{
+    resetUsageLimitsCache({invalidateInFlight:true});const tmp=fs.mkdtempSync(path.join(os.tmpdir(),"aitool-key-generation-"));
+    try {
+      const {options}=makeCountingDeps();const opts={...options,home:tmp,env:{},now:()=>new Date("2026-10-21T01:00:00Z")};
+      const old=getUsageLimits(opts);resetUsageLimitsCache({invalidateInFlight:true});
+      const fresh=getUsageLimits({...opts,now:()=>new Date("2026-10-21T02:00:00Z")});
+      const [before,after]=await Promise.all([old,fresh]);assert.notEqual(before,after);assert.equal(await getUsageLimits(opts),after);
+    } finally {resetUsageLimitsCache({invalidateInFlight:true});fs.rmSync(tmp,{recursive:true,force:true});}
+  });
   it("shares one upstream fetch round across concurrent cache misses", async () => {
     resetUsageLimitsCache();
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tokentracker-limits-singleflight-"));

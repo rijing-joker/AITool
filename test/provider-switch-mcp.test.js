@@ -133,7 +133,7 @@ async function overlapLiveMutations(t, filePath, first, second) {
 // Projections
 // ---------------------------------------------------------------------------
 
-for (const app of ["claude", "codex", "gemini", "grokbuild", "opencode", "hermes", "mcode", "pi"]) {
+for (const app of ["claude", "codex", "gemini", "agy", "grokbuild", "opencode", "hermes", "mcode", "pi"]) {
   for (const operation of ["insert", "delete"]) {
     test(`mcp: concurrent ${operation} and insert preserve ${app}'s live entries`, { timeout: 5000 }, async (t) => {
       const mcp = require("../src/lib/provider-switch/mcp");

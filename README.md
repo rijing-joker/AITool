@@ -25,7 +25,7 @@ The UI is TokenTracker's design language throughout — one dashboard for both w
 │  Sidebar                                                                                     │
 │  ├── AI Proxy        ← NEW: proxy lifecycle, providers, keys, per-request records, config    │
 │  ├── Provider Configs ← NEW: one-click AI-CLI config-file switching (cc-switch port)         │
-│  ├── CLI Sessions     ← NEW: read-only claude/codex/gemini transcripts + cost (cc-switch)    │
+│  ├── CLI Sessions     ← read-only transcripts for nine CLIs + cost (cc-switch)             │
 │  └── Tokens / Sessions / Limits / …  ← TokenTracker analytics (45 CLI tools), unchanged      │
 └──────────────┬──────────────────────────────────────────────────────────┬────────────────────┘
                │ /api/proxy/*                                             │ /functions/* (local API)
@@ -92,7 +92,8 @@ A Node port of [cc-switch](https://github.com/farion1231/cc-switch)'s config-fil
 
 | | |
 | --- | --- |
-| **Tools covered** | Claude Code (`~/.claude/settings.json`) · Codex CLI (`~/.codex/config.toml` + `auth.json`) · Gemini CLI (`~/.gemini/.env`) |
+| **Tools covered** | Claude Code · Codex CLI · Gemini CLI · Antigravity CLI (`agy`) · Grok Build · OpenCode · OpenClaw · Hermes · Pi · MiniMax Code |
+| **Antigravity CLI** | Per-provider model/endpoint launch settings; shared MCP, skills and prompts; official account binding and per-account quota. Official account switching currently requires macOS; API-key launches use a private profile and keep keys in the child process. |
 | **Switch model** | Minimal-patch projection (cc-switch's "floor" key fields): only the provider's key fields — endpoint, credentials, model names — are written; user-owned content (hooks, permissions, comments) is never touched, and the previous provider's residue is removed only when you haven't changed it |
 | **Editor** | The add/edit dialog shows the full config file as it would look after switching to this provider (cc-switch's editor view); on save, key fields go back to the provider row while other edits are written into the live files with three-way conflict detection (keep mine / keep theirs) |
 | **Codex credentials** | The relay key is written to `experimental_bearer_token` under `[model_providers.custom]` in `config.toml` — Codex CLI 0.149+ no longer reads relay keys from `auth.json`, which holds only the official ChatGPT login (the add/edit dialog's Codex editors are split accordingly: `auth.json` JSON + `config.toml` TOML) |
@@ -100,6 +101,8 @@ A Node port of [cc-switch](https://github.com/farion1231/cc-switch)'s config-fil
 | **MCP servers** | The page's MCP tab keeps one list of MCP servers (cc-switch's unified `mcp_servers` module) with per-app toggles that project each spec into the app's native MCP config — Claude (`~/.claude.json`), Codex (`[mcp_servers.*]` in `config.toml`), Gemini (`settings.json`), Grok Build, OpenCode, Hermes, MiniMax Code (`~/.minimax/mcp.json`) — and can import what the tools already configured |
 | **Prompts** | The page's Prompts tab keeps named per-app prompt lists (cc-switch's prompt module); enabling one writes it over the app's instruction file — `~/.claude/CLAUDE.md`, `AGENTS.md` (Codex, Grok Build, OpenCode, OpenClaw, pi, mcode), `~/.gemini/GEMINI.md`, `~/.hermes/SOUL.md` — capturing the live file's content into the store first, so hand-written instruction files are never silently overwritten |
 | **Quota** | Providers whose base URL matches a supported plan provider (Command Code presets included for Claude Code and Codex) show per-window "left %" lines on their card (cc-switch's coding_plan quota service); the query uses the row's own API key against the provider's `/alpha` control plane |
+| **Additional quota sources** | Zhipu/Z.ai coding-plan windows and balance fallback; Volcengine Agent/Coding Plan uses separate control-plane AK/SK credentials. OpenCode Go and Command Code keys can also be saved locally on the Limits page. |
+| **Quick switching** | Desktop tray → Switch provider opens the dashboard's shared selector and uses the same backup/conflict-aware switching API. |
 | **Safety** | Atomic writes (`0600` for credential files), first-write backup per file restorable from the dashboard, and config-file editors built into the add/edit dialog; Codex's official ChatGPT login is stashed when switching to a third-party relay and restored on switch-back |
 | **Storage** | `~/.aitool/provider-switch/` — `providers.json` (presets + current pointer), `mcp-servers.json` (shared MCP server list), `prompts.json` (per-app prompt lists), `codex-auth-stash.json`, `backups/` |
 
@@ -112,7 +115,9 @@ Managed through the dashboard's **AI Proxy** page (tabs) or the core's managemen
 | Core lifecycle (start / stop / health / version) | Overview |
 | Client access keys (`access.api-keys`) | Access Keys |
 | Compatible endpoints — `/v1/chat/completions`, `/v1/messages`, `/v1beta/models` | Access Keys |
-| Provider auth files (upload / list / delete / refresh) | Providers |
+| Provider auth files, indexed single/batch OAuth refresh, batch enable/disable/delete, per-item outcomes and problem filtering | Providers |
+| Per-credential retry/error policy, xAI mode and supported plugin quota queries | Providers |
+| Bounded recovery after an owned core exits; manual stop/restart cancels pending recovery | Overview / server lifecycle |
 | Per-request usage records with cost estimates, separate client/upstream notes, stable filters and error copying | Requests |
 | Saved OAuth account counts/status and privacy masking of displayed identities | Providers / page privacy toggle |
 | Session credential rebinding on any failure or quota/authentication/model errors | Settings |
@@ -140,7 +145,7 @@ Default endpoint: `http://127.0.0.1:8318` (loopback-only; port configurable in c
 | **AI tools supported** | **45** |
 | **Dashboard** | localhost:7680 — trends, model breakdown, cost, heatmap |
 | **Proxy usage source** | `cliproxy` — folded into the same views automatically |
-| **CLI session history** | `/cli-sessions` — read-only transcripts from Claude Code / Codex / Gemini with per-session cost estimates |
+| **CLI session history** | `/cli-sessions` — read-only Claude Code / Codex / Gemini / Antigravity CLI / OpenCode / Hermes / Grok Build / Pi / MiniMax Code transcripts with per-model cost estimates; binary-only Antigravity entries provide resume commands |
 
 Everything in the vendored TokenTracker CLI keeps working: hook installation for 45 AI coding tools (Claude Code, Codex, Gemini, Cursor, Droid, Cline, Command Code, TRAE, …), local JSONL parsing, the cost engine, sessions, limits, achievements, skills panel, desktop pet, widgets — with the same dashboard at `localhost:7680`. Proxy usage appears as a `cliproxy` source in the same views.
 

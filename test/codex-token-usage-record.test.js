@@ -464,3 +464,55 @@ test("file with both events is not flagged; a deleted flagged file stops warning
   });
   assert.equal(formatRecordOnlyWarning(0), null);
 });
+
+for (const [prior, advances] of [[false, false], [false, true], [true, false], [true, true]]) {
+  test(`remote compaction zero snapshot is counted across every split (prior=${prior}, advances=${advances})`, async () => {
+    const zero = usage(0, 0, 0);
+    const total = advances ? (prior ? add(R1, RC) : RC) : (prior ? R1 : zero);
+    const lines = [meta(), turnContext("2026-09-20T04:00:01.000Z"),
+      ...(prior ? [tc("2026-09-20T04:00:11.000Z", R1, R1)] : []),
+      tur("2026-09-20T04:00:40.000Z", RC),
+      tc("2026-09-20T04:00:41.000Z", zero, total),
+      // A repeated snapshot and a later response must not bill the compaction
+      // through the cumulative delta a second time.
+      ...(advances ? [tc("2026-09-20T04:00:42.000Z", zero, total),
+        tur("2026-09-20T04:00:50.000Z", R2),
+        tc("2026-09-20T04:00:51.000Z", R2, add(total, R2))] : [])];
+    const expected = parserTotal(...(prior ? [R1, RC] : [RC]), ...(advances ? [R2] : []));
+    assert.equal((await parserTotals(lines)).tokens, expected);
+    assert.equal((await parserTotals(lines, everyLine(lines))).tokens, expected);
+    for (let cut = 1; cut < lines.length; cut += 1) {
+      const totals = await syncInChunks(lines, [cut, lines.length]);
+      assert.equal(totals.total_tokens, expected, `split ${cut}`);
+    }
+    await withTmp(async ctx => {
+      await fs.writeFile(ctx.rolloutPath, lines.join("\n") + "\n");
+      await ctx.sync(); await ctx.sync();
+      assert.equal((await queueTotals(ctx.queuePath)).total_tokens, expected);
+      const { readSession } = require("../src/lib/sessions");
+      // readSession root validation needs a normal .codex/sessions tree.
+      const home = require("node:path").join(ctx.dir, "isolated-home");
+      const target = require("node:path").join(home, ".codex", "sessions", require("node:path").basename(ctx.rolloutPath));
+      await fs.mkdir(require("node:path").dirname(target), { recursive: true });
+      await fs.copyFile(ctx.rolloutPath, target);
+      const transcript = await readSession({ app: "codex", sourcePath: target, home });
+      assert.equal(transcript.usage.totalTokens, expected);
+    });
+  });
+}
+
+test("first zero last snapshot does not bill an unrelated cumulative total", async () => {
+  const lines = [meta(), turnContext("2026-09-20T04:00:01.000Z"),
+    tur("2026-09-20T04:00:40.000Z", RC),
+    tc("2026-09-20T04:00:41.000Z", usage(0, 0, 0), R1)];
+  assert.equal((await parserTotals(lines)).tokens, 0);
+  assert.equal((await syncInChunks(lines, everyLine(lines))).total_tokens, 0);
+});
+
+test("a zero last snapshot with an advancing total does not double-count its record", async () => {
+  const zero = usage(0, 0, 0);
+  const lines = [meta(), turnContext("2026-09-20T04:00:01.000Z"),
+    tc("2026-09-20T04:00:10.000Z", R1, R1), tur("2026-09-20T04:00:40.000Z", RC),
+    tc("2026-09-20T04:00:41.000Z", zero, add(R1, RC))];
+  assert.equal((await parserTotals(lines)).tokens, parserTotal(R1, RC));
+});

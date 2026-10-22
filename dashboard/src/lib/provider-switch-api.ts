@@ -38,6 +38,7 @@ export type ProviderSwitchApp =
   | "claude"
   | "codex"
   | "gemini"
+  | "agy"
   | "opencode"
   | "openclaw"
   | "mcode"
@@ -302,6 +303,10 @@ export const piPromptFilesApi = {  get(kind: PiPromptFileKind) {
 };
 
 export const providerSwitchApi = {
+  launchAgy(id: string) { return mutate("/api/provider-switch/agy/launch", "POST", { id }); },
+  migrateHermesId(id: string): Promise<{ ok: true; slotKey: string }> {
+    return mutate("/api/provider-switch/hermes/migrate-id", "POST", { id });
+  },
   getCodexClient(signal?: AbortSignal): Promise<{ ok: true; client: CodexClientStatus }> {
     return get("/api/provider-switch/codex-client", signal);
   },
@@ -434,6 +439,7 @@ export const providerSwitchApi = {
   },
 
   fetchModels(payload: {
+    app?: ProviderSwitchApp;
     baseUrl: string;
     apiKey?: string;
     modelsUrl?: string;
@@ -530,7 +536,7 @@ export type PiPromptFile = {
   content: string;
 };
 
-export type McpAppId = "claude" | "codex" | "gemini" | "grokbuild" | "opencode" | "hermes" | "mcode" | "pi";
+export type McpAppId = "claude" | "codex" | "gemini" | "agy" | "grokbuild" | "opencode" | "hermes" | "mcode" | "pi";
 
 export interface McpServerSpec {
   type?: "stdio" | "http" | "sse" | string;
@@ -607,6 +613,7 @@ export type PromptAppId =
   | "claude"
   | "codex"
   | "gemini"
+  | "agy"
   | "grokbuild"
   | "opencode"
   | "openclaw"

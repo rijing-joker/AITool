@@ -1,6 +1,6 @@
 const { cacheCreation1h } = require("./cache-tokens");
-const { normalizeCodexUsage } = require("./codex-token-usage");
 const codexFiles = require("./codex-rollout-file");
+const { normalizeShellOutput, geminiToolResult } = require("./session-tool-results");
 // CLI session history (cc-switch session_manager port, minimal reader):
 // scan each AI CLI's on-disk session logs and read them back as a plain
 // transcript of {role, content, ts} rows. Providers and layouts mirror
@@ -21,7 +21,9 @@ const codexFiles = require("./codex-rollout-file");
 const fs = require("node:fs");
 const fsp = require("node:fs/promises");
 const path = require("node:path");
-const { createUsageDeltaState, consumeUsageDelta } = require("./codex-token-usage");
+const { createHash } = require("node:crypto");
+const { TranscriptCache, previewTranscript, contentPage } = require("./session-transcript-cache");
+const sessionSources = require("./session-sources");
 const {
   codexSessionIdFromPath,
 } = require("./rollout");
@@ -31,6 +33,51 @@ const SUMMARY_MAX_CHARS = 160;
 const HEAD_LINES = 10;
 const TAIL_LINES = 30;
 const SMALL_FILE_BYTES = 16_384;
+const metadataCache = new Map();
+const titleIndexCache = new Map();
+const transcriptCache = new TranscriptCache();
+
+async function transcriptRevision(app, files) {
+  const stats = await Promise.all(files.map(async file => {
+    const stat = await fsp.stat(file);
+    return [file, stat.dev, stat.ino, stat.size, stat.mtimeMs, stat.ctimeMs];
+  }));
+  return createHash("sha256").update(JSON.stringify([app, stats])).digest("hex");
+}
+
+async function cachedMetadata(filePath, app) {
+  const stat = await fsp.stat(filePath).catch(() => null);
+  if (!stat) return null;
+  const signature = `${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`;
+  const cached = metadataCache.get(filePath);
+  if (cached?.signature === signature) return cached.value ? { ...cached.value } : null;
+  const value = app === "claude" ? await claudeParseSession(filePath) : await codexParseSession(filePath);
+  metadataCache.delete(filePath);
+  metadataCache.set(filePath, { signature, value });
+  if (metadataCache.size > 512) metadataCache.delete(metadataCache.keys().next().value);
+  return value ? { ...value } : null;
+}
+
+async function codexNativeTitles(home) {
+  const root = path.join(home, ".codex");
+  const sourcePath = path.join(root, "session_index.jsonl");
+  let realPath;
+  try { realPath = await resolveSessionPath(sourcePath, [root]); } catch { return new Map(); }
+  const stat = await fsp.stat(realPath).catch(() => null);
+  if (!stat) return new Map();
+  const signature = `${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`;
+  const cached = titleIndexCache.get(realPath);
+  if (cached?.signature === signature) return cached.titles;
+  const titles = new Map();
+  const raw = await fsp.readFile(realPath, "utf8").catch(() => "");
+  for (const line of raw.split("\n")) {
+    const row = parseJsonLine(line);
+    if (typeof row?.id === "string" && typeof row.thread_name === "string" && row.thread_name.trim()) titles.set(row.id, row.thread_name.trim());
+  }
+  titleIndexCache.set(realPath, { signature, titles });
+  if (titleIndexCache.size > 8) titleIndexCache.delete(titleIndexCache.keys().next().value);
+  return titles;
+}
 
 function isNonEmptyString(value) {
   return typeof value === "string" && value.trim().length > 0;
@@ -99,7 +146,6 @@ function extractTextFromItem(item) {
 
 // Thinking rows render as a collapsed block in the reader; cap the captured
 // text so a runaway reasoning stream cannot bloat the API response.
-const THINKING_MAX_CHARS = 32 * 1024;
 
 // Inline raster images are bounded independently and across the transcript.
 const IMAGE_MAX_BASE64_CHARS = 2 * 1024 * 1024;
@@ -127,20 +173,51 @@ function extractImageFromItem(item, budget) {
   return entry;
 }
 
-function capThinking(text) {
+function thinkingText(text) {
   const trimmed = String(text ?? "").trim();
   if (trimmed === "") return null;
-  return trimmed.length > THINKING_MAX_CHARS ? `${trimmed.slice(0, THINKING_MAX_CHARS)}\n…` : trimmed;
+  return trimmed;
 }
 
 async function readHeadTailLines(filePath, headN = HEAD_LINES, tailN = TAIL_LINES) {
-  const raw = await codexFiles.readText(filePath);
-  const lines = raw.split("\n").filter((line) => line !== "");
-  if (lines.length <= headN + tailN) return { head: lines, tail: lines };
-  return {
-    head: lines.slice(0, headN),
-    tail: lines.slice(lines.length - tailN),
-  };
+  const file = await fsp.open(filePath, "r");
+  try {
+    const { size } = await file.stat();
+    const read = async (start, length) => {
+      const buffer = Buffer.alloc(length);
+      const { bytesRead } = await file.read(buffer, 0, length, start);
+      return buffer.subarray(0, bytesRead);
+    };
+    const nonempty = text => text.split("\n").filter(line => line !== "");
+    if (size <= SMALL_FILE_BYTES) {
+      const lines = nonempty((await read(0, size)).toString("utf8"));
+      if (lines.length <= headN + tailN) return { head: lines, tail: lines };
+      return { head: lines.slice(0, headN), tail: lines.slice(-tailN) };
+    }
+    // Read complete lines from either end. Long individual JSON records can
+    // span chunks; decode only after joining so UTF-8 is never split mid-codepoint.
+    const chunk = 64 * 1024;
+    let end = 0, headBuffer = Buffer.alloc(0), head = [];
+    while (end < size) {
+      const buffer = await read(end, Math.min(chunk, size - end));
+      if (!buffer.length) break;
+      end += buffer.length;
+      headBuffer = Buffer.concat([headBuffer, buffer]);
+      const text = headBuffer.toString("utf8");
+      head = nonempty(end < size ? text.slice(0, text.lastIndexOf("\n") + 1) : text);
+      if (head.length >= headN) break;
+    }
+    let start = size, tailBuffer = Buffer.alloc(0), tail = [];
+    while (start > 0) {
+      const next = Math.max(0, start - chunk);
+      tailBuffer = Buffer.concat([await read(next, start - next), tailBuffer]);
+      start = next;
+      const text = tailBuffer.toString("utf8");
+      tail = nonempty(start > 0 ? text.slice(text.indexOf("\n") + 1) : text);
+      if (tail.length >= tailN) break;
+    }
+    return { head: head.slice(0, headN), tail: tail.slice(-tailN) };
+  } finally { await file.close(); }
 }
 
 function parseJsonLine(line) {
@@ -382,11 +459,12 @@ async function claudeReadMessages(filePath) {
   // Claude can rewrite the same assistant message (streaming retries); keep
   // the row with the larger output_tokens per message id, like cc-switch does.
   const usageById = new Map();
+  const callsById = new Map();
   const usage = emptyUsage(false);
   for (const line of raw.split("\n")) {
     if (line === "") continue;
     const value = parseJsonLine(line);
-    if (!value || value.isMeta === true) continue;
+    if (!value || value.isMeta === true || value.isSidechain === true) continue;
     trackSpan(usage, parseTimestampToMs(value.timestamp));
     const message = value.message;
     if (!message) continue;
@@ -398,11 +476,21 @@ async function claudeReadMessages(filePath) {
       const results = message.content.filter((item) => item?.type === "tool_result");
       if (message.content.length > 0 && results.length === message.content.length) role = "tool";
       if (results.length > 0) {
-        toolResults = results.map((item) => ({
-          toolUseId: typeof item.tool_use_id === "string" ? item.tool_use_id : null,
-          content: extractText(item.content),
-          ...(typeof item.is_error === "boolean" ? { isError: item.is_error } : {}),
-        }));
+        toolResults = results.map((item) => {
+          const call = callsById.get(item.tool_use_id);
+          const text = extractText(item.content);
+          const ts = parseTimestampToMs(value.timestamp);
+          const shell = call?.name === "Bash" ? normalizeShellOutput(text) : null;
+          return {
+            toolUseId: typeof item.tool_use_id === "string" ? item.tool_use_id : null,
+            content: text,
+            ...(typeof item.is_error === "boolean" ? { isError: item.is_error } : {}),
+            ...(results.length === 1 && value.toolUseResult?.structuredPatch?.length ? { structuredPatch: value.toolUseResult.structuredPatch } : {}),
+            ...(results.length === 1 && value.toolUseResult?.interrupted === true ? { status: "interrupted" } : {}),
+            ...(shell?.exitCode != null ? { exitCode: shell.exitCode } : {}),
+            ...(call?.name === "Bash" && ts != null && call.ts != null && ts >= call.ts ? { durationMs: ts - call.ts } : {}),
+          };
+        });
       }
     }
     if (role === "assistant" && Array.isArray(message.content)) {
@@ -413,10 +501,13 @@ async function claudeReadMessages(filePath) {
           name: typeof item.name === "string" ? item.name : "unknown",
           input: item.input ?? null,
         }));
+        for (const call of toolCalls) {
+          if (call.id) callsById.set(call.id, { name: call.name, ts: parseTimestampToMs(value.timestamp) });
+        }
       }
     }
     const thinking = role === "assistant" && Array.isArray(message.content)
-      ? capThinking(message.content
+      ? thinkingText(message.content
           .filter((item) => item?.type === "thinking" && typeof item.thinking === "string")
           .map((item) => item.thinking)
           .join("\n"))
@@ -430,10 +521,13 @@ async function claudeReadMessages(filePath) {
         if (image) (images ??= []).push(image);
       }
     }
-    const content = extractText(message.content);
+    const content = extractText(role === "user" && toolResults
+      ? message.content.filter(item => item?.type !== "tool_result") : message.content);
     if (content.trim() !== "" || thinking || toolCalls || toolResults || images) {
       const row = { role, content, ts: parseTimestampToMs(value.timestamp) };
-      if (thinking) row.thinking = thinking;
+      if (thinking) {
+        row.thinking = thinking;
+      }
       if (toolCalls) row.toolCalls = toolCalls;
       if (toolResults) row.toolResults = toolResults;
       if (images) row.images = images;
@@ -513,6 +607,16 @@ function codexExtractPromptFromIdeContext(text) {
   return match ? match[1].trim() : text.trim();
 }
 
+function codexIsInjectedContext(text) {
+  return /^(?:# AGENTS\.md instructions|<environment_context>|<user_instructions>|<turn_aborted>)/.test(String(text || "").trimStart());
+}
+
+function codexQuestionText(content) {
+  const items = Array.isArray(content) ? content : [content];
+  return items.map(item => codexExtractPromptFromIdeContext(extractText(typeof item === "string" ? item : [item])))
+    .filter(text => text.trim() && !codexIsInjectedContext(text)).join("\n");
+}
+
 async function codexParseSession(filePath) {
   if (codexFiles.isCompressed(filePath)) return codexParseCompressedSession(filePath);
   let headTail;
@@ -540,8 +644,8 @@ async function codexParseSession(filePath) {
       if (projectDir === null && typeof payload.cwd === "string") projectDir = payload.cwd;
     }
     if (firstUserMessage === null && value.type === "response_item" && value.payload?.type === "message" && value.payload?.role === "user") {
-      const text = codexExtractPromptFromIdeContext(extractText(value.payload.content));
-      if (text !== "" && !text.includes("<user_instructions>") && !text.startsWith("<environment_context>")) {
+      const text = codexQuestionText(value.payload.content);
+      if (text !== "" && !codexIsInjectedContext(text)) {
         firstUserMessage = text;
       }
     }
@@ -602,8 +706,8 @@ async function codexParseCompressedSession(filePath) {
       if (projectDir === null && typeof payload.cwd === "string") projectDir = payload.cwd;
     }
     if (firstUserMessage === null && value.type === "response_item" && value.payload?.type === "message" && value.payload?.role === "user") {
-      const text = codexExtractPromptFromIdeContext(extractText(value.payload.content));
-      if (text !== "" && !text.includes("<user_instructions>") && !text.startsWith("<environment_context>")) {
+      const text = codexQuestionText(value.payload.content);
+      if (text !== "" && !codexIsInjectedContext(text)) {
         firstUserMessage = text;
       }
     }
@@ -691,32 +795,13 @@ async function codexReadMessages(filePaths, { resolveForkReplay } = {}) {
   // returning usage. The explicit flag keeps pricing from subtracting cache
   // a second time, independent of the model-id heuristic.
   const usage = emptyUsage(false);
-  const usageState = createUsageDeltaState();
-  const snapshot = (value) => value && typeof value === "object" && !Array.isArray(value) ? {
-    ...value,
-    // Explicit-zero stubs fall through to the documented alternates
-    // (cc-switch 5667b28): some relays hardcode the leading cache field to 0
-    // and only report the real count in the other one.
-    cached_input_tokens: value.cached_input_tokens || value.cache_read_input_tokens || 0,
-    total_tokens: value.total_tokens ?? ((Number(value.input_tokens) || 0) + (Number(value.output_tokens) || 0)),
-  } : null;
   let usageSeen = false;
-  let lineageSeen = false;
-  let replay = null;
   let usageDeferred = false;
   for (const line of raw.split("\n")) {
     if (line === "") continue;
     const value = parseJsonLine(line);
     if (!value) continue;
     trackSpan(usage, parseTimestampToMs(value.timestamp));
-    if (value.type === "session_meta" && !lineageSeen) {
-      lineageSeen = true;
-      try { replay = await resolveForkReplay?.(value.payload, value.timestamp, paths); }
-      catch (error) {
-        if (error.code !== "CODEX_FORK_DEFERRED") throw error;
-        usageDeferred = true;
-      }
-    }
     if (value.type === "turn_context" && typeof value.payload?.model === "string" && value.payload.model) {
       usage.model = value.payload.model;
     }
@@ -726,22 +811,6 @@ async function codexReadMessages(filePaths, { resolveForkReplay } = {}) {
       // and the token_count info block — the last one seen wins.
       if (typeof info?.model === "string" && info.model) usage.model = info.model;
       else if (typeof info?.model_name === "string" && info.model_name) usage.model = info.model_name;
-      const delta = consumeUsageDelta(usageState, snapshot(info?.last_token_usage), snapshot(info?.total_token_usage));
-      const replayed = replay?.skip(info) === true;
-      if (delta && !usageDeferred && !replayed) {
-        const normalized = normalizeCodexUsage(delta);
-        const row = {
-          inputTokens: normalized.input_tokens,
-          outputTokens: delta.output_tokens,
-          reasoningTokens: delta.reasoning_output_tokens,
-          cacheReadTokens: normalized.cached_input_tokens,
-          cacheCreationTokens: normalized.cache_creation_input_tokens,
-        };
-        trackModelUsage(usage, usage.model, row);
-        for (const [key, count] of Object.entries(row)) usage[key] += count;
-        usage.totalTokens += delta.total_tokens;
-        usageSeen = true;
-      }
     }
     if (value.type !== "response_item") continue;
     const payload = value.payload;
@@ -753,6 +822,12 @@ async function codexReadMessages(filePaths, { resolveForkReplay } = {}) {
     if (payload.type === "message") {
       role = typeof payload.role === "string" ? payload.role : "unknown";
       content = extractText(payload.content);
+      if (role === "user") {
+        const items = Array.isArray(payload.content) ? payload.content : [payload.content];
+        const injected = items.map(item => extractText(typeof item === "string" ? item : [item])).filter(codexIsInjectedContext);
+        if (injected.length) messages.push({ role, content: injected.join("\n"), injected: true, ts: parseTimestampToMs(value.timestamp) });
+        content = codexQuestionText(payload.content);
+      }
     } else if (payload.type === "function_call" || payload.type === "custom_tool_call") {
       role = "assistant";
       const args = payload.type === "custom_tool_call" ? payload.input : payload.arguments;
@@ -771,10 +846,11 @@ async function codexReadMessages(filePaths, { resolveForkReplay } = {}) {
       content = "";
     } else if (payload.type === "function_call_output" || payload.type === "custom_tool_call_output") {
       role = "tool";
-      content = extractText(payload.output);
+      content = typeof payload.output === "object" && payload.output !== null && !Array.isArray(payload.output)
+        ? JSON.stringify(payload.output) : extractText(payload.output);
       toolResults = [{
         callId: typeof payload.call_id === "string" ? payload.call_id : null,
-        output: content,
+        ...normalizeShellOutput(content),
       }];
       const patch = patchesByCallId.get(payload.call_id);
       if (patch) {
@@ -786,7 +862,7 @@ async function codexReadMessages(filePaths, { resolveForkReplay } = {}) {
       const summary = Array.isArray(payload.summary)
         ? payload.summary.filter((item) => typeof item?.text === "string").map((item) => item.text).join("\n")
         : "";
-      const thinking = capThinking(summary);
+      const thinking = thinkingText(summary);
       if (!thinking) continue;
       messages.push({ role: "assistant", content: "", thinking, ts: parseTimestampToMs(value.timestamp) });
       continue;
@@ -795,12 +871,37 @@ async function codexReadMessages(filePaths, { resolveForkReplay } = {}) {
     }
     if (content.trim() === "" && !toolCalls && !toolResults) continue;
     const row = { role, content, ts: parseTimestampToMs(value.timestamp) };
+    if (role === "assistant" && usage.model) row.model = usage.model;
     if (toolCalls) row.toolCalls = toolCalls;
     if (toolResults) row.toolResults = toolResults;
     messages.push(row);
   }
-  if (!usageSeen) return { messages, usage: null };
-  return { messages, usage: finalizeUsage(usage) };
+  // Use the same accounting pass as analytics, including compaction records,
+  // merged pages and parent replay. Presentation keeps its original messages.
+  if (!usageDeferred) {
+    const { parseCodexRolloutFile } = require("./codex-rollout-parser");
+    try {
+      await parseCodexRolloutFile(paths, {
+        collectBreakdowns: false, resolveForkReplay, allowUndatedUsage: true,
+        onUsage(event) {
+          if (!event.delta) return;
+          const delta = event.delta;
+          const row = { inputTokens: delta.input_tokens, outputTokens: delta.output_tokens,
+            reasoningTokens: delta.reasoning_output_tokens, cacheReadTokens: delta.cached_input_tokens,
+            cacheCreationTokens: delta.cache_creation_input_tokens };
+          trackModelUsage(usage, event.model, row);
+          for (const [key, count] of Object.entries(row)) usage[key] += count;
+          usage.totalTokens += delta.total_tokens;
+          usageSeen = true;
+        },
+      });
+    } catch (error) {
+      if (error.code !== "CODEX_FORK_DEFERRED") throw error;
+      usageDeferred = true;
+    }
+  }
+  if (!usageSeen || usageDeferred) return { messages, usage: null, usageDeferred };
+  return { messages, usage: finalizeUsage(usage), usageDeferred };
 }
 
 // ---------------------------------------------------------------------------
@@ -1021,7 +1122,7 @@ async function geminiReadMessages(filePath) {
       };
     }
     const thinking = Array.isArray(msg.content)
-      ? capThinking(msg.content
+      ? thinkingText(msg.content
           .filter((item) => item?.thought === true && typeof item.text === "string")
           .map((item) => item.text)
           .join("\n"))
@@ -1032,19 +1133,27 @@ async function geminiReadMessages(filePath) {
         ? msg.content.filter((item) => item && item.thought !== true && typeof item.text === "string").map((item) => item.text).join("\n")
         : "";
     let toolCalls = null;
+    let toolResults = null;
     if (Array.isArray(msg.toolCalls)) {
       const calls = msg.toolCalls.filter((call) => call && typeof call.name === "string");
       if (calls.length > 0) {
-        toolCalls = calls.map((call) => ({
-          name: call.name,
-          args: call.args ?? null,
-        }));
+        toolCalls = calls.map((call, index) => {
+          const id = call.id || `${msg.id || messages.length}-tool-${index}`;
+          const result = geminiToolResult(call, id);
+          if (result) (toolResults ??= []).push(result);
+          return { name: call.name, args: call.args ?? null,
+            ...(call.id || result ? { id } : {}) };
+        });
       }
     }
     if (content.trim() === "" && !thinking && !toolCalls) continue;
     const row = { role: type === "gemini" ? "assistant" : "user", content, ts: parseTimestampToMs(msg.timestamp) };
-    if (thinking) row.thinking = thinking;
+    if (thinking) {
+      row.thinking = thinking;
+    }
     if (toolCalls) row.toolCalls = toolCalls;
+    if (toolResults) row.toolResults = toolResults;
+    if (typeof msg.model === "string" && msg.model) row.model = msg.model;
     if (rowUsage) row.usage = rowUsage;
     messages.push(row);
   }
@@ -1056,12 +1165,13 @@ async function geminiReadMessages(filePath) {
 // Public surface
 // ---------------------------------------------------------------------------
 
-const SESSION_APPS = ["claude", "codex", "gemini"];
+const SESSION_APPS = ["claude", "codex", "gemini", ...sessionSources.APPS];
 
-function rootsForApp(app, home) {
+function rootsForApp(app, home, env = process.env) {
   if (app === "claude") return claudeRoots(home);
   if (app === "codex") return codexRoots(home);
   if (app === "gemini") return geminiRoots(home);
+  if (sessionSources.APPS.includes(app)) return sessionSources.roots(app, home, env);
   throw new Error(`Unsupported app: ${app}`);
 }
 
@@ -1069,6 +1179,12 @@ async function listSessions({ app, home, env = process.env } = {}) {
   if (!SESSION_APPS.includes(app)) throw new Error(`Unsupported app: ${app}`);
   const resolvedHome = resolveHome({ home, env });
   if (!resolvedHome) return [];
+
+  if (sessionSources.APPS.includes(app)) {
+    const roots = rootsForApp(app, resolvedHome, env);
+    return sortByRecency(await sessionSources.list(app, resolvedHome, env,
+      file => resolveSessionPath(path.resolve(file), roots, { directory: true })));
+  }
 
   if (app === "gemini") {
     const sessions = [];
@@ -1086,7 +1202,7 @@ async function listSessions({ app, home, env = process.env } = {}) {
   const sessions = [];
   for (const filePath of codexFiles.dedupeSiblings(files)) {
     try { await resolveSessionPath(filePath, rootsForApp(app, resolvedHome)); } catch { continue; }
-    const meta = app === "claude" ? await claudeParseSession(filePath) : await codexParseSession(filePath);
+    const meta = await cachedMetadata(filePath, app);
     if (meta) sessions.push(meta);
   }
   if (app !== "codex") return sortByRecency(sessions);
@@ -1101,6 +1217,10 @@ async function listSessions({ app, home, env = process.env } = {}) {
       if (!previous.title) previous.title = row.title;
     }
   }
+  const titles = await codexNativeTitles(resolvedHome);
+  for (const row of grouped.values()) {
+    if (titles.has(row.sessionId)) row.title = titles.get(row.sessionId);
+  }
   return sortByRecency([...grouped.values()]);
 }
 
@@ -1113,25 +1233,42 @@ function pathIsInsideRoot(sourcePath, root) {
   return relative !== "" && !relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative);
 }
 
-async function resolveSessionPath(sourcePath, roots) {
+async function resolveSessionPath(sourcePath, roots, { directory = false } = {}) {
   // Require both the client path and its actual target to belong to the same
   // app root. Resolve the root too so a user-relocated session directory works.
-  const matchingRoots = roots.filter((root) => pathIsInsideRoot(sourcePath, root));
+  const matchingRoots = roots.filter((root) => pathIsInsideRoot(sourcePath, root) || (directory && sourcePath === path.resolve(root)));
   if (matchingRoots.length) {
     const realPath = await fsp.realpath(sourcePath);
     for (const root of matchingRoots) {
       const realRoot = await fsp.realpath(root);
-      if (pathIsInsideRoot(realPath, realRoot)) return realPath;
+      if (pathIsInsideRoot(realPath, realRoot) || (directory && realPath === realRoot && (await fsp.stat(realPath)).isDirectory())) return realPath;
     }
   }
   throw new Error("Session path is outside this app's session roots");
 }
 
-async function readSession({ app, sourcePath, home, env = process.env } = {}) {
+async function readSession({ app, sourcePath, home, env = process.env, preview = false } = {}) {
   if (!SESSION_APPS.includes(app)) throw new Error(`Unsupported app: ${app}`);
   const resolvedHome = resolveHome({ home, env });
   if (!resolvedHome || !isNonEmptyString(sourcePath)) {
     throw new Error("Session path is required");
+  }
+  if (sessionSources.APPS.includes(app)) {
+    const roots = rootsForApp(app, resolvedHome, env);
+    const validate = file => resolveSessionPath(path.resolve(file), roots, { directory: true });
+    await sessionSources.validateSource(app, sourcePath, resolvedHome, env, validate);
+    const dependencies = await sessionSources.dependencies(app, sourcePath, validate);
+    const revision = await transcriptRevision(app, dependencies);
+    const key = `${app}:${sourcePath}`;
+    let transcript = transcriptCache.get(key, revision);
+    if (!transcript) {
+      transcript = await sessionSources.read(app, sourcePath, validate);
+      const after = await sessionSources.dependencies(app, sourcePath, validate);
+      if (await transcriptRevision(app, after) !== revision) throw new Error("Session changed during reading; reload the session");
+      transcriptCache.set(key, revision, transcript);
+    }
+    const session = { sourcePath, revision, messages: transcript.messages, usage: transcript.usage };
+    return preview ? previewTranscript(session) : session;
   }
   const resolved = path.resolve(sourcePath);
   let realPath;
@@ -1158,6 +1295,7 @@ async function readSession({ app, sourcePath, home, env = process.env } = {}) {
     throw new Error("Not a claude session file");
   }
   let codexPages = [realPath];
+  let dependencies = [realPath];
   let resolveForkReplay;
   if (app === "codex") {
     const inventory = [];
@@ -1173,20 +1311,44 @@ async function readSession({ app, sourcePath, home, env = process.env } = {}) {
     if (!codexPages.length) codexPages = [realPath];
     codexPages = [...new Set(codexPages)];
     resolveForkReplay = require("./codex-fork-replay").createForkReplayResolver(inventory.map((row) => row.real));
+    // Conservative invalidation includes all possible native fork parents.
+    // New pages/parents and preferred compressed siblings change this set.
+    dependencies = [...new Set([...inventory.map(row => row.real), realPath])].sort();
   }
-  const transcript = app === "claude"
-    ? await claudeReadMessages(realPath)
-    : app === "codex"
-      ? await codexReadMessages(codexPages, { resolveForkReplay })
-      : await geminiReadMessages(realPath);
-  return { sourcePath: resolved, messages: transcript.messages, usage: transcript.usage };
+  const revision = await transcriptRevision(app, dependencies);
+  const key = `${app}:${realPath}`;
+  let transcript = transcriptCache.get(key, revision);
+  if (!transcript) {
+    transcript = app === "claude"
+      ? await claudeReadMessages(realPath)
+      : app === "codex"
+        ? await codexReadMessages(codexPages, { resolveForkReplay })
+        : await geminiReadMessages(realPath);
+    // Don't commit a snapshot of a log that changed during parsing, or usage
+    // whose fork parent is not yet available. A later request must retry.
+    if (await transcriptRevision(app, dependencies) !== revision) {
+      throw new Error("Session changed during reading; reload the session");
+    }
+    if (!transcript.usageDeferred) {
+      transcriptCache.set(key, revision, transcript);
+    }
+  }
+  const session = { sourcePath: resolved, revision, messages: transcript.messages, usage: transcript.usage };
+  return preview ? previewTranscript(session) : session;
+}
+
+async function readSessionContent(options) {
+  // Never trust a reference as authorization. Revalidate roots and current
+  // physical pages (including symlinks) before accessing the memory cache.
+  const session = await readSession({ ...options, preview: false });
+  return contentPage(session, options);
 }
 
 function listSessionApps({ home, env = process.env } = {}) {
   const resolvedHome = resolveHome({ home, env });
   return SESSION_APPS.map((app) => ({
     id: app,
-    available: resolvedHome ? rootsForApp(app, resolvedHome).some((root) => {
+    available: resolvedHome ? rootsForApp(app, resolvedHome, env).some((root) => {
       try {
         return fs.statSync(root).isDirectory();
       } catch {
@@ -1201,6 +1363,7 @@ module.exports = {
   listSessionApps,
   listSessions,
   readSession,
+  readSessionContent,
   // exposed for tests
   extractText,
   parseTimestampToMs,

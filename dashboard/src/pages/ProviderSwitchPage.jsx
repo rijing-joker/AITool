@@ -49,6 +49,7 @@ import { ProviderUniversalPanel } from "./provider-universal-panel";
 import { ProviderQuotaLine } from "./provider-quota-line";
 import { ProviderEnvBanner } from "./provider-env-banner";
 import { ProviderSkillsPanel } from "./provider-skills-panel";
+import { ProviderAgyAccounts } from "./provider-agy-accounts";
 import { ProviderCodexClient } from "./provider-codex-client";
 
 // Provider config management — an interaction port of cc-switch's provider
@@ -67,6 +68,7 @@ const APPS = [
   { id: "claude", labelKey: "pswitch.tab.claude" },
   { id: "codex", labelKey: "pswitch.tab.codex" },
   { id: "gemini", labelKey: "pswitch.tab.gemini" },
+  { id: "agy", labelKey: "pswitch.tab.agy" },
   { id: "opencode", labelKey: "pswitch.tab.opencode" },
   { id: "openclaw", labelKey: "pswitch.tab.openclaw" },
   { id: "mcode", labelKey: "pswitch.tab.mcode" },
@@ -345,7 +347,7 @@ function EncryptedBackupDialog({ mode, onClose, onImported, onEditorStateChange 
   );
 }
 
-function SortableProviderCard({ app, provider, isCurrent, busy, dragLabel, cooldownMs, onSwitch, onEdit, onDuplicate, onDelete }) {
+function SortableProviderCard({ app, provider, isCurrent, busy, dragLabel, cooldownMs, onSwitch, onEdit, onDuplicate, onDelete, onMigrate }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: provider.id,
     disabled: busy,
@@ -425,15 +427,19 @@ function SortableProviderCard({ app, provider, isCurrent, busy, dragLabel, coold
             </a>
           ) : null}
           <ProviderQuotaLine app={app} provider={provider} />
+          {provider.builtinIdConflict ? <div className="mt-2 text-xs text-amber-700 dark:text-amber-300">
+            <p>{copy("pswitch.hermes.idConflict")}</p>
+            <Button size="sm" variant="secondary" disabled={busy} onClick={onMigrate}>{copy("pswitch.hermes.migrateId")}</Button>
+          </div> : null}
         </div>
         <div className="ml-auto flex w-full shrink-0 items-center justify-end gap-1.5 sm:w-auto">
           <Button
             variant={isCurrent ? "ghost" : "primary"}
             size="sm"
-            disabled={busy || isCurrent}
+            disabled={busy || (isCurrent && app !== "agy")}
             onClick={onSwitch}
           >
-            {copy("pswitch.action.switch")}
+            {copy(app === "agy" ? "pswitch.agy.launch" : "pswitch.action.switch")}
           </Button>
           <Button variant="ghost" size="icon" aria-label={copy("pswitch.action.edit")} disabled={busy} onClick={onEdit}>
             <Pencil className="h-4 w-4" />
@@ -957,6 +963,7 @@ export function ProviderSwitchPage() {
           />
         </div>
       ) : null}
+      {activeApp === "agy" ? <ProviderAgyAccounts /> : null}
       {activeApp === "codex" ? <ProviderCodexClient revision={status} /> : null}
       <section className="mb-8">
         <SectionTitle>{copy("pswitch.section.providers")}</SectionTitle>
@@ -989,8 +996,14 @@ export function ProviderSwitchPage() {
                     busy={busy}
                     dragLabel={copy("pswitch.provider.drag_handle", { name: provider.name })}
                     cooldownMs={provider.cooldownMs}
-                    onSwitch={() => setSwitchTarget(provider)}
+                    onSwitch={() => { if (activeApp !== "agy") { setSwitchTarget(provider); return; } setBusy(true); providerSwitchApi.launchAgy(provider.id).catch(error => setActionError(String(error))).finally(() => setBusy(false)); }}
                     onEdit={() => void openDialog(provider)}
+                    onMigrate={async () => {
+                      setBusy(true);
+                      try { await providerSwitchApi.migrateHermesId(provider.id); await refreshStatus(); }
+                      catch (error) { setActionError(String(error)); }
+                      finally { setBusy(false); }
+                    }}
                     onDuplicate={() => void duplicateProvider(provider)}
                     onDelete={() => setDeleteTarget(provider)}
                   />
@@ -1108,7 +1121,7 @@ export function ProviderSwitchPage() {
               })
             : ""
         }
-        confirmLabel={copy("pswitch.action.switch")}
+        confirmLabel={copy(activeApp === "agy" ? "pswitch.agy.launch" : "pswitch.action.switch")}
         cancelLabel={copy("pswitch.action.cancel")}
         busy={busy}
         onConfirm={() => void confirmSwitch()}

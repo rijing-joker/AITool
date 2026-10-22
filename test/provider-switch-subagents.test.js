@@ -7,6 +7,18 @@ const editor = require('../src/lib/provider-switch/editor');
 const toml = require('../src/lib/provider-switch/toml');
 const provider = agents => ({ id: 'fixture', settingsConfig: { config: { agents } } });
 
+test('remote compaction capabilities switch as provider fields and preserve unrelated tables',()=>{
+  const target={settingsConfig:{config:{model_provider:'custom',model_providers:{custom:{name:'relay',base_url:'https://relay.test',capabilities:{remote_compaction:'v2',unknown:'keep'}}}}}};
+  const live='notify = ["hook"]\n[model_providers.other]\nname="mine"\n';
+  const projected=projectCodex({prev:null,target,liveToml:live}).configToml;
+  assert.deepEqual(parse(projected).model_providers.custom.capabilities,{remote_compaction:'v2',unknown:'keep'});
+  const plan=editor.planSave('codex',target,target.settingsConfig,{config:parse(projected)});
+  assert.equal(plan.rowSettings.config.model_providers.custom.capabilities.remote_compaction,'v2');
+  const disabled=JSON.parse(JSON.stringify(target));disabled.settingsConfig.config.model_providers.custom.capabilities.remote_compaction='unsupported';
+  const switched=projectCodex({prev:target,target:disabled,liveToml:projected}).configToml;
+  assert.equal(parse(switched).model_providers.custom.capabilities.remote_compaction,'unsupported');assert.equal(parse(switched).model_providers.other.name,'mine');assert.deepEqual(parse(switched).notify,['hook']);
+});
+
 test('Codex subagent defaults switch and clear without changing user roles, limits or notify', () => {
   const prev = provider({ default_subagent_model: 'old', default_subagent_reasoning_effort: 'low' });
   const target = provider({ default_subagent_model: 'new', default_subagent_reasoning_effort: 'high' });

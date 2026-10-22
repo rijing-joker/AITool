@@ -1,3 +1,4 @@
+const credentialIdentity = file => `${authFileName(file)}:${authFileCooldownResetIndex(file) || ""}`;
 import React, { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Dialog } from "@base-ui/react/dialog";
 import {
@@ -25,9 +26,12 @@ import {
 } from "lucide-react";
 import { copy } from "../lib/copy";
 import { PrivacyIdentities, authFileIdentities, usePrivacyText } from "../lib/proxy-privacy";
+import { CredentialPluginQuota } from "./credential-plugin-quota";
 import { ProxyAccountOverview } from "./proxy-account-overview";
 import { getLocalApiAuthHeaders } from "../lib/local-api-auth";
 import { managementApi } from "../lib/easy-providers";
+import { isPageVisible } from "../lib/page-visibility";
+import { refreshCredential, refreshAllCredentials, runCredentialBatch } from "../lib/easy-credential-operations";
 import {
   authFileName,
   authFileCooldownResetIndex,
@@ -38,6 +42,7 @@ import {
   isOAuthCredentialFile,
   isRuntimeOnlyAuthFile,
   loadAuthFileSettings,
+  hasUniqueAuthFileName,
   loadOAuthModelSettings,
   modelMatchesRule,
   normalizeAuthFileCooldowns,
@@ -165,6 +170,7 @@ const subscribeClock = (listener) => {
   if (!clockTimer) {
     clockNow = Date.now();
     clockTimer = setInterval(() => {
+      if (!isPageVisible()) return;
       clockNow = Date.now();
       clockListeners.forEach((notify) => notify());
     }, 1000);
@@ -422,7 +428,7 @@ function CredentialRequestTimeline({ file }) {
 
 // --- settings dialog (AuthFileSettingsDialog port) ---------------------------
 
-function CredentialSettingsDialog({ name, onClose, onSaved }) {
+function CredentialSettingsDialog({ name, provider, onClose, onSaved }) {
   const display = usePrivacyText();
   const [original, setOriginal] = useState(null);
   const [draft, setDraft] = useState(null);
@@ -558,7 +564,14 @@ function CredentialSettingsDialog({ name, onClose, onSaved }) {
                   {textField("weight", "1")}
                   {booleanField("disable_cooling")}
                   {booleanField("websockets")}
+                  {textField("request_retry")}
+                  {provider === "xai" || draft.using_api !== "" ? booleanField("using_api") : null}
                 </div>
+                <label className="block space-y-1">
+                  <FieldLabel>{copy("proxy.creds.settings.request_scoped_errors")}</FieldLabel>
+                  <textarea rows={4} value={draft.request_scoped_errors || ""} spellCheck={false}
+                    onChange={event => update("request_scoped_errors", event.target.value)} className={`${inputClass} h-auto py-2 font-mono`} />
+                </label>
               </section>
               <section className="space-y-3">
                 <h3 className="text-sm font-semibold">
@@ -1024,6 +1037,9 @@ function OauthModelsDialog({ target, onClose }) {
 export function AuthFilesTab({ onDirty }) {
   const [snapshot, setSnapshot] = useState({ files: [], receivedAtMs: 0, observedAt: undefined });
   const [filter, setFilter] = useState("");
+  const [selectedNames, setSelectedNames] = useState(new Set());
+  const [batchResults, setBatchResults] = useState([]);
+  const [batchDeleteOpen, setBatchDeleteOpen] = useState(false);
   const [providerFilter, setProviderFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [loading, setLoading] = useState(true);
@@ -1053,6 +1069,8 @@ export function AuthFilesTab({ onDirty }) {
     try {
       const next = await fetchAuthFiles();
       setSnapshot(next);
+      const identities = new Set(next.files.map(credentialIdentity));
+      setSelectedNames(current => new Set([...current].filter(id => identities.has(id))));
     } catch (requestError) {
       setError(String(requestError));
     } finally {
@@ -1062,11 +1080,13 @@ export function AuthFilesTab({ onDirty }) {
 
   useEffect(() => {
     void loadFiles();
-    const refresh = () => void loadFiles(false);
+    const refresh = () => { if (isPageVisible()) void loadFiles(false); };
     window.addEventListener("focus", refresh);
+    window.addEventListener("page:visibility", refresh);
     window.addEventListener("aitool:credentials-changed", refresh);
     return () => {
       window.removeEventListener("focus", refresh);
+      window.removeEventListener("page:visibility", refresh);
       window.removeEventListener("aitool:credentials-changed", refresh);
     };
   }, [loadFiles]);
@@ -1089,16 +1109,35 @@ export function AuthFilesTab({ onDirty }) {
         statusFilter === "all"
         || (statusFilter === "disabled" && disabled)
         || (statusFilter === "enabled" && !disabled)
-        || (statusFilter === "runtime" && isRuntimeOnlyAuthFile(file));
+        || (statusFilter === "runtime" && isRuntimeOnlyAuthFile(file))
+        || (statusFilter === "problem" && (authFileHealth(file).tone === "error" || file.unavailable === true || (Array.isArray(file.cooldowns) && file.cooldowns.length > 0)));
       const searchMatch =
         !query
-        || [authFileName(file), providerLabelForFile(file), [file.email, file.account, file.project_id, file.label].filter(Boolean).join(" ")]
+        || [authFileName(file), providerLabelForFile(file), [file.email, file.account, file.project_id, file.label, file.note, file.prefix].filter(Boolean).join(" ")]
           .join(" ")
           .toLowerCase()
           .includes(query);
       return providerMatch && runtimeMatch && searchMatch;
     });
   }, [files, filter, providerFilter, statusFilter]);
+
+  const batchLock = useRef(false);
+  const runBatch = async (action, singleFile) => {
+    if (batchLock.current) return;
+    batchLock.current = true;
+    setBusy(true); setError(""); setBatchResults([]);
+    try {
+      const picked = singleFile ? [singleFile] : files.filter(file => selectedNames.has(credentialIdentity(file)) && isOAuthCredentialFile(file));
+      const results = action === "all" ? await refreshAllCredentials() : await runCredentialBatch(picked, file => {
+        if (action === "refresh") return refreshCredential(file);
+        if (action === "delete" && !hasUniqueAuthFileName(files, file)) throw new Error(copy("proxy.creds.duplicateName"));
+        if (action === "delete") return managementApi.delete("/auth-files", { query: { name: authFileName(file), auth_index: authFileCooldownResetIndex(file) } });
+        return setOAuthCredentialFileDisabled(file, action === "disable");
+      });
+      setBatchResults(results); await loadFiles(false); onDirty?.();
+    } catch (error) { setError(String(error)); }
+    finally { batchLock.current = false; setBusy(false); setBatchDeleteOpen(false); }
+  };
 
   const handleUpload = async (event) => {
     const selected = Array.from(event.currentTarget.files ?? []);
@@ -1208,10 +1247,11 @@ export function AuthFilesTab({ onDirty }) {
 
   const confirmDelete = async (file) => {
     const name = authFileName(file);
+    if (!hasUniqueAuthFileName(files, file)) { setError(copy("proxy.creds.duplicateName")); setDeleteFile(null); return; }
     setBusy(true);
     setError("");
     try {
-      await managementApi.delete("/auth-files", { query: { name } });
+      await managementApi.delete("/auth-files", { query: { name, auth_index: authFileCooldownResetIndex(file) } });
       showToast(copy("proxy.creds.deleted"), "success");
       await loadFiles();
       onDirty?.();
@@ -1283,6 +1323,17 @@ export function AuthFilesTab({ onDirty }) {
   return (
     <PrivacyIdentities.Provider value={identities}>
     <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <Button size="sm" variant="secondary" disabled={busy} onClick={() => setSelectedNames(new Set(visibleFiles.filter(isOAuthCredentialFile).map(credentialIdentity)))}>{copy("proxy.creds.batch.selectVisible")}</Button>
+        <Button size="sm" variant="ghost" disabled={busy} onClick={() => setSelectedNames(new Set())}>{copy("proxy.creds.batch.clear")}</Button>
+        {["refresh", "enable", "disable"].map(action => <Button key={action} size="sm" variant="secondary" disabled={busy || !selectedNames.size} onClick={() => void runBatch(action)}>{copy(`proxy.creds.batch.${action}`)}</Button>)}
+        <Button size="sm" variant="secondary" disabled={busy || !selectedNames.size} onClick={() => setBatchDeleteOpen(true)}>{copy("proxy.creds.batch.delete")}</Button>
+        <Button size="sm" variant="secondary" disabled={busy || loading} onClick={() => void runBatch("all")}>{copy("proxy.creds.batch.all")}</Button>
+      </div>
+      {batchResults.length ? <ul aria-live="polite" className="text-xs space-y-1">
+        {batchResults.map((result, index) => <li key={`${result.id}-${index}`} className={result.success ? "text-oai-brand-600" : "text-red-600"}>{display(result.id)} · {copy(result.success ? "proxy.creds.batch.success" : "proxy.creds.batch.failure")}{result.error ? ` · ${result.error}` : ""}</li>)}
+      </ul> : null}
+      <ConfirmModal open={batchDeleteOpen} onCancel={() => setBatchDeleteOpen(false)} onConfirm={() => void runBatch("delete")} busy={busy} title={copy("proxy.creds.batch.delete")} description={copy("proxy.creds.batch.deleteConfirm", { count: selectedNames.size })} confirmLabel={copy("proxy.creds.batch.delete")} cancelLabel={copy("shared.cancel")} destructive />
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-oai-gray-500 dark:text-oai-gray-400">
           {copy("proxy.creds.summary", { files: files.length, disabled: disabledCount })}
@@ -1363,6 +1414,7 @@ export function AuthFilesTab({ onDirty }) {
             <option value="enabled">{copy("proxy.creds.filter.enabled")}</option>
             <option value="disabled">{copy("proxy.creds.filter.disabled")}</option>
             <option value="runtime">{copy("proxy.creds.filter.runtime")}</option>
+            <option value="problem">{copy("proxy.creds.filter.problem")}</option>
           </select>
         </div>
 
@@ -1391,6 +1443,7 @@ export function AuthFilesTab({ onDirty }) {
               const note = String(file.note ?? "");
               const isOauth = isOAuthCredentialFile(file);
               const runtimeOnly = isRuntimeOnlyAuthFile(file);
+              const uniqueName = hasUniqueAuthFileName(files, file);
               const size = file.size == null ? null : Number(file.size);
               return (
                 <article
@@ -1402,6 +1455,9 @@ export function AuthFilesTab({ onDirty }) {
                   }`}
                 >
                   <header className="flex items-center gap-2.5">
+                    {isOauth ? <input type="checkbox" checked={selectedNames.has(credentialIdentity(file))} disabled={busy}
+                      aria-label={copy("proxy.creds.batch.select", { name: display(name) })}
+                      onChange={event => setSelectedNames(current => { const next = new Set(current); if (event.target.checked) next.add(credentialIdentity(file)); else next.delete(credentialIdentity(file)); return next; })} /> : null}
                     <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-oai-gray-100 text-oai-gray-600 dark:bg-oai-gray-800 dark:text-oai-gray-300">
                       <Icon className="h-4 w-4" />
                     </span>
@@ -1450,13 +1506,16 @@ export function AuthFilesTab({ onDirty }) {
                       <p className="mt-0.5 break-words text-oai-gray-600 dark:text-oai-gray-300" title={display(note)}>{display(note)}</p>
                     </div>
                   ) : null}
+                  {!uniqueName ? <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">{copy("proxy.creds.duplicateName")}</p> : null}
+                  <CredentialPluginQuota key={credentialIdentity(file)} file={file} />
                   <footer className="mt-3 flex flex-wrap items-center gap-1.5">
+                    {isOauth ? <Button variant="secondary" size="sm" disabled={busy || disabled} onClick={() => void runBatch("refresh", file)}>{copy("proxy.creds.refreshOne")}</Button> : null}
                     <Button
                       variant="secondary"
                       size="sm"
                       onClick={() => setSettingsName(name)}
-                      disabled={busy || !isOauth}
-                      title={isOauth ? copy("proxy.creds.settings.title") : copy("proxy.creds.fileOnly")}
+                      disabled={busy || !isOauth || !uniqueName}
+                      title={!uniqueName ? copy("proxy.creds.duplicateName") : isOauth ? copy("proxy.creds.settings.title") : copy("proxy.creds.fileOnly")}
                     >
                       <Settings2 className="h-3.5 w-3.5" />
                       {copy("proxy.creds.settings.button")}
@@ -1465,7 +1524,7 @@ export function AuthFilesTab({ onDirty }) {
                       variant="secondary"
                       size="sm"
                       onClick={() => setModelViewName(name)}
-                      disabled={busy}
+                      disabled={busy || !uniqueName}
                       title={copy("proxy.creds.models.viewTitle")}
                     >
                       {copy("proxy.creds.models.button")}
@@ -1484,8 +1543,8 @@ export function AuthFilesTab({ onDirty }) {
                       variant={disabled ? "primary" : "secondary"}
                       size="sm"
                       onClick={() => void toggleStatus(file)}
-                      disabled={busy || !isOauth}
-                      title={isOauth ? undefined : copy("proxy.creds.fileOnly")}
+                      disabled={busy || !isOauth || !uniqueName}
+                      title={!uniqueName ? copy("proxy.creds.duplicateName") : isOauth ? undefined : copy("proxy.creds.fileOnly")}
                       className="ml-auto"
                     >
                       {disabled ? copy("proxy.creds.action.enable") : copy("proxy.creds.action.disable")}
@@ -1493,7 +1552,7 @@ export function AuthFilesTab({ onDirty }) {
                     <button
                       type="button"
                       onClick={() => setDeleteFile(file)}
-                      disabled={busy || runtimeOnly}
+                      disabled={busy || runtimeOnly || !uniqueName}
                       title={copy("proxy.upstream.common.delete")}
                       aria-label={copy("proxy.upstream.common.delete")}
                       className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-oai-gray-400 transition-colors hover:bg-red-50 hover:text-red-600 disabled:opacity-50 dark:hover:bg-red-950/40 dark:hover:text-red-400"
@@ -1517,6 +1576,7 @@ export function AuthFilesTab({ onDirty }) {
         <CredentialSettingsDialog
           key={settingsName}
           name={settingsName}
+          provider={providerKeyForFile(files.find(file => authFileName(file) === settingsName) || {})}
           onClose={() => setSettingsName(null)}
           onSaved={() => {
             showToast(copy("proxy.creds.settings.updated", { name: display(settingsName) }), "success");

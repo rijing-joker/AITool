@@ -20,6 +20,8 @@ import {
   X,
 } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { mergeProcessSteps, toolCategory, toolPath } from "./cli-session-tools";
+import { ProviderIcon } from "../ui/dashboard/components/ProviderIcon";
 import { copy } from "../lib/copy";
 import { exportSessionMarkdown } from "../lib/session-export";
 import {
@@ -44,7 +46,7 @@ import {
   writePreference,
 } from "./cli-sessions-model";
 
-function SessionTurn({ turn, index, filter, expandAll, query, onCopy }) {
+function SessionTurn({ turn, index, filter, expandAll, query, onCopy, session }) {
   const [override, setOverride] = useState(null);
   useEffect(() => setOverride(null), [expandAll]);
   const steps =
@@ -52,16 +54,40 @@ function SessionTurn({ turn, index, filter, expandAll, query, onCopy }) {
   const forced = steps.some((step) => {
     return textHits(stepText(step), query);
   });
-  const open = forced || (override ?? expandAll);
+  const open = forced || (override ?? (expandAll || !turn.final));
+  const commands = steps.filter(
+    (step) => toolCategory(step.call) === "command",
+  ).length;
+  const duration = steps.reduce(
+    (total, step) => total + (step.durationMs || 0),
+    0,
+  );
+  const files = new Set(
+    steps
+      .filter(isChangeStep)
+      .flatMap(
+        (step) =>
+          step.call?.patch?.files?.map((file) => {
+            return file.path;
+          }) || [toolPath(step.call)],
+      )
+      .filter(Boolean),
+  ).size;
   const failures = steps.filter(isFailedStep).length;
   return (
     <section
       data-turn-key={turn.key}
       aria-label={copy("clisessions.turn", { count: index + 1 })}
-      className="mx-auto w-full max-w-4xl space-y-4 border-b border-oai-gray-100 px-4 py-6 dark:border-oai-gray-800/70 sm:px-8"
+      className="mx-auto w-full max-w-4xl space-y-3 border-b border-oai-gray-100 px-4 py-5 dark:border-oai-gray-800/70 sm:px-8"
     >
       {turn.question ? (
-        <MessageContent message={turn.question} query={query} onCopy={onCopy} />
+        <div data-turn-part="question">
+          <MessageContent
+            message={turn.question}
+            query={query}
+            onCopy={onCopy}
+          />
+        </div>
       ) : null}
       {filter === "changes" ? (
         <div className="space-y-1">
@@ -71,6 +97,7 @@ function SessionTurn({ turn, index, filter, expandAll, query, onCopy }) {
               step={step}
               query={query}
               onCopy={onCopy}
+              projectDir={session.projectDir}
             />
           ))}
         </div>
@@ -81,32 +108,53 @@ function SessionTurn({ turn, index, filter, expandAll, query, onCopy }) {
             type="button"
             aria-expanded={open}
             onClick={() => setOverride(!open)}
-            className="flex min-h-10 items-center gap-2 text-xs text-oai-gray-500 hover:text-oai-brand-600"
+            className="flex min-h-10 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-oai-gray-600 hover:text-oai-brand-600 dark:text-oai-gray-400 dark:hover:text-oai-brand-400"
           >
             <ChevronRight size={14} className={open ? "rotate-90" : ""} />
             {copy("clisessions.process", { count: steps.length })}
+            {commands ? (
+              <span>
+                {copy("clisessions.process_commands", { count: commands })}
+              </span>
+            ) : null}
+            {files ? (
+              <span>{copy("clisessions.process_files", { count: files })}</span>
+            ) : null}
+            {0 < duration ? (
+              <span className="tabular-nums">
+                {(duration / 1000).toFixed(1)}s
+              </span>
+            ) : null}
             {failures !== 0 ? (
-              <span className="text-red-500">
+              <span className="text-red-700 dark:text-red-400">
                 {copy("clisessions.process_failed", { count: failures })}
               </span>
             ) : null}
           </button>
-          {open ? (
+          {open || failures ? (
             <div className="space-y-1 border-l border-oai-gray-200 pl-2 dark:border-oai-gray-700">
-              {steps.map((step) => (
+              {mergeProcessSteps(open ? steps : steps.filter(isFailedStep)).map((step) => (
                 <ProcessStep
                   key={step.key}
                   step={step}
                   query={query}
                   onCopy={onCopy}
+                  projectDir={session.projectDir}
                 />
               ))}
             </div>
           ) : null}
         </div>
       ) : null}
+      {!turn.final && filter !== "changes" ? (
+        <p className="text-xs text-oai-gray-600 dark:text-oai-gray-400">
+          {copy("clisessions.no_final")}
+        </p>
+      ) : null}
       {turn.final && filter !== "changes" ? (
-        <MessageContent message={turn.final} query={query} onCopy={onCopy} />
+        <div data-turn-part="answer">
+          <MessageContent message={turn.final} query={query} onCopy={onCopy} appId={session.appId} />
+        </div>
       ) : null}
     </section>
   );
@@ -120,6 +168,8 @@ export function SessionReader({
   onBack,
   onReload,
   onCopy,
+  onLoadFull,
+  preview = false,
 }) {
   const titleRef = useRef(null);
   const searchRef = useRef(null);
@@ -134,7 +184,12 @@ export function SessionReader({
     () => readPreference(SESSION_PREFS.outline, false) === true,
   );
   const [activeTurn, setActiveTurn] = useState(null);
+  const jumpFrame = useRef(null);
+  const jumping = useRef(false);
   const [hitIndex, setHitIndex] = useState(0);
+  const [fullBusy, setFullBusy] = useState(false);
+  const [fullError, setFullError] = useState(false);
+  const completeQuery = preview ? "" : query;
   const turns = useMemo(() => buildSessionTurns(messages ?? []), [messages]);
   const effectiveFilter = query ? "all" : filter;
   const visibleTurns = useMemo(
@@ -149,8 +204,8 @@ export function SessionReader({
   );
   const hits = useMemo(
     () =>
-      query ? turns.filter((turn) => textHits(turnText(turn), query)) : [],
-    [turns, query],
+      completeQuery ? turns.filter((turn) => textHits(turnText(turn), completeQuery)) : [],
+    [turns, completeQuery],
   );
   const virtual = visibleTurns.length > 60;
   const virtualizer = useVirtualizer({
@@ -161,32 +216,105 @@ export function SessionReader({
     overscan: 3,
   });
   const jumpTo = useCallback(
-    (key) => {
+    (key, part = "question", find = false) => {
       const index = visibleTurns.findIndex(({ turn }) => {
         return turn.key === key;
       });
       if (index < 0) return;
+      cancelAnimationFrame(jumpFrame.current);
+      jumping.current = true;
       setActiveTurn(key);
       if (virtual) virtualizer.scrollToIndex(index, { align: "start" });
-      else
-        scrollRef.current
-          ?.querySelector(`[data-turn-key="${key}"]`)
-          ?.scrollIntoView?.({ block: "start" });
+      let attempts = 0;
+      const locate = () => {
+        const root = scrollRef.current;
+        const section = root?.querySelector(`[data-turn-key="${key}"]`);
+        // A truncated summary can contain a clipped mark. Prefer the full
+        // message/argument/output block so a reported match becomes readable.
+        const marks = find ? [...(section?.querySelectorAll("[data-session-hit]") || [])] : [];
+        const mark = marks.find(hit => !hit.closest("summary")) || marks[0];
+        const target =
+          mark ||
+          section?.querySelector(`[data-turn-part="${part}"]`) ||
+          section;
+        if (target && (!find || mark || attempts >= 15)) {
+          // Nested output/code panes scroll first, then the reader. Keep the
+          // surrounding page fixed and preserve horizontal code scroll.
+          let parent = target.parentElement;
+          while (parent && parent !== root) {
+            const style = getComputedStyle(parent);
+            if (
+              /(auto|scroll)/.test(style.overflowY) &&
+              parent.scrollHeight > parent.clientHeight
+            ) {
+              parent.scrollTop +=
+                target.getBoundingClientRect().top -
+                parent.getBoundingClientRect().top -
+                parent.clientHeight / 3;
+            }
+            parent = parent.parentElement;
+          }
+          if (root)
+            root.scrollTop +=
+              target.getBoundingClientRect().top -
+              root.getBoundingClientRect().top -
+              (find ? 72 : 16);
+        }
+        // Disclosure mounting and virtual measurements settle over several
+        // frames. Retry while the target appears, then correct the final offset.
+        if (++attempts < 18) jumpFrame.current = requestAnimationFrame(locate);
+        else jumping.current = false;
+      };
+      jumpFrame.current = requestAnimationFrame(locate);
     },
     [visibleTurns, virtual, virtualizer],
   );
+  useEffect(() => () => cancelAnimationFrame(jumpFrame.current), []);
+  useEffect(() => {
+    const root = scrollRef.current;
+    if (!root) return;
+    let frame;
+    setActiveTurn((current) => current ?? visibleTurns[0]?.turn.key ?? null);
+    const cancelJump = () => {
+      cancelAnimationFrame(jumpFrame.current);
+      jumping.current = false;
+    };
+    root.addEventListener("wheel", cancelJump, { passive: true });
+    root.addEventListener("touchstart", cancelJump, { passive: true });
+    const update = () => {
+      if (jumping.current) return;
+      const top = root.getBoundingClientRect().top + 80;
+      const sections = [...root.querySelectorAll("[data-turn-key]")];
+      const current = sections.find(
+        (section) => section.getBoundingClientRect().bottom > top,
+      );
+      if (current) setActiveTurn(current.dataset.turnKey);
+    };
+    const onScroll = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(update);
+    };
+    root.addEventListener("scroll", onScroll, { passive: true });
+    update();
+    return () => {
+      root.removeEventListener("scroll", onScroll);
+      root.removeEventListener("wheel", cancelJump);
+      root.removeEventListener("touchstart", cancelJump);
+      cancelAnimationFrame(frame);
+    };
+  }, [visibleTurns, messages]);
   const stepHit = (direction) => {
     if (!hits.length) return;
     const next = (hitIndex + direction + hits.length) % hits.length;
     setHitIndex(next);
-    jumpTo(hits[next].key);
+    jumpTo(hits[next].key, "question", true);
   };
   useEffect(() => {
     titleRef.current?.focus({ preventScroll: true });
   }, []);
   useEffect(() => {
     setHitIndex(0);
-    if (hits.length) jumpTo(hits[0].key);
+    if (hits.length) jumpTo(hits[0].key, "question", true);
   }, [hits, jumpTo]);
   useEffect(() => {
     const handleKey = (event) => {
@@ -205,9 +333,26 @@ export function SessionReader({
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
   }, [search, onBack]);
-  const exportMarkdown = () => {
+  const requestFull = async () => {
+    setFullBusy(true);
+    setFullError(false);
+    try {
+      return onLoadFull ? await onLoadFull() : messages;
+    } catch {
+      setFullError(true);
+      return null;
+    } finally {
+      setFullBusy(false);
+    }
+  };
+  useEffect(() => {
+    if (query && preview && !fullBusy && !fullError) void requestFull();
+  });
+  const exportMarkdown = async () => {
+    const fullMessages = await requestFull();
+    if (!fullMessages) return;
     const blob = new Blob(
-      [exportSessionMarkdown(session, messages, formatTime, roleKey)],
+      [exportSessionMarkdown(session, fullMessages, formatTime, roleKey)],
       { type: "text/markdown;charset=utf-8" },
     );
     const url = URL.createObjectURL(blob);
@@ -227,6 +372,7 @@ export function SessionReader({
         expandAll={expandAll}
         query={query}
         onCopy={onCopy}
+        session={session}
       />
     );
   };
@@ -234,19 +380,44 @@ export function SessionReader({
   let readerContent;
   if (error) {
     readerContent = (
-      <p role="alert" className="p-6 text-sm text-red-600">
-        {error}
-      </p>
+      <div role="alert" className="mx-auto max-w-xl p-6 text-sm">
+        <p className="font-medium">{copy("clisessions.read_failed")}</p>
+        <p className="mt-2 text-oai-gray-600 dark:text-oai-gray-400">
+          {copy("clisessions.read_failed_hint")}
+        </p>
+        <div className="mt-3 flex gap-3">
+          <button
+            type="button"
+            onClick={onReload}
+            className="min-h-10 rounded-lg bg-oai-brand-600 px-4 text-white hover:bg-oai-brand-700"
+          >
+            {copy("clisessions.reload")}
+          </button>
+          <button
+            type="button"
+            onClick={onBack}
+            className="min-h-10 rounded-lg px-3 hover:bg-oai-gray-100 dark:hover:bg-oai-gray-800"
+          >
+            {copy("clisessions.back")}
+          </button>
+        </div>
+        <details className="mt-3 text-xs text-oai-gray-600 dark:text-oai-gray-400">
+          <summary className="min-h-10 cursor-pointer py-3">
+            {copy("clisessions.error_details")}
+          </summary>
+          <pre className="whitespace-pre-wrap break-words">{error}</pre>
+        </details>
+      </div>
     );
   } else if (messages === null) {
     readerContent = (
-      <p className="p-6 text-sm text-oai-gray-400">
+      <p className="p-6 text-sm text-oai-gray-600 dark:text-oai-gray-400">
         {copy("clisessions.loading")}
       </p>
     );
   } else if (visibleTurns.length === 0) {
     readerContent = (
-      <p className="p-6 text-sm text-oai-gray-400">
+      <p className="p-6 text-sm text-oai-gray-600 dark:text-oai-gray-400">
         {copy(
           effectiveFilter === "changes" && messages.length
             ? "clisessions.no_changes"
@@ -298,7 +469,8 @@ export function SessionReader({
             >
               {session.title || copy("clisessions.untitled")}
             </h1>
-            <p className="mt-0.5 text-[11px] text-oai-gray-400">
+            <p className="mt-0.5 flex items-center gap-1.5 text-xs text-oai-gray-600 dark:text-oai-gray-400">
+              <ProviderIcon provider={session.appId} size={13} />
               {sessionAppLabel(session.appId)} ·{" "}
               {formatTime(session.lastActiveAt ?? session.createdAt)}
             </p>
@@ -352,11 +524,15 @@ export function SessionReader({
             </div>
           </details>
         </div>
-        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 px-2 text-[11px] text-oai-gray-400">
+        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2 px-2 text-xs text-oai-gray-600 dark:text-oai-gray-400">
           <span className="min-w-0 flex-1 truncate" title={session.projectDir}>
             {session.projectDir || copy("clisessions.unknown_project")}
           </span>
-          <span>{copy("clisessions.turn_count", { count: turns.length })}</span>
+          {messages !== null && !error ? (
+            <span>
+              {copy("clisessions.turn_count", { count: turns.length })}
+            </span>
+          ) : null}
           <UsageChips usage={usage} />
         </div>
       </header>
@@ -372,27 +548,29 @@ export function SessionReader({
                   setSearch("");
                   setFilter(value);
                 }}
-                className={`min-h-10 rounded-md px-3 text-xs ${effectiveFilter === value ? "bg-oai-white shadow-sm dark:bg-oai-gray-700" : "text-oai-gray-500"}`}
+                className={`min-h-10 rounded-md px-3 text-xs ${effectiveFilter === value ? "bg-oai-white shadow-sm dark:bg-oai-gray-700" : "text-oai-gray-600 dark:text-oai-gray-300"}`}
               >
                 {copy(`clisessions.filter.${value}`)}
               </button>
             ))}
           </div>
-          <button
-            type="button"
-            aria-pressed={expandAll}
-            onClick={() => {
-              setExpandAll(!expandAll);
-              writePreference(SESSION_PREFS.processes, !expandAll);
-            }}
-            className="min-h-10 shrink-0 px-2 text-xs text-oai-gray-500"
-          >
-            {copy(
-              expandAll
-                ? "clisessions.collapse_processes"
-                : "clisessions.expand_processes",
-            )}
-          </button>
+          {effectiveFilter === "all" ? (
+            <button
+              type="button"
+              aria-pressed={expandAll}
+              onClick={() => {
+                setExpandAll(!expandAll);
+                writePreference(SESSION_PREFS.processes, !expandAll);
+              }}
+              className="min-h-10 shrink-0 px-2 text-xs text-oai-gray-600 dark:text-oai-gray-400"
+            >
+              {copy(
+                expandAll
+                  ? "clisessions.collapse_processes"
+                  : "clisessions.expand_processes",
+              )}
+            </button>
+          ) : null}
           <button
             type="button"
             aria-label={copy("clisessions.outline")}
@@ -410,7 +588,7 @@ export function SessionReader({
             type="button"
             aria-label={copy("clisessions.export")}
             title={copy("clisessions.export")}
-            disabled={!messages?.length || Boolean(error)}
+            disabled={!messages?.length || Boolean(error) || fullBusy}
             onClick={exportMarkdown}
             className={sessionIconButton}
           >
@@ -418,28 +596,31 @@ export function SessionReader({
           </button>
         </div>
         <div className="flex items-center gap-1" role="search">
-          <Search size={14} className="shrink-0 text-oai-gray-400" />
+          <Search
+            size={14}
+            className="shrink-0 text-oai-gray-600 dark:text-oai-gray-400"
+          />
           <input
             ref={searchRef}
             aria-label={copy("clisessions.find")}
             placeholder={copy("clisessions.find")}
             value={search}
-            onChange={(event) => setSearch(event.target.value)}
+            onChange={(event) => { setFullError(false); setSearch(event.target.value); }}
             onKeyDown={(event) => {
               if (event.key === "Enter") {
                 event.preventDefault();
                 stepHit(event.shiftKey ? -1 : 1);
               }
             }}
-            className="h-10 min-w-0 flex-1 rounded-md border border-oai-gray-300 bg-oai-white px-3 text-sm outline-none focus:border-oai-brand-500 dark:border-oai-gray-700 dark:bg-oai-gray-900"
+            className="h-10 min-w-0 flex-1 rounded-md border border-oai-gray-300 bg-oai-white px-3 text-sm placeholder:text-oai-gray-500 dark:placeholder:text-oai-gray-400 outline-none focus:border-oai-brand-500 dark:border-oai-gray-700 dark:bg-oai-gray-900"
           />
           {query ? (
             <>
               <span
                 role="status"
-                className="max-w-28 text-[10px] tabular-nums text-oai-gray-400"
+                className="max-w-28 text-xs tabular-nums text-oai-gray-600 dark:text-oai-gray-400"
               >
-                {copy("clisessions.find_count", {
+                {preview ? copy(fullError ? "clisessions.content_retry" : "clisessions.loading") : copy("clisessions.find_count", {
                   current: hits.length ? hitIndex + 1 : 0,
                   count: hits.length,
                 })}
@@ -473,6 +654,10 @@ export function SessionReader({
             </>
           ) : null}
         </div>
+        {fullError ? <div role="alert" className="flex items-center gap-3 text-xs text-red-700 dark:text-red-400">
+          <span>{copy("clisessions.content_failed")}</span>
+          <button type="button" onClick={() => { void requestFull(); }} className="min-h-10 underline">{copy("clisessions.content_retry")}</button>
+        </div> : null}
       </div>
       <div className="relative flex min-h-0 flex-1">
         <div
@@ -486,29 +671,66 @@ export function SessionReader({
             aria-label={copy("clisessions.outline")}
             className="absolute bottom-0 right-0 top-0 z-10 w-56 max-w-[85%] shrink-0 overflow-y-auto border-l border-oai-gray-200 bg-oai-white p-3 shadow-lg dark:border-oai-gray-800 dark:bg-oai-gray-900 md:static md:shadow-none"
           >
-            <p className="mb-2 px-2 py-1 text-xs font-medium text-oai-gray-500">
-              {copy("clisessions.outline")}
-            </p>
-            {visibleTurns.map(({ turn, index }) => (
+            <div className="mb-2 flex items-center justify-between px-2 text-xs font-medium text-oai-gray-600 dark:text-oai-gray-400">
+              <span>{copy("clisessions.outline")}</span>
               <button
-                key={turn.key}
                 type="button"
-                aria-current={activeTurn === turn.key ? "location" : undefined}
-                onClick={() => {
-                  jumpTo(turn.key);
-                  if (window.matchMedia("(max-width: 767px)").matches)
-                    setOutline(false);
-                }}
-                className={`mb-1 flex min-h-10 w-full gap-2 rounded-lg px-2 py-2 text-left text-xs ${activeTurn === turn.key ? "bg-oai-brand-50 text-oai-brand-700 dark:bg-oai-brand-950/40 dark:text-oai-brand-300" : "text-oai-gray-500 hover:bg-oai-gray-100 dark:hover:bg-oai-gray-800"}`}
+                aria-label={copy("clisessions.close_outline")}
+                onClick={() => setOutline(false)}
+                className={`${sessionIconButton} md:hidden`}
               >
-                <span className="tabular-nums text-oai-gray-400">
-                  {index + 1}
-                </span>
-                <span className="line-clamp-2 break-words">
-                  {turnPreview(turn) ||
-                    copy("clisessions.turn", { count: index + 1 })}
-                </span>
+                <X size={16} />
               </button>
+            </div>
+            {visibleTurns.map(({ turn, index }) => (
+              <div key={turn.key} className="mb-2">
+                <button
+                  type="button"
+                  aria-current={
+                    activeTurn === turn.key ? "location" : undefined
+                  }
+                  onClick={() => {
+                    jumpTo(turn.key);
+                    if (window.matchMedia("(max-width: 767px)").matches)
+                      setOutline(false);
+                  }}
+                  className={`flex min-h-10 w-full gap-2 rounded-lg px-2 py-2 text-left text-xs ${activeTurn === turn.key ? "bg-oai-brand-50 text-oai-brand-700 dark:bg-oai-brand-950/40 dark:text-oai-brand-300" : "text-oai-gray-600 hover:bg-oai-gray-100 dark:text-oai-gray-400 dark:hover:bg-oai-gray-800"}`}
+                >
+                  <span className="tabular-nums">{index + 1}</span>
+                  <span className="line-clamp-2 break-words">
+                    {turnPreview(turn) ||
+                      copy("clisessions.turn", { count: index + 1 })}
+                  </span>
+                </button>
+                {turn.final && effectiveFilter !== "changes" ? (
+                  <button
+                    type="button"
+                    aria-label={copy("clisessions.jump_answer", {
+                      count: index + 1,
+                    })}
+                    onClick={() => {
+                      jumpTo(turn.key, "answer");
+                      if (window.matchMedia("(max-width: 767px)").matches)
+                        setOutline(false);
+                    }}
+                    className="ml-5 flex min-h-10 w-[calc(100%-1.25rem)] items-start gap-1 rounded-md px-2 py-2 text-left text-xs text-oai-gray-600 hover:bg-oai-gray-100 dark:text-oai-gray-400 dark:hover:bg-oai-gray-800"
+                  >
+                    <ArrowDown size={12} className="mt-0.5 shrink-0" />
+                    <span className="line-clamp-2 break-words">
+                      {turn.final.content.replace(/[#*`]/g, "").slice(0, 100)}
+                    </span>
+                  </button>
+                ) : null}
+                {turn.steps.some(isFailedStep) || !turn.final ? (
+                  <p className="ml-7 text-xs text-oai-gray-600 dark:text-oai-gray-400">
+                    {turn.steps.some(isFailedStep)
+                      ? copy("clisessions.process_failed", {
+                          count: turn.steps.filter(isFailedStep).length,
+                        })
+                      : copy("clisessions.no_final")}
+                  </p>
+                ) : null}
+              </div>
             ))}
           </nav>
         ) : null}

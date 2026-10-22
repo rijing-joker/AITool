@@ -1,4 +1,5 @@
 use std::time::Duration;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use tauri::image::Image;
 use tauri::menu::{CheckMenuItem, Menu, MenuItem};
@@ -9,6 +10,13 @@ const OPEN_ID: &str = "open-dashboard";
 const PET_ID: &str = "show-pet";
 const QUIT_ID: &str = "quit";
 const TRAY_ID: &str = "tokentracker-tray";
+static PROVIDERS_PENDING: AtomicBool = AtomicBool::new(false);
+
+pub fn restore_pending_providers<R: Runtime>(window: &tauri::Webview<R>) {
+    if PROVIDERS_PENDING.swap(false, Ordering::SeqCst) {
+        let _ = window.eval("window.__aitoolProvidersPending=true;window.dispatchEvent(new Event('native:providers'))");
+    }
+}
 
 /// How long to wait before re-publishing the menu. Long enough that the
 /// desktop's tray client has finished its initial layout exchange, short
@@ -38,8 +46,9 @@ fn build_menu<R: Runtime, M: Manager<R>>(manager: &M) -> tauri::Result<Menu<R>> 
         .try_state::<crate::pet::PetState>()
         .is_some_and(|state| state.get().visible);
     let pet = CheckMenuItem::with_id(manager, PET_ID, "Show Pet", true, pet_visible, None::<&str>)?;
+    let providers = MenuItem::with_id(manager, "providers", "Switch provider", true, None::<&str>)?;
     let quit = MenuItem::with_id(manager, QUIT_ID, "Quit", true, None::<&str>)?;
-    Menu::with_items(manager, &[&open, &pet, &quit])
+    Menu::with_items(manager, &[&open, &providers, &pet, &quit])
 }
 
 /// Reflect the pet's visibility in the tray's "Show Pet" check after it changes.
@@ -108,6 +117,11 @@ pub fn install(app: &App) -> tauri::Result<()> {
         .menu(&menu)
         .on_menu_event(|app, event| match event.id().as_ref() {
             OPEN_ID => show_main_window(app),
+            "providers" => { show_main_window(app); if let Some(window) = app.get_webview_window("main") {
+                if window.url().map(|url| url.host_str() == Some("127.0.0.1") || url.host_str() == Some("localhost")).unwrap_or(false) {
+                    let _ = window.eval("window.__aitoolProvidersPending=true;window.dispatchEvent(new Event('native:providers'))");
+                } else { PROVIDERS_PENDING.store(true, Ordering::SeqCst); }
+            } else { PROVIDERS_PENDING.store(true, Ordering::SeqCst); } },
             PET_ID => {
                 let visible = app.state::<crate::pet::PetState>().get().visible;
                 crate::pet::set_visible(app, !visible);
@@ -127,6 +141,7 @@ pub fn show_main_window<R: Runtime>(app: &AppHandle<R>) {
         let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();
+        let _ = window.eval("window.dispatchEvent(new CustomEvent('native:visibility',{detail:{visible:true}}))");
     }
 }
 

@@ -1622,7 +1622,7 @@ function createLocalApiHandler({ queuePath, serverVersion = null }) {
         const app = url.searchParams.get("app") || "claude";
         const sourcePath = url.searchParams.get("path") || "";
         try {
-          const session = await sessions.readSession({ app, sourcePath });
+          const session = await sessions.readSession({ app, sourcePath, preview: url.searchParams.get("preview") === "1" });
           // Reader-header cost (cc-switch 31e5ae3): price each model's share of
           // the session at its own rate (mixed-model sessions), using the
           // session's own input semantics.
@@ -1630,18 +1630,24 @@ function createLocalApiHandler({ queuePath, serverVersion = null }) {
           if (Array.isArray(perModel) && perModel.length > 0) {
             const pricing = require("./proxy/pricing");
             const snapshot = await pricing.getPricingSnapshot(require("./proxy/paths").pricingPath);
-            let totalCostUsd = 0;
-            let pricedAny = false;
-            for (const entry of perModel) {
-              const costUsd = pricing.estimateCostUsd(snapshot.models, entry.model, entry, { inputInclusive: session.usage.inputInclusive });
-              if (costUsd != null) {
-                totalCostUsd += costUsd;
-                pricedAny = true;
-              }
-            }
-            if (pricedAny) session.usage.estimatedCostUsd = totalCostUsd;
+            require("./session-pricing").priceSessionUsage(session.usage, snapshot.models);
           }
           json(res, { ok: true, app, ...session });
+        } catch (error) {
+          json(res, { ok: false, error: error?.message || String(error) }, 400);
+        }
+        return;
+      }
+      if (p === "/api/cli-sessions/content" && req.method === "GET") {
+        try {
+          const page = await sessions.readSessionContent({
+            app: url.searchParams.get("app") || "claude",
+            sourcePath: url.searchParams.get("path") || "",
+            revision: url.searchParams.get("revision"),
+            ref: url.searchParams.get("ref"),
+            offset: url.searchParams.get("offset") ?? 0,
+          });
+          json(res, { ok: true, ...page });
         } catch (error) {
           json(res, { ok: false, error: error?.message || String(error) }, 400);
         }
@@ -3349,6 +3355,30 @@ function createLocalApiHandler({ queuePath, serverVersion = null }) {
       return true;
     }
 
+    if (p === "/api/provider-api-key") {
+      const keys = require("./provider-api-key-store");
+      const provider = String(url.searchParams.get("provider") || "");
+      if (!keys.isProviderId(provider)) { json(res, { ok: false, error: "Unsupported provider" }, 400); return; }
+      if (!isAuthorizedLocalMutation(req)) { json(res, { ok: false, error: "Unauthorized" }, 401); return; }
+      if (req.method === "GET") {
+        json(res, { ok: true, configured: Boolean(keys.readStoredApiKey({ provider, home: os.homedir() })), source: keys.normalizeApiKey(process.env[keys.envNameForProvider(provider)]) ? "env" : "stored" }); return;
+      }
+      if (req.method === "PUT") {
+        try {
+          const body = await readJsonBody(req);
+          await keys.writeStoredApiKey({ provider, home: os.homedir(), apiKey: body.apiKey });
+          const limits = require("./usage-limits");
+          limits.resetUsageLimitsCache({ invalidateInFlight: true });
+          if (provider === "opencode-go") {
+            const cache = path.join(os.homedir(), ".tokentracker", "tracker", "opencode-go-usage-limits-cache.json");
+            await fs.promises.unlink(cache).catch(() => {});
+          }
+          json(res, { ok: true }, 200);
+        } catch { json(res, { ok: false, error: "Invalid API key" }, 400); }
+        return;
+      }
+      json(res, { ok: false }, 405); return;
+    }
     // --- usage-limits ---
     if (p === "/functions/tokentracker-usage-limits") {
       const { getUsageLimits, resetUsageLimitsCache } = require("./usage-limits");

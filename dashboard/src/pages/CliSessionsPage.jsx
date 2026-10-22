@@ -17,6 +17,7 @@ import { isLocalDashboardHost } from "../lib/host-mode";
 import { isMockEnabled } from "../lib/mock-data";
 import { SessionList } from "./cli-session-list";
 import { SessionReader } from "./cli-session-reader";
+import { SessionContentContext } from "./cli-session-lazy";
 import {
   filterSessions,
   readPreference,
@@ -51,6 +52,9 @@ function LocalCliSessionsPage() {
   );
   const [messages, setMessages] = useState(null);
   const [usage, setUsage] = useState(null);
+  const [revision, setRevision] = useState(null);
+  const [preview, setPreview] = useState(false);
+  const fullRequest = useRef(null);
   const [loading, setLoading] = useState(false);
   const [listError, setListError] = useState(null);
   const [readError, setReadError] = useState(null);
@@ -155,11 +159,15 @@ function LocalCliSessionsPage() {
     transcriptController.current = controller;
     setMessages(null);
     setUsage(null);
+    setRevision(null);
+    setPreview(false);
+    fullRequest.current = null;
     setReadError(null);
     try {
       const params = new URLSearchParams({
         app: session.appId,
         path: session.sourcePath,
+        preview: "1",
       });
       const data = await readApi(
         `/api/cli-sessions/read?${params}`,
@@ -168,6 +176,8 @@ function LocalCliSessionsPage() {
       if (controller.signal.aborted) return;
       setMessages(data.messages ?? []);
       setUsage(data.usage ?? null);
+      setRevision(data.revision ?? null);
+      setPreview(data.preview === true);
     } catch (error) {
       if (!controller.signal.aborted) {
         setMessages([]);
@@ -175,6 +185,30 @@ function LocalCliSessionsPage() {
       }
     }
   }, []);
+  const readContent = useCallback(async (reference, offset) => {
+    if (!selected || !revision) throw new Error("Session content is unavailable");
+    const params = new URLSearchParams({ app: selected.appId, path: selected.sourcePath,
+      revision, ref: reference.id, offset: String(offset) });
+    return readApi(`/api/cli-sessions/content?${params}`, transcriptController.current?.signal);
+  }, [selected, revision]);
+  const loadFullTranscript = async () => {
+    if (!preview) return messages;
+    if (!fullRequest.current) {
+      const controller = transcriptController.current;
+      const params = new URLSearchParams({ app: selected.appId, path: selected.sourcePath });
+      fullRequest.current = readApi(`/api/cli-sessions/read?${params}`, controller.signal).then(data => {
+        if (controller.signal.aborted) throw new Error("Session request cancelled");
+        if (data.revision !== revision) throw new Error("Session changed; reload before reading more content");
+        setMessages(data.messages ?? []);
+        setPreview(false);
+        return data.messages ?? [];
+      }).catch(error => {
+        if (!controller.signal.aborted) fullRequest.current = null;
+        throw error;
+      });
+    }
+    return fullRequest.current;
+  };
   useEffect(() => {
     if (selected) {
       void loadTranscript(selected);
@@ -351,16 +385,20 @@ function LocalCliSessionsPage() {
         </div>
       </div>
       {selected ? (
-        <SessionReader
-          key={sessionKey(selected)}
-          session={selected}
-          messages={messages}
-          usage={usage}
-          error={readError}
-          onBack={backToList}
-          onReload={() => void loadTranscript(selected)}
-          onCopy={handleCopy}
-        />
+        <SessionContentContext.Provider value={readContent}>
+          <SessionReader
+            key={`${sessionKey(selected)}:${revision || "loading"}`}
+            session={selected}
+            messages={messages}
+            usage={usage}
+            error={readError}
+            onBack={backToList}
+            onReload={() => void loadTranscript(selected)}
+            onCopy={handleCopy}
+            onLoadFull={loadFullTranscript}
+            preview={preview}
+          />
+        </SessionContentContext.Provider>
       ) : null}
     </div>
   );

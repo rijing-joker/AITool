@@ -957,21 +957,32 @@ async function handleProxyApiRequest(req, res, url, ctx) {
         json(res, { ok: false, error: "Invalid management API path" });
         return true;
       }
-      const timeoutMs = Math.min(120_000, Math.max(1_000, Number(body.timeoutMs) || 15_000));
+      const refresh = verb === "POST" && /^\/?credentials\/refresh$/.test(route);
+      const pluginQuota = verb === "POST" && /^\/?plugins\/[^/]+\/quota$/.test(route);
+      const timeoutMs = Math.min(refresh ? 300_000 : 120_000, Math.max(1_000, Number(body.timeoutMs) || 15_000));
       if (verb !== "GET" && /^\/?config(?:[/.]|$)/.test(route)
         && !requireConfigRevision(res, body.ifMatch)) return true;
-      const result = await management.request(verb, `/v8/management/${route.replace(/^\/+/, "")}`, {
+      const options = {
         query: body.query && typeof body.query === "object" && !Array.isArray(body.query) ? body.query : undefined,
         body: body.body,
         timeoutMs,
         ifMatch: body.ifMatch,
-      });
+      };
+      let result = await management.request(verb, `/v8/management/${route.replace(/^\/+/, "")}`, options);
+      // Older cores expose plugin operations only on the legacy namespace.
+      // Never retry permission, account or upstream failures on another route.
+      if (result.status === 404 && (pluginQuota || (verb === "GET" && /^\/?plugins$/.test(route)))) {
+        result = await management.request(verb, `/v0/management/${route.replace(/^\/+/, "")}`, options);
+      }
       if (!result.ok) {
         if (result.status === 412) configResponse(res, result);
-        else json(res, { ok: false, error: formatManagementError(result.status, result.data) });
+        else json(res, { ok: false, error: refresh ? "Credential refresh failed" : pluginQuota ? "Plugin quota query failed" : formatManagementError(result.status, result.data) });
         return true;
       }
-      json(res, { ok: true, value: result.data === "" ? null : result.data, etag: result.etag || null });
+      // Refresh replies may contain access and refresh tokens. Expose only
+      // acknowledgements and per-credential results to the browser.
+      const value = refresh ? require("./credential-refresh").sanitize(result.data) : pluginQuota ? require("./credential-refresh").sanitizeQuota(result.data) : result.data === "" ? null : result.data;
+      json(res, { ok: true, value, etag: result.etag || null });
       return true;
     }
 

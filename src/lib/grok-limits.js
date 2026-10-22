@@ -609,6 +609,11 @@ function normalizeGrokBillingResponse(body) {
     // Effective percent used for the primary bar (API creditUsagePercent, or
     // productUsage / legacy monthly counters when the raw field is absent).
     credit_usage_percent: usedPercent == null ? null : clampPercent(usedPercent),
+    product_shares: Array.isArray(config.productUsage) ? config.productUsage.flatMap(row => {
+      const percent = clampPercent(row?.usagePercent);
+      const label = row?.product || row?.productName || row?.name;
+      return percent === null || typeof label !== "string" ? [] : [{ product: label, used_percent: percent }];
+    }) : [],
     on_demand_cap: onDemandCap,
     on_demand_used: onDemandUsed,
     billing_period_start: periodStart,

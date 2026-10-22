@@ -235,6 +235,8 @@ function commonGlobalBinDirectories({ home = os.homedir(), platform = process.pl
   if (platform === "win32") {
     return [
       path.join(home, "AppData", "Roaming", "npm"),
+      ...versionedBinDirs(path.join(home, "AppData", "Roaming", "fnm", "node-versions"), ["installation"]),
+      ...versionedBinDirs(path.join(home, "AppData", "Local", "fnm", "node-versions"), ["installation"]),
     ];
   }
   return [

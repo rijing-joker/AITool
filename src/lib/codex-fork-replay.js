@@ -36,6 +36,7 @@ async function timeline(file, previous = null) {
   if (cached?.stamp === stamp) return cached;
   const snapshot = await files.readSnapshot(file, { expectedStat: stat });
   const events = [];
+  const usageRecords = [];
   let maxTimestamp = null;
   let invalidTimestamp = false;
   let lastServiceTier = previous?.lastServiceTier || null;
@@ -49,6 +50,10 @@ async function timeline(file, previous = null) {
     applyCodexModelEvent(attribution, obj);
     lastServiceTier = readCodexServiceTier(obj) || lastServiceTier;
     if (Number.isFinite(ms)) maxTimestamp = Math.max(maxTimestamp || 0, ms);
+    if (obj.type === "token_usage_record" && typeof obj.payload?.response_id === "string") {
+      if (!Number.isFinite(ms)) invalidTimestamp = true;
+      else usageRecords.push({ ms, id: obj.payload.response_id });
+    }
     if (obj.type !== "event_msg" || obj.payload?.type !== "token_count") continue;
     const signature = tokenSignature(obj.payload.info);
     if (!signature) continue;
@@ -56,7 +61,7 @@ async function timeline(file, previous = null) {
     else events.push({ ms, signature });
     consumeUsageDelta(usageState, obj.payload.info?.last_token_usage, obj.payload.info?.total_token_usage);
   }
-  const value = { stamp, events, maxTimestamp, invalidTimestamp, lastModel: currentCodexModel(attribution), lastServiceTier,
+  const value = { stamp, events, usageRecords, maxTimestamp, invalidTimestamp, lastModel: currentCodexModel(attribution), lastServiceTier,
     modelAttributionState: snapshotCodexModelAttributionState(attribution),
     lastTotal: usageState.lastTotal, tokenUsageBaselines: snapshotUsageBaselines(usageState) };
   cache.delete(file); cache.set(file, value);
@@ -89,9 +94,11 @@ function createForkReplayResolver(inventory) {
     const cutoff = Date.parse(timestamp);
     if (!Number.isFinite(cutoff)) throw deferred("Codex fork metadata has no valid timestamp.");
     const segments = new Map();
+    const parentUsageIds = new Set();
     for (const candidate of candidates.sort((a, b) => path.basename(a).localeCompare(path.basename(b)))) {
       let value;
       try { value = await timeline(candidate); } catch { throw deferred("Codex parent rollout could not be read."); }
+      for (const row of value.usageRecords) if (row.ms <= cutoff) parentUsageIds.add(row.id);
       if (value.invalidTimestamp) throw deferred("Codex parent usage has no valid timestamp.");
       const id = files.rolloutIds(candidate).rollout;
       const signatures = value.events.filter((row) => row.ms <= cutoff).map((row) => row.signature);
@@ -106,6 +113,7 @@ function createForkReplayResolver(inventory) {
     let offset = previous?.offset || 0;
     let active = previous?.active !== false;
     return {
+      hasUsageRecord(id) { return parentUsageIds.has(id); },
       skip(info) {
         if (!active) return false;
         const signature = tokenSignature(info);

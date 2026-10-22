@@ -4,21 +4,15 @@
 //   {"type":"token_usage_record","payload":{usage,turn_token_usage,thread_token_usage,...}}
 // next to the event_msg token_count that has always carried usage (issue
 // #652). While both are written they describe the same model response, so
-// token_count stays the only source of normal usage and a record is counted
-// in exactly one case:
+// token_count stays the source of ordinary response usage.
 //
-// Compaction. Codex bills the compaction model call in a record that is
-// immediately followed by a top-level `compacted` line, and the next
-// token_count repeats the previous cumulative total (its last_token_usage is
-// the post-compaction context size, not a response). The cumulative delta is
-// zero, so without the record the call is lost. Inside a file that has
-// already shown a token_count, such a record is held as `compaction` and
-// counted when the next token_count arrives with a total identical to the
-// previous one. If that total advanced, the token_count already covers the
-// call and the record is dropped. Each compaction is counted once per
-// payload.response_id: a fork replays its parent's records and a copied
-// rollout repeats them, both with the same id. A record without one is never
-// counted.
+// Remote compaction can use either `record → compacted → token_count` with
+// repeated cumulative totals, or (CLI 0.153+) adjacent `record → token_count`
+// with an all-zero last usage and repeated totals or a delta exactly matching
+// the record. The record supplies the missing call; the cumulative baseline
+// still advances, so later turns do not bill it again. This includes a first
+// event with no previous token_count. Each call is counted once by response_id;
+// fork replay keeps its parent's IDs and excludes those calls.
 //
 // A file whose records are never matched by a token_count is not counted from
 // its records. It is flagged `recordOnly` instead, and sync surfaces a
@@ -34,7 +28,7 @@
 // record, the `compacted` line and the token_count may land in different
 // reads.
 
-const { canonicalUsage, sameUsage } = require("./codex-token-usage");
+const { canonicalUsage, sameUsage, diffUsage } = require("./codex-token-usage");
 
 function extractTokenUsageRecord(obj) {
   if (obj?.type !== "token_usage_record") return null;
@@ -96,7 +90,7 @@ function createUsageRecordState(snapshot) {
     unmatchedRecord: Boolean(snapshot?.unmatchedRecord),
     recordOnly: Boolean(snapshot?.recordOnly),
     compaction: isPlainObject(compaction) && isPlainObject(compaction.candidate)
-      ? { candidate: compaction.candidate, compacted: Boolean(compaction.compacted) }
+      ? { candidate: compaction.candidate, compacted: Boolean(compaction.compacted), adjacentTokenCount: Boolean(compaction.adjacentTokenCount) }
       : null,
   };
 }
@@ -111,8 +105,8 @@ function noteTokenCount(state) {
 // Called for every record. `candidate` is what the caller would count if the
 // record turns out to be a compaction call (null when it cannot be counted).
 function noteUsageRecord(state, candidate) {
+  state.compaction = candidate ? { candidate, compacted: false, adjacentTokenCount: false } : null;
   if (state.sawTokenCount) {
-    state.compaction = candidate ? { candidate, compacted: false } : null;
     return;
   }
   if (state.unmatchedRecord) state.recordOnly = true;
@@ -121,6 +115,7 @@ function noteUsageRecord(state, candidate) {
 
 // Turn end: a record still waiting for its token_count will not get one.
 function noteTurnEnd(state) {
+  state.compaction = null;
   if (state.sawTokenCount) return;
   if (state.unmatchedRecord) state.recordOnly = true;
   state.unmatchedRecord = false;
@@ -134,18 +129,31 @@ function awaitsCompactedLine(state) {
 
 // Called for each complete line after a record, other than a record. Only a
 // `compacted` line directly after the record keeps it as a candidate.
-function noteLineAfterUsageRecord(state, isCompactedLine) {
+function noteLineAfterUsageRecord(state, isCompactedLine, isTokenCount = false) {
   if (!awaitsCompactedLine(state)) return;
   if (isCompactedLine) state.compaction.compacted = true;
+  else if (isTokenCount) state.compaction.adjacentTokenCount = true;
   else state.compaction = null;
 }
 
 // Called for every token_count carrying an info object, with the cumulative
 // total that was active before it. Returns the compaction candidate to count,
 // or null.
-function takeCompactionOnTokenCount(state, previousTotal, totalUsage) {
+function takeCompactionOnTokenCount(state, previousTotal, totalUsage, lastUsage) {
   const compaction = state.compaction;
   state.compaction = null;
+  const zero = (value) => {
+    const usage = canonicalUsage(value);
+    return usage && Object.values(usage).every(count => count === 0);
+  };
+  // Codex 0.153 also writes a remote-compaction response followed directly
+  // by a zero last-usage snapshot, without a `compacted` record. It can be
+  // the first request in a page. With no baseline, the cumulative total must
+  // match the record; a zero last-usage snapshot never counts that total.
+  if (compaction?.adjacentTokenCount && zero(lastUsage)
+      && (zero(totalUsage) || sameUsage(previousTotal, totalUsage)
+        || (!canonicalUsage(previousTotal) && sameUsage(totalUsage, compaction.candidate.rawUsage))
+        || sameUsage(diffUsage(totalUsage, previousTotal), compaction.candidate.rawUsage))) return compaction.candidate;
   if (!compaction?.compacted) return null;
   if (!canonicalUsage(previousTotal) || !sameUsage(previousTotal, totalUsage)) return null;
   return compaction.candidate;
@@ -156,7 +164,7 @@ function isRecordOnly(state) {
 }
 
 function snapshotUsageRecordState(state) {
-  if (!state || (!state.sawTokenCount && !state.unmatchedRecord && !state.recordOnly)) return null;
+  if (!state || (!state.sawTokenCount && !state.unmatchedRecord && !state.recordOnly && !state.compaction)) return null;
   const out = { sawTokenCount: state.sawTokenCount };
   if (state.unmatchedRecord) out.unmatchedRecord = true;
   if (state.recordOnly) out.recordOnly = true;

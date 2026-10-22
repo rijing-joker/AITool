@@ -52,6 +52,7 @@ function canonicalUsage(value) {
       out[field] = 0;
     }
   }
+  if (value.total_tokens == null) out.total_tokens = out.input_tokens + out.output_tokens;
   return sawNumber ? out : null;
 }
 

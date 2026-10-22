@@ -1,3 +1,4 @@
+import { isPageVisible } from "../lib/page-visibility";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Check, RefreshCw, X } from "lucide-react";
 import { copy } from "../lib/copy";
@@ -116,21 +117,23 @@ export function ProviderQuotaLine({ app, provider }) {
   const autoLoadRef = useRef(false);
   useEffect(() => {
     if (!provider.quotaProvider) return undefined;
-    const timer = setInterval(() => {
-      if (document.visibilityState !== "visible") return;
+    const poll = () => {
+      if (!isPageVisible()) return;
       if (autoLoadRef.current || refreshPhaseRef.current === "spinning") return;
       autoLoadRef.current = true;
       void load().finally(() => {
         autoLoadRef.current = false;
       });
-    }, QUOTA_AUTO_REFRESH_MS);
-    return () => clearInterval(timer);
+    };
+    const timer = setInterval(poll, QUOTA_AUTO_REFRESH_MS);
+    window.addEventListener("page:visibility", poll);
+    return () => { clearInterval(timer); window.removeEventListener("page:visibility", poll); };
   }, [load, provider.quotaProvider]);
 
   // Keep the reset countdowns live without re-querying the server.
   useEffect(() => {
     if (!quota?.ok) return undefined;
-    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    const timer = setInterval(() => { if (isPageVisible()) setNow(Date.now()); }, 30_000);
     return () => clearInterval(timer);
   }, [quota?.ok]);
 

@@ -122,9 +122,11 @@ internal sealed class DashboardWindow : Window
         Content = _webView;
 
         Loaded += OnLoaded;
+        IsVisibleChanged += (_, _) => PushVisibility();
         StateChanged += (_, _) =>
         {
             SyncMaxGlyph();
+            PushVisibility();
             // Minimising this window (WindowStyle.None + WindowChrome
             // GlassFrameThickness=-1 "sheet of glass" + DwmExtendFrameIntoClientArea(-1)
             // + Acrylic, hosting a WebView2CompositionControl / DirectComposition visual)
@@ -451,6 +453,7 @@ internal sealed class DashboardWindow : Window
             try
             {
                 Log($"nav completed uri={_webView.CoreWebView2.Source}");
+                PushVisibility();
                 if (_oauthInFlight
                     && Uri.TryCreate(_webView.CoreWebView2.Source, UriKind.Absolute, out var completedUri)
                     && completedUri.AbsolutePath is "/" or "/dashboard")
@@ -983,10 +986,18 @@ internal sealed class DashboardWindow : Window
     }
 
     /// <summary>Show the dashboard, bringing an already-open window to the front.</summary>
+    private void PushVisibility()
+    {
+        if (_webView.CoreWebView2 is null) return;
+        var visible = IsVisible && WindowState != WindowState.Minimized;
+        _ = _webView.CoreWebView2.ExecuteScriptAsync($"window.dispatchEvent(new CustomEvent('native:visibility',{{detail:{{visible:{(visible ? "true" : "false")}}}}}))");
+    }
+
     public void ShowDashboard()
     {
         if (!IsVisible) Show();
         if (WindowState == WindowState.Minimized) WindowState = WindowState.Normal;
+        PushVisibility();
         Activate();
         // Nudge to the foreground without leaving the window pinned topmost.
         Topmost = true;
@@ -1001,6 +1012,12 @@ internal sealed class DashboardWindow : Window
     }
 
     /// <summary>Navigate to the dashboard Settings page, mirroring macOS `showSettings()`.</summary>
+    public void ShowProviders()
+    {
+        ShowDashboard();
+        NavigateWhenServerReady("/?quick=providers&app=1");
+    }
+
     public void ShowSettings()
     {
         ShowDashboard();

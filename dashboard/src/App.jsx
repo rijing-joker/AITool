@@ -1,3 +1,4 @@
+import { ProviderQuickSwitch } from "./pages/provider-quick-switch";
 import React, { lazy, Suspense, useCallback, useEffect, useMemo, useRef } from "react";
 import { Navigate, useLocation } from "react-router-dom";
 import { ErrorBoundary } from "./components/ErrorBoundary.jsx";
@@ -358,6 +359,7 @@ export default function App() {
             <Suspense fallback={null}>
               {showSidebar ? <CommandPalette /> : null}
               <LoginModal />
+              <ProviderQuickSwitch />
               <Analytics />
               <SpeedInsights />
             </Suspense>

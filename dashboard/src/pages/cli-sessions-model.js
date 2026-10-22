@@ -1,15 +1,22 @@
 import { toolCallPayloadText } from "../lib/session-export";
+import { toolCategory } from "./cli-session-tools";
 import { copy } from "../lib/copy";
 
 const APP_LABELS = {
   claude: "pswitch.tab.claude",
   codex: "pswitch.tab.codex",
   gemini: "pswitch.tab.gemini",
+  agy: "pswitch.tab.agy",
+  opencode: "pswitch.tab.opencode",
+  hermes: "pswitch.tab.hermes",
+  grokbuild: "pswitch.tab.grokbuild",
+  pi: "pswitch.tab.pi",
+  mcode: "pswitch.tab.mcode",
 };
 export const sessionAppLabel = (app) =>
   APP_LABELS[app] ? copy(APP_LABELS[app]) : app;
 export const sessionIconButton =
-  "inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-oai-gray-500 hover:bg-oai-gray-100 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-oai-brand-500 disabled:opacity-40 dark:hover:bg-oai-gray-800";
+  "inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-oai-gray-600 dark:text-oai-gray-400 hover:bg-oai-gray-100 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-oai-brand-500 disabled:opacity-40 dark:hover:bg-oai-gray-800";
 
 // Interaction model follows cc-switch SessionManagerPage / reader/turns.ts
 // (5ae6ad3). Adapt the local read-only API without changing the source logs.
@@ -37,7 +44,7 @@ export function writePreference(key, value) {
 }
 
 export function sessionKey(session) {
-  return `${session.appId}:${session.sourcePath}`;
+  return `${session.appId}:${session.sourcePath || session.sessionId}`;
 }
 
 export function baseName(path) {
@@ -104,7 +111,13 @@ export function groupSessions(sessions, mode, now = new Date()) {
             : time >= week
               ? "week"
               : "earlier";
-    if (!groups.has(key)) groups.set(key, { key, projectDir: session.projectDir || "", sessions: [], latest: time });
+    if (!groups.has(key))
+      groups.set(key, {
+        key,
+        projectDir: session.projectDir || "",
+        sessions: [],
+        latest: time,
+      });
     groups.get(key).sessions.push(session);
   }
   return [...groups.values()];
@@ -117,6 +130,8 @@ export function stepText(step) {
     step.call?.name,
     step.call && toolCallPayloadText(step.call),
     step.call?.patch?.body,
+    step.result?.diff,
+    step.result?.structuredPatch && JSON.stringify(step.result.structuredPatch),
     step.output,
   ]
     .filter(Boolean)
@@ -124,18 +139,15 @@ export function stepText(step) {
 }
 
 export function isChangeStep(step) {
-  return (
-    Boolean(step.call?.patch) ||
-    /^(?:.*\.)?(?:apply_patch|edit|write|multiedit|write_file|replace)$/i.test(
-      step.call?.name || "",
-    )
-  );
+  return Boolean(step.call?.patch || step.result?.diff || step.result?.structuredPatch) || toolCategory(step.call) === "edit";
 }
 
 export function isFailedStep(step) {
   return (
     step.call?.patch?.error ||
     step.call?.patch?.status === "failed" ||
+    step.status === "failed" ||
+    step.status === "interrupted" ||
     step.failed
   );
 }
@@ -148,7 +160,49 @@ export function buildSessionTurns(messages) {
     turn = { key: `turn-${index}`, question, steps: [], final: null };
     turns.push(turn);
   };
+  const addResults = (message, index) => {
+    (message.toolResults || []).forEach((result, resultIndex) => {
+      const id = result.toolUseId ?? result.callId;
+      const output = result.output ?? result.content ?? "";
+      const outputPart = { key: `message-${index}-result-${resultIndex}`, output,
+        reference: result.outputRef || result.contentRef };
+      const paired = id ? calls.get(id) : null;
+      const failed =
+        result.isError === true ||
+        result.is_error === true ||
+        result.status === "failed" || (result.exitCode != null && result.exitCode !== 0);
+      // Claude tool_result with no error flag is a completed result. Other
+      // providers require a known status/exit code rather than output guessing.
+      const status =
+        result.status ||
+        (failed ? "failed" : "toolUseId" in result ? "success" : undefined);
+      if (paired) {
+        paired.output = [paired.output, output].filter(Boolean).join("\n");
+        // A field reference addresses one result, never the combined output.
+        (paired.outputParts ??= []).push(outputPart);
+        paired.failed ||= failed;
+        if (status) paired.status = status;
+        paired.result = { ...result };
+        paired.exitCode = result.exitCode;
+        paired.durationMs = result.durationMs;
+      } else {
+        if (!turn) begin(index);
+        turn.steps.push({
+          key: `message-${index}-result-${resultIndex}`,
+          kind: "result",
+          output,
+          outputParts: [outputPart],
+          failed,
+          status,
+          result: { ...result },
+        });
+      }
+    });
+  };
   messages.forEach((message, index) => {
+    if (message.injected) return;
+    // Mixed Claude user rows finish earlier calls before opening a question.
+    if (message.role === "user") addResults(message, index);
     if (
       message.role === "user" &&
       (message.content?.trim() || message.images?.length)
@@ -165,27 +219,9 @@ export function buildSessionTurns(messages) {
         message: { ...message, content: "" },
       });
     if (message.role === "tool") {
-      if (message.toolResults?.length) {
-        message.toolResults.forEach((result, resultIndex) => {
-          const id = result.toolUseId ?? result.callId;
-          const output = result.content ?? result.output ?? "";
-          const paired = id ? calls.get(id) : null;
-          if (paired) {
-            paired.output = [paired.output, output].filter(Boolean).join("\n");
-            paired.failed ||=
-              result.isError === true || result.is_error === true;
-          } else {
-            turn.steps.push({
-              key: `${key}-result-${resultIndex}`,
-              kind: "result",
-              output,
-              failed: result.isError === true || result.is_error === true,
-            });
-          }
-        });
-      } else if (message.content) {
-        turn.steps.push({ key, kind: "result", output: message.content });
-      }
+      addResults(message, index);
+      if (!message.toolResults?.length && message.content)
+        turn.steps.push({ key, kind: "result", output: message.content, outputRef: message.contentRef });
       return;
     }
     // The local Claude reader includes these markers alongside toolCalls.
@@ -216,6 +252,7 @@ export function buildSessionTurns(messages) {
       const id = call.id ?? call.callId;
       if (id) calls.set(id, step);
     });
+    if (message.role !== "user") addResults(message, index);
   });
   for (const entry of turns) {
     const last = entry.steps.at(-1);

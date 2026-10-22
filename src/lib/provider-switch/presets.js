@@ -855,10 +855,10 @@ const HERMES_NOUS = {
   websiteUrl: "https://nousresearch.com",
   endpointCandidates: ["https://inference-api.nousresearch.com/v1"],
   settingsConfig: {
-    slotKey: "nous",
+    slotKey: "aitool-nous",
     modelId: "Hermes-4-405B",
     provider: {
-      name: "nous",
+      name: "aitool-nous",
       base_url: "https://inference-api.nousresearch.com/v1",
       api_key: "",
       api_mode: "chat_completions",
@@ -899,10 +899,10 @@ const HERMES_DEEPSEEK = {
   websiteUrl: "https://platform.deepseek.com",
   endpointCandidates: ["https://api.deepseek.com"],
   settingsConfig: {
-    slotKey: "deepseek",
+    slotKey: "aitool-deepseek",
     modelId: "deepseek-v4-pro",
     provider: {
-      name: "deepseek",
+      name: "aitool-deepseek",
       base_url: "https://api.deepseek.com",
       api_key: "",
       api_mode: "chat_completions",
@@ -1255,6 +1255,14 @@ const localPresets = require("./local-presets");
 const PRESETS = {
   claude: [CLAUDE_OFFICIAL, CLAUDE_KIMI, CLAUDE_DEEPSEEK, CLAUDE_MODELSCOPE, CLAUDE_COMMANDCODE, CLAUDE_MOARK, CLAUDE_ZEN, ...localPresets.claude, CLAUDE_CUSTOM],
   codex: [CODEX_OFFICIAL, CODEX_COMMANDCODE, CODEX_MOARK, CODEX_ZEN, ...localPresets.codex, CODEX_CUSTOM],
+  agy: [
+    { id: "agy_official", name: "Antigravity", group: "official", icon: "gem", color: "sky", settingsConfig: { env: {}, config: { model: { name: "" } } }, formFields: [{ id: "model", path: "config.model.name", labelKey: "pswitch.field.default_model", placeholder: "" }] },
+    { id: "agy_custom", nameKey: "pswitch.preset.custom", group: "custom", icon: "gem", color: "sky", settingsConfig: { env: { GEMINI_API_KEY: "", GOOGLE_GEMINI_BASE_URL: "" }, config: { model: { name: "" } } }, formFields: [
+      { id: "api_key", path: "env.GEMINI_API_KEY", labelKey: "pswitch.field.api_key", secret: true },
+      { id: "base_url", path: "env.GOOGLE_GEMINI_BASE_URL", labelKey: "pswitch.field.base_url", placeholder: "https://generativelanguage.googleapis.com" },
+      { id: "model", path: "config.model.name", labelKey: "pswitch.field.default_model", placeholder: "" },
+    ] },
+  ],
   gemini: [GEMINI_OFFICIAL, GEMINI_CUSTOM],
   opencode: [OPENCODE_KIMI, OPENCODE_DEEPSEEK, OPENCODE_MODELSCOPE, OPENCODE_MOARK, ...localPresets.opencode, OPENCODE_CUSTOM],
   openclaw: [OPENCLAW_KIMI, OPENCLAW_DEEPSEEK, OPENCLAW_MOARK, OPENCLAW_CUSTOM],

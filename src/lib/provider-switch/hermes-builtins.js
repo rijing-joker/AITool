@@ -1,0 +1,5 @@
+// Canonical IDs shadow custom providers in Hermes rc.3-v0.22.0.
+// Ported from cc-switch (MIT), 0a41250dc03a, hermesBuiltinProviderIds.ts.
+const ids = new Set(["actual", "ai-gateway", "alibaba", "alibaba-cn", "alibaba-coding-plan", "alibaba-coding-plan-cn", "alibaba-token-plan", "alibaba-token-plan-cn", "anthropic", "arcee", "azure-foundry", "bedrock", "commandcode", "commandcode-anthropic", "copilot", "copilot-acp", "deepinfra", "deepseek", "fireworks", "gemini", "gmi", "huggingface", "kilocode", "kimi-coding", "kimi-coding-cn", "lmstudio", "meta-ai", "minimax", "minimax-cn", "minimax-oauth", "nebius-token-factory", "nous", "novita", "nvidia", "ollama-cloud", "openai-api", "openai-codex", "opencode-go", "opencode-zen", "openrouter", "qwen-oauth", "router", "solstice", "stepfun", "tencent-tokenhub", "tencent-tokenplan", "upstage", "vertex", "xai", "xai-oauth", "xiaomi", "zai"]);
+function conflicts(key) { return ids.has(String(key || "").trim().toLowerCase().replace(/ /g, "-")); }
+module.exports = { conflicts };

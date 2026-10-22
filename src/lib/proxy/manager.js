@@ -201,7 +201,7 @@ async function startCore() {
     // kill.
     const stalePid = readPid();
     if (await managedCoreAlive(stalePid)) {
-      await stop();
+      await stopImpl();
       await new Promise((resolve) => setTimeout(resolve, 500));
     } else {
       throw new Error(`Port ${port} is in use by a core we cannot authenticate (stale management key?)`);
@@ -272,7 +272,7 @@ function warnOptionalUpstream(action, error) {
   } catch {}
 }
 
-async function start() {
+async function startImpl() {
   const result = await startCore();
   // An optional upstream must not prevent other providers or the caller's
   // usage bridge from starting. Core failures still propagate to the caller.
@@ -286,7 +286,7 @@ async function start() {
   return result;
 }
 
-async function stop() {
+async function stopImpl() {
   const result = await stopCore();
   try {
     await require("./opencode-free").stop();
@@ -317,15 +317,60 @@ async function status() {
     autoStart: settings.autoStart !== false,
     pidFile: paths.pidPath,
     logFile: paths.coreLogPath,
+    lifecycle: lifecycleState,
+    recovery: recovery.snapshot(),
   };
 }
 
 // easy parity (Kernel.tsx restart_core_process): one action that recycles the
 // core. The usage bridge goes down with it and the caller brings it back once
 // the start handshake succeeds.
-async function restart() {
-  await stop();
-  return start();
+let operation = Promise.resolve();
+let manualGeneration = 0;
+let lifecycleState = "idle";
+const serial = (name, action) => {
+  const next = operation.catch(() => {}).then(async () => {
+    lifecycleState = name;
+    try { return await action(); } finally { lifecycleState = "idle"; }
+  });
+  operation = next;
+  return next;
+};
+const recovery = require("./recovery").createRecovery({
+  check: async () => {
+    if (lifecycleState !== "idle") return true;
+    // External instances are never recovery targets.
+    const pid = readPid();
+    if (await managedCoreAlive(pid)) return true;
+    return false;
+  },
+  recover: valid => serial("recovering", async () => {
+    if (!valid()) return;
+    await stopImpl();
+    if (!valid()) return;
+    await startImpl();
+    if (valid()) require("./usage-bridge").startBridge();
+  }),
+});
+function start() {
+  const generation = ++manualGeneration;
+  recovery.disarm();
+  return serial("starting", async () => {
+    const result = await startImpl();
+    if (generation === manualGeneration && !result.external) recovery.arm();
+    return result;
+  });
+}
+function stop() { ++manualGeneration; recovery.disarm(); return serial("stopping", stopImpl); }
+function restart() {
+  const generation = ++manualGeneration;
+  recovery.disarm();
+  return serial("restarting", async () => { await stopImpl(); const result = await startImpl(); if (generation === manualGeneration && !result.external) recovery.arm(); return result; });
+}
+let monitor;
+function startRecoveryMonitor() {
+  if (!monitor) { monitor = setInterval(() => recovery.tick().catch(() => {}), 5000); monitor.unref(); }
+  return () => { recovery.disarm(); clearInterval(monitor); monitor = null; };
 }
 
 module.exports = {
@@ -336,6 +381,7 @@ module.exports = {
   stop,
   restart,
   status,
+  startRecoveryMonitor,
   readPid,
   pidAlive,
   managedCoreAlive,

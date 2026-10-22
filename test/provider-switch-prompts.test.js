@@ -104,6 +104,7 @@ test("prompts: per-app instruction file mapping", () => {
   assert.equal(mapping("claude"), homePath(".claude", "CLAUDE.md"));
   assert.equal(mapping("codex"), homePath(".codex", "AGENTS.md"));
   assert.equal(mapping("gemini"), homePath(".gemini", "GEMINI.md"));
+  assert.equal(mapping("agy"), homePath(".gemini", "config", "AGENTS.md"));
   assert.equal(mapping("grokbuild"), homePath(".grok", "AGENTS.md"));
   assert.equal(mapping("opencode"), homePath(".config", "opencode", "AGENTS.md"));
   assert.equal(mapping("openclaw"), homePath(".openclaw", "AGENTS.md"));
@@ -116,6 +117,31 @@ test("prompts: per-app instruction file mapping", () => {
 // ---------------------------------------------------------------------------
 // Enable semantics: live backfill + projection
 // ---------------------------------------------------------------------------
+
+test("prompts: Antigravity captures and restores the shared AGENTS.md", async () => {
+  const file = homePath(".gemini", "config", "AGENTS.md");
+  const geminiFile = homePath(".gemini", "GEMINI.md");
+  const ignoredFile = homePath(".gemini", "config", "GEMINI.md");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, "# Hand-written Antigravity rules\n");
+  fs.writeFileSync(geminiFile, "Gemini CLI rules");
+  fs.writeFileSync(ignoredFile, "Unrelated file");
+
+  const saved = await post("/api/provider-switch/prompts", {
+    app: "agy", prompt: { id: "work", content: "Antigravity work rules", enabled: true },
+  });
+  assert.equal(saved.status, 200);
+  assert.equal(saved.body.targetPath, file);
+  assert.equal(fs.readFileSync(file, "utf8"), "Antigravity work rules");
+  const original = saved.body.prompts.find(entry => entry.content === "# Hand-written Antigravity rules\n");
+  assert.ok(original, "the real live instructions were captured");
+  assert.equal(original.enabled, false);
+  const restored = await post("/api/provider-switch/prompts/enable", { app: "agy", id: original.id });
+  assert.equal(restored.status, 200);
+  assert.equal(fs.readFileSync(file, "utf8"), original.content);
+  assert.equal(fs.readFileSync(geminiFile, "utf8"), "Gemini CLI rules");
+  assert.equal(fs.readFileSync(ignoredFile, "utf8"), "Unrelated file");
+});
 
 test("prompts: enabling the first prompt captures a hand-written file as a disabled backup", async () => {
   const claudeMd = homePath(".claude", "CLAUDE.md");

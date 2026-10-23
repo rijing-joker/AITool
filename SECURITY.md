@@ -1,44 +1,42 @@
 # Security Policy
 
-## Supported Versions
+This repository is the personal fork `rijing-joker/AITool`. Working code is maintained on `dev`; the inherited npm, website and desktop release channels belong to upstream TokenTracker. This fork does not promise a release-based support window. Include the commit and local changes when reporting an issue.
 
-Only the **latest minor release** is supported with security fixes. This is a small project — please run a recent version.
+## Reporting a vulnerability
 
-## Reporting a Vulnerability
+Do not put credentials, transcripts, private config files or exploitable details in a public issue. Check the fork's [Security page](https://github.com/rijing-joker/AITool/security) for an available private channel. For issues also affecting upstream TokenTracker, its [private advisory page](https://github.com/xiufengsun/TokenTracker/security/advisories/new) is the existing upstream reporting channel.
 
-**Please do not open a public GitHub issue for security reports.**
+Include a redacted reproduction, affected commit/runtime/platform, impact and mitigation. Use synthetic session/config fixtures where possible. Do not assume a fork report has been sent to upstream.
 
-Instead, use one of these private channels:
+## Local trust boundary
 
-- **GitHub Private Vulnerability Reporting**: [Report a vulnerability](https://github.com/xiufengsun/TokenTracker/security/advisories/new)
-- **Email**: open a GitHub issue asking the maintainer to enable an alternative private channel if you can't use GitHub Security Advisories
+`serve` binds to `127.0.0.1` by default, usually :7680; the proxy core normally uses :8318. Local reads include usage, configuration and root-clamped transcripts. Mutations require a local token (header/cookie) and an allowed loopback Origin. This is a same-machine trust model, not a multi-user authentication service.
 
-When reporting, please include:
+`AITOOL_BIND_HOST` can change binding. Docker uses `0.0.0.0` internally and publishes only host loopback ports by default. Exposing either port to other machines exposes local read surfaces unless an authenticating boundary is added. A provider inference key is separate from local management authorization.
 
-- A clear description of the issue
-- Steps to reproduce
-- Affected version(s)
-- Your assessment of impact (data exposure, privilege escalation, etc.)
-- Any suggested mitigation, if you have one
+Core management uses an independent Bearer key. AiTool keeps its plaintext in `~/.aitool/proxy/settings.json`; the core hashes its `config.yaml` copy. Do not disclose credential/config files in reports. Core saves use ETag/If-Match; stale or missing revisions must not overwrite newer settings.
 
-You can expect an initial response within a few days. Once a fix is ready, it will ship in the next release with a credit to you (or anonymously if you prefer).
+## Areas to review
 
-## Scope
+| Area | Security contract |
+| --- | --- |
+| `src/lib/rollout.js`, `src/commands/sync.js`, upload queue | 45-tool statistics parsing; token semantics/dedup; no bodies in analytics/upload rows |
+| `src/lib/local-api.js` | Loopback binding, mutation token/Origin, bounded inputs and readable endpoint exposure |
+| `sessions.js`, `session-sources.js`, `session-transcript-cache.js` | Read-only transcripts; roots/real paths, database/WAL and companion checks, revisions/paged references; bounded process cache |
+| `src/lib/provider-switch/` | Supported app/file targets, private writes/backups, owned projections, conflict handling and safe recovery retention |
+| `provider-switch/agy-accounts.js` | macOS official switching; quota/deletion do not replace live login; unreadable keychain state stays recoverable |
+| `src/lib/proxy/` | External core lifecycle, masked/hashed usage identities, body-free usage bridge, ETag groups and bounded recovery |
+| `proxy/extensions/`, `proxy/opencode-free/` | Explicit enablement, independent adapter keys, limits/cancellation, loop prevention and single accounting |
+| Copilot / WorkBuddy / Zed connections | Owned config changes, native secrets where applicable, backup/conflict-aware restore |
+| Native clients | Documented CLI hooks/config writes, embedded runtime, OAuth bridges, owned-process cleanup and update integrity |
+| Cloud sync / edge code | Every automatic upload checks `canUpload()`; invalid/unreadable preference is disabled; usage upload contains only aggregates |
 
-TokenTracker is a local-first tool that reads AI CLI tool logs from your home directory. The most sensitive areas to consider when reviewing security:
+## Privacy and credentials
 
-- **`src/lib/rollout.js`** — parses logs from 8 different AI CLI tools. Privacy rule: only token counts and timestamps may be extracted, never prompt or response content.
-- **`src/lib/cursor-config.js`** — reads Cursor's local SQLite to extract auth tokens for the Cursor usage API. Tokens must never leave the user's machine.
-- **`src/lib/local-api.js`** — local HTTP server bound to `127.0.0.1`. Should not accept connections from other hosts.
-- **`TokenTrackerBar/`** — macOS app, ad-hoc signed. Has filesystem access via macOS TCC permissions; should never write outside its own data directories or the documented snapshot/queue paths.
-- **`insforge/`** — optional cloud edge functions. Only used if the user opts into the leaderboard.
+Analytics queues do not retain or upload prompts, responses or source file contents. Project/session sidecars are stored locally and excluded from cloud usage uploads. CLI Sessions explicitly reads local transcripts into bounded memory and can export them at the user's request; provider-switch stores credentials and user-authored instructions locally.
 
-## Out of Scope
+The proxy forwards bodies to the selected upstream. Enabled search/vision/classification can send selected content to configured services; keep it out of usage records and telemetry. Quota APIs receive required credentials directly from the user's machine.
 
-- Issues only reproducible with arbitrary modifications to the user's local files outside the documented data paths
-- Vulnerabilities in dependencies that have already been disclosed and patched upstream — please report those upstream first
-- Social engineering, phishing, or other non-technical attack vectors
+Provider stores, auth stashes, prompts, backups and recovery manifests may contain secrets. Private writes use `0600` where supported; they are not universally encrypted at rest. Zed uses native secret stores; other credentials can be local files. Display privacy mode masks identities but does not sanitize files or explicit copy/export.
 
-## Privacy Commitment
-
-TokenTracker's foundational privacy rule: **token counts and timestamps only — never any prompt content, response content, or file contents from user code**. Any change that risks violating this is treated as a security issue.
+See [docs/PRIVACY.md](docs/PRIVACY.md) for network behavior and controls. Report dependency vulnerabilities to their upstream too. Arbitrary local filesystem access does not excuse a reproducible path/symlink escape in an AiTool-owned operation.

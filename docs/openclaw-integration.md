@@ -1,14 +1,14 @@
 # OpenClaw Integration
 
-How TokenTracker collects token usage from OpenClaw, and what to check when it isn't working.
+How AiTool collects OpenClaw token usage, checked against the 2026-10-23 working code. TokenTracker paths/plugin IDs remain for compatibility. This is analytics ingestion; OpenClaw does not have a CLI Sessions body-reader projection. Use `node bin/tracker.js <command>` from a checkout, or `aitool` after `npm link`.
 
-## TL;DR
+## Setup
 
-You do **not** need to download, copy, or drag any plugin into OpenClaw. Running `tokentracker` (or `tokentracker init`) once handles the whole installation.
+Run `node bin/tracker.js init` to install supported hooks/plugins locally, then restart the OpenClaw gateway so it loads the session listener. The plugin is generated from the AiTool source; no manual plugin copy is needed. Automatic cloud upload remains gated by the saved opt-in preference.
 
 ## How it works
 
-TokenTracker ships a small OpenClaw session plugin (`openclaw-session-sync`) inside the `tokentracker-cli` npm package. It lives at:
+TokenTracker ships a small OpenClaw session plugin (`openclaw-session-sync`) with the AiTool CLI source. It lives at:
 
 ```
 ~/.tokentracker/tracker/openclaw-plugin/openclaw-session-sync/
@@ -17,13 +17,13 @@ TokenTracker ships a small OpenClaw session plugin (`openclaw-session-sync`) ins
 └── index.js
 ```
 
-During `tokentracker init`, TokenTracker:
+During `aitool init`, TokenTracker:
 
 1. Writes the plugin files to the path above.
 2. Calls OpenClaw's own CLI: `openclaw plugins install --link <that path>`.
 3. Calls `openclaw plugins enable openclaw-session-sync`.
 4. Ensures `plugins.entries.openclaw-session-sync.hooks.allowConversationAccess` is `true` in OpenClaw's config.
-5. The plugin registers a session listener inside OpenClaw. After you restart the OpenClaw gateway, every completed session gets a token-usage record that TokenTracker reads during `sync`.
+5. The plugin registers lifecycle listeners and triggers scoped sync with session identifiers/counters after the gateway loads it. The parser reads the existing JSONL or SQLite history; the plugin does not create a second transcript store.
 
 OpenClaw requires `allowConversationAccess` before non-bundled plugins can register session lifecycle hooks such as `agent_end`. TokenTracker needs that event to know when a session has finished and a sync should run.
 
@@ -38,7 +38,7 @@ plugin yet, or a newer OpenClaw build may keep runtime rows in SQLite and only l
 archived transcripts on disk. In all of those cases usage exists but would otherwise
 show as 0.
 
-To close that gap, a full `tokentracker sync` also passively scans every transcript
+To close that gap, a full `aitool sync` also passively scans every transcript
 under `~/.openclaw/agents/*/` and counts their token usage directly — no plugin event
 required. The per-event identity dedup makes the plugin path and the passive scan
 idempotent, so a session counted by both is never double counted, and the
@@ -68,20 +68,20 @@ openclaw gateway status --json
 openclaw --version
 ```
 
-### Known expiry: the SQLite flip
+### SQLite runtime history
 
-Upstream moved runtime session and transcript rows into
-`~/.openclaw/agents/<agentId>/agent/openclaw-agent.sqlite`, leaving `sessions/` as a
-legacy/archive location. That change is not in the stable line yet, so JSONL scanning
-still covers current installs — but once it ships, transcripts alone will stop reflecting
-new usage and this reader will need a SQLite path.
+The current reader also scans `agents/<agentId>/agent/openclaw-agent.sqlite` (or the alternate `agents/<agentId>/openclaw-agent.sqlite`). It projects assistant usage metadata from `transcript_events` joined to `session_windows`, excluding compaction-only windows; it does not load whole message bodies from SQLite.
+
+Import archives seed dedup before SQLite. A per-session ledger retains event identities across imported JSONL and database records, avoiding duplicate totals. The plugin resolves a live session through `session_nodes` / `session_windows` when `sessions.json` is absent; `--from-openclaw` can target the selected database session. If native `node:sqlite` is unavailable in the OpenClaw plugin host, scoped resolution can fail and full passive scanning remains the fallback.
+
+See `test/openclaw-sqlite.test.js` for archive/database/scoped-hook idempotency coverage. General parser tests remain in `test/openclaw-parser.test.js`.
 
 ## Verifying the install
 
 Run:
 
 ```bash
-tokentracker status
+aitool status
 ```
 
 Look for the `OpenClaw Session Plugin` row. Expected states:
@@ -92,17 +92,17 @@ Look for the `OpenClaw Session Plugin` row. Expected states:
 | `set` | Plugin is already active in the running OpenClaw process. |
 | `skipped` | Something prevented the install. See the `detail` column. |
 
-For deeper checks, `tokentracker status --json` and `tokentracker diagnostics` expose `openclaw_session_plugin_conversation_access`. A linked and enabled plugin without conversation access is not considered fully configured, because OpenClaw will block the `agent_end` hook that triggers automatic sync.
+For deeper checks, `aitool status --json` and `aitool diagnostics` expose `openclaw_session_plugin_conversation_access`. A linked and enabled plugin without conversation access is not considered fully configured, because OpenClaw will block the `agent_end` hook that triggers automatic sync.
 
 ## Troubleshooting
 
-If `tokentracker status` shows `skipped`, the `detail` column tells you which case applies:
+If `aitool status` shows `skipped`, the `detail` column tells you which case applies:
 
 ### `OpenClaw CLI not found`
 
 The `openclaw` binary is not on your `PATH`. TokenTracker cannot link a plugin without it.
 
-**Fix:** install OpenClaw globally, confirm `openclaw --version` works in a fresh terminal, then re-run `tokentracker init`.
+**Fix:** install OpenClaw globally, confirm `openclaw --version` works in a fresh terminal, then re-run `aitool init`.
 
 ### `OpenClaw config unreadable` / `OpenClaw config not found`
 
@@ -110,7 +110,7 @@ TokenTracker could not read `~/.openclaw/openclaw.json`. This usually means Open
 
 **Fix:**
 - Launch OpenClaw once so it generates its config.
-- If you use a custom location, set `OPENCLAW_CONFIG_PATH` to the absolute path before running `tokentracker init`.
+- If you use a custom location, set `OPENCLAW_CONFIG_PATH` to the absolute path before running `aitool init`.
 
 ### `Install failed: …`
 
@@ -140,7 +140,7 @@ Then make sure `~/.openclaw/openclaw.json` includes:
 }
 ```
 
-If that surfaces a clearer error (e.g. version mismatch, locked config file), resolve it there, then re-run `tokentracker init`.
+If that surfaces a clearer error (e.g. version mismatch, locked config file), resolve it there, then re-run `aitool init`.
 
 ## Removing the plugin
 
@@ -149,10 +149,10 @@ openclaw plugins disable openclaw-session-sync
 openclaw plugins uninstall openclaw-session-sync
 ```
 
-Or run `tokentracker uninstall` to remove hooks and plugins for every integration at once.
+Or run `aitool uninstall` to remove hooks and plugins for every integration at once.
 
 ## Where to look in the source
 
 - `src/lib/openclaw-session-plugin.js` — installer, probe, plugin-file builders.
 - `src/commands/init.js` — calls `installOpenclawSessionPlugin` and reports its result.
-- `src/lib/rollout.js` — parses OpenClaw session records during `tokentracker sync`.
+- `src/lib/rollout.js` — parses OpenClaw session records during `aitool sync`.

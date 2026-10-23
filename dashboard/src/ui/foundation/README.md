@@ -1,13 +1,11 @@
 # UI Foundation
 
-App-level providers and motion primitives — context that wraps the entire dashboard, not feature UI.
+App-level providers, formatting and motion primitives shared across the dashboard.
 
-Contents:
+- `LocaleProvider` — locale and registry-backed copy.
+- `ThemeProvider` / `ThemeToggle` — light/dark/system theme; defaults to system, persists the choice and consumes native appearance updates.
+- `CurrencyProvider` / `TokenFormatProvider` — shared currency and token formatting.
+- `FadeIn` — shared motion wrapper.
+- `ClawdAnimated`, `BotAnimated`, `PetAtlasAnimated` — mascot/pet renderers; the bot engine is documented [here](../../lib/bot/README.md).
 
-- `LocaleProvider` / `ThemeProvider` — React context providers.
-- `ThemeToggle` — light/dark switch button.
-- `FadeIn` — shared motion wrapper used across pages.
-- `ClawdAnimated` — pixel-art mascot rendered on the dashboard.
-
-For shared design-system atoms (Button / Card / Input / Sidebar / Shell), see `../components/`.
-For feature panels and views (UsageLimitsPanel / ActivityHeatmap / DashboardView), see `../dashboard/`.
+Shared atoms (Button / Card / Input / Sidebar / Shell) live in `../components/`; feature panels live in `../dashboard/`. Tokens and responsive conventions are in [DESIGN.md](../../../../DESIGN.md); functional boundaries are in [architecture.md](../../../../docs/architecture.md).

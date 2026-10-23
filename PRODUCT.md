@@ -7,10 +7,14 @@ register: product
 Local-first AI toolbox that merges three products into one dashboard:
 
 1. **AI gateway** (EasyCLIProxyAPI / CLIProxyAPI parity) — a Node management layer driving the external `cli-proxy-api` core: OpenAI / Anthropic / Gemini-compatible endpoints on loopback, with per-request usage records and cost estimates (models.dev pricing).
-2. **Provider config management** (cc-switch parity) — named per-tool provider presets one-click projected into the live config files of Claude Code / Codex / Gemini, plus shared MCP servers, per-app instruction prompts, plan-quota reads, and read-only CLI session history.
-3. **Token usage analytics** (vendored TokenTracker) — 43 AI coding tools parsed into local half-hour buckets; proxied requests fold into the same trends, model breakdown, and cost views as native CLI usage.
+2. **Provider config management** (cc-switch parity) — named per-tool provider presets one-click projected into the live config files or launch profiles of ten tools (Claude Code, Codex, Gemini, Antigravity CLI, Grok Build, OpenCode, OpenClaw, Hermes, Pi and MiniMax Code), plus shared MCP servers and skills, per-app prompts, reusable profiles, multi-app bundles, drift diagnostics and project/role distribution.
+3. **Token usage analytics** (vendored TokenTracker) — 45 AI coding tools parsed into local half-hour buckets; proxied requests fold into the same trends, model breakdown, and cost views as native CLI usage.
 
-Privacy-first: token counts only, never prompts or conversation bodies; every config write is backed up; cloud sync is strictly opt-in. Ships as a CLI (`serve` on :7680), a web dashboard (www.tokentracker.cc), and desktop apps (macOS menu bar, Windows tray, Linux, and the Tauri `AiTool.app` shell).
+Read-only CLI history is a separate local surface for nine tools: transcripts, tool results, diffs, full-content search and Markdown export. It reads existing logs and caches them in bounded memory; conversation bodies do not enter analytics queues or cloud sync.
+
+Local-first: managed config writes have backups and conflict checks; automatic cloud sync is off until enabled. A manual `aitool sync` is a one-time upload request when account/device credentials are available, without changing that preference. Proxy inference forwards content to the selected upstream; optional search, vision and intent classification have their own explicit activation. See [Privacy](docs/PRIVACY.md).
+
+This personal fork runs from a checkout as the CLI (`serve` on :7680), dashboard and native apps. The inherited hosted dashboard at www.tokentracker.cc belongs to upstream. macOS/Windows/Linux TokenTracker apps bundle Node + CLI + dashboard; the separate `desktop/` AiTool shell depends on the checkout and installed Node. Fork work follows [CLAUDE.md](CLAUDE.md): ordinary `dev` commits, no version bump or release. See the [architecture overview](docs/architecture.md) for boundaries and the [documentation index](docs/README.md) for module guides.
 
 ## Users
 
@@ -22,7 +26,7 @@ Developers and AI-power-users who run multiple agent CLIs daily — often agains
 - Numbers are the hero content, but never the gradient-glow "hero-metric" cliché. Big figures must stay legible and never clip.
 - Mobile is a first-class glance surface, not a shrunk desktop. Core metrics (total tokens, cost, your rank) must be visible without horizontal scrolling.
 - Per-provider breakdown is secondary detail: fine to defer to a tap/expand on small screens.
-- Local-first is a promise, not a tagline: loopback-only servers, backups before every config write, cloud sync off until the user opts in. Trust is the feature.
+- Local-first is a promise, not a tagline: loopback by default, backups and conflict checks for managed writes, automatic cloud sync off until the user opts in. Trust is the feature.
 
 ## Anti-references
 

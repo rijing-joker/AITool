@@ -18,7 +18,7 @@ When an API key is present, TokenTracker calls the official endpoint first. A `4
 
 ## Configuration
 
-Configure secrets only in the local environment. API keys and cookies must never be committed, logged, displayed, or placed in client-side dashboard variables.
+Set `OPENCODE_GO_API_KEY` in the launch environment or save a key from the local Limits page. Saved keys live in `~/.tokentracker/tracker/opencode-go-api-key.json` with private permissions; the environment takes precedence. Replacement invalidates cached/in-flight quota results. Cookies remain an environment-based legacy fallback. Never put credentials in commits, logs or `VITE_*` variables.
 
 ```dotenv
 # Preferred: official OpenCode Go usage API.
@@ -43,7 +43,7 @@ curl -sS https://opencode.ai/zen/go/v1/usage \
   -H "Authorization: Bearer $OPENCODE_GO_API_KEY"
 ```
 
-A successful response contains the three usage windows in either of two shapes: the early spec `rollingUsage`/`weeklyUsage`/`monthlyUsage` with `usagePercent` + `resetInSec`, or the live nested shape `{ usage: { rolling: { percent, resetsAt }, ... } }`. Both shapes are parsed as of the nested-shape parser fix (PR pending merge at the time of writing); the service may also include `status` and top-level `useBalance`. `src/lib/opencode-go-limits.js` converts those fields into the provider-panel contract:
+A successful response contains the three usage windows in either of two shapes: the early spec `rollingUsage`/`weeklyUsage`/`monthlyUsage` with `usagePercent` + `resetInSec`, or the live nested shape `{ usage: { rolling: { percent, resetsAt }, ... } }`. Both shapes are supported by the current parser; the service may also include `status` and top-level `useBalance`. `src/lib/opencode-go-limits.js` converts those fields into the provider-panel contract:
 
 ```json
 {
@@ -72,9 +72,10 @@ Run the targeted test during development, then execute the repository's complete
 
 ```bash
 node --test test/opencode-go-limits.test.js
-npm run ci:local
+npm test
+# Additional checks and fork-specific gates: ../CONTRIBUTING.md
 ```
 
-## Release impact
+## Fork workflow
 
-The implementation changes `src/`, so it follows the release workflow documented in `CLAUDE.md`: maintainers bump the shared package version and ship the updated CLI through npm and the macOS, Windows, and Linux bundles.
+This fork does not bump versions or publish packages. Follow [CONTRIBUTING.md](../CONTRIBUTING.md) and [CLAUDE.md](../CLAUDE.md); inherited packaging scripts can be used for local builds without a release.

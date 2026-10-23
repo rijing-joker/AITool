@@ -1,156 +1,113 @@
 # Privacy Policy
 
-_Last updated: 2026-10-05 · Applies to the `tokentracker-cli` npm package, the macOS app, the Windows app, the Linux app, and [www.tokentracker.cc](https://www.tokentracker.cc)._
+_Last updated: 2026-10-23. Describes the current AiTool fork's CLI, dashboard, proxy, native clients and inherited optional TokenTracker cloud integrations. The upstream website and release channels are separate deployments._
 
-TokenTracker reads the local logs that AI coding tools already write to your disk, and turns them into token counts and cost estimates. It is local-first: the dashboard, the parsers and the database all run on your machine.
+AiTool reads existing AI-tool logs for local usage statistics, manages client configuration and forwards inference through a local proxy. Automatic cloud sync is off by default. Provider inference, quota reads, pricing refreshes and enabled integrations use their respective services.
 
-This document lists **every** network request the software can make, what each one sends, and how to switch it off. If you find a request that is not listed here, that is a bug — please [open an issue](https://github.com/xiufengsun/TokenTracker/issues).
+## 1. Statistics and conversation content are separate
 
----
+**Analytics queues and cloud usage uploads** contain usage metrics, source/model IDs, timestamps and accounting annotations. They do not contain prompts, responses, project file contents or transcripts. Local project/session sidecars can contain paths and repository names but are excluded from cloud upload.
 
-## 1. What never leaves your machine
+**CLI Sessions** explicitly reads existing transcripts for nine tools, including messages, thinking, tool arguments/results and diffs, and returns them to the local browser/native window. Its process LRU is bounded to 8 sessions / 96 MiB, with no transcript disk cache. Long fields use revision-checked previews/pages. Full search and Markdown export load the complete revision; an exported file contains conversation content by the user's choice. Source logs remain owned by the originating CLI.
 
-TokenTracker's parsers extract numbers and timestamps only. TRAE Work CN is a narrow exception to the local-only source model, and it is off by default: only when you explicitly set `TOKENTRACKER_TRAE_CN_USAGE=1`, during an eligible non-background sync, when local TRAE Work CN auth exists, does TokenTracker transmit the existing sign-in authorization from the locally signed-in app to TRAE's internal API for a read-only usage request. Without that variable nothing is ever sent. It is not an unconditional or default generic network request. That authorization is never persisted or logged.
+**Provider switching** stores API keys, presets, MCP specs, user-authored prompts and backups locally, and writes supported native config/instruction files. Enabling a prompt first captures existing live content. These stores are not analytics and are not automatically uploaded.
 
-**Never retained as usage data or uploaded to TokenTracker:**
+**Proxy inference** forwards messages and other content to the selected upstream. The usage bridge stores model/provider/tokens/status/timing metadata, not request or response bodies. Normalization removes raw client keys, upstream credential source and response headers, retaining hashes/masked values for local matching. Records can still contain account labels and error metadata. Core logs, CLI source logs and external services have their own behavior; do not treat them as sanitized analytics exports.
 
-- **Prompts, responses, and conversation bodies** — TokenTracker may parse local tool files containing conversation records to extract usage metrics, but prompt and response texts are never persisted, collected, or transmitted
-- **File contents** from your projects
-- **Commit messages and diffs** — Git attribution runs `git log` locally, uses the subject line only to detect reverts, and keeps nothing
-- **API keys, cookies, and session tokens** belonging to your AI providers are never persisted or logged by TokenTracker
+**Optional tools/routing** can send content when enabled/invoked: Tavily receives queries; summary/vision models receive selected search context or images; enabled classification receives a bounded portion of the last user text. Magpie tools forward arguments to the connected service. Tool counters and route events do not persist queries, results, images or task/reply bodies.
 
-**Recorded locally, never uploaded:**
+## 2. Local storage
 
-- **File paths, project names, and repository names.** The Projects view needs to know which repo a session belonged to, so `project.queue.jsonl` stores a project key and git remote URL, and `session.queue.jsonl` stores each session's working directory. Both files stay on your machine — they are excluded from cloud sync (see §4) and the Projects view is computed entirely locally. Set `TOKENTRACKER_DISABLE_GIT_ATTRIBUTION=1` to stop deriving them at all.
+| Location | Contents |
+| --- | --- |
+| `~/.tokentracker/tracker/queue.jsonl` | Append-only UTC **half-hour** aggregate snapshots; cloud usage upload source |
+| `~/.tokentracker/tracker/project.queue.jsonl`, `session.queue.jsonl` | Local project/session usage and paths; never uploaded |
+| `~/.tokentracker/tracker/` | Cursors, preferences, device/account configuration, upload state and quota caches |
+| Other `~/.tokentracker/` directories | Local runtime, pet/skill assets, caches and native preferences |
+| `~/.aitool/proxy/settings.json`, `config.yaml`, `auths/` | Plaintext management key, core settings/access keys and provider credentials |
+| `~/.aitool/proxy/usage/` | Request records, bridge buckets and models.dev cache; raw records are not uploaded |
+| `~/.aitool/proxy/` integration state | Adapter/subscription/routing/tool settings, local credentials or source pointers, connection receipts |
+| `~/.aitool/provider-switch/` | Providers, MCP, skills, prompts, profiles, auth stashes, diagnostic/distribution receipts and recovery copies |
+| AI-client config roots / selected project | Explicit provider/MCP/skill/prompt/role projections and owned project files |
+| Native secret stores | Zed connection keys; macOS Antigravity official-account state |
 
-You can verify this in [`src/lib/rollout.js`](../src/lib/rollout.js): every `parse*Incremental` function emits only the queue row shapes described below.
+Private files use `0600` where supported, but are not all encrypted at rest. Encrypted provider-backup export uses a passphrase, scrypt and AES-256-GCM for selected stores; it is not a backup of every live config, auth stash or integration credential.
 
----
+Completed profile/distribution recovery attempts default to 20 recent copies and a 30-day maximum age. Active, uncertain or receipt-referenced copies are retained. Failed restorations can deliberately retain their only recovery copy. See [magpie-integration.md](magpie-integration.md) before deleting/restoring files.
 
-## 2. What is stored locally
+Display privacy mode masks identities, including agy account lists. It does not remove credentials, change route IDs or sanitize explicit copying/exporting of original values.
 
-Everything lives under `~/.tokentracker/` (`%USERPROFILE%\.tokentracker\` on Windows):
+## 3. Network behavior
 
-| Path | Contents |
-|---|---|
-| `tracker/queue.jsonl` | Append-only hourly buckets: source, model, token counts, timestamp |
-| `tracker/project.queue.jsonl` | The same hourly buckets, split per project: git remote URL and `owner/repo` key. Never uploaded |
-| `tracker/session.queue.jsonl` | Per-session token totals and timing for the Sessions view, plus each session's working directory. Never uploaded |
-| `tracker/cursors.json` | Read offsets so parsing stays incremental |
-| `tracker/config.json` | Your preferences |
-| `tracker/*-usage-limits-cache.json` | Last successful quota reading per provider, so a timeout shows stale bars instead of an error |
-| `pets/`, `skills/`, `cache/` | Desktop pet assets, skill index, misc caches |
+These groups describe built-in request paths. User-configured upstreams, MCP commands and external services may make additional requests under their own configuration. Provider credentials go directly to the owning provider/control plane, not to TokenTracker's statistics service.
 
-To erase everything TokenTracker knows about you, delete that directory. `tokentracker uninstall` additionally removes the hooks it installed into your AI tools.
+### Automatic/background requests where enabled
 
-The AiTool additions store under `~/.aitool/`: the AI proxy keeps per-request usage records (`~/.aitool/proxy/usage/*.jsonl` — model, provider, token counts, latency, cost estimates; these records stay local and are never uploaded), its core binary, config and logs (`bin/`, `config.yaml`, `logs/`), the provider auth files you give the proxy (`auths/`), and the provider-config presets, MCP server list, prompt lists, and pre-write backups (`~/.aitool/provider-switch/`). Only the aggregated hourly buckets described in §4 ever reach the cloud — never the per-request records.
+| Request | Destination / data | Trigger and control |
+| --- | --- | --- |
+| Anonymous heartbeat | Configured InsForge backend (upstream default `srctyff5.us-east.insforge.app`); one-way machine hash, version, platform, shell | At most daily; independent of cloud usage sync; telemetry opt-out applies |
+| Dashboard product analytics | PostHog (`us.i.posthog.com`); pageviews and instrumented feature/shell events | Production builds; autocapture/session recording off, browser DNT respected; local/native startup requires confirmed telemetry preference |
+| Hosted web metrics | Vercel Analytics / Speed Insights | Hosted deployment; these components do not render on local/native surfaces |
+| Provider quota reads | Anthropic, OpenAI, Cursor, Copilot, Kimi, Z.ai, Qoder, Google and other enabled provider APIs; required credentials | Enabled quota surfaces/refreshes; provider-specific opt-ins apply |
+| Aggregate pricing refresh | Public LiteLLM JSON on `raw.githubusercontent.com` | Missing/stale pricing cache; TTL-based |
+| Proxy/session pricing refresh | Public `models.dev/api.json` | Estimate reads; 24-hour TTL, background refresh, failure backoff 5 minutes |
+| Public repository metadata | GitHub API | Dashboard star count and related metadata |
+| Native update checks/downloads | Upstream GitHub release API/assets | Update preferences, launch/periodic checks or manual action; inherited updater is not a fork release service |
+| Automatic usage upload | Configured InsForge backend; aggregate rows in §4 | Account/device credentials **and** saved cloud-sync opt-in, rechecked during upload |
 
----
+### Explicit setup, page or user-requested actions
 
-## 3. Network requests
+| Request | Destination / data | Trigger |
+| --- | --- | --- |
+| AI inference | Selected provider/relay; request messages/tools/images and required auth | Client proxy request, explicit speed/test action or enabled tool/classifier inference |
+| Core/runtime/dependency install | GitHub releases, Node.js distribution site, npm registry or local checkout | `proxy install`, runtime/dependency setup, platform bundling; Docker downloads core at image build |
+| Provider login/credential refresh | Owning provider auth service | Explicit OAuth/refresh; core can also refresh configured credentials while serving |
+| Provider-switch quota/models | Matching provider endpoint; row key or configured control-plane credentials | Quota/model-fetch actions; Command Code, Z.ai and Volcengine use their own APIs |
+| Antigravity accounts | Google OAuth / Code Assist; selected account auth | Login/quota/switching; quota/deletion do not replace current login |
+| WorkBuddy subscription / Magpie | WorkBuddy login/models/quota/inference or configured Magpie | Explicit login/discovery/selection; enabled adapters run with proxy and may consume credits |
+| MCP check | Configured stdio command or HTTP/SSE service, auth/env | Explicit initialize/tools-list check; no tools invoked, bounded/cancelable |
+| Search / vision MCP | Tavily, selected inference service or Magpie | Tool invocation after setup; queries/images can leave the machine and incur charges |
+| Intent classifier | Selected model through core | Only enabled route classification; additional inference usage |
+| OpenCode free models | OpenCode directory/service and models.dev | Explicit discover/enable/refresh and client inference; unsupported/unpriced models rejected |
+| Skills catalogs/downloads | GitHub/raw content, `skills.sh`, configured repositories; search terms/IDs | Skills discover/search/install/update |
+| Cloud-skills inventory | Configured InsForge backend; authenticated skill metadata | Skills refresh while signed in with cloud sync enabled; not transcript/skill-body upload |
+| Devin quota | `server.codeium.com` GetPlanStatus; existing Devin CLI token | Off by default; enabled Devin option and authorized local request |
+| TRAE Work CN usage | TRAE internal API; existing local app authorization | Only `TOKENTRACKER_TRAE_CN_USAGE=1`, eligible non-background sync and local auth; this read path does not log/persist auth |
+| Account login/device pairing | Configured InsForge / OAuth provider | Explicit sign-in/pairing |
+| Manual usage upload | Configured InsForge; aggregate rows | Manual `aitool sync` with credentials, even with automatic sync off |
+| Exchange rates | `open.er-api.com` | Non-USD currency selection |
+| Pet download | `codex-pets.net` or supported selected source | Explicit import |
+| IP / status pages | `ip.net.coffee`, `claude.ai`, `1.1.1.1`, provider status APIs | Open page; endpoints observe connecting IP |
+| Share-card fonts | Google Fonts | Generate share image |
 
-### 3.1 Enabled by default
+Opening an integration status page does not discover Magpie, run MCP checks, log into WorkBuddy or refresh subscription quota. External MCP programs and enabled adapters still operate under their selected setup.
 
-| Request | Destination | What is sent | Frequency |
-|---|---|---|---|
-| **Anonymous heartbeat** | `srctyff5.us-east.insforge.app` | A one-way hash of the machine id, plus the app version, OS platform, and app shell (`cli` / `macos` / `windows` / `linux`) as separate plain fields. Nothing else. | At most once per day |
-| **Dashboard analytics** | `us.i.posthog.com` (PostHog) | Pageviews and explicitly instrumented feature events, plus which shell you use. Autocapture and session recording are **off**; browser Do-Not-Track is respected. | While the dashboard is open |
-| **Provider quota reads** | The provider's own API (`api.anthropic.com`, `chatgpt.com`, `cursor.com`, `api.github.com`, `api.kimi.com`, `api.z.ai`, `qoder.com`, `qoder.com.cn`, `openapi.qoder.sh`, `openapi.qoder.com.cn`, `cloudcode-pa.googleapis.com`, …) | Whatever that provider's own endpoint requires, authenticated with the credentials **that provider already stored on your machine**. These requests go directly from your machine to the provider — they never pass through our servers, and we never see the response. | While quota bars are visible |
-| **TRAE Work CN usage read** | TRAE's internal API | Transmits the existing sign-in authorization from the locally signed-in TRAE Work CN app to TRAE; reads usage metadata only. TokenTracker never persists or logs the auth token or prompt/response content. | Off unless you set `TOKENTRACKER_TRAE_CN_USAGE=1`; then during eligible non-background sync when local TRAE Work CN auth exists |
-| **GitHub star count** | `api.github.com` | Nothing but the request itself (public repo metadata) | On dashboard load |
-| **Update check** | `api.github.com` | Nothing but the request itself | Windows: once at launch. macOS: only when you click "Check for Updates" |
-| **Pricing data refresh** | `raw.githubusercontent.com` | Nothing but the request itself (public model pricing JSON from BerriAI/litellm) | At most once every 24 hours when the local pricing cache is missing or stale |
-| **Proxy pricing refresh** | `models.dev` | Nothing but the request itself (public model pricing JSON) | At most once every 24 hours while the AI proxy's Requests view or a CLI-session cost estimate needs pricing (cached in `~/.aitool/proxy/usage/models-dev-pricing.json`; failures back off and never delay a response) |
+## 4. Cloud usage upload
 
-Both telemetry items are disabled together by a single switch:
+Automatic upload defaults **off**, including while signed in; unset/invalid/unreadable preferences fail closed. Hooks, native publication, retries and notify/background sync must pass `canUpload()`. Preference ordering prevents a delayed old opt-in from replacing a newer opt-out.
 
-```bash
-export TOKENTRACKER_NO_TELEMETRY=1     # or DO_NOT_TRACK=1
-```
+Manual `aitool sync` parses logs and requests one-time upload if credentials are available, without changing the automatic-upload preference. Signing in alone is not automatic-sync consent; automatic sync being off does not prevent an explicit manual request.
 
-You can also set `"telemetry": false` in `~/.tokentracker/tracker/config.json`. On localhost and inside the desktop apps, the dashboard asks the local server for this preference before initialising analytics — and if the answer cannot be confirmed, analytics stays **off** (fail-closed).
+Uploads contain `source`, `model`, UTC half-hour `hour_start`, input/output/cache/reasoning counts, `total_tokens`, `conversation_count` and supported accounting annotations. Device/account identifiers associate rows with the signed-in account. Aggregates may include `source: "cliproxy"`.
 
-Audit: [`src/lib/telemetry.js`](../src/lib/telemetry.js), [`dashboard/src/lib/analytics.js`](../dashboard/src/lib/analytics.js), [`src/lib/pricing/litellm-fetcher.js`](../src/lib/pricing/litellm-fetcher.js).
+Usage upload excludes provider keys/presets, raw proxy records, transcript bodies, local paths, project/session sidecars and instructions. Public-profile visibility is independent of synchronization. The Skills page also reads/publishes inventories while signed in with cloud sync enabled: stable key, name, relative directory/source, target IDs and managed/read-only/scope flags. It excludes descriptions, SKILL.md bodies, README URLs and absolute paths. This is separate from token rows. Sign-in/auth and explicit network features have their own controls.
 
-### 3.2 Only after you opt in or click something
+Audit entry points: [cloud-sync-prefs.js](../src/lib/cloud-sync-prefs.js), [sync.js](../src/commands/sync.js), [upload-queue.js](../src/lib/upload-queue.js), [telemetry.js](../src/lib/telemetry.js), [analytics.js](../dashboard/src/lib/analytics.js), [usage-record.js](../src/lib/proxy/usage-record.js), [session-transcript-cache.js](../src/lib/session-transcript-cache.js).
 
-| Request | Destination | What is sent | Trigger |
-|---|---|---|---|
-| **Devin quota read** | `server.codeium.com` (Devin's official `GetPlanStatus` RPC) | An empty JSON body, authenticated with the Devin CLI session token already stored on your machine. The token is never persisted or logged by TokenTracker. | Off by default — only while the Devin provider switch in Settings → Usage & Limits → Providers is on, and only on a locally authenticated request |
-| **Cloud sync / leaderboard** | `srctyff5.us-east.insforge.app` | Hourly buckets only — see §4 | Signing in to a TokenTracker account **and** an explicit cloud-sync opt-in (default off — see §4) |
-| **Exchange rates** | `open.er-api.com` | Nothing but the request itself | Selecting a non-USD display currency |
-| **Desktop pet download** | `codex-pets.net` | The pet id you chose | Importing a pet from a link |
-| **IP check page** | `ip.net.coffee`, `claude.ai`, `1.1.1.1` | Your IP address is, by design, what these endpoints observe — that page exists to tell you how providers see your network | Opening the IP Check page |
-| **Service status page** | Provider status pages (`status.claude.com`, `status.openai.com`, `status.cursor.com`, …) | Nothing but the request itself | Opening the Service Status page |
-| **Share card fonts** | `fonts.googleapis.com` | Standard web-font request; Google can see your IP address | Generating a share image |
+## 5. Controls and deletion
 
-### 3.3 Never
+| Control | Effect |
+| --- | --- |
+| `TOKENTRACKER_NO_TELEMETRY=1` / `DO_NOT_TRACK=1` | Disable CLI heartbeat and local/native PostHog analytics |
+| `"telemetry": false` in `~/.tokentracker/tracker/config.json` | Same local telemetry opt-out; confirmation failure keeps dashboard analytics off |
+| Cloud-sync off / sign out | Stop automatic aggregate uploads; not inference, provider APIs, telemetry or explicit manual upload |
+| `TOKENTRACKER_DISABLE_GIT_ATTRIBUTION=1` | Stop Git attribution; existing sidecars are not erased |
+| Disable quota/integration/adapter/tool | Stop that capability per its lifecycle; restore owned client config separately |
 
-- No request contains prompt text, responses, file contents, paths, or project names.
-- We operate no ad network, no data broker integration, and no cross-site tracking.
-- We do not sell, rent, or share your data with third parties.
+To remove state, stop AiTool/clients and review backups/receipts. `aitool uninstall` removes supported analytics hooks; it is not complete provider-config/credential restoration. Deleting `~/.tokentracker/` and `~/.aitool/` removes stores but does not erase CLI source logs, exports, cloud data, projected native configs or keyring entries. Restore/remove projections deliberately before deleting recovery records.
 
----
+Hosted account data belongs to the configured service. For upstream TokenTracker use its [contact/issues page](https://github.com/xiufengsun/TokenTracker/issues) for deletion requests without posting credentials. Removing local files does not delete an upstream account.
 
-## 4. Cloud account and leaderboard
+Third-party services follow their own policies, including [GitHub](https://docs.github.com/en/site-policy/privacy-policies/github-privacy-statement), [PostHog](https://posthog.com/privacy), [Vercel](https://vercel.com/legal/privacy-policy), [Google](https://policies.google.com/privacy), InsForge and selected AI providers. AiTool is a developer tool, not directed at children under 13.
 
-Signing in is **entirely optional**. TokenTracker is fully functional without an account; the leaderboard, cross-device aggregation, badges and public profiles are the only features that require one.
-
-**Cloud sync is opt-in and off by default.** Since the v1.1.11 merge, signing in alone uploads nothing: automatic uploads (background syncs, retries, notification-driven runs, native publication) only fire while the cloud-sync preference is explicitly enabled in Settings, and the preference fails closed — an unset, corrupted, or unreadable state counts as off. A delayed re-enable can never overwrite a newer opt-out. A manual `aitool sync` remains a one-time upload request; it does not change the toggle.
-
-**Sent when signed in:**
-
-- Hourly usage buckets, each containing exactly: `hour_start`, `source`, `model`, `input_tokens`, `output_tokens`, `cached_input_tokens`, `cache_creation_input_tokens`, `reasoning_output_tokens`, `total_tokens`, `conversation_count`
-- A machine id at device-registration time, so usage from several computers can be merged into one account without double-counting
-- The email address and display name from your OAuth provider (GitHub or Google)
-
-**Not sent, ever:**
-
-- Prompts, responses, file contents, project or repository names, file paths
-- Local session records — `session.queue.jsonl` stays on your machine
-- Per-project breakdowns — `project.queue.jsonl` is never uploaded
-- Any provider credential
-
-**Public visibility:** your profile appears on the public leaderboard only while `Settings → Account → Public profile` is on. Turning it off removes you from the leaderboard and turns badges into a "private" placeholder.
-
-**Deleting cloud data:** contact us via [GitHub issues](https://github.com/xiufengsun/TokenTracker/issues) and we will remove the account and its rows. Deleting `~/.tokentracker/` removes the local copy immediately.
-
----
-
-## 5. Third parties
-
-| Service | Role | Their policy |
-|---|---|---|
-| InsForge | Backend for accounts, cloud sync, leaderboard, heartbeat | [github.com/InsForge](https://github.com/InsForge) |
-| PostHog | Anonymous product analytics | [posthog.com/privacy](https://posthog.com/privacy) |
-| Vercel | Hosting for www.tokentracker.cc | [vercel.com/legal/privacy-policy](https://vercel.com/legal/privacy-policy) |
-| GitHub | Source hosting, releases, OAuth, star counts, upstream pricing data (`raw.githubusercontent.com`) | [GitHub Privacy Statement](https://docs.github.com/en/site-policy/privacy-policies/github-privacy-statement) |
-| Google | OAuth sign-in, fonts on share cards | [policies.google.com/privacy](https://policies.google.com/privacy) |
-
-AI providers whose quota endpoints TokenTracker reads (Anthropic, OpenAI, Cursor, GitHub Copilot, Google, Moonshot, Z.ai, Qoder, Devin, …) are governed by their own policies. TokenTracker acts on your behalf with credentials already on your machine; it does not create any new relationship with them.
-
----
-
-## 6. Turning things off
-
-| Variable | Effect |
-|---|---|
-| `TOKENTRACKER_NO_TELEMETRY=1` | Disables the daily heartbeat **and** dashboard analytics |
-| `DO_NOT_TRACK=1` | Same as above (respects the standard) |
-| `TOKENTRACKER_DISABLE_GIT_ATTRIBUTION=1` | Stops TokenTracker running `git log` inside your project directories |
-
-Signing out removes cloud sync. Not signing in means it never starts — and since v1.1.11, cloud sync is additionally opt-in: with the preference off (the default), nothing uploads even when you are signed in.
-
----
-
-## 7. Children
-
-TokenTracker is a developer tool and is not directed at children under 13. We do not knowingly collect personal information from children.
-
-## 8. Changes
-
-Material changes to this policy will be noted in the release notes and in the `Last updated` date above. The full history is in [this file's Git log](https://github.com/xiufengsun/TokenTracker/commits/main/docs/PRIVACY.md).
-
-## 9. Contact
-
-Questions, corrections, or deletion requests: [github.com/xiufengsun/TokenTracker/issues](https://github.com/xiufengsun/TokenTracker/issues)
+Fork corrections: [rijing-joker/AITool](https://github.com/rijing-joker/AITool/issues). Private reports follow [SECURITY.md](../SECURITY.md); policy changes remain in this file's Git history.

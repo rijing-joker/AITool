@@ -1,7 +1,7 @@
 # `bot` — vector morphing engine
 
 Upstream: [bloub](https://github.com/jeremy-prt/bloub) by Jérémy Perret (MIT).
-Vendored **unmodified** — see `THIRD_PARTY_NOTICES.md`. Comments are in French;
+Vendored **unmodified** — see [THIRD_PARTY_NOTICES.md](../../../../THIRD_PARTY_NOTICES.md). Comments are in French;
 this file is the Chinese orientation guide so you don't have to read all 2900
 lines to make a safe change.
 
@@ -60,7 +60,7 @@ nuage/goutte`）、12 个颜色、`expressions.ts` 的 16 个表情都是普通�
 | 端 | 做法 |
 |---|---|
 | Web / Windows | 直接 `import`，实时 `sample(t)`，见 `ui/foundation/BotAnimated.jsx`（懒加载，不进 dashboard 主 chunk） |
-| Linux | 无桌宠、无动画托盘（平台限制，见 `TokenTrackerLinux/src-tauri/src/tray.rs`）；Pet 设置页仍可预览 |
+| Linux | 桌宠子进程加载 `pet.html` 并复用 Web 引擎；宿主为 X11/XWayland（`TokenTrackerLinux/src-tauri/src/pet.rs`），托盘保持静态图标 |
 | macOS（宠物 + 菜单栏） | 构建期 `scripts/gen-bot-frames.cjs` 跑本引擎导出点序列 JSON，Swift 只做播放 + 64 点 lerp |
 
 macOS 走预渲染是**刻意的**：手抄 `states`/`decor`/`face`/`expressions`/`eyefit`
@@ -70,4 +70,4 @@ macOS 走预渲染是**刻意的**：手抄 `states`/`decor`/`face`/`expressions
 ## 升级上游
 
 `dashboard/src/lib/bot/` 是未修改的 vendor 副本，请保持这一点——需要定制就在
-外面包一层。上游有 94 个测试（`*.test.ts`），跑 `npx vitest run src/lib/bot`。
+外面包一层。测试位于 `*.test.ts`；从仓库根目录运行 `npm --prefix dashboard test -- src/lib/bot`。引擎改动或包装层映射变化后运行 `npm run gen:bot-frames`，并以 `npm run validate:bot-frames` 核对 macOS 帧数据。

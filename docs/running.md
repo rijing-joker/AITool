@@ -1,10 +1,10 @@
 # Running AiTool
 
-How to get every surface of AiTool running locally: the dashboard GUI, the AI proxy behind it, and the desktop apps. For architecture see the [README](../README.md); for packaging/release internals and agent conventions see [CLAUDE.md](../CLAUDE.md).
+How to get every surface of AiTool running locally: the dashboard GUI, the AI proxy behind it, and the desktop apps. For architecture see the [README](../README.md); for fork workflow and agent conventions see [CLAUDE.md](../CLAUDE.md).
 
 ## Prerequisites
 
-- **Node.js 20+** (the CLI, dashboard build, and everything the desktop shell spawns)
+- **Node.js 24 recommended** for development and tests; use **22.19+** for current dependencies. `package.json` still declares ≥20, but `undici@8` requires ≥22.19 and the tests import TypeScript through native type stripping.
 - **Rust toolchain (cargo)** — only if you build a Tauri desktop app yourself
 - The AI proxy core additionally needs macOS / Linux / Windows; its Go binary is fetched automatically (no toolchain needed)
 - **Docker** — only for the container run (section 5)
@@ -22,24 +22,26 @@ node bin/tracker.js serve      # opens http://localhost:7680 in your browser
 `serve` starts the local HTTP API, serves the built dashboard, and (unless disabled in the proxy settings) starts the AI proxy core and its usage bridge with it. If port 7680 is taken, pass `--port 7681`; `--no-open` skips opening the browser. Other useful commands:
 
 ```bash
-node bin/tracker.js sync       # manual sync of local AI-tool logs into the analytics store
+node bin/tracker.js sync       # parse logs; one-time upload request if account/device credentials exist
 node bin/tracker.js status     # which AI CLI hooks are attached
 node bin/tracker.js doctor     # health check
 ```
 
-Data lands in `~/.tokentracker/` (analytics) and `~/.aitool/proxy/` (proxy).
+Analytics state lives in `~/.tokentracker/tracker/`; the main queue is `queue.jsonl` (UTC half-hour buckets). Proxy state lives in `~/.aitool/proxy/`, and provider/config/MCP/skills/prompt/profile state in `~/.aitool/provider-switch/`. Automatic cloud upload defaults off; a manual `sync` requests a one-time upload without changing that preference.
+
+`serve --no-sync` skips the initial sync; it still starts the proxy when auto-start is enabled. `serve` can repair/install local hook integration. Docker sets `AITOOL_PASSIVE_HOOKS=1` to avoid writing container hook paths into shared host configs.
 
 ### Dashboard frontend development (hot reload)
 
 ```bash
-npm run dashboard:dev          # Vite dev server on :5173 with a mocked local API
+npm run dashboard:dev          # Vite :5173, hybrid local/mock analytics middleware
 ```
 
-This skips the CLI backend entirely — good for UI work. To verify changes to `src/` (local API, proxy, parsers), build the dashboard and use `node bin/tracker.js serve` instead.
+Vite serves selected analytics, projects, sessions, pet and skills endpoints from the checkout, supplies local/mock results for other `/functions/*` endpoints and forwards unhandled `/functions/*` routes to a CLI on :7680. It does not bootstrap `/api/proxy/*`, `/api/provider-switch/*` or `/api/cli-sessions/*`. Use the built dashboard with `serve` for those features. Backend modules outside Vite’s module graph need a Vite restart after edits; frontend hot reload alone does not reload them.
 
 ## 2. AI proxy (optional)
 
-The proxy drives the external [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) Go binary; AiTool never links or bundles it.
+The proxy drives the external [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) Go binary; AiTool does not link or vendor it into the CLI/native app. The Docker image separately downloads it at image build time. The current pin is **v8.0.37** (`core-version.txt`); this pin does not automatically replace an already installed core.
 
 ```bash
 node bin/tracker.js proxy install   # fetch the pinned core (core-version.txt) into ~/.aitool/proxy/bin
@@ -63,16 +65,23 @@ npx tauri dev      # development build
 npx tauri build    # release: desktop/src-tauri/target/release/bundle/macos/AiTool.app (+ dmg)
 ```
 
-Behavior: the shell picks a free loopback port, spawns `node bin/tracker.js serve --port <p> --no-open` from the repo root, polls `GET /api/proxy/status` until healthy, then opens the window. Closing the window hides to tray (server + proxy keep running); **Quit** stops the server and the proxy core. Tray menu: Open AiTool / Start proxy / Stop proxy / Quit.
+Behavior: the shell picks a free loopback port, spawns `node bin/tracker.js serve --port <p> --no-open` from the repo root, polls `GET /api/proxy/status` until the local server responds, then opens the window. Closing the window hides to tray (server + proxy keep running); **Quit** stops the server and the proxy core. Tray menu: Open AiTool / Start proxy / Stop proxy / Quit.
 
-The shell needs to find a Node binary — it probes `/opt/homebrew/bin/node`, `/usr/local/bin/node`, `/usr/bin/node`, `~/.volta/bin/node`, `~/.bun/bin/bun`, then `$PATH`. Set `AITOOL_NODE` to override, and `AITOOL_ROOT` if the repo isn't at the compile-time location.
+The configured bundle targets are macOS `app`/`dmg`; unlike the TokenTracker platform apps, this shell does not bundle Node, CLI or `dashboard/dist`. Build the dashboard before launching. Its port search is limited to 7680–7687. Server readiness does not require the proxy core to be healthy.
+
+The shell needs to find a Node binary — it probes `/opt/homebrew/bin/node`, `/usr/local/bin/node`, `/usr/bin/node`, `~/.volta/bin/node`, `~/.bun/bin/bun`, then `$PATH`. Set `AITOOL_NODE` to override, and use the runtime `AITOOL_ROOT` override if the checkout moved from its compile-time location.
 
 Note: `desktop/` is built manually and is not part of the GitHub release workflows.
 
-## 4. Platform apps (menu bar / tray apps shipped by CI)
+## 4. Platform apps (bundled menu bar / tray clients)
 
-- **macOS** (`TokenTrackerBar/`, Swift menu bar app): local DMG build steps are in [CLAUDE.md → Local DMG build](../CLAUDE.md). Requires XcodeGen + Xcode.
-- **Windows** (`TokenTrackerWin/`, .NET 8 tray app) and **Linux** (`TokenTrackerLinux/`, Tauri 2 → AppImage/`.deb`/`.rpm`): CI is authoritative — see [CLAUDE.md → Release workflow](../CLAUDE.md). Each bundles its own `EmbeddedServer/` (Node + CLI + dashboard), so a repo-local dev loop is the same `serve` command as in section 1.
+Each platform app packages its own gitignored `EmbeddedServer/` (Node + CLI + dashboard). These retain their TokenTracker names during the rebrand.
+
+- **macOS** (`TokenTrackerBar/`, Swift/AppKit + WidgetKit): requires Xcode + XcodeGen. Build the dashboard, run `bash TokenTrackerBar/scripts/bundle-node.sh --arch arm64` (or `x64`), then `(cd TokenTrackerBar && xcodegen generate && ruby scripts/patch-pbxproj-icon.rb)`. Open the generated Xcode project for a local build; `project.yml` is the project definition. The server uses :7680.
+- **Windows** (`TokenTrackerWin/`, .NET 8 + WebView2): [build/dev/bundling guide](../TokenTrackerWin/README.md). Prefers :17680 and falls back to a free loopback port; the fixed port matters for OAuth.
+- **Linux** (`TokenTrackerLinux/`, Tauri 2 + WebKitGTK): [platform guide](../TokenTrackerLinux/README.md). `npm run linux:build` builds dashboard assets, stages Node/CLI and packages AppImage/`.deb`/`.rpm`; requires Linux Tauri dependencies. Also prefers :17680 with a free-port fallback.
+
+Inherited CI/packaging workflows remain in the tree. This personal fork does not dispatch releases or publish packages; see [CLAUDE.md → Fork — no releases here](../CLAUDE.md#fork--no-releases-here).
 
 ## 5. Docker
 
@@ -90,9 +99,11 @@ docker run -d --name aitool -p 127.0.0.1:7680:7680 -p 127.0.0.1:8318:8318 aitool
 
 - One container = dashboard + local API + AI proxy core. The pinned CLIProxyAPI binary is pre-fetched for the image platform at build time and staged at `/opt/aitool/cli-proxy-api` (outside the data dirs, so a mounted volume cannot shadow it); the proxy layer copies it into `~/.aitool/proxy/bin` on first start.
 - Data: named volumes `aitool-tracker` → `/root/.tokentracker` (analytics) and `aitool-proxy` → `/root/.aitool` (proxy config/usage + provider-switch presets/backups).
-- Named volumes start empty and know nothing about AI-CLI data on the host, so on a machine with native usage history the dashboard reads zeros, and provider switch cannot reach the host CLIs' live config files it is supposed to rewrite. To run the container as a full native equivalent, copy `docker-compose.override.yml.example` to `docker-compose.override.yml` (binds `~/.tokentracker`, `~/.zcode`, `~/.claude`, `~/.codex`, `~/.gemini`, `~/.aitool` and runs the service as uid 1000 so files it writes stay owned by the host account) and `docker compose up -d` again; the override file is machine-local and gitignored, the example is what travels with the repo. This covers the Usage page (scan-based ingestion), the Sessions page (reads `~/.claude/projects` plus `~/.codex/sessions`/`archived_sessions` directly), and provider switch (projects into `~/.claude/settings.json`, `~/.codex/config.toml` + `auth.json`, `~/.gemini/.env`) — no native run needed.
+- Named volumes start empty and know nothing about AI-CLI data on the host, so on a machine with native usage history the dashboard reads zeros, and provider switch cannot reach the host CLIs' live config files it is supposed to rewrite. To run the container as a full native equivalent, copy `docker-compose.override.yml.example` to `docker-compose.override.yml` (binds `~/.tokentracker`, `~/.zcode`, `~/.claude`, `~/.codex`, `~/.gemini`, `~/.aitool` and runs the service as uid 1000 so files it writes stay owned by the host account) and `docker compose up -d` again; the override file is machine-local and gitignored, the example is what travels with the repo. This exposes the mounted sources for analytics, the read-only CLI Sessions page and Claude/Codex/Gemini configuration projection. The other supported tools require their own config/session-root mounts. Check the example’s uid and bind paths against your machine; it is not a complete mount inventory for all ten tools.
 - Ports publish on the host **loopback only**. The local API is login-free and trusts loopback origins — never publish it to a public interface without an authenticating reverse proxy.
 - Inside the container everything binds `0.0.0.0` via `AITOOL_BIND_HOST` (a container-bound `127.0.0.1` is unreachable through `-p`). On a bare host the default stays `127.0.0.1`; the proxy's `config.yaml` `server.host` reconciles to the override on start, including volumes carried over from a loopback-only machine.
+
+For optional OpenCode free models, desktop client connections, Magpie/WorkBuddy adapters and search/vision/routing, see the [documentation index](README.md). These integrations require explicit configuration; opening a status page does not perform discovery, login, MCP checks or quota refresh.
 
 ## Troubleshooting
 
@@ -105,4 +116,5 @@ docker run -d --name aitool -p 127.0.0.1:7680:7680 -p 127.0.0.1:8318:8318 aitool
 | Dashboard shows no proxy data | Check `proxy status` → usage bridge should be `streaming`; core log at `~/.aitool/proxy/logs/core.log`. |
 | Docker: usage dashboard is all zeros while the service is healthy | Stock compose uses named volumes — the container can't see native tracker state or AI-CLI data. Copy `docker-compose.override.yml.example` → `docker-compose.override.yml` and `docker compose up -d` (see section 5). |
 | Desktop app can't find Node | It probes common Homebrew/Volta/bun paths then `$PATH`; set `AITOOL_NODE`. |
+| Long CLI-session fields show previews | Expand to load the full field. If logs change during reading, reload the session; search and Markdown export load the full current revision. |
 | Auth/OAuth issues in the dashboard | Use `node bin/tracker.js doctor`; the OAuth callback page (`NativeAuthCallbackPage`) must stay eagerly imported — see CLAUDE.md. |

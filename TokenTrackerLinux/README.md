@@ -1,6 +1,6 @@
 # TokenTracker Linux Client
 
-A Tauri desktop client for TokenTracker. It is the Linux counterpart of the macOS
+A Tauri desktop client for the AiTool fork, retaining TokenTracker naming for compatibility. It is the Linux counterpart of the macOS
 menu bar app and the Windows tray app: a native shell that starts the bundled
 TokenTracker CLI on a loopback port, loads the same dashboard in a WebKitGTK
 window, and keeps a tray icon alive.
@@ -8,12 +8,12 @@ window, and keeps a tray icon alive.
 Two distribution paths are supported:
 
 - **Release packages** — an **AppImage**, a **`.deb`** and an **`.rpm`**, built
-  by CI and attached to every release.
+  by the local build or inherited upstream workflow. This fork does not publish releases.
 - **Arch package** — a `PKGBUILD` for building from a local checkout.
 
 ## Install
 
-All three release packages carry the same embedded Node runtime and dashboard.
+All three packages carry the same embedded Node runtime and dashboard. Upstream downloads below are TokenTracker releases, not builds of this fork; build from the checkout to run current AiTool changes. For project boundaries see [architecture.md](../docs/architecture.md).
 
 ### AppImage
 
@@ -205,16 +205,26 @@ single `server.log.1` generation.
 
 ## Development
 
+Use Node 24 for checkout development/tests (current dependencies require ≥22.19), Rust and the system libraries below. From the repository root:
+
 ```bash
+npm ci
+npm ci --prefix dashboard
 npm ci --prefix TokenTrackerLinux
 TOKENTRACKER_BUILD_PET=1 npm run dashboard:build   # from the repo root; includes pet.html
 npm --prefix TokenTrackerLinux run bundle:node # stages EmbeddedServer/
 npm --prefix TokenTrackerLinux run dev
 ```
 
-`TOKENTRACKER_BUILD_PET=1` adds `pet.html`, the page the floating desktop pet
-loads (tray → **Show Pet**, or the dashboard's Pet page). Without it the pet
-window has nothing to show.
+`TOKENTRACKER_BUILD_PET=1` adds `pet.html` and `quota.html`; the floating desktop pet loads `pet.html` (tray → **Show Pet**, or the dashboard's Pet page). The pet runs in a separate X11/XWayland process; the main dashboard can use Wayland. A generated quota entry does not imply the Windows quota widget is implemented on Linux.
+
+For a local AppImage/deb/rpm build after dependencies are installed:
+
+```bash
+npm run linux:build
+```
+
+This builds dashboard assets, stages `EmbeddedServer/` and runs Tauri packaging. For the checkout-based Arch package, use `npm run linux:package:local` or the PKGBUILD instructions above.
 
 `bundle:node` must run before any bundling build: `tauri.bundle.conf.json`
 declares `EmbeddedServer` as a bundle resource and `tauri-build` fails on a
@@ -224,8 +234,9 @@ Tests:
 
 ```bash
 cd TokenTrackerLinux/src-tauri
-cargo test
-cargo clippy --all-targets -- -D warnings
+cargo fmt --check
+cargo test --locked
+cargo clippy --locked --all-targets -- -D warnings
 ```
 
 Build dependencies: `webkit2gtk-4.1`, `gtk3`, `libayatana-appindicator`,

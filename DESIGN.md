@@ -2,13 +2,17 @@
 
 Derived from `dashboard/src/styles.css` + `dashboard/tailwind.config.cjs`. Tailwind utility classes use the `oai-*` token names. The language is TokenTracker's, inherited unchanged by the AiTool merge — the newer AI Proxy, Provider Configs, and CLI Sessions pages are held to the same tokens.
 
+The theme behavior is implemented in `dashboard/src/ui/foundation/ThemeProvider.jsx`; native appearance changes feed the same provider. This document describes shared tokens and conventions; feature behavior is in [docs/architecture.md](docs/architecture.md).
+
 ## Color (OKLCH, green-tinted neutrals, hue 145)
 
-- **Neutrals** `oai-gray-50…950`: every neutral is tinted toward green (chroma ~0.005–0.03, hue 145). Surfaces, borders, text. Dark mode inverts the ramp; dashboard defaults dark.
+- **Neutrals** `oai-gray-50…950`: every neutral is tinted toward green (chroma ~0.005–0.03, hue 145). Surfaces, borders, text. Dark mode overrides the ramp; `ThemeProvider` defaults to `system` and persists an explicit light/dark/system choice.
 - **Brand accent**: emerald — `--oai-blue: #059669` (token name is legacy; the brand is green), light `#10b981`, dark `#047857`. Exposed as `oai-brand` utilities. Used for primary action, current selection, cost figure, and "you/me" highlight only. Restrained: accent ≤10% of surface.
 - **Semantic**: success `#10b981`, warning `#f59e0b`, error `#ef4444`, info `#059669`.
 - Never `#000`/`#fff`: base black `#0a0a0a`, white `#fafafa`.
 - Per-provider category colors come from `getProviderColor()` (data-viz only, in distribution bars/charts).
+
+Hex fallbacks in `styles.css` support older WebViews; its `@supports` block restores OKLCH on compatible engines.
 
 ## Typography
 

@@ -2,6 +2,19 @@
 
 This project includes third-party assets and code. The following notices apply.
 
+## AiTool integration code
+
+| Source | Use in AiTool | License / reference |
+| --- | --- | --- |
+| [TokenTracker](https://github.com/xiufengsun/TokenTracker) | CLI, analytics, dashboard and platform apps | MIT; root [LICENSE](./LICENSE) |
+| [EasyCLIProxyAPI](https://github.com/router-for-me/EasyCLIProxyAPI) / [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) | Management/UI reference and external inference core | MIT upstream; core is downloaded separately, not linked or vendored into npm/native artifacts |
+| [cc-switch](https://github.com/farion1231/cc-switch) | Node ports of configuration, sessions and account behavior | MIT upstream; fixed snapshots documented in [integration records](./docs/README.md) |
+| [opencode-free-bridge](https://github.com/azrinaldi/opencode-free-bridge) (`f3e1c5a`) | Adapted protocol/session/tool helpers in `src/lib/proxy/opencode-free/` | Copyright © 2026 azrinaldi; [retained MIT license](./src/lib/proxy/opencode-free/LICENSE) |
+| [Magpie](https://github.com/yetone/magpie) (`86254d4049cb6be4a2ccdab02edf0bd59860c603`) | Integration/configuration/tool/routing references and adapted code | Copyright © 2026 yetone; [retained MIT license](./src/lib/proxy/extensions/LICENSE.magpie) |
+| Magpie community WorkBuddy adapter | Optional subscription protocol adapter | Copyright © 2026 magpie-community contributors; [retained MIT license](./src/lib/proxy/extensions/LICENSE.workbuddy); [source snapshot](./docs/magpie-integration-research.md) |
+
+These notices distinguish source references, adapted code and separately downloaded executables. Keep the full retained licenses with their modules when packaging; the table does not replace license text. Docker separately fetches the core at image build time.
+
 ## RunCat menu bar cat frames
 
 The running-cat animation frames used by the macOS menu bar icon

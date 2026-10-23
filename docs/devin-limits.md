@@ -4,7 +4,7 @@
 
 TokenTracker exposes **Devin** (devin.ai) as a usage-limits provider. The provider reports the two subscription quota windows a Devin plan calculates on its servers: daily usage and weekly usage. Both are *remaining* quotas on the wire and are inverted into the panel's `used_percent` convention.
 
-Quota display only: there is no local session token parsing for Devin, no spending enforcement and no billing manager. The bars are always the server's own numbers.
+This module only displays quotas: it does not parse local session tokens, enforce spending or manage billing. The bars are always the server's own numbers. Separate passive Devin token statistics are documented in [devin-usage.md](devin-usage.md).
 
 Devin is **opt-in and off by default**. The existing provider switch in Settings → Usage & Limits → Providers is the single selection fact: while it is off, TokenTracker never reads the Devin CLI credentials or calls the endpoint, and any retained rows are hidden; turning it on sends a locally authenticated `devin=1` opt-in on each quota request and displays the result. Finding Devin credentials never enables the provider by itself.
 

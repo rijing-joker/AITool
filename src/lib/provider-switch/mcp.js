@@ -7,6 +7,8 @@ const { readJson, updateJsonLocked, withFileLock, ensureDir, writeFileAtomic, ch
 const paths = require("./paths");
 const toml = require("./toml");
 const backup = require("./backup");
+const envrefs = require("./mcp-envrefs");
+const toolRules = require("./mcp-tool-rules");
 
 // MCP server management, ported from cc-switch's mcp module (services/mcp.rs
 // + mcp/*.rs). One SSOT list of server specs (mcp-servers.json) is projected
@@ -64,6 +66,12 @@ function validateServerSpec(spec) {
   }
   if ((type === "http" || type === "sse") && !String(spec.url || "").trim()) {
     throw new Error(`${type} MCP server requires a url`);
+  }
+  if (spec.args !== undefined && (!Array.isArray(spec.args) || spec.args.some(arg => typeof arg !== "string"))) throw new Error("MCP args must be a list of strings");
+  for (const key of ["env", "headers"]) {
+    if (spec[key] !== undefined && (!spec[key] || typeof spec[key] !== "object" || Array.isArray(spec[key]) || Object.values(spec[key]).some(value => typeof value !== "string"))) {
+      throw new Error(`MCP ${key} must be a string map`);
+    }
   }
   return spec;
 }
@@ -311,6 +319,7 @@ function toHermesSpec(spec) {
   } else {
     throw new Error(`Unknown MCP type: ${type}`);
   }
+  if (spec.tools && typeof spec.tools === "object" && !Array.isArray(spec.tools)) out.tools = structuredClone(spec.tools);
   out.enabled = true;
   return out;
 }
@@ -323,6 +332,7 @@ function mergeHermesSpec(existing, next) {
     }
   }
   for (const [key, value] of Object.entries(next)) result[key] = value;
+  if (result.tools && !Object.keys(result.tools).length) delete result.tools;
   return result;
 }
 
@@ -526,7 +536,17 @@ function mcpLiveFiles() {
 async function upsertServerInApp(app, id, spec) {
   const file = mcpLiveFiles()[app];
   if (app !== "mcode" && !shouldSyncDir(HOME_SUBDIRS[app])) return;
-  return withFileLock(file.path, () => upsertServerInFile(app, file, id, spec));
+  const projected = envrefs.projectReferences(app, spec);
+  await withFileLock(file.path, async () => {
+    let live;
+    if (app === "codex") live = tomlParse((await readText(file.path)) || "").mcp_servers?.[id];
+    if (app === "gemini") live = (await readJsonDoc(file.path)).mcpServers?.[id];
+    if (app === "hermes") live = YAML.parse((await readText(file.path)) || "{}")?.mcp_servers?.[id];
+    const rules = await toolRules.projectInSpec(app, id, projected, live);
+    await upsertServerInFile(app, file, id, rules.spec);
+    if (rules.owned !== null) await toolRules.commit(app, id, rules.owned);
+  });
+  await toolRules.projectExternal(app, id, true);
 }
 
 async function upsertServerInFile(app, file, id, spec) {
@@ -612,7 +632,9 @@ function stripInlineMcpEntry(text, id) {
 async function removeServerFromApp(app, id, { mode = "off" } = {}) {
   const file = mcpLiveFiles()[app];
   if (app !== "mcode" && !shouldSyncDir(HOME_SUBDIRS[app])) return;
-  return withFileLock(file.path, () => removeServerFromFile(app, file, id, { mode }));
+  await withFileLock(file.path, () => removeServerFromFile(app, file, id, { mode }));
+  await toolRules.projectExternal(app, id, false);
+  if (["codex", "gemini", "hermes"].includes(app)) await toolRules.commit(app, id, []);
 }
 
 // mode "off" (default) is what toggles and projections use; "delete" is the
@@ -763,6 +785,39 @@ async function toggleServerApp(id, app, enabled) {
   return { servers: await listServers(), failures };
 }
 
+async function toggleServerTool(id, app, tool, enabled, revision) {
+  if (!toolRules.APPS.includes(app)) throw new Error(`MCP tool filtering is not supported for app: ${app}`);
+  const cleanId = sanitizeServerId(id);
+  const server = (await listServers()).find(row => row.id === cleanId);
+  if (!server) throw new Error("MCP server not found");
+  const health = require("./mcp-check").snapshot(server);
+  if (health?.status !== "healthy" || health.revision !== revision || !health.tools.some(row => row.name === tool)) {
+    throw new Error("MCP tools changed; check the server again before changing a tool");
+  }
+  if (["claude", "opencode"].includes(app)) {
+    const rule = toolRules.nativeRules(app, cleanId, [tool])[0];
+    if (health.tools.some(row => row.name !== tool && toolRules.nativeRules(app, cleanId, [row.name])[0] === rule)) {
+      throw new Error("MCP tool names collide in this client's native rules; the rules were kept");
+    }
+  }
+  await mutateMcpStore(store => {
+    const row = store.servers.find(item => item.id === cleanId);
+    if (!row || require("./mcp-check").fingerprint(row) !== revision) throw new Error("MCP configuration changed");
+    const disabled = new Set(row.disabledTools?.[app] || []);
+    if (enabled) disabled.delete(tool); else disabled.add(tool);
+    row.disabledTools = { ...row.disabledTools, [app]: [...disabled] };
+    row.updatedAt = new Date().toISOString();
+    return store;
+  });
+  const fresh = (await listServers()).find(row => row.id === cleanId);
+  const failures = [];
+  if (fresh.apps?.[app]) {
+    try { await upsertServerInApp(app, cleanId, fresh.server); }
+    catch (error) { failures.push(`${app}/${cleanId}: ${error.message}`); }
+  }
+  return { servers: await listServers(), failures };
+}
+
 // Import MCP entries from one app's live config (or all apps) into the SSOT.
 // Existing servers only get the app flag synced to the live state; their spec
 // stays user-owned. Returns the change count and the per-entry skip reasons.
@@ -835,7 +890,7 @@ async function importFromApp(app) {
         }
       }
       else spec = tomlEntryToSpec(value, { codexStyle: app === "codex" });
-      spec = JSON.parse(JSON.stringify(spec));
+      spec = envrefs.importReferences(app, JSON.parse(JSON.stringify(spec)));
       // Gemini's legacy httpUrl selects streamable HTTP ahead of url/type.
       // Normalize it before validating or projecting into other apps.
       if (app === "gemini" && typeof spec?.httpUrl === "string" && spec.httpUrl.trim()) {
@@ -907,6 +962,7 @@ module.exports = {
   upsertServer,
   deleteServer,
   toggleServerApp,
+  toggleServerTool,
   importFromApps,
   syncServers,
   // exported for tests

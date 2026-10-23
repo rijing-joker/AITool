@@ -3,6 +3,7 @@ import { Download } from "lucide-react";
 import { Button, Card, Input } from "../ui/components";
 import { copy } from "../lib/copy";
 import { skillsApi } from "../lib/provider-switch-api";
+import { LibraryDistributionPanel } from "./library-distribution-panel";
 
 // Skills panel (cc-switch's UnifiedSkillsPanel, v1): one SSOT list discovered
 // from the agents' skills directories, with per-app toggles that project each
@@ -135,6 +136,7 @@ export function ProviderSkillsPanel({ onEditorStateChange }) {
           ))}
         </div>
       )}
+      <LibraryDistributionPanel />
     </div>
   );
 }

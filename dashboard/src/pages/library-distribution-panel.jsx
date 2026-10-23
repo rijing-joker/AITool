@@ -1,0 +1,33 @@
+import React, { useEffect, useRef, useState } from "react";
+import { copy } from "../lib/copy";
+import { distributionApi } from "../lib/provider-switch-api";
+import { Button, Card } from "../ui/components";
+const empty = { name: "", description: "", prompt: "", dir: "", apps: [], skills: [], mcp: [] };
+const inputClass = "min-w-0 rounded-lg border border-oai-gray-200 bg-transparent p-3 text-sm dark:border-oai-gray-700";
+export function LibraryDistributionPanel() {
+  const [state, setState] = useState(null), [kind, setKind] = useState("subagent"), [row, setRow] = useState(empty);
+  const [preview, setPreview] = useState(null), [result, setResult] = useState(null), [busy, setBusy] = useState(false), [error, setError] = useState("");
+  const pending = useRef(false);
+  const load = async () => setState(await distributionApi.list());
+  useEffect(() => { void load().catch(failure => setError(failure.message)); }, []);
+  const run = async action => { if (pending.current) return; pending.current = true; setBusy(true); setError(""); try { await action(); } catch (failure) { setError(failure.message); } finally { pending.current = false; setBusy(false); } };
+  const change = update => { setRow(previous => ({ ...previous, ...update })); setPreview(null); setResult(null); };
+  const toggle = (field, id, checked) => { setRow(previous => ({ ...previous, [field]: checked ? [...previous[field], id] : previous[field].filter(value => value !== id) })); setPreview(null); setResult(null); };
+  const existing = state?.[kind === "subagent" ? "subagents" : "projects"] || [];
+  return <Card>
+    <h3 className="text-sm font-semibold">{copy("pswitch.distribution.title")}</h3><p className="mt-2 text-sm text-oai-gray-500 dark:text-oai-gray-400">{copy("pswitch.distribution.description")}</p>
+    <div className="mt-3 flex flex-wrap gap-2">{["subagent", "project"].map(value => <Button key={value} size="sm" variant={kind === value ? "primary" : "secondary"} disabled={busy} onClick={() => { setKind(value); setRow(empty); setPreview(null); setResult(null); }}>{copy(`pswitch.distribution.${value}`)}</Button>)}</div>
+    {Boolean(existing.length) ? <div className="mt-3 flex flex-wrap gap-2">{existing.map(item => <Button key={item.name || item.dir} variant="secondary" size="sm" disabled={busy} onClick={() => { setRow({ ...empty, ...item }); setPreview(null); setResult(null); }}>{item.name || item.dir}</Button>)}</div> : null}
+    <div className="mt-4 grid gap-3">
+      {kind === "subagent" ? <><label className="flex flex-col gap-1 text-xs"><span>{copy("pswitch.distribution.name")}</span><input className={inputClass} value={row.name} disabled={busy} onChange={event => change({ name: event.currentTarget.value })} /></label><label className="flex flex-col gap-1 text-xs"><span>{copy("pswitch.distribution.purpose")}</span><input className={inputClass} value={row.description} disabled={busy} onChange={event => change({ description: event.currentTarget.value })} /></label><label className="flex flex-col gap-1 text-xs"><span>{copy("pswitch.distribution.prompt")}</span><textarea className={inputClass} rows={5} value={row.prompt} disabled={busy} onChange={event => change({ prompt: event.currentTarget.value })} /></label></> : <label className="flex flex-col gap-1 text-xs"><span>{copy("pswitch.distribution.directory")}</span><input className={`${inputClass} font-mono`} value={row.dir} disabled={busy} onChange={event => change({ dir: event.currentTarget.value })} /></label>}
+    </div>
+    <fieldset className="mt-3"><legend className="text-xs font-medium">{copy("pswitch.distribution.apps")}</legend><div className="flex flex-wrap gap-3">{(state?.[kind === "subagent" ? "roleApps" : "projectApps"] || []).map(app => <label key={app} className="flex min-h-10 items-center gap-2 text-xs"><input className="h-4 w-4 shrink-0 accent-oai-brand-600" type="checkbox" checked={row.apps.includes(app)} disabled={busy} onChange={event => toggle("apps", app, event.currentTarget.checked)} />{copy(`pswitch.tab.${app}`)}</label>)}</div></fieldset>
+    <p className="mt-1 text-xs text-oai-gray-500 dark:text-oai-gray-400">{copy(kind === "subagent" ? "pswitch.distribution.role_matrix" : "pswitch.distribution.project_matrix")}</p>
+    {[{ field: "skills", title: "pswitch.skills.tab", items: state?.skills || [] }, { field: "mcp", title: "pswitch.mcp.tab", items: state?.mcp || [] }].map(group => <fieldset key={group.field} className="mt-3"><legend className="text-xs font-medium">{copy(group.title)}</legend><div className="max-h-40 overflow-y-auto">{group.items.map(item => <label key={item.id} className="flex min-h-10 items-center gap-2 text-xs"><input className="h-4 w-4 shrink-0 accent-oai-brand-600" type="checkbox" checked={row[group.field].includes(item.id)} disabled={busy} onChange={event => toggle(group.field, item.id, event.currentTarget.checked)} /><span className="break-all">{item.name || item.id}</span></label>)}</div>{!group.items.length ? <p className="mt-2 text-xs text-oai-gray-500 dark:text-oai-gray-400">{copy("pswitch.distribution.library_empty")}</p> : null}</fieldset>)}
+    <p className="mt-3 text-xs text-oai-gray-500 dark:text-oai-gray-400">{copy("pswitch.distribution.remove_hint")}</p>
+    <div className="mt-4 flex flex-wrap gap-2"><Button size="sm" variant="secondary" disabled={busy || !state} onClick={() => void run(async () => { setPreview(await distributionApi.preview(kind, row)); setResult(null); })}>{copy("pswitch.distribution.preview")}</Button>{preview ? <Button size="sm" disabled={busy || Boolean(preview.errors.length)} onClick={() => void run(async () => { setResult(await distributionApi.apply(kind, row, preview.revision)); setPreview(null); await load(); })}>{copy("pswitch.distribution.apply")}</Button> : null}</div>
+    {preview ? <div className="mt-3 text-xs"><ul className="space-y-2">{preview.changes.map(change => <li key={change.path} className="break-all"><span>{copy(`pswitch.distribution.action.${change.action}`)}</span><span className="ml-2 font-mono">{change.path}</span></li>)}</ul>{preview.errors.map(message => <p key={message} role="alert" className="mt-2 text-red-600 dark:text-red-400">{message}</p>)}</div> : null}
+    {result ? <div className="mt-3 text-xs" role="status">{result.results.map(item => <p key={item.path} className="break-all">{copy(item.status === "applied" ? "pswitch.distribution.applied" : "pswitch.distribution.failed")} · {item.path}{item.error ? ` · ${item.error}` : ""}</p>)}<p className="mt-2 break-all font-mono">{result.recoveryPath}</p></div> : null}
+    {error ? <p role="alert" className="mt-2 text-xs text-red-600 dark:text-red-400">{error}</p> : null}
+  </Card>;
+}

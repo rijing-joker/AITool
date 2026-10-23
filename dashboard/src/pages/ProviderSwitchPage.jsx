@@ -44,6 +44,7 @@ import { useVisiblePolling } from "../hooks/use-visible-polling";
 import { PresetIcon, providerTileClass, ProviderEditDialog } from "./provider-edit-dialog";
 import { ProviderMcpPanel } from "./provider-mcp-panel";
 import { ProviderProfilesBar } from "./provider-profiles-bar";
+import { ProviderDiagnostics } from "./provider-diagnostics";
 import { ProviderPromptsPanel } from "./provider-prompts-panel";
 import { ProviderUniversalPanel } from "./provider-universal-panel";
 import { ProviderQuotaLine } from "./provider-quota-line";
@@ -965,6 +966,7 @@ export function ProviderSwitchPage() {
       ) : null}
       {activeApp === "agy" ? <ProviderAgyAccounts /> : null}
       {activeApp === "codex" ? <ProviderCodexClient revision={status} /> : null}
+      <ProviderDiagnostics key={activeApp} app={activeApp} revision={status} onChanged={refreshStatus} />
       <section className="mb-8">
         <SectionTitle>{copy("pswitch.section.providers")}</SectionTitle>
         {!appState || appState.providers.length === 0 ? (

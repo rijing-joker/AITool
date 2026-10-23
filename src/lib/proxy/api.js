@@ -417,6 +417,61 @@ async function handleProxyApiRequest(req, res, url, ctx) {
   };
 
   try {
+    if (p === "/api/proxy/routing" && method === "GET") { json(res, { ok: true, ...await require("./extensions/routing").status() }); return true; }
+    if (p === "/api/proxy/routing" && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req), routing = require("./extensions/routing");
+      if (body.action === "magpie-events") { json(res, { ok: true, events: await routing.magpieEvents() }); return true; }
+      if (body.enabled) {
+        if (!clientAccessKeys(config.readConfig() || {}).includes(body.apiKey)) throw new Error("Select a configured proxy key");
+        const models = await require("./copilot").modelCatalog(body);
+        if ([...(body.models || []), ...(body.intent ? [body.classifier] : [])].some(id => !models.some(row => row.id === id))) throw new Error("Select available models and classifier");
+      }
+      json(res, { ok: true, ...await routing.configure(body) }); return true;
+    }
+    if (p === "/api/proxy/tools" && method === "GET") { json(res, { ok: true, ...await require("./extensions/tools").status() }); return true; }
+    if (p === "/api/proxy/tools" && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req), tools = require("./extensions/tools");
+      if (body.action === "mount") json(res, { ok: true, ...await tools.mount(body.apps) });
+      else {
+        if (body.enabled && body.mode === "local") {
+          if (!clientAccessKeys(config.readConfig() || {}).includes(body.apiKey)) throw new Error("Select a configured proxy client key");
+          const models = await require("./copilot").modelCatalog(body);
+          if (!models.some(row => row.id === body.model && row.inputModalities?.includes("image"))) throw new Error("Select a model with verified image capability");
+        }
+        json(res, { ok: true, ...await tools.configure(body) });
+      }
+      return true;
+    }
+    if (p === "/api/proxy/integrations" && method === "GET") {
+      const magpie = require("./extensions/magpie"), buddy = require("./extensions/workbuddy");
+      json(res, { ok: true, magpie: await magpie.status(), workbuddy: await buddy.status("workbuddy"), workbuddyAI: await buddy.status("workbuddy-ai") }); return true;
+    }
+    if (p === "/api/proxy/integrations" && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      if (!["magpie", "workbuddy", "workbuddy-ai"].includes(body.kind)) throw new Error("Unknown optional integration");
+      const root = require("./managed-upstream").root({});
+      const result = await require("../fs").withFileLock(require("node:path").join(root, "integration-mutation"), async () => {
+        if (body.kind === "magpie") {
+          const magpie = require("./extensions/magpie");
+          if (body.action === "discover") return magpie.discover();
+          if (body.action === "configure") return magpie.configure(body);
+        } else {
+          const buddy = require("./extensions/workbuddy");
+          if (body.action === "desktop") return buddy.useDesktop(body.kind);
+          if (body.action === "begin") return buddy.begin(body.kind);
+          if (body.action === "poll") return buddy.poll(body.kind, body.id);
+          if (body.action === "catalog") return { models: await buddy.catalog(body.kind) };
+          if (body.action === "quota") return buddy.quota(body.kind);
+          if (body.action === "configure") return buddy.configure(body.kind, body);
+          if (body.action === "forget") return buddy.forget(body.kind);
+        }
+        throw new Error("Unknown optional integration action");
+      });
+      json(res, { ok: true, result }); return true;
+    }
     if (p === "/api/proxy/opencode-free" && method === "GET") {
       json(res, { ok: true, ...await require("./opencode-free").status() });
       return true;
@@ -430,6 +485,20 @@ async function handleProxyApiRequest(req, res, url, ctx) {
     }
     if (p === "/api/proxy/copilot" && method === "GET") {
       json(res, { ok: true, clients: await require("./copilot").status() });
+      return true;
+    }
+    if (p === "/api/proxy/desktop-clients" && method === "GET") {
+      json(res, { ok: true, clients: await require("./desktop-clients").status() }); return true;
+    }
+    if (["/api/proxy/desktop-clients/connect", "/api/proxy/desktop-clients/restore", "/api/proxy/desktop-clients/models"].includes(p) && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req), clients = require("./desktop-clients");
+      if (p.endsWith("/restore")) { json(res, { ok: true, ...await clients.restore(body.client) }); return true; }
+      const cfg = config.readConfig() || {};
+      if (!clientAccessKeys(cfg).includes(body.apiKey)) { json(res, { ok: false, error: "Select a configured proxy client key." }, 400); return true; }
+      const models = await require("./copilot").modelCatalog(body);
+      if (p.endsWith("/models")) json(res, { ok: true, models: models.map(row => row.id) });
+      else json(res, { ok: true, ...await clients.connect(body.client, { ...body, models }) });
       return true;
     }
     if (["/api/proxy/copilot/connect", "/api/proxy/copilot/restore", "/api/proxy/copilot/models"].includes(p) && method === "POST") {
@@ -1223,7 +1292,7 @@ async function handleProxyApiRequest(req, res, url, ctx) {
     json(res, { ok: false, error: "Not found" }, 404);
     return true;
   } catch (error) {
-    json(res, { ok: false, error: error?.message || String(error) }, 500);
+    json(res, { ok: false, error: error?.message || String(error) }, error?.status >= 400 && error?.status < 600 ? error.status : 500);
     return true;
   }
 }

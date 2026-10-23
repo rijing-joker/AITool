@@ -3224,3 +3224,182 @@ proxy.copilot.notInstalled,shared,*,UpstreamIntegration,hint,VS Code was not fou
 proxy.creds.refreshOne,shared,*,UpstreamIntegration,action,Refresh token,,active
 proxy.creds.settings.request_retryHint,shared,*,UpstreamIntegration,hint,Leave empty to inherit the global retry limit.,,active
 proxy.creds.settings.using_apiHint,shared,*,UpstreamIntegration,hint,Choose the xAI API mode for this credential or inherit the global setting.,,active
+pswitch.mcp.check,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_check,Check connection,,active
+pswitch.mcp.check_cancel,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_check_cancel,Cancel check,,active
+pswitch.mcp.check_hint,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_check_hint,"Starts the configured server or connects to its URL, then reads tool metadata. No tools are executed.",,active
+pswitch.mcp.health_unknown,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_health_unknown,Not checked,,active
+pswitch.mcp.health_checking,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_health_checking,Checking connection…,,active
+pswitch.mcp.health_healthy,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_health_healthy,Connected,,active
+pswitch.mcp.health_failed,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_health_failed,Check failed,,active
+pswitch.mcp.health_cancelled,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_health_cancelled,Check cancelled,,active
+pswitch.mcp.health_stale,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_health_stale,Configuration changed — check again,,active
+pswitch.mcp.tools_count,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_tools_count,{{count}} tools,,active
+pswitch.mcp.tools,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_tools,Tool list and controls,,active
+pswitch.mcp.tool_app,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_tool_app,Apply tool controls to,,active
+pswitch.mcp.tool_unsupported,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_tool_unsupported,This app has no verified per-tool control. The tool list is read-only.,,active
+pswitch.mcp.tool_hint,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_tool_hint,Controls update native deny rules. Existing user rules are kept; enabling here does not remove them. Disabled apps receive these controls when enabled.,,active
+pswitch.mcp.tool_enabled,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_tool_enabled,Enabled,,active
+pswitch.mcp.tool_toggle,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_tool_toggle,Enable {{tool}} for {{app}},,active
+pswitch.mcp.envrefs_hint,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_envrefs_hint,Use ${NAME} to reference process environment variables. Client syntax is converted without writing resolved secrets. Unsupported references report a projection error.,,active
+pswitch.mcp.stage_connect,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_stage_connect,Connecting,,active
+pswitch.mcp.stage_initialize,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_stage_initialize,Initializing,,active
+pswitch.mcp.stage_initialized,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_stage_initialized,Confirming initialization,,active
+pswitch.mcp.stage_tools,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_stage_tools,Reading tool list,,active
+pswitch.mcp.reason_timeout,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_reason_timeout,This step timed out. Check the server and try again.,,active
+pswitch.mcp.reason_authorization,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_reason_authorization,Access was denied. Check the server credentials.,,active
+pswitch.mcp.reason_environment,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_reason_environment,A referenced environment variable is missing from AiTool’s process. Set it and restart AiTool.,,active
+pswitch.mcp.reason_notfound,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_reason_notfound,The command was not found. Install it or use an absolute path.,,active
+pswitch.mcp.reason_launcher,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_reason_launcher,This Windows launcher needs an executable command or a supported npm/npx installation.,,active
+pswitch.mcp.reason_protocol,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_reason_protocol,The server returned an invalid MCP response. Check its transport and protocol version.,,active
+pswitch.mcp.reason_size,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_reason_size,The tool list or response exceeded the check limit.,,active
+pswitch.mcp.reason_url,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_reason_url,The server URL or SSE endpoint is invalid. Use an HTTP(S) URL and a same-origin SSE endpoint.,,active
+pswitch.mcp.reason_exited,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_reason_exited,The server could not start or exited during the check. Check its command and dependencies.,,active
+pswitch.mcp.reason_unreachable,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_reason_unreachable,The server could not be reached. Check its address and try again.,,active
+pswitch.mcp.reason_http,pswitch,ProviderSwitchPage,ProviderMcpPanel,mcp_reason_http,The server returned an HTTP error. Check its endpoint and try again.,,active
+pswitch.diagnostic.title,pswitch,ProviderSwitchPage,ProviderDiagnostics,diagnostic_title,Configuration diagnostics,,active
+pswitch.diagnostic.applied,pswitch,ProviderSwitchPage,ProviderDiagnostics,diagnostic_applied,Managed fields match the last successful projection.,,active
+pswitch.diagnostic.unwired,pswitch,ProviderSwitchPage,ProviderDiagnostics,diagnostic_unwired,No provider is selected.,,active
+pswitch.diagnostic.unverified,pswitch,ProviderSwitchPage,ProviderDiagnostics,diagnostic_unverified,No verified projection receipt yet. Preview and apply to establish one.,,active
+pswitch.diagnostic.replaced,pswitch,ProviderSwitchPage,ProviderDiagnostics,diagnostic_replaced,Managed configuration changed outside the last projection.,,active
+pswitch.diagnostic.preset_changed,pswitch,ProviderSwitchPage,ProviderDiagnostics,diagnostic_preset_changed,The provider preset changed since it was applied.,,active
+pswitch.diagnostic.invalid,pswitch,ProviderSwitchPage,ProviderDiagnostics,diagnostic_invalid,A live configuration file cannot be parsed. Fix it before applying.,,active
+pswitch.diagnostic.details,pswitch,ProviderSwitchPage,ProviderDiagnostics,diagnostic_details,View diagnostics,,active
+pswitch.diagnostic.collapse,pswitch,ProviderSwitchPage,ProviderDiagnostics,diagnostic_collapse,Collapse diagnostics,,active
+pswitch.diagnostic.scope,pswitch,ProviderSwitchPage,ProviderDiagnostics,diagnostic_scope,This checks provider fields in global files. Project configuration and a running client can still override them; request routing is not inferred from inactivity.,,active
+pswitch.diagnostic.environment,pswitch,ProviderSwitchPage,ProviderDiagnostics,diagnostic_environment,Possible environment overrides,,active
+pswitch.diagnostic.environment_hint,pswitch,ProviderSwitchPage,ProviderDiagnostics,diagnostic_environment_hint,These are configuration clues from AiTool’s process and shell files. They do not prove what an already-running client loaded. Use the environment banner to manage them.,,active
+pswitch.diagnostic.probe,pswitch,ProviderSwitchPage,ProviderDiagnostics,diagnostic_probe,Check endpoint,,active
+pswitch.diagnostic.preview,pswitch,ProviderSwitchPage,ProviderDiagnostics,diagnostic_preview,Preview configuration repair,,active
+pswitch.diagnostic.reachable,pswitch,ProviderSwitchPage,ProviderDiagnostics,diagnostic_reachable,Endpoint responded. This checks connectivity only.,,active
+pswitch.diagnostic.unreachable,pswitch,ProviderSwitchPage,ProviderDiagnostics,diagnostic_unreachable,Endpoint could not be reached. Check its address and service.,,active
+pswitch.diagnostic.cancelled,pswitch,ProviderSwitchPage,ProviderDiagnostics,diagnostic_cancelled,Endpoint check cancelled.,,active
+pswitch.diagnostic.invalid_url,pswitch,ProviderSwitchPage,ProviderDiagnostics,diagnostic_invalid_url,The configured endpoint is not a valid HTTP(S) URL.,,active
+pswitch.diagnostic.no_endpoint,pswitch,ProviderSwitchPage,ProviderDiagnostics,diagnostic_no_endpoint,This preset has no explicit endpoint to check.,,active
+pswitch.diagnostic.stale,pswitch,ProviderSwitchPage,ProviderDiagnostics,diagnostic_stale,Configuration changed during the check. Reload and try again.,,active
+pswitch.diagnostic.preview_hint,pswitch,ProviderSwitchPage,ProviderDiagnostics,diagnostic_preview_hint,This preview comes from the native provider projection. Applying makes backups and rechecks the file revision. Files are written sequentially.,,active
+pswitch.diagnostic.show_values,pswitch,ProviderSwitchPage,ProviderDiagnostics,diagnostic_show_values,Show local diff values (may contain credentials),,active
+pswitch.diagnostic.no_changes,pswitch,ProviderSwitchPage,ProviderDiagnostics,diagnostic_no_changes,No changes in this file.,,active
+pswitch.diagnostic.values_hidden,pswitch,ProviderSwitchPage,ProviderDiagnostics,diagnostic_values_hidden,Changes are ready to review; values are hidden.,,active
+pswitch.diagnostic.repair,pswitch,ProviderSwitchPage,ProviderDiagnostics,diagnostic_repair,Apply previewed configuration,,active
+pswitch.profile.select_apps,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_select_apps,Select apps to capture or apply,,active
+pswitch.profile.bundle_hint,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_bundle_hint,Only selected apps will change. Preview checks all references and files before application; results and recovery copies are recorded per app.,,active
+pswitch.profile.bundle_ready,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_bundle_ready,Ready,,active
+pswitch.profile.bundle_blocked,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_bundle_blocked,Needs attention,,active
+pswitch.profile.bundle_preview,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_bundle_preview,Preview selected apps,,active
+pswitch.profile.bundle_apply,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_bundle_apply,Apply to selected apps,,active
+pswitch.profile.bundle_applied,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_bundle_applied,Applied,,active
+pswitch.profile.bundle_partial,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_bundle_partial,Partially applied,,active
+pswitch.profile.bundle_failed,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_bundle_failed,Failed,,active
+pswitch.profile.bundle_recovery,pswitch,ProviderSwitchPage,ProviderProfilesBar,profile_bundle_recovery,Recovery copies and manifest:,,active
+proxy.desktop.title,proxy,ProxyPage,DesktopClients,desktop_title,Connect desktop clients,,active
+proxy.desktop.client,proxy,ProxyPage,DesktopClients,desktop_client,Client,,active
+proxy.desktop.workbuddy,proxy,ProxyPage,DesktopClients,desktop_workbuddy,WorkBuddy,,active
+proxy.desktop.workbuddy_ai,proxy,ProxyPage,DesktopClients,desktop_workbuddy_ai,WorkBuddy AI,,active
+proxy.desktop.zed,proxy,ProxyPage,DesktopClients,desktop_zed,Zed,,active
+proxy.desktop.buddy_hint,proxy,ProxyPage,DesktopClients,desktop_buddy_hint,Add selected proxy models to this WorkBuddy build’s picker. Domestic and international builds use separate files. Choose the model in WorkBuddy.,,active
+proxy.desktop.zed_hint,proxy,ProxyPage,DesktopClients,desktop_zed_hint,"Configure an OpenAI-compatible provider and default model, preserving JSONC comments. The client key is stored in the native keyring.",,active
+proxy.desktop.models,proxy,ProxyPage,DesktopClients,desktop_models,Load available models,,active
+proxy.desktop.select_models,proxy,ProxyPage,DesktopClients,desktop_select_models,Models to add,,active
+proxy.desktop.default_model,proxy,ProxyPage,DesktopClients,desktop_default_model,Default model,,active
+proxy.desktop.connect,proxy,ProxyPage,DesktopClients,desktop_connect,Connect selected client,,active
+proxy.desktop.restore,proxy,ProxyPage,DesktopClients,desktop_restore,Restore previous configuration,,active
+proxy.desktop.restored,proxy,ProxyPage,DesktopClients,desktop_restored,Previous managed configuration restored.,,active
+proxy.desktop.buddy_ready,proxy,ProxyPage,DesktopClients,desktop_buddy_ready,Models added. Select one in WorkBuddy’s picker.,,active
+proxy.desktop.zed_ready,proxy,ProxyPage,DesktopClients,desktop_zed_ready,Zed configured. Restart Zed if it still asks for the client key.,,active
+proxy.integration.title,proxy,ProxyPage,IntegrationsPanel,title,Optional model sources,,active
+proxy.integration.magpie,proxy,ProxyPage,IntegrationsPanel,magpie,Magpie,,active
+proxy.integration.source,proxy,ProxyPage,IntegrationsPanel,source,Model source,,active
+proxy.integration.enabled,proxy,ProxyPage,IntegrationsPanel,enabled,Enabled,,active
+proxy.integration.disabled,proxy,ProxyPage,IntegrationsPanel,disabled,Disabled,,active
+proxy.integration.magpie_hint,proxy,ProxyPage,IntegrationsPanel,magpie_hint,"Use an installed, running Magpie. Discovery audits local provider URLs for loops; changed configuration requires discovery again.",,active
+proxy.integration.buddy_hint,proxy,ProxyPage,IntegrationsPanel,buddy_hint,Experimental subscription adapter. Instructions and tool names stay as sent; refused channels are reported. Desktop encrypted credentials require browser login.,,active
+proxy.integration.browser_login,proxy,ProxyPage,IntegrationsPanel,browser_login,Start browser login,,active
+proxy.integration.desktop_login,proxy,ProxyPage,IntegrationsPanel,desktop_login,Use desktop login,,active
+proxy.integration.quota,proxy,ProxyPage,IntegrationsPanel,quota,Check credits,,active
+proxy.integration.forget,proxy,ProxyPage,IntegrationsPanel,forget,Disconnect and forget login,,active
+proxy.integration.open_login,proxy,ProxyPage,IntegrationsPanel,open_login,Open login page,,active
+proxy.integration.check_login,proxy,ProxyPage,IntegrationsPanel,check_login,Check login result,,active
+proxy.integration.login_pending,proxy,ProxyPage,IntegrationsPanel,login_pending,Login expires after five minutes.,,active
+proxy.integration.quota_unknown,proxy,ProxyPage,IntegrationsPanel,quota_unknown,Credit allowance is unknown.,,active
+proxy.integration.quota_value,proxy,ProxyPage,IntegrationsPanel,quota_value,{{used}} / {{total}} credits used,,active
+proxy.integration.discover,proxy,ProxyPage,IntegrationsPanel,discover,Discover models,,active
+proxy.integration.save,proxy,ProxyPage,IntegrationsPanel,save,Update selection,,active
+proxy.integration.enable,proxy,ProxyPage,IntegrationsPanel,enable,Enable selected models,,active
+proxy.integration.disable,proxy,ProxyPage,IntegrationsPanel,disable,Disable source,,active
+proxy.integration.accounting,proxy,ProxyPage,IntegrationsPanel,accounting,Chat Completions upstream; other client protocols are translated by the core. Requests and token costs use AiTool’s existing usage pipeline. Magpie’s internal retries or classifier calls are not included in that total.,,active
+proxy.tools.title,proxy,ProxyPage,ProxyToolsPanel,title,Search and vision tools,,active
+proxy.tools.description,proxy,ProxyPage,ProxyToolsPanel,description,Explicit MCP tools for clients. Image files are restricted to selected roots; remote image URLs are refused.,,active
+proxy.tools.mode,proxy,ProxyPage,ProxyToolsPanel,mode,Tool backend,,active
+proxy.tools.local,proxy,ProxyPage,ProxyToolsPanel,local,AiTool local tools,,active
+proxy.tools.vision_model,proxy,ProxyPage,ProxyToolsPanel,vision_model,Vision model,,active
+proxy.tools.select_model,proxy,ProxyPage,ProxyToolsPanel,select_model,Select a model,,active
+proxy.tools.roots,proxy,ProxyPage,ProxyToolsPanel,roots,Allowed image directories (one absolute path per line),,active
+proxy.tools.search_env,proxy,ProxyPage,ProxyToolsPanel,search_env,Tavily key environment variable,,active
+proxy.tools.summarize,proxy,ProxyPage,ProxyToolsPanel,summarize,Summarize search results with the selected model (extra token cost),,active
+proxy.tools.enable,proxy,ProxyPage,ProxyToolsPanel,enable,Save and enable tools,,active
+proxy.tools.disable,proxy,ProxyPage,ProxyToolsPanel,disable,Disable tools,,active
+proxy.tools.mount_apps,proxy,ProxyPage,ProxyToolsPanel,mount_apps,Clients to connect,,active
+proxy.tools.mount,proxy,ProxyPage,ProxyToolsPanel,mount,Connect selected clients,,active
+proxy.tools.accounting_local,proxy,ProxyPage,ProxyToolsPanel,accounting_local,"Model calls appear in Proxy Requests. Search API calls have their own counter and supplier charges; queries, results and images are not stored in that counter.",,active
+proxy.tools.accounting_magpie,proxy,ProxyPage,ProxyToolsPanel,accounting_magpie,Magpie executes these MCP calls directly. AiTool counts tool invocations; Magpie’s model cost is outside the AiTool core usage total.,,active
+proxy.tools.counts,proxy,ProxyPage,ProxyToolsPanel,counts,Search calls: {{search}} · Image calls: {{vision}},,active
+pswitch.distribution.title,provider-switch,ProviderSwitchPage,LibraryDistributionPanel,title,Named subagents and project distribution,,active
+pswitch.distribution.description,provider-switch,ProviderSwitchPage,LibraryDistributionPanel,description,Preview native role files and selected-project MCP/skill copies. Existing or edited user files are kept.,,active
+pswitch.distribution.subagent,provider-switch,ProviderSwitchPage,LibraryDistributionPanel,subagent,Named subagent,,active
+pswitch.distribution.project,provider-switch,ProviderSwitchPage,LibraryDistributionPanel,project,Project distribution,,active
+pswitch.distribution.name,provider-switch,ProviderSwitchPage,LibraryDistributionPanel,name,"Role name (lowercase, 2–50 characters)",,active
+pswitch.distribution.purpose,provider-switch,ProviderSwitchPage,LibraryDistributionPanel,purpose,When to use this role,,active
+pswitch.distribution.prompt,provider-switch,ProviderSwitchPage,LibraryDistributionPanel,prompt,Role instructions,,active
+pswitch.distribution.directory,provider-switch,ProviderSwitchPage,LibraryDistributionPanel,directory,Absolute project directory,,active
+pswitch.distribution.apps,provider-switch,ProviderSwitchPage,LibraryDistributionPanel,apps,Target clients,,active
+pswitch.distribution.role_matrix,provider-switch,ProviderSwitchPage,LibraryDistributionPanel,role_matrix,Claude roles can select their own skills and MCP servers. Other supported roles inherit the client’s skills and servers.,,active
+pswitch.distribution.project_matrix,provider-switch,ProviderSwitchPage,LibraryDistributionPanel,project_matrix,"Project MCP: Claude, Gemini and OpenCode. Project skills: Claude uses .claude/skills; the other listed clients share .agents/skills. Config trust requirements still apply.",,active
+pswitch.distribution.library_empty,provider-switch,ProviderSwitchPage,LibraryDistributionPanel,library_empty,Import items into the local library first.,,active
+pswitch.distribution.remove_hint,provider-switch,ProviderSwitchPage,LibraryDistributionPanel,remove_hint,"To remove managed files, load a saved item and clear its client selections, then preview. Remove MCP selections before removing their project clients.",,active
+pswitch.distribution.preview,provider-switch,ProviderSwitchPage,LibraryDistributionPanel,preview,Preview distribution,,active
+pswitch.distribution.apply,provider-switch,ProviderSwitchPage,LibraryDistributionPanel,apply,Apply reviewed files,,active
+pswitch.distribution.action.create,provider-switch,ProviderSwitchPage,LibraryDistributionPanel,action.create,Create,,active
+pswitch.distribution.action.update,provider-switch,ProviderSwitchPage,LibraryDistributionPanel,action.update,Update,,active
+pswitch.distribution.action.remove,provider-switch,ProviderSwitchPage,LibraryDistributionPanel,action.remove,Remove,,active
+pswitch.distribution.applied,provider-switch,ProviderSwitchPage,LibraryDistributionPanel,applied,Applied,,active
+pswitch.distribution.failed,provider-switch,ProviderSwitchPage,LibraryDistributionPanel,failed,Failed,,active
+proxy.route.title,proxy,ProxyPage,RoutingPanel,title,Advanced routing,,active
+proxy.route.description,proxy,ProxyPage,RoutingPanel,description,Publish aitool/auto as an optional route. Rules choose a concrete model in order; the first model is the default.,,active
+proxy.route.mode,proxy,ProxyPage,RoutingPanel,mode,Routing mode,,active
+proxy.route.rules_mode,proxy,ProxyPage,RoutingPanel,rules_mode,AiTool rules,,active
+proxy.route.magpie_mode,proxy,ProxyPage,RoutingPanel,magpie_mode,Magpie group,,active
+proxy.route.models,proxy,ProxyPage,RoutingPanel,models,Models in default order (up to eight),,active
+proxy.route.quota,proxy,ProxyPage,RoutingPanel,quota,Prefer lower-used subscription credits when all models have known quotas,,active
+proxy.route.quota_hint,proxy,ProxyPage,RoutingPanel,quota_hint,Local quota ordering supports WorkBuddy credit windows only. Unknown quotas keep the default order. Use a Magpie group for broader account routing.,,active
+proxy.route.intent,proxy,ProxyPage,RoutingPanel,intent,Enable intent classification (an extra model call),,active
+proxy.route.classifier,proxy,ProxyPage,RoutingPanel,classifier,Classifier model,,active
+proxy.route.condition,proxy,ProxyPage,RoutingPanel,condition,Condition,,active
+proxy.route.match,proxy,ProxyPage,RoutingPanel,match,Match text / byte threshold,,active
+proxy.route.target,proxy,ProxyPage,RoutingPanel,target,Target model,,active
+proxy.route.remove_rule,proxy,ProxyPage,RoutingPanel,remove_rule,Remove rule,,active
+proxy.route.add_rule,proxy,ProxyPage,RoutingPanel,add_rule,Add rule,,active
+proxy.route.magpie_hint,proxy,ProxyPage,RoutingPanel,magpie_hint,"Configure cross-model fallbacks, quota ordering and intent in Magpie, then select its discovered group here.",,active
+proxy.route.accounting,proxy,ProxyPage,RoutingPanel,accounting,The serving model and classifier each appear in Proxy Requests. The outer dispatch carries no token usage to avoid double-counting. Magpie internal attempts appear separately in its route events.,,active
+proxy.route.save,proxy,ProxyPage,RoutingPanel,save,Save and enable route,,active
+proxy.route.disable,proxy,ProxyPage,RoutingPanel,disable,Disable route,,active
+proxy.route.hide_events,proxy,ProxyPage,RoutingPanel,hide_events,Hide events,,active
+proxy.route.refresh_events,proxy,ProxyPage,RoutingPanel,refresh_events,Refresh routing events,,active
+proxy.route.magpie_events,proxy,ProxyPage,RoutingPanel,magpie_events,Read Magpie route events,,active
+proxy.route.extra_call,proxy,ProxyPage,RoutingPanel,extra_call,Classifier call,,active
+proxy.route.when.image,proxy,ProxyPage,RoutingPanel,when.image,Has images,,active
+proxy.route.reason.image,proxy,ProxyPage,RoutingPanel,reason.image,Has images,,active
+proxy.route.when.tools,proxy,ProxyPage,RoutingPanel,when.tools,Has tools,,active
+proxy.route.reason.tools,proxy,ProxyPage,RoutingPanel,reason.tools,Has tools,,active
+proxy.route.when.large,proxy,ProxyPage,RoutingPanel,when.large,Large request,,active
+proxy.route.reason.large,proxy,ProxyPage,RoutingPanel,reason.large,Large request,,active
+proxy.route.when.contains,proxy,ProxyPage,RoutingPanel,when.contains,User text contains,,active
+proxy.route.reason.contains,proxy,ProxyPage,RoutingPanel,reason.contains,User text contains,,active
+proxy.route.when.intent,proxy,ProxyPage,RoutingPanel,when.intent,Task intent,,active
+proxy.route.reason.intent,proxy,ProxyPage,RoutingPanel,reason.intent,Task intent,,active
+proxy.route.reason.quota,proxy,ProxyPage,RoutingPanel,reason.quota,Credit quota,,active
+proxy.route.reason.default,proxy,ProxyPage,RoutingPanel,reason.default,Default order,,active
+proxy.route.reason.magpie-group,proxy,ProxyPage,RoutingPanel,reason.magpie-group,Magpie group,,active
+proxy.route.status.started,proxy,ProxyPage,RoutingPanel,status.started,Started,,active
+proxy.route.status.completed,proxy,ProxyPage,RoutingPanel,status.completed,Completed,,active
+proxy.route.status.failed,proxy,ProxyPage,RoutingPanel,status.failed,Failed,,active
+proxy.route.status.canceled,proxy,ProxyPage,RoutingPanel,status.canceled,Canceled,,active

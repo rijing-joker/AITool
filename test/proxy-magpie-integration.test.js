@@ -1,0 +1,214 @@
+"use strict";
+const { test } = require("node:test");
+const assert = require("node:assert/strict");
+const fs = require("node:fs/promises");
+const path = require("node:path");
+const os = require("node:os");
+const http = require("node:http");
+const { once } = require("node:events");
+const { pipeline } = require("node:stream/promises");
+const state = require("../src/lib/proxy/managed-upstream");
+const magpie = require("../src/lib/proxy/extensions/magpie");
+const buddy = require("../src/lib/proxy/extensions/workbuddy");
+async function fixture(t) {
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), "aitool-magpie-integration-"));
+  t.after(() => fs.rm(home, { recursive: true, force: true }));
+  const options = { home, env: {}, root: path.join(home, "extensions"), magpieDir: path.join(home, ".config/magpie"), corePort: 19996 };
+  await fs.mkdir(options.magpieDir, { recursive: true });
+  await fs.writeFile(path.join(options.magpieDir, "providers.json"), JSON.stringify({ providers: [{ chat: "https://provider.invalid/v1" }] }));
+  let groups = [{ name: "user", keys: [{ "api-key": "user-key" }] }], etag = '"r1"';
+  options.request = async (method, route, values) => {
+    if (route.startsWith("https:")) throw new Error("Unexpected network");
+    if (method === "GET") return { ok: true, data: groups, etag };
+    assert.equal(values.ifMatch, etag); groups = values.body; etag = '"r2"'; return { ok: true, etag };
+  };
+  options.runtime = { start: async () => { await state.saveSettings(value => ({ ...value, port: 19994 }), options); return 19994; } };
+  return { options, groups: () => groups, change: value => { groups = value; } };
+}
+test("managed native groups require strong revisions and preserve neighbors and user drift", async t => {
+  const fixtureData = await fixture(t), { options } = fixtureData;
+  await state.configure("aitool-magpie", { keys: [{ "api-key": "internal" }], models: [{ name: "provider/model", alias: "provider/model" }] }, options);
+  assert.equal(fixtureData.groups()[0].keys[0]["api-key"], "user-key");
+  fixtureData.change(fixtureData.groups().map(row => row.name === "aitool-magpie" ? { ...row, priority: 10 } : row));
+  await assert.rejects(state.configure("aitool-magpie", null, options), /changed outside/);
+  options.request = async () => ({ ok: true, data: [], etag: "*" });
+  await assert.rejects(state.configure("aitool-magpie", {}, options), /REVISION_REQUIRED/);
+});
+test("runtime credential indices and JSON key ordering do not block managed removal", async t => {
+  const fixtureData = await fixture(t), { options } = fixtureData;
+  await state.configure("aitool-magpie", { "base-url": "http://127.0.0.1:9999/v1", keys: [{ "api-key": "synthetic" }], models: [] }, options);
+  fixtureData.change(fixtureData.groups().map(row => row.name === "aitool-magpie" ? { name: row.name, models: row.models, keys: row.keys.map(key => ({ auth_index: "core-runtime-index", ...key })), "base-url": row["base-url"] } : row));
+  await state.configure("aitool-magpie", null, options); assert.equal(fixtureData.groups().length, 1);
+});
+test("Magpie discovery verifies identity, keeps group IDs and audits cycles before inference", async t => {
+  const { options, groups } = await fixture(t);
+  let inference = 0;
+  const server = http.createServer((req, res) => {
+    res.setHeader("content-type", "application/json");
+    if (req.url === "/api/hello") return res.end(JSON.stringify({ name: "magpie", version: "fixture" }));
+    assert.equal(req.headers.authorization, "Bearer magpie-aitool");
+    if (req.url === "/v1/models") return res.end(JSON.stringify({ data: [{ id: "group/daily" }, { id: "vendor/model" }, { id: "group/daily" }] }));
+    inference++; req.resume();
+    res.end(JSON.stringify({ usage: { prompt_tokens: 100, completion_tokens: 8, prompt_tokens_details: { cached_tokens: 60 } }, choices: [{ message: { content: "synthetic" } }] }));
+  });
+  server.listen(0, "127.0.0.1"); await once(server, "listening");
+  t.after(() => { server.close(); server.closeAllConnections(); });
+  await fs.writeFile(path.join(options.magpieDir, "settings.json"), JSON.stringify({ port: server.address().port }));
+  const found = await magpie.discover(options); assert.deepEqual(found.models.map(row => row.id), ["group/daily", "vendor/model"]);
+  await magpie.configure({ enabled: true, models: ["group/daily"], revision: found.revision }, options);
+  assert.deepEqual(groups()[1].models, [{ name: "group/daily", alias: "group/daily" }]);
+  assert.equal(groups()[1].keys[0]["proxy-url"], "direct");
+  const proxy = http.createServer((req, res) => magpie.forward({ req, res, body: { model: "group/daily", messages: [{ role: "user", content: "synthetic" }] }, signal: new AbortController().signal, options, pipeline }).catch(() => { res.writeHead(502); res.end(); }));
+  proxy.listen(0, "127.0.0.1"); await once(proxy, "listening"); t.after(() => { proxy.close(); proxy.closeAllConnections(); });
+  const result = await fetch(`http://127.0.0.1:${proxy.address().port}`); assert.equal((await result.json()).usage.prompt_tokens_details.cached_tokens, 60);
+  await fs.writeFile(path.join(options.magpieDir, "providers.json"), JSON.stringify({ providers: [{ chat: "http://127.0.0.1:19996/v1" }] }));
+  await assert.rejects(magpie.discover(options), /loop/);
+  assert.equal((await fetch(`http://127.0.0.1:${proxy.address().port}`)).status, 502); assert.equal(inference, 1);
+  await magpie.configure({ enabled: false }, options); assert.equal(groups().length, 1);
+});
+test("WorkBuddy browser login handles pending enterprise flow without exposing credentials", async t => {
+  const { options } = await fixture(t); let pending = true;
+  options.request = async (url, request) => {
+    let data, code = 0;
+    if (url.includes("auth/state")) data = { state: "synthetic-state", authUrl: "https://www.workbuddy.ai/login" };
+    else if (url.includes("auth/token?")) { code = pending ? 11217 : 0; data = { accessToken: "synthetic-access", refreshToken: "synthetic-refresh", expiresIn: 3600 }; }
+    else if (url.includes("login/account")) data = { uid: "u1", type: "enterprise" };
+    else if (url.includes("/accounts")) data = { accounts: [{ uid: "u1", type: "enterprise", enterpriseId: "e1" }] };
+    else throw new Error(url);
+    assert.equal(request.method === "GET" ? request.body : "{}", request.body);
+    return { status: 200, body: Buffer.from(JSON.stringify({ code, data })) };
+  };
+  const login = await buddy.begin("workbuddy-ai", options);
+  assert.match(login.url, /^https:\/\/www.workbuddy.ai/);
+  assert.deepEqual(await buddy.poll("workbuddy-ai", login.id, options), { pending: true });
+  pending = false;
+  assert.deepEqual(await buddy.poll("workbuddy-ai", login.id, options), { pending: false, source: "browser" });
+  const account = await buddy.current("workbuddy-ai", options); assert.equal(account.enterpriseId, "e1");
+  assert.equal(buddy.headers("workbuddy-ai", account)["x-tenant-id"], "e1");
+  assert.doesNotMatch(JSON.stringify(await buddy.status("workbuddy-ai", options)), /synthetic-access|synthetic-refresh/);
+  assert.equal((await fs.stat(path.join(options.root, "workbuddy-ai-account.json"))).mode & 0o777, 0o600);
+});
+test("rotating refresh is serialized and live catalog/quota preserve native semantics", async t => {
+  const { options } = await fixture(t); let refreshes = 0;
+  await state.write(path.join(options.root, "workbuddy-account.json"), { access: "old", refresh: "rotating", expires: 1, uid: "u" });
+  options.request = async url => {
+    let data;
+    if (url.includes("refresh")) { refreshes++; data = { accessToken: "new", refreshToken: "rotated", expiresIn: 3600 }; }
+    else if (url.includes("config")) data = { agents: [{ name: "cli", models: ["native"] }], models: [{ id: "native", supportsImages: true, supportsReasoning: true, maxInputTokens: 100000 }] };
+    else data = { Packages: [{ CycleTotalCapacity: "200", CycleUsedCapacity: "75.5" }] };
+    return { status: 200, body: Buffer.from(JSON.stringify({ data })) };
+  };
+  const accounts = await Promise.all(Array.from({ length: 4 }, () => buddy.current("workbuddy", options))); assert.equal(refreshes, 1); assert.equal(accounts[3].refresh, "rotated");
+  assert.equal((await buddy.catalog("workbuddy", options))[0].contextWindow, 100000);
+  assert.deepEqual(await buddy.quota("workbuddy", options), { used: 75.5, total: 200, unit: "credits" });
+});
+test("desktop tokens stay in the user's file and encrypted/expiring logins fail clearly", async t => {
+  const { options } = await fixture(t), target = buddy.desktopFile("workbuddy", options);
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  const raw = JSON.stringify({ auth: { accessToken: "desktop-access", refreshToken: "desktop-refresh", expiresAt: Date.now() + 3600000 }, account: { uid: "u" } });
+  await fs.writeFile(target, raw); await buddy.useDesktop("workbuddy", options);
+  assert.equal((await buddy.current("workbuddy", options)).refresh, ""); assert.equal(await fs.readFile(target, "utf8"), raw);
+  assert.doesNotMatch(await fs.readFile(path.join(options.root, "workbuddy-account.json"), "utf8"), /desktop-access|desktop-refresh/);
+  await fs.writeFile(target, JSON.stringify({ auth: { accessToken: { $wbEncrypted: 1 } } }));
+  await assert.rejects(buddy.desktop("workbuddy", options), /encrypted/);
+});
+test("WorkBuddy inference preserves system/developer content, streaming cache/reasoning and rejects redirects", async t => {
+  const { options } = await fixture(t);
+  await state.write(path.join(options.root, "workbuddy-account.json"), { access: "synthetic-access", expires: Date.now() + 3600000, uid: "u" });
+  await state.saveSettings(value => ({ ...value, workbuddy: { models: ["native"] } }), options);
+  const body = { model: "native", stream: true, messages: [{ role: "system", content: "Claude Code synthetic" }, { role: "developer", content: "Codex synthetic" }, { role: "user", content: "Synthetic" }] };
+  const upstream = http.createServer((req, res) => {
+    let raw = ""; req.on("data", chunk => { raw += chunk; }); req.on("end", () => {
+      assert.deepEqual(JSON.parse(raw), { ...body, stream_options: { include_usage: true } }); assert.equal(req.headers.authorization, "Bearer synthetic-access");
+      assert.ok(req.headers["x-conversation-request-id"]);
+      res.writeHead(200, { "content-type": "text/event-stream" }); res.end('data: {"usage":{"prompt_tokens":100,"completion_tokens":10,"prompt_tokens_details":{"cached_tokens":60},"completion_tokens_details":{"reasoning_tokens":5}}}\n\ndata: [DONE]\n\n');
+    });
+  });
+  upstream.listen(0, "127.0.0.1"); await once(upstream, "listening"); t.after(() => { upstream.close(); upstream.closeAllConnections(); });
+  options.streamRequest = (_url, config, callback) => http.request(`http://127.0.0.1:${upstream.address().port}`, config, callback);
+  const proxy = http.createServer((req, res) => buddy.forward({ kind: "workbuddy", req, res, body, signal: new AbortController().signal, options, pipeline }));
+  proxy.listen(0, "127.0.0.1"); await once(proxy, "listening"); t.after(() => { proxy.close(); proxy.closeAllConnections(); });
+  const raw = await (await fetch(`http://127.0.0.1:${proxy.address().port}`)).text(); assert.match(raw, /cached_tokens/); assert.match(raw, /reasoning_tokens/); assert.match(raw, /\[DONE\]/);
+});
+
+test("WorkBuddy aggregates SSE into non-streaming JSON with tools, reasoning and exact usage", async t => {
+  const { options } = await fixture(t);
+  for (const kind of ["workbuddy", "workbuddy-ai"]) {
+    await state.write(path.join(options.root, `${kind}-account.json`), { access: "synthetic-access", expires: Date.now() + 3600000, uid: "u" });
+  }
+  await state.saveSettings(value => ({ ...value, enabled: { workbuddy: true, "workbuddy-ai": true }, workbuddy: { models: ["native"] }, "workbuddy-ai": { models: ["native"] } }), options);
+  const messages = [{ role: "system", content: "System stays" }, { role: "developer", content: "Developer stays" }, { role: "user", content: "Synthetic" }];
+  const usage = { prompt_tokens: 120, completion_tokens: 25, total_tokens: 145,
+    prompt_tokens_details: { cached_tokens: 80, cache_creation_tokens: 10 }, completion_tokens_details: { reasoning_tokens: 5 } };
+  const chunks = [
+    { id: "chatcmpl-fixture", created: 123, model: "actual-model", choices: [{ index: 0, delta: { role: "assistant", content: "回答", reasoning_content: "Think " } }] },
+    { choices: [{ index: 0, delta: { content: "完成", reasoning_content: "done", tool_calls: [{ index: 0, id: "call-fixture", type: "function", function: { name: "echo", arguments: '{"marker":' } }] } }] },
+    { choices: [{ index: 0, delta: { tool_calls: [{ index: 0, function: { arguments: '"fixture"}' } }] }, finish_reason: "tool_calls" }] },
+    { choices: [], usage },
+  ];
+  const wire = Buffer.from(": keepalive\r\n\r\n" + chunks.map(chunk => `event: message\r\ndata: ${JSON.stringify(chunk)}\r\n\r\n`).join("") + "data: [DONE]\r\n\r\n");
+  const seen = [];
+  const upstream = http.createServer(async (req, res) => {
+    let raw = ""; for await (const chunk of req) raw += chunk;
+    const sent = JSON.parse(raw); seen.push(sent);
+    assert.equal(sent.stream, true); assert.deepEqual(sent.stream_options, { include_usage: true });
+    assert.deepEqual(sent.messages, messages); assert.equal(sent.max_tokens, 32);
+    assert.deepEqual(sent.tools, [{ type: "function", function: { name: "echo", parameters: { type: "object" } } }]);
+    assert.equal(req.headers.accept, "text/event-stream");
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    // Split inside UTF-8 and JSON tokens, as actual network chunks can do.
+    for (let index = 0; index < wire.length; index += 7) {
+      res.write(wire.subarray(index, index + 7)); await new Promise(resolve => setImmediate(resolve));
+    }
+    res.end();
+  });
+  upstream.listen(0, "127.0.0.1"); await once(upstream, "listening"); t.after(() => { upstream.close(); upstream.closeAllConnections(); });
+  options.streamRequest = (_url, config, callback) => http.request(`http://127.0.0.1:${upstream.address().port}`, config, callback);
+  const proxy = require("../src/lib/proxy/extensions/server").createServer(options);
+  proxy.listen(0, "127.0.0.1"); await once(proxy, "listening"); t.after(() => proxy.stop());
+  const config = await state.settings(options);
+  for (const [kind, stream] of [["workbuddy", false], ["workbuddy-ai", false], ["workbuddy", undefined]]) {
+    const response = await fetch(`http://127.0.0.1:${proxy.address().port}/${kind}/v1/chat/completions`, {
+      method: "POST", headers: { authorization: `Bearer ${config.token}` },
+      body: JSON.stringify({ model: "native", stream, messages, max_tokens: 32, tools: [{ type: "function", function: { name: "echo", parameters: { type: "object" } } }] }),
+    });
+    assert.equal(response.status, 200); assert.match(response.headers.get("content-type"), /application\/json/);
+    const result = await response.json();
+    assert.equal(result.object, "chat.completion"); assert.equal(result.id, "chatcmpl-fixture");
+    assert.equal(result.created, 123); assert.equal(result.model, "actual-model");
+    assert.deepEqual(result.usage, usage);
+    assert.deepEqual(result.choices, [{ index: 0, message: { role: "assistant", content: "回答完成", reasoning_content: "Think done",
+      tool_calls: [{ id: "call-fixture", type: "function", function: { name: "echo", arguments: '{"marker":"fixture"}' } }] }, finish_reason: "tool_calls" }]);
+  }
+  assert.equal(seen.length, 3);
+});
+
+test("WorkBuddy non-streaming responses reject failed or incomplete SSE without exposing text", async t => {
+  const { options } = await fixture(t);
+  await state.write(path.join(options.root, "workbuddy-account.json"), { access: "synthetic-access", expires: Date.now() + 3600000, uid: "u" });
+  await state.saveSettings(value => ({ ...value, enabled: { workbuddy: true }, workbuddy: { models: ["native"] } }), options);
+  let wire;
+  const upstream = http.createServer((req, res) => { req.resume(); res.writeHead(200, { "content-type": "text/event-stream" }); res.end(wire); });
+  upstream.listen(0, "127.0.0.1"); await once(upstream, "listening"); t.after(() => { upstream.close(); upstream.closeAllConnections(); });
+  options.streamRequest = (_url, config, callback) => http.request(`http://127.0.0.1:${upstream.address().port}`, config, callback);
+  const proxy = require("../src/lib/proxy/extensions/server").createServer(options);
+  proxy.listen(0, "127.0.0.1"); await once(proxy, "listening"); t.after(() => proxy.stop());
+  const config = await state.settings(options);
+  async function request() {
+    return fetch(`http://127.0.0.1:${proxy.address().port}/workbuddy/v1/chat/completions`, { method: "POST", headers: { authorization: `Bearer ${config.token}` },
+      body: JSON.stringify({ model: "native", stream: false, messages: [{ role: "user", content: "Synthetic" }] }) });
+  }
+  for (const failed of [
+    'data: {"choices":[{"index":0,"delta":{"content":"private-upstream-text"}}]}\n\n',
+    'data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n',
+    'data: {"error":{"message":"private-upstream-text"}}\n\ndata: [DONE]\n\n',
+    'data: malformed-private-upstream-text\n\ndata: [DONE]\n\n',
+  ]) {
+    wire = failed;
+    const response = await request(); assert.equal(response.status, 502);
+    assert.deepEqual(await response.json(), { error: { code: "extension_failed" } });
+  }
+  wire = 'data: {"choices":[{"index":0,"delta":{"content":"OK"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n';
+  const response = await request(); assert.equal(response.status, 200);
+  const result = await response.json(); assert.equal(result.choices[0].message.content, "OK"); assert.equal(result.usage, undefined);
+});

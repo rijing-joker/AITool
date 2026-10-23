@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { copy } from "../lib/copy";
 import { profilesApi } from "../lib/provider-switch-api";
 import { ConfirmModal } from "../ui/components";
@@ -89,6 +89,12 @@ export function ProviderProfilesBar({ activeApp, onNotice, onChanged }) {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [busy, setBusy] = useState(false);
   const [operationError, setOperationError] = useState("");
+  const pending = useRef(false);
+  const [selectedApps, setSelectedApps] = useState([activeApp]);
+  const [bundleTarget, setBundleTarget] = useState(null);
+  const [bundlePreview, setBundlePreview] = useState(null);
+  const [bundleResult, setBundleResult] = useState(null);
+  useEffect(() => { setSelectedApps([activeApp]); setBundleTarget(null); setBundlePreview(null); }, [activeApp]);
   useEffect(() => { setOperationError(""); }, [creating, manageOpen, applyTarget, deleteTarget]);
 
   const load = useCallback(async () => {
@@ -107,6 +113,8 @@ export function ProviderProfilesBar({ activeApp, onNotice, onChanged }) {
   }, [load]);
 
   const run = useCallback(async (action) => {
+    if (pending.current) return false;
+    pending.current = true;
     setBusy(true);
     setOperationError("");
     try {
@@ -116,6 +124,7 @@ export function ProviderProfilesBar({ activeApp, onNotice, onChanged }) {
       setOperationError(error instanceof Error ? error.message : String(error));
       return false;
     } finally {
+      pending.current = false;
       setBusy(false);
     }
   }, []);
@@ -124,7 +133,7 @@ export function ProviderProfilesBar({ activeApp, onNotice, onChanged }) {
 
   const createProfile = () => run(async () => {
     if (!newName.trim()) return;
-    await profilesApi.create({ name: newName.trim(), app: activeApp });
+    await profilesApi.create(selectedApps.length === 1 && selectedApps[0] === activeApp ? { name: newName.trim(), app: activeApp } : { name: newName.trim(), apps: selectedApps });
     setCreating(false);
     setNewName("");
     onNotice?.(copy("pswitch.profile.created"));
@@ -166,7 +175,10 @@ export function ProviderProfilesBar({ activeApp, onNotice, onChanged }) {
           key={profile.id}
           type="button"
           disabled={busy}
-          onClick={() => setApplyTarget(profile)}
+          onClick={() => {
+            if (profile.capturedApps) { setBundleTarget(profile); setSelectedApps(profile.capturedApps); setBundlePreview(null); setBundleResult(null); }
+            else setApplyTarget(profile);
+          }}
           className={`min-h-8 rounded-full px-3 text-xs font-medium disabled:opacity-50 ${
             currentId === profile.id
               ? "bg-oai-black text-white dark:bg-white dark:text-oai-black"
@@ -202,13 +214,40 @@ export function ProviderProfilesBar({ activeApp, onNotice, onChanged }) {
               <input autoFocus disabled={busy} value={newName} onChange={(e) => setNewName(e.currentTarget.value)} className={inputClass} placeholder={copy("pswitch.profile.name_placeholder")} />
             </label>
             <p className="text-xs text-oai-gray-400 dark:text-oai-gray-500">{copy("pswitch.profile.hint")}</p>
+            <AppSelection selected={selectedApps} disabled={busy} onChange={setSelectedApps} />
             {operationError ? <p role="alert" className="text-sm text-red-600 dark:text-red-400">{operationError}</p> : null}
           </div>
           <div className="flex justify-end gap-2 border-t border-oai-gray-100 px-5 py-3 dark:border-oai-gray-800">
             <button type="button" onClick={() => setCreating(false)} disabled={busy} className="min-h-10 rounded-lg border border-oai-gray-200 px-3 font-medium hover:bg-oai-gray-50 dark:border-oai-gray-700 dark:hover:bg-oai-gray-800">{copy("pswitch.action.cancel")}</button>
-            <button type="button" disabled={busy || !newName.trim()} onClick={() => void createProfile()} className="min-h-10 rounded-lg bg-oai-black px-3 font-medium text-white hover:bg-oai-gray-800 disabled:opacity-50 dark:bg-white dark:text-oai-black dark:hover:bg-oai-gray-200">{copy("pswitch.profile.create")}</button>
+            <button type="button" disabled={busy || !newName.trim() || !selectedApps.length} onClick={() => void createProfile()} className="min-h-10 rounded-lg bg-oai-black px-3 font-medium text-white hover:bg-oai-gray-800 disabled:opacity-50 dark:bg-white dark:text-oai-black dark:hover:bg-oai-gray-200">{copy("pswitch.profile.create")}</button>
           </div>
         </ModalFrame>
+      ) : null}
+
+      {bundleTarget ? (
+        <div className="w-full space-y-3 border-t border-oai-gray-100 pt-3 dark:border-oai-gray-800">
+          <p className="text-sm font-medium">{bundleTarget.name}</p>
+          <AppSelection available={bundleTarget.capturedApps} selected={selectedApps} disabled={busy || Boolean(bundleResult)} onChange={apps => { setSelectedApps(apps); setBundlePreview(null); }} />
+          <p className="text-xs text-oai-gray-500 dark:text-oai-gray-400">{copy("pswitch.profile.bundle_hint")}</p>
+          {bundlePreview ? <ul className="space-y-1 text-xs">
+            {bundlePreview.results.map(result => <li key={result.app}>
+              {copy(`pswitch.tab.${result.app}`)} · {copy(result.ready ? "pswitch.profile.bundle_ready" : "pswitch.profile.bundle_blocked")}
+              {result.errors.length ? <p className="mt-1 text-red-600 dark:text-red-400">{result.errors.join(" · ")}</p> : null}
+            </li>)}
+          </ul> : null}
+          {bundleResult ? <div className="space-y-2 text-xs">
+            {bundleResult.results.map(result => <p key={result.app}>{copy(`pswitch.tab.${result.app}`)} · {copy(result.status === "applied" ? "pswitch.profile.bundle_applied" : result.status === "partial" ? "pswitch.profile.bundle_partial" : "pswitch.profile.bundle_failed")}{result.warnings.length ? ` · ${result.warnings.join(" · ")}` : ""}</p>)}
+            <p className="break-all">{copy("pswitch.profile.bundle_recovery")} <code>{bundleResult.recoveryPath}</code></p>
+          </div> : null}
+          {operationError ? <p role="alert" className="text-xs text-red-600 dark:text-red-400">{operationError}</p> : null}
+          <div className="flex flex-wrap gap-2">
+            {!bundleResult ? <button type="button" disabled={busy || !selectedApps.length} className="min-h-10 rounded-lg border border-oai-gray-200 px-3 text-xs dark:border-oai-gray-700"
+              onClick={() => void run(async () => setBundlePreview(await profilesApi.previewBundle(bundleTarget.id, selectedApps)))}>{copy("pswitch.profile.bundle_preview")}</button> : null}
+            {bundlePreview && !bundleResult ? <button type="button" disabled={busy || bundlePreview.results.some(result => !result.ready)} className="min-h-10 rounded-lg bg-oai-brand-700 px-3 text-xs text-white disabled:opacity-50"
+              onClick={() => void run(async () => { const result = await profilesApi.applyBundle(bundleTarget.id, selectedApps, bundlePreview.revision); setBundleResult(result); await load(); await onChanged?.(); })}>{copy("pswitch.profile.bundle_apply")}</button> : null}
+            <button type="button" disabled={busy} className="min-h-10 rounded-lg border border-oai-gray-200 px-3 text-xs dark:border-oai-gray-700" onClick={() => setBundleTarget(null)}>{copy("pswitch.action.close")}</button>
+          </div>
+        </div>
       ) : null}
 
       {applyTarget ? (
@@ -254,4 +293,17 @@ export function ProviderProfilesBar({ activeApp, onNotice, onChanged }) {
       ) : null}
     </div>
   );
+}
+
+function AppSelection({ selected, onChange, disabled, available = PROFILE_APPS }) {
+  return <fieldset>
+    <legend className="mb-2 text-xs font-medium">{copy("pswitch.profile.select_apps")}</legend>
+    <div className="flex flex-wrap gap-x-4 gap-y-1">
+      {available.map(app => <label key={app} className="flex min-h-10 items-center gap-2 text-xs">
+        <input type="checkbox" className="h-4 w-4 accent-oai-brand-600" disabled={disabled} checked={selected.includes(app)}
+          onChange={event => onChange(event.currentTarget.checked ? [...selected, app] : selected.filter(item => item !== app))} />
+        {copy(`pswitch.tab.${app}`)}
+      </label>)}
+    </div>
+  </fieldset>;
 }

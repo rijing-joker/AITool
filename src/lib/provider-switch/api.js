@@ -11,8 +11,10 @@ const catalog = require("./catalog");
 const editor = require("./editor");
 const universal = require("./universal");
 const profiles = require("./profiles");
+const profileBundles = require("./profile-bundles");
 const additive = require("./additive");
 const mcp = require("./mcp");
+const mcpCheck = require("./mcp-check");
 const prompts = require("./prompts");
 const piPromptFiles = require("./pi-prompt-files");
 const backupExport = require("./backup-export");
@@ -21,6 +23,7 @@ const skills = require("./skills");
 const quota = require("./quota");
 const failover = require("./failover");
 const codexClient = require("./codex-client");
+const diagnostics = require("./diagnostics");
 
 // Dashboard-facing REST surface for the provider-switch layer, mounted by
 // local-api.js under /api/provider-switch/*. Mirrors the proxy/api.js
@@ -277,15 +280,56 @@ async function switchProviderUnlocked({ app, id }) {
   const plan = computeSwitchPlan(app, prev, target, lives, stash);
   const { wrote, backups } = await persistSwitchPlan(app, plan);
 
-  // Commit the pointer only after every write landed.
+  await diagnostics.record(app, target, plan.writes);
+  // Commit the pointer only after every write and its receipt landed.
   await store.setCurrentProvider(app, id);
   return { app, current: id, wrote, backups };
+}
+
+async function disconnectProvider(app) {
+  return withFileLock(path.join(paths.providerSwitchRoot(), `${app}.projection`), async () => {
+    const state = await store.listProviders(app);
+    const prev = state.providers.find(row => row.id === state.current);
+    if (!prev && app !== "codex") { await store.setCurrentProvider(app, null); return { wrote: [] }; }
+    if (app === "codex") {
+      const lives = await readLives(app);
+      const stash = await readCodexStash(await officialCodexRowAuths(), lives.auth.exists ? JSON.parse(lives.auth.content) : {});
+      const plan = computeSwitchPlan(app, prev, { category: "official", settingsConfig: { config: {} } }, lives, stash);
+      const applied = await persistSwitchPlan(app, plan);
+      await store.setCurrentProvider(app, null);
+      return applied;
+    }
+    const lives = await readLives(app), writes = [];
+    for (const file of paths.targetFiles(app)) {
+      if (!lives[file.id].exists) continue;
+      let content;
+      if (app === "claude") content = `${JSON.stringify(targets.projectClaude({ prev, target: { settingsConfig: {} }, live: JSON.parse(lives[file.id].content) }), null, 2)}\n`;
+      else if (app === "gemini") content = targets.projectGemini({ prev, target: { settingsConfig: {} }, liveEnv: lives[file.id].content });
+      else content = additive.serializeLive(app, additive.disconnectAdditive(app, { prev, live: additive.parseLive(app, lives[file.id].content) }));
+      writes.push({ file, content });
+    }
+    const applied = await persistSwitchPlan(app, { writes, catalogAction: { action: "keep" }, stashNext: null });
+    await store.setCurrentProvider(app, null); return applied;
+  });
 }
 
 // profiles/universal inject the switch projection positionally as (app, id);
 // adapt to switchProvider's single { app, id } payload.
 function switchProviderPositional(app, id) {
-  return switchProvider({ app, id });
+  return id === "" ? disconnectProvider(app) : switchProvider({ app, id });
+}
+
+async function diagnosticRepairPlan(app) {
+  const diagnostic = await diagnostics.inspect(app);
+  const state = await store.listProviders(app);
+  const target = state.providers.find(provider => provider.id === state.current);
+  if (!target) throw new Error("Select a provider before previewing its configuration");
+  const lives = await readLives(app);
+  const stash = app === "codex" ? await readCodexStash(await officialCodexRowAuths(), lives.auth.exists ? JSON.parse(lives.auth.content) : {}) : null;
+  const plan = computeSwitchPlan(app, target, target, lives, stash);
+  if (!plan.writes.length) throw new Error("This app does not use a live provider projection");
+  const revision = sha256(JSON.stringify([diagnostic.revision, lives, stash, target, plan]));
+  return { revision, target, lives, plan };
 }
 
 // ---------------------------------------------------------------------------
@@ -388,6 +432,11 @@ async function saveProviderUnlocked({ app, id, body }) {
   const provider = id
     ? await store.updateProvider(app, id, { ...body, settingsConfig: plan.rowSettings })
     : await store.createProvider(app, { ...body, settingsConfig: plan.rowSettings });
+  if (applied) {
+    const freshLives = await readLives(app);
+    await diagnostics.record(app, provider, paths.targetFiles(app).filter(file => freshLives[file.id].exists)
+      .map(file => ({ file, content: freshLives[file.id].content })));
+  }
   return { ok: true, provider, applied, wrote, backups };
 }
 
@@ -440,6 +489,48 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
     if (p === `${prefix}/status`) {
       json(res, await buildStatus());
       return true;
+    }
+    if (p === `${prefix}/distribution` && method === "GET") { json(res, { ok: true, ...await require("./library-distribution").list() }); return true; }
+    if (p === `${prefix}/distribution` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req), distribution = require("./library-distribution");
+      if (body.action === "preview") {
+        const plan = await distribution.preview(body);
+        json(res, { ok: true, revision: plan.revision, errors: plan.errors, changes: plan.changes.map(change => ({ path: change.path, action: change.next === null ? "remove" : change.beforeHash ? "update" : "create", app: change.app })) });
+      } else if (body.action === "apply") json(res, { ok: true, ...await distribution.apply(body) });
+      else throw new Error("Unknown distribution action");
+      return true;
+    }
+    if (p === `${prefix}/diagnostics` && method === "GET") {
+      json(res, { ok: true, diagnostic: await diagnostics.inspect(url.searchParams.get("app") || "claude") }); return true;
+    }
+    if (p === `${prefix}/diagnostics/probe` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      const controller = new AbortController(); const cancel = () => controller.abort(); res.on?.("close", cancel);
+      try { const probe = await diagnostics.probeEndpoint(body.app, { signal: controller.signal }); if (!res.destroyed) json(res, { ok: true, probe }); }
+      finally { res.removeListener?.("close", cancel); }
+      return true;
+    }
+    if (p === `${prefix}/diagnostics/preview` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      const preview = await diagnosticRepairPlan(body.app);
+      json(res, { ok: true, revision: preview.revision, providerId: preview.target.id, files: preview.plan.writes.map(write => ({
+        id: write.file.id, path: write.file.path, before: preview.lives[write.file.id]?.content || "", after: write.content,
+      })) }); return true;
+    }
+    if (p === `${prefix}/diagnostics/repair` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      const result = await withFileLock(path.join(paths.providerSwitchRoot(), `${body.app}.projection`), async () => {
+        const preview = await diagnosticRepairPlan(body.app);
+        if (!body.revision || preview.revision !== body.revision) throw Object.assign(new Error("Configuration changed; reload the repair preview"), { status: 409 });
+        const applied = await persistSwitchPlan(body.app, preview.plan);
+        await diagnostics.record(body.app, preview.target, preview.plan.writes);
+        return applied;
+      });
+      json(res, { ok: true, ...result }); return true;
     }
     if (p === `${prefix}/agy/launch` && method === "POST") {
       if (!requireMutation()) return true;
@@ -608,7 +699,7 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
       if (!requireMutation()) return true;
       const body = await readJsonBody(req);
       try {
-        json(res, { ok: true, profile: await profiles.createProfile({ name: body.name, app: String(body.app || "") }) });
+        json(res, { ok: true, profile: await profiles.createProfile({ name: body.name, app: String(body.app || ""), ...(body.apps !== undefined ? { apps: body.apps } : {}) }) });
       } catch (error) {
         json(res, { ok: false, error: error?.message || String(error) });
       }
@@ -649,6 +740,17 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
         json(res, { ok: false, error: error?.message || String(error) });
       }
       return true;
+    }
+    if (p === `${prefix}/profiles/preview-bundle` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      const result = await profileBundles.preview(body);
+      json(res, { ok: true, revision: result.revision, results: result.results }); return true;
+    }
+    if (p === `${prefix}/profiles/apply-bundle` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      json(res, await profileBundles.apply({ ...body, applyProvider: switchProviderPositional })); return true;
     }
 
     // Failover monitor (AiTool-original): failure-rate cooldowns over the
@@ -693,7 +795,30 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
     // are open; every mutation projects into the enabled apps' live configs
     // and reports per-server projection failures instead of aborting.
     if (p === `${prefix}/mcp` && method === "GET") {
-      json(res, { ok: true, servers: await mcp.listServers(), apps: mcp.MCP_APPS });
+      const servers = await mcp.listServers();
+      json(res, { ok: true, servers, apps: mcp.MCP_APPS, toolFilterApps: require("./mcp-tool-rules").APPS,
+        checks: Object.fromEntries(servers.map(server => [server.id, mcpCheck.snapshot(server)])) });
+      return true;
+    }
+    if (p === `${prefix}/mcp/check` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      const server = (await mcp.listServers()).find(row => row.id === body.id);
+      if (!server) throw new Error("MCP server not found");
+      const controller = new AbortController();
+      const cancel = () => controller.abort();
+      res.on?.("close", cancel);
+      try {
+        const check = await mcpCheck.checkServer(server, { signal: controller.signal });
+        if (!res.destroyed) json(res, { ok: true, check: mcpCheck.snapshot((await mcp.listServers()).find(row => row.id === server.id) || server) || check });
+      } finally { res.removeListener?.("close", cancel); }
+      return true;
+    }
+    if (p === `${prefix}/mcp/tool` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      const result = await mcp.toggleServerTool(body.id, body.app, body.tool, body.enabled === true, body.revision);
+      json(res, { ok: true, ...result });
       return true;
     }
     if (p === `${prefix}/mcp` && method === "POST") {
@@ -1043,7 +1168,7 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
     json(res, { ok: false, error: "Not Found" }, 404);
     return true;
   } catch (error) {
-    json(res, { ok: false, error: error?.message || String(error) }, 400);
+    json(res, { ok: false, error: error?.message || String(error) }, error?.status === 409 ? 409 : 400);
     return true;
   }
 }

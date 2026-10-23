@@ -56,6 +56,25 @@ export const opencodeFreeApi = {
   configure: (enabled: boolean, models: string[]) => mutate<OpenCodeFreeStatus>("/api/proxy/opencode-free", "POST", { enabled, models }),
 };
 
+export interface IntegrationStatus { enabled: boolean; models: string[]; signedIn?: boolean; source?: string; directory?: string; error?: string | null }
+export interface IntegrationModel { id: string; name?: string; images?: boolean; reasoning?: boolean }
+export const integrationsApi = {
+  status: () => get<{ magpie: IntegrationStatus; workbuddy: IntegrationStatus; workbuddyAI: IntegrationStatus }>("/api/proxy/integrations"),
+  action: (kind: string, action: string, values: Record<string, unknown> = {}) => mutate<{ result: { models?: IntegrationModel[]; revision?: string; id?: string; url?: string; pending?: boolean; used?: number; total?: number } }>("/api/proxy/integrations", "POST", { kind, action, ...values }),
+};
+export interface ToolsStatus { enabled: boolean; mode: string; model: string; roots: string[]; searchKeyEnv: string; summarize: boolean; url: string | null; counts: Record<string, { calls: number; succeeded: number; failed: number }> }
+export const toolsApi = {
+  status: () => get<ToolsStatus>("/api/proxy/tools"),
+  configure: (values: Record<string, unknown>) => mutate<ToolsStatus>("/api/proxy/tools", "POST", values),
+  mount: (apps: string[]) => mutate<{ failures: string[] }>("/api/proxy/tools", "POST", { action: "mount", apps }),
+};
+export interface RoutingStatus { enabled: boolean; mode: string; models: string[]; rules: Array<{ when: string; model: string; value?: string | number }>; intent: boolean; classifier: string; quota: boolean; routeId: string; events: Array<{ id: string; at: string; requested: string; selected: string; reason: string; status: string; extraCall?: boolean }> }
+export const routingApi = {
+  status: () => get<RoutingStatus>("/api/proxy/routing"),
+  configure: (values: Record<string, unknown>) => mutate<RoutingStatus>("/api/proxy/routing", "POST", values),
+  magpieEvents: () => mutate<{ events: Array<Record<string, unknown>> }>("/api/proxy/routing", "POST", { action: "magpie-events" }),
+};
+
 export interface ProxyCoreStatus {
   installed: boolean;
   binary: string | null;
@@ -182,6 +201,18 @@ export type CoreUpdateCheck = {
 export const proxyApi = {
   copilotStatus(): Promise<{ ok: true; clients: Array<{ client: "cli" | "vscode"; installed?: boolean; path: string; configured: boolean; canRestore: boolean; model?: string; error?: string }> }> {
     return get("/api/proxy/copilot");
+  },
+  desktopClientStatus(): Promise<{ ok: true; clients: Array<{ client: "workbuddy" | "workbuddy-ai" | "zed"; path: string; configured: boolean; canRestore: boolean; installed?: boolean; modelCount?: number; error?: string }> }> {
+    return get("/api/proxy/desktop-clients");
+  },
+  desktopClientModels(apiKey: string): Promise<{ ok: true; models: string[] }> {
+    return mutate("/api/proxy/desktop-clients/models", "POST", { apiKey, model: "catalog" });
+  },
+  connectDesktopClient(client: string, apiKey: string, selectedModels: string[], model: string): Promise<{ ok: true; path: string; modelCount: number }> {
+    return mutate("/api/proxy/desktop-clients/connect", "POST", { client, apiKey, selectedModels, model });
+  },
+  restoreDesktopClient(client: string): Promise<{ ok: true; restored: boolean }> {
+    return mutate("/api/proxy/desktop-clients/restore", "POST", { client });
   },
   connectCopilot(client: "cli" | "vscode", apiKey: string, model: string): Promise<{ ok: true; path: string }> {
     return mutate("/api/proxy/copilot/connect", "POST", { client, apiKey, model });

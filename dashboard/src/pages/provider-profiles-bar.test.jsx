@@ -18,6 +18,8 @@ vi.mock("../lib/provider-switch-api", () => ({
     update: vi.fn(async ({ id, name }) => ({ ok: true, profile: { id, name, payload: {} } })),
     remove: vi.fn(async () => ({ ok: true })),
     apply: vi.fn(async () => ({ ok: true, warnings: ["[claude] provider 'p_gone' no longer exists, skipped"] })),
+    previewBundle: vi.fn(async () => ({ ok: true, revision: "bundle-r1", results: [{ app: "claude", ready: true, errors: [] }, { app: "codex", ready: true, errors: [] }] })),
+    applyBundle: vi.fn(async () => ({ ok: true, recoveryPath: "/tmp/recovery", results: [{ app: "claude", status: "applied", warnings: [] }, { app: "codex", status: "applied", warnings: [] }] })),
   },
 }));
 
@@ -33,6 +35,27 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.profiles = [];
   mocks.currentIds = {};
+});
+
+it("captures only explicitly selected apps", async () => {
+  render(<ProviderProfilesBar activeApp="claude" />);
+  await screen.findByText("pswitch.profile.empty");
+  fireEvent.click(screen.getByRole("button", { name: "pswitch.profile.new" }));
+  fireEvent.change(screen.getByRole("dialog").querySelector("input"), { target: { value: "Daily" } });
+  fireEvent.click(screen.getByRole("checkbox", { name: "pswitch.tab.codex" }));
+  fireEvent.click(screen.getByRole("button", { name: "pswitch.profile.create" }));
+  await waitFor(() => expect(profilesApi.create).toHaveBeenCalledWith({ name: "Daily", apps: ["claude", "codex"] }));
+});
+
+it("previews the selected bundle before applying its revision", async () => {
+  mocks.profiles = [{ ...aProfile, capturedApps: ["claude", "codex"] }];
+  render(<ProviderProfilesBar activeApp="claude" />);
+  fireEvent.click(await screen.findByText("Work"));
+  expect(profilesApi.applyBundle).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "pswitch.profile.bundle_preview" }));
+  fireEvent.click(await screen.findByRole("button", { name: "pswitch.profile.bundle_apply" }));
+  await waitFor(() => expect(profilesApi.applyBundle).toHaveBeenCalledWith("pr_1", ["claude", "codex"], "bundle-r1"));
+  await screen.findByText("/tmp/recovery");
 });
 
 it("renders profile chips, creates with a name and applies through the confirm", async () => {

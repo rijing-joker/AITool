@@ -151,7 +151,12 @@ function projectCodex({ prev, target, liveToml, liveAuth, stash }) {
   } else {
     // Remove when the previous provider wrote one and the target has none.
     const liveTable = require("smol-toml").parse(text || "").model_providers?.custom;
-    const unchanged = liveTable && prevTable && stableEqual(liveTable, normalizeTable(prevTable));
+    const projectedPrevTable = prevTable && normalizeTable(prevTable);
+    if (projectedPrevTable) {
+      applyCodexRouteAuth(projectedPrevTable, codexRowKey(prev, projectedPrevTable), prev?.category === "official" && liveAuthObject !== null);
+    }
+    const unchanged = liveTable && prevTable
+      && (stableEqual(liveTable, projectedPrevTable) || stableEqual(liveTable, normalizeTable(prevTable)));
     if (unchanged) {
       text = toml.replaceTable(text, floor.CODEX_PROVIDER_TABLE, null);
     }

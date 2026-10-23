@@ -446,6 +446,16 @@ function projectAdditive(app, { prev, target, live }) {
   return doc;
 }
 
+function disconnectAdditive(app, { prev, live }) {
+  const spec = specOf(app), doc = structuredClone(live);
+  const wrapper = wrapperOf(prev);
+  if (!wrapper.slotKey) return doc;
+  if (stableEqual(readSlot(doc, spec, wrapper.slotKey), wrapper.provider)) removeSlot(doc, spec, wrapper.slotKey);
+  if (spec.pointerProviderKey && valueAt(doc, spec.pointerProviderKey) === wrapper.slotKey) deleteValueAt(doc, spec.pointerProviderKey);
+  if (spec.modelPointer && stableEqual(valueAt(doc, spec.modelPointer), pointerValueOf(app, wrapper))) deleteValueAt(doc, spec.modelPointer);
+  return doc;
+}
+
 // ---------------------------------------------------------------------------
 // Import from live
 // ---------------------------------------------------------------------------
@@ -489,6 +499,14 @@ function extractAdditive(app, live) {
       ? modelIdFromEntry(app, provider)
       : modelIdFromRef(String(valueAt(live, spec.modelPointer) || "").trim(), slotKey);
   return sanitizeWrapper(app, { slotKey, provider, modelId }, slotKey);
+}
+
+function diagnosticFields(app, live, slotKey) {
+  const spec = specOf(app);
+  const result = { slotKey, provider: readSlot(live, spec, slotKey) ?? null };
+  if (spec.modelPointer) result.modelPointer = valueAt(live, spec.modelPointer) ?? null;
+  if (spec.pointerProviderKey) result.providerPointer = valueAt(live, spec.pointerProviderKey) ?? null;
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -713,7 +731,9 @@ module.exports = {
   parseLive,
   serializeLive,
   projectAdditive,
+  disconnectAdditive,
   extractAdditive,
+  diagnosticFields,
   planSaveAdditive,
   resolveSlotKey,
   additiveConflicts,

@@ -257,7 +257,8 @@ async function modelCatalog(values, options = {}) {
     const fallback = pricing.findPricing(metadata, id) || {};
     return [{ id, contextWindow: row.context_window ?? row.contextWindow ?? fallback.contextWindow,
       inputModalities: row.input_modalities ?? row.inputModalities ?? fallback.inputModalities,
-      maxOutputTokens: row.max_output_tokens ?? row.maxOutputTokens ?? fallback.maxOutputTokens }];
+      maxOutputTokens: row.max_output_tokens ?? row.maxOutputTokens ?? fallback.maxOutputTokens,
+      reasoning: row.reasoning ?? fallback.reasoning }];
   });
 }
 

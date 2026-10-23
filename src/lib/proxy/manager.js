@@ -261,8 +261,8 @@ async function stopCore() {
   return { stopped: true, running: false };
 }
 
-function warnOptionalUpstream(action, error) {
-  const message = `OpenCode free upstream ${action} warning: ${error?.message || error}`;
+function warnOptionalUpstream(action, error, label = "OpenCode free upstream") {
+  const message = `${label} ${action} warning: ${error?.message || error}`;
   console.warn(message);
   // Desktop launchers may not expose stderr; keep the same diagnostic log as
   // serve's proxy bootstrap warnings. Logging must not fail the core action.
@@ -283,6 +283,8 @@ async function startImpl() {
   } catch (error) {
     warnOptionalUpstream("start", error);
   }
+  try { await require("./extensions/runtime").startEnabled(); }
+  catch (error) { warnOptionalUpstream("start", error, "Optional integrations"); }
   return result;
 }
 
@@ -294,6 +296,8 @@ async function stopImpl() {
     // restart() must still reach start() if only the adapter failed to stop.
     warnOptionalUpstream("stop", error);
   }
+  try { await require("./extensions/runtime").stop(); }
+  catch (error) { warnOptionalUpstream("stop", error, "Optional integrations"); }
   return result;
 }
 

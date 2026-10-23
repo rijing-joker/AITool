@@ -23,16 +23,24 @@ async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
   return parseResponse<T>(await fetch(path, { cache: "no-store", signal }));
 }
 
-async function mutate<T>(path: string, method: string, body?: unknown): Promise<T> {
+async function mutate<T>(path: string, method: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   const headers = await getLocalApiAuthHeaders();
   return parseResponse<T>(
     await fetch(path, {
       method,
+      signal,
       headers: { ...headers, ...(body !== undefined ? { "content-type": "application/json" } : {}) },
       body: body !== undefined ? JSON.stringify(body) : undefined,
     }),
   );
 }
+export interface DistributionRow { name?: string; description?: string; prompt?: string; dir?: string; apps: string[]; skills: string[]; mcp: string[]; partial?: boolean }
+export interface DistributionState { subagents: DistributionRow[]; projects: DistributionRow[]; roleApps: string[]; projectApps: string[]; projectMcpApps: string[]; skills: Array<{ id: string; name: string }>; mcp: Array<{ id: string; name: string }> }
+export const distributionApi = {
+  list: () => get<DistributionState>("/api/provider-switch/distribution"),
+  preview: (kind: string, row: DistributionRow) => mutate<{ revision: string; errors: string[]; changes: Array<{ path: string; action: string; app: string }> }>("/api/provider-switch/distribution", "POST", { action: "preview", kind, row }),
+  apply: (kind: string, row: DistributionRow, revision: string) => mutate<{ results: Array<{ path: string; status: string; error?: string }>; recoveryPath: string }>("/api/provider-switch/distribution", "POST", { action: "apply", kind, row, revision }),
+};
 
 export type ProviderSwitchApp =
   | "claude"
@@ -45,6 +53,17 @@ export type ProviderSwitchApp =
   | "hermes"
   | "pi"
   | "grokbuild";
+
+export interface ProviderDiagnostic {
+  app: string;
+  status: string;
+  providerId: string | null;
+  appliedAt: string | null;
+  revision: string;
+  differences: { fileId: string; path: string; field: string; change: string }[];
+  environment: { varName: string; sourceType: string; sourcePath: string }[];
+  files: { id: string; path: string; exists: boolean }[];
+}
 
 export interface ProviderSwitchEnvConflict {
   varName: string;
@@ -271,14 +290,27 @@ export interface ProviderSwitchProfile {
   };
   createdAt: string | null;
   updatedAt: string | null;
+  capturedApps?: string[];
+}
+
+export interface ProfileBundlePreview {
+  ok: true;
+  revision: string;
+  results: { app: string; ready: boolean; errors: string[]; providerId: string | null; mcpCount: number | null; skillCount: number | null; promptId: string | null }[];
 }
 
 export const profilesApi = {
   list(): Promise<{ ok: true; profiles: ProviderSwitchProfile[]; currentIds: Record<string, string | null> }> {
     return get("/api/provider-switch/profiles");
   },
-  create(body: { name: string; app: string }): Promise<{ ok: true; profile: ProviderSwitchProfile }> {
+  create(body: { name: string; app?: string; apps?: string[] }): Promise<{ ok: true; profile: ProviderSwitchProfile }> {
     return mutate("/api/provider-switch/profiles", "POST", body);
+  },
+  previewBundle(id: string, apps: string[]): Promise<ProfileBundlePreview> {
+    return mutate("/api/provider-switch/profiles/preview-bundle", "POST", { id, apps });
+  },
+  applyBundle(id: string, apps: string[], revision: string): Promise<{ ok: true; results: { app: string; status: string; warnings: string[] }[]; recoveryPath: string }> {
+    return mutate("/api/provider-switch/profiles/apply-bundle", "POST", { id, apps, revision });
   },
   update(body: { id: string; name?: string; resnapshot?: boolean; app?: string }): Promise<{ ok: true; profile: ProviderSwitchProfile }> {
     return mutate("/api/provider-switch/profiles/update", "POST", body);
@@ -303,6 +335,18 @@ export const piPromptFilesApi = {  get(kind: PiPromptFileKind) {
 };
 
 export const providerSwitchApi = {
+  diagnostic(app: ProviderSwitchApp, signal?: AbortSignal): Promise<{ ok: true; diagnostic: ProviderDiagnostic }> {
+    return get(`/api/provider-switch/diagnostics?app=${encodeURIComponent(app)}`, signal);
+  },
+  probeDiagnostic(app: ProviderSwitchApp, signal?: AbortSignal): Promise<{ ok: true; probe: { status: string; httpStatus?: number; latencyMs?: number } }> {
+    return mutate("/api/provider-switch/diagnostics/probe", "POST", { app }, signal);
+  },
+  previewDiagnostic(app: ProviderSwitchApp): Promise<{ ok: true; revision: string; providerId: string; files: { id: string; path: string; before: string; after: string }[] }> {
+    return mutate("/api/provider-switch/diagnostics/preview", "POST", { app });
+  },
+  repairDiagnostic(app: ProviderSwitchApp, revision: string): Promise<{ ok: true; wrote: string[] }> {
+    return mutate("/api/provider-switch/diagnostics/repair", "POST", { app, revision });
+  },
   launchAgy(id: string) { return mutate("/api/provider-switch/agy/launch", "POST", { id }); },
   migrateHermesId(id: string): Promise<{ ok: true; slotKey: string }> {
     return mutate("/api/provider-switch/hermes/migrate-id", "POST", { id });
@@ -560,6 +604,17 @@ export interface McpServer {
   tags?: string[];
   createdAt?: string;
   updatedAt?: string;
+  disabledTools?: Partial<Record<McpAppId, string[]>>;
+}
+
+export interface McpCheckResult {
+  status: "checking" | "healthy" | "failed" | "cancelled" | "stale";
+  stage: "connect" | "initialize" | "initialized" | "tools" | "done";
+  reason?: string;
+  revision: string;
+  checkedAt: string;
+  durationMs?: number;
+  tools: { name: string; description: string }[];
 }
 
 export interface McpUpsertPayload {
@@ -580,8 +635,16 @@ export interface McpMutationResult {
 }
 
 export const mcpApi = {
-  list(): Promise<{ ok: true; servers: McpServer[]; apps: McpAppId[] }> {
+  list(): Promise<{ ok: true; servers: McpServer[]; apps: McpAppId[]; checks: Record<string, McpCheckResult | null>; toolFilterApps: McpAppId[] }> {
     return get("/api/provider-switch/mcp");
+  },
+
+  check(id: string, signal?: AbortSignal): Promise<{ ok: true; check: McpCheckResult }> {
+    return mutate("/api/provider-switch/mcp/check", "POST", { id }, signal);
+  },
+
+  tool(id: string, app: McpAppId, tool: string, enabled: boolean, revision: string): Promise<McpMutationResult> {
+    return mutate("/api/provider-switch/mcp/tool", "POST", { id, app, tool, enabled, revision });
   },
 
   upsert(server: McpUpsertPayload): Promise<McpMutationResult> {

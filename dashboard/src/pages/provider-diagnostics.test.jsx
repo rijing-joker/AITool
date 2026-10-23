@@ -1,0 +1,38 @@
+import React from "react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, expect, it, vi } from "vitest";
+import { ProviderDiagnostics } from "./provider-diagnostics";
+import { providerSwitchApi } from "../lib/provider-switch-api";
+vi.mock("../lib/copy", () => ({ copy: key => key }));
+vi.mock("../lib/provider-switch-api", () => ({ providerSwitchApi: { diagnostic: vi.fn(), probeDiagnostic: vi.fn(), previewDiagnostic: vi.fn(), repairDiagnostic: vi.fn() } }));
+afterEach(() => { cleanup(); vi.clearAllMocks(); });
+const diagnostic = { app: "claude", status: "replaced", providerId: "p1", differences: [{ fileId: "settings", field: "env.ANTHROPIC_MODEL" }], environment: [] };
+it("starts with a local diagnosis and requires review before repairing", async () => {
+  providerSwitchApi.diagnostic.mockResolvedValue({ diagnostic });
+  providerSwitchApi.previewDiagnostic.mockResolvedValue({ revision: "rev1", files: [{ id: "settings", path: "/tmp/settings.json", before: "old-secret", after: "new-secret" }] });
+  providerSwitchApi.repairDiagnostic.mockResolvedValue({ wrote: [] });
+  render(<ProviderDiagnostics app="claude" />);
+  await screen.findByText("pswitch.diagnostic.replaced");
+  expect(providerSwitchApi.probeDiagnostic).not.toHaveBeenCalled();
+  expect(providerSwitchApi.previewDiagnostic).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "pswitch.diagnostic.details" }));
+  fireEvent.click(screen.getByRole("button", { name: "pswitch.diagnostic.preview" }));
+  await screen.findByText("pswitch.diagnostic.values_hidden");
+  expect(screen.queryByText(/new-secret/)).toBeNull();
+  fireEvent.click(screen.getByRole("checkbox"));
+  expect(screen.getByText(/new-secret/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "pswitch.diagnostic.repair" }));
+  await waitFor(() => expect(providerSwitchApi.repairDiagnostic).toHaveBeenCalledWith("claude", "rev1"));
+});
+it("keeps the preview after a stale repair error", async () => {
+  providerSwitchApi.diagnostic.mockResolvedValue({ diagnostic });
+  providerSwitchApi.previewDiagnostic.mockResolvedValue({ revision: "rev1", files: [] });
+  providerSwitchApi.repairDiagnostic.mockRejectedValue(new Error("Reload the preview"));
+  render(<ProviderDiagnostics app="claude" />);
+  await screen.findByText("pswitch.diagnostic.replaced");
+  fireEvent.click(screen.getByRole("button", { name: "pswitch.diagnostic.details" }));
+  fireEvent.click(screen.getByRole("button", { name: "pswitch.diagnostic.preview" }));
+  fireEvent.click(await screen.findByRole("button", { name: "pswitch.diagnostic.repair" }));
+  await screen.findByRole("alert");
+  expect(screen.getByRole("button", { name: "pswitch.diagnostic.repair" })).toBeTruthy();
+});

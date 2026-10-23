@@ -17,6 +17,9 @@ import { copy } from "../lib/copy";
 import { proxyApi } from "../lib/proxy-api";
 import { Button, Card, ConfirmModal } from "../ui/components";
 import { CopilotClients } from "./copilot-clients";
+import { DesktopClients } from "./desktop-clients";
+import { ProxyToolsPanel } from "./proxy-tools-panel";
+import { RoutingPanel } from "./routing-panel";
 import { useGuardedDialog } from "../hooks/use-guarded-dialog";
 
 // ---------------------------------------------------------------------------
@@ -381,6 +384,9 @@ export function KeysTab({ status, onEditorStateChange }) {
       </Card>
 
       <CopilotClients keys={keys} remarks={remarks} />
+      <DesktopClients keys={keys || []} remarks={remarks} />
+      <ProxyToolsPanel keys={keys || []} remarks={remarks} />
+      <RoutingPanel keys={keys || []} remarks={remarks} />
       <KeyDialog
         error={error}
         onEditorStateChange={onEditorStateChange}

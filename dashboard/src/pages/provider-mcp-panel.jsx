@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Import, Pencil, Plus, Server, Trash2 } from "lucide-react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Import, Pencil, Plus, Server, Trash2, Activity } from "lucide-react";
 import { copy } from "../lib/copy";
 import { mcpApi } from "../lib/provider-switch-api";
 import { Button, Card, ConfirmModal } from "../ui/components";
@@ -96,6 +96,9 @@ export function ProviderMcpPanel({ onEditorStateChange }) {
   const [servers, setServers] = useState(null);
   const [loadError, setLoadError] = useState(null);
   const [busy, setBusy] = useState(false);
+  const operation = useRef(false);
+  const [checks, setChecks] = useState({});
+  const [toolFilterApps, setToolFilterApps] = useState([]);
   const [search, setSearch] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -105,6 +108,8 @@ export function ProviderMcpPanel({ onEditorStateChange }) {
     try {
       const data = await mcpApi.list();
       setServers(data.servers);
+      setChecks(data.checks || {});
+      setToolFilterApps(data.toolFilterApps || []);
       setLoadError(null);
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : String(error));
@@ -114,7 +119,8 @@ export function ProviderMcpPanel({ onEditorStateChange }) {
   useEffect(() => { void load(); }, [load]);
 
   const run = useCallback(async (action, { successTitle } = {}) => {
-    if (busy) return null;
+    if (operation.current) return null;
+    operation.current = true;
     setBusy(true);
     try {
       const result = await action();
@@ -133,9 +139,10 @@ export function ProviderMcpPanel({ onEditorStateChange }) {
       showToast({ title: `${copy("pswitch.mcp.toast_error")} — ${error instanceof Error ? error.message : String(error)}` });
       return null;
     } finally {
+      operation.current = false;
       setBusy(false);
     }
-  }, [busy]);
+  }, []);
 
   const handleToggle = (server, app) => {
     const enabled = !(server.apps && server.apps[app] === true);
@@ -206,6 +213,7 @@ export function ProviderMcpPanel({ onEditorStateChange }) {
         onEditorStateChange={onEditorStateChange}
         onSaved={(result) => {
           setServers(result.servers);
+          setChecks({});
           closeDialog();
           showToast({ title: result.failures.length
             ? `${copy("pswitch.mcp.toast_saved")} — ${result.failures[0]}`
@@ -280,6 +288,9 @@ export function ProviderMcpPanel({ onEditorStateChange }) {
             onToggle={handleToggle}
             onEdit={openEdit}
             onDelete={setDeleteTarget}
+            check={checks[server.id]}
+            toolFilterApps={toolFilterApps}
+            onTool={(app, tool, enabled, revision) => run(() => mcpApi.tool(server.id, app, tool, enabled, revision))}
           />
         ))}
       </div>
@@ -299,7 +310,7 @@ export function ProviderMcpPanel({ onEditorStateChange }) {
   );
 }
 
-function McpServerCard({ server, busy, onToggle, onEdit, onDelete }) {
+function McpServerCard({ server, busy, onToggle, onEdit, onDelete, check, toolFilterApps, onTool }) {
   const summary = specSummary(server.server);
   const description = String(server.description || "").trim();
   const summaryText = summary || copy("pswitch.mcp.spec_empty");
@@ -352,7 +363,97 @@ function McpServerCard({ server, busy, onToggle, onEdit, onDelete }) {
           );
         })}
       </div>
+      <McpHealth key={JSON.stringify(server.server)} server={server} initialCheck={check} busy={busy} toolFilterApps={toolFilterApps} onTool={onTool} />
     </Card>
+  );
+}
+
+function McpHealth({ server, initialCheck, busy, toolFilterApps, onTool }) {
+  const [check, setCheck] = useState(initialCheck || null);
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState("");
+  const [app, setApp] = useState("codex");
+  const controller = useRef(null);
+  useEffect(() => () => controller.current?.abort(), []);
+  useEffect(() => { if (!running) setCheck(initialCheck || null); }, [initialCheck]);
+  const start = async () => {
+    if (controller.current) return;
+    const request = new AbortController(); controller.current = request;
+    setRunning(true); setError("");
+    try {
+      const result = await mcpApi.check(server.id, request.signal);
+      if (!request.signal.aborted) setCheck(result.check);
+    } catch (failure) {
+      if (!request.signal.aborted) setError(failure instanceof Error ? failure.message : String(failure));
+    } finally {
+      if (controller.current === request) { controller.current = null; setRunning(false); }
+    }
+  };
+  const cancel = () => {
+    controller.current?.abort();
+    setCheck({ status: "cancelled", tools: [] });
+  };
+  const statusKey = running ? "pswitch.mcp.health_checking" : check?.status === "healthy" ? "pswitch.mcp.health_healthy"
+    : check?.status === "failed" ? "pswitch.mcp.health_failed" : check?.status === "cancelled" ? "pswitch.mcp.health_cancelled"
+      : check?.status === "stale" ? "pswitch.mcp.health_stale" : "pswitch.mcp.health_unknown";
+  const reasonKeys = {
+    timeout: "pswitch.mcp.reason_timeout", authorization: "pswitch.mcp.reason_authorization", environment: "pswitch.mcp.reason_environment",
+    notfound: "pswitch.mcp.reason_notfound", launcher: "pswitch.mcp.reason_launcher", protocol: "pswitch.mcp.reason_protocol",
+    pagination: "pswitch.mcp.reason_protocol", size: "pswitch.mcp.reason_size", url: "pswitch.mcp.reason_url", endpoint: "pswitch.mcp.reason_url",
+    exited: "pswitch.mcp.reason_exited", start: "pswitch.mcp.reason_exited", unreachable: "pswitch.mcp.reason_unreachable", http: "pswitch.mcp.reason_http",
+  };
+  const stageKeys = { connect: "pswitch.mcp.stage_connect", initialize: "pswitch.mcp.stage_initialize", initialized: "pswitch.mcp.stage_initialized", tools: "pswitch.mcp.stage_tools" };
+  const supported = toolFilterApps.includes(app);
+  return (
+    <div className="mt-3 border-t border-oai-gray-100 pt-3 dark:border-oai-gray-800">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p role="status" className="text-xs text-oai-gray-600 dark:text-oai-gray-300">
+          {copy(statusKey)}
+          {!running && check?.status === "healthy" ? ` · ${copy("pswitch.mcp.tools_count", { count: check.tools.length })}` : ""}
+        </p>
+        <Button variant="secondary" size="sm" disabled={busy} onClick={() => running ? cancel() : void start()}>
+          <Activity className="h-3.5 w-3.5" />{copy(running ? "pswitch.mcp.check_cancel" : "pswitch.mcp.check")}
+        </Button>
+      </div>
+      {!check && !running ? <p className="mt-1 text-xs text-oai-gray-500 dark:text-oai-gray-400">{copy("pswitch.mcp.check_hint")}</p> : null}
+      {error ? <p role="alert" className="mt-2 text-xs text-red-600 dark:text-red-400">{error}</p> : null}
+      {check?.status === "failed" && !running ? (
+        <p className="mt-2 text-xs text-red-600 dark:text-red-400">
+          {copy(reasonKeys[check.reason] || "pswitch.mcp.reason_unreachable")}
+          {stageKeys[check.stage] ? ` · ${copy(stageKeys[check.stage])}` : ""}
+        </p>
+      ) : null}
+      {check?.status === "healthy" && Boolean(check.tools.length) && !running ? (
+        <details className="mt-3">
+          <summary className="cursor-pointer rounded text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500">{copy("pswitch.mcp.tools")}</summary>
+          <div className="mt-3 flex flex-col gap-2">
+            <label className="flex flex-wrap items-center gap-2 text-xs">
+              <span>{copy("pswitch.mcp.tool_app")}</span>
+              <select value={app} onChange={event => setApp(event.currentTarget.value)} className={`${inputClass} max-w-48`}>
+                {MCP_APPS.map(item => <option key={item.id} value={item.id}>{copy(item.labelKey)}</option>)}
+              </select>
+            </label>
+            {!supported ? <p className="text-xs text-oai-gray-500 dark:text-oai-gray-400">{copy("pswitch.mcp.tool_unsupported")}</p> : <p className="text-xs text-oai-gray-500 dark:text-oai-gray-400">{copy("pswitch.mcp.tool_hint")}</p>}
+            <ul className="max-h-96 overflow-y-auto divide-y divide-oai-gray-100 dark:divide-oai-gray-800">
+              {check.tools.map(tool => (
+                <li key={tool.name} className="flex items-start justify-between gap-3 py-3">
+                  <div className="min-w-0">
+                    <p className="break-all font-mono text-xs font-medium">{tool.name}</p>
+                    {tool.description ? <p className="mt-1 whitespace-pre-wrap break-words text-xs text-oai-gray-500 dark:text-oai-gray-400">{tool.description}</p> : null}
+                  </div>
+                  <label className="flex min-h-10 shrink-0 items-center gap-2 text-xs">
+                    <input type="checkbox" className="h-4 w-4 accent-oai-brand-600" checked={!server.disabledTools?.[app]?.includes(tool.name)} disabled={busy || !supported}
+                      aria-label={copy("pswitch.mcp.tool_toggle", { tool: tool.name, app: copy(MCP_APPS.find(item => item.id === app).labelKey) })}
+                      onChange={event => void onTool(app, tool.name, event.currentTarget.checked, check.revision)} />
+                    {copy("pswitch.mcp.tool_enabled")}
+                  </label>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </details>
+      ) : null}
+    </div>
   );
 }
 
@@ -487,6 +588,7 @@ function McpServerEditor({ editing, busy, existingIds, onClose, onSaved, onEdito
           {configError || parsed.error ? (
             <p className="text-xs text-red-600 dark:text-red-400">{configError || parsed.error}</p>
           ) : null}
+          <p className="text-xs text-oai-gray-500 dark:text-oai-gray-400">{copy("pswitch.mcp.envrefs_hint")}</p>
         </div>
 
         <fieldset className="space-y-2">

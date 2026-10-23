@@ -49,12 +49,17 @@ function normalizeProfile(raw) {
     },
     createdAt: typeof raw.createdAt === "string" ? raw.createdAt : null,
     updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : null,
+    ...(Array.isArray(raw.capturedApps) ? { capturedApps: raw.capturedApps.filter(isProfileApp) } : {}),
   };
   // Older snapshots wrote null for both "disabled" and "not captured".
   // Their initiating app always has MCP and skill arrays, even when empty;
   // use those to recognize a captured empty prompt without claiming other apps.
   for (const app of PROFILE_APPS) {
-    if (profile.payload.prompts[app] === null
+    // Bundle autosaves from older builds lost the explicit empty provider.
+    if (profile.capturedApps?.includes(app) && profile.payload.providers[app] === null) {
+      profile.payload.providers[app] = "";
+    }
+    if (!profile.capturedApps && profile.payload.prompts[app] === null
       && Array.isArray(profile.payload.mcp[app])
       && Array.isArray(profile.payload.skills[app])) {
       profile.payload.prompts[app] = "";
@@ -129,7 +134,7 @@ async function snapshotApp(app) {
   const mcpSlots = nullSlots();
   const skillSlots = nullSlots();
   const promptSlots = nullSlots();
-  providers[app] = providerState.current;
+  providers[app] = providerState.current || "";
   mcpSlots[app] = servers.filter((s) => s.apps?.[app] === true).map((s) => s.id);
   skillSlots[app] = allSkills.filter((s) => s.apps?.[app] === true).map((s) => s.id);
   promptSlots[app] = (appPrompts.find((p) => p.enabled) || {}).id || "";
@@ -144,11 +149,16 @@ function nullSlots() {
 
 // Create: snapshot only the initiating app's slots (upstream create) — other
 // apps may be living in another profile and must not be captured silently.
-async function createProfile({ name, app }) {
+async function createProfile({ name, app, apps }) {
   const trimmed = String(name || "").trim();
   if (!trimmed) throw new Error("Profile name is empty");
-  if (!isProfileApp(app)) throw new Error(`Profiles are not supported for app: ${app}`);
-  const snapshot = await snapshotApp(app);
+  const selected = apps === undefined ? [app] : validateApps(apps);
+  if (!isProfileApp(app) && apps === undefined) throw new Error(`Profiles are not supported for app: ${app}`);
+  const snapshot = { providers: nullSlots(), mcp: nullSlots(), skills: nullSlots(), prompts: nullSlots() };
+  for (const selectedApp of selected) {
+    const captured = await snapshotApp(selectedApp);
+    for (const group of Object.keys(snapshot)) snapshot[group][selectedApp] = captured[group][selectedApp];
+  }
   const now = new Date().toISOString();
   const profile = {
     id: `pr_${crypto.randomUUID()}`,
@@ -156,12 +166,18 @@ async function createProfile({ name, app }) {
     payload: snapshot,
     createdAt: now,
     updatedAt: now,
+    ...(apps !== undefined ? { capturedApps: selected } : {}),
   };
   await mutateProfilesStore((store) => {
     store.profiles.push(profile);
     return store;
   });
   return profile;
+}
+
+function validateApps(apps) {
+  if (!Array.isArray(apps) || !apps.length || apps.some(app => !isProfileApp(app))) throw new Error("Select supported profile apps");
+  return [...new Set(apps)];
 }
 
 // Update: rename and/or resnapshot the given app's slots. The bundled UI only
@@ -268,7 +284,9 @@ async function applyProfile({ id, app, applyProvider }) {
   const targetPid = payload.providers[app];
   if (targetPid != null) {
     const state = await store.listProviders(app);
-    if (!state.providers.some((p) => p.id === targetPid)) {
+    if (targetPid === "") {
+      try { await applyProvider(app, ""); } catch (error) { warnings.push(`[${app}] clear provider failed: ${error.message}`); }
+    } else if (!state.providers.some((p) => p.id === targetPid)) {
       warnings.push(`[${app}] provider '${targetPid}' no longer exists, skipped`);
     } else if (state.current !== targetPid) {
       try {
@@ -356,4 +374,6 @@ module.exports = {
   planToggles,
   // exported for tests
   scopeCaptured,
+  validateApps,
+  restoreCurrentMarker: (app, id) => mutateProfilesStore(current => { current.currentIds[app] = id || null; return current; }),
 };

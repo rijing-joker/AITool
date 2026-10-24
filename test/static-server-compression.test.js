@@ -182,3 +182,84 @@ test("a variant's Content-Length is re-statted from the opened descriptor", asyn
   assert.equal(body.length, realSize);
   await fs.rm(dir, { recursive: true, force: true });
 });
+
+test("clients aborting mid-open cannot leak the static FileHandles (upstream 56e21b4a)", async (t) => {
+  // The close listener must be registered before the first await: "close"
+  // firing during the open/stat window leaves a later listener forever
+  // unregistered, so the opened descriptor was never closed (fatal GC error
+  // on Node 25+). Abort at each await point and count closes per path.
+  const fsp = require("node:fs/promises");
+  const origOpen = fsp.open;
+  const opensByPath = new Map();
+  const closesByPath = new Map();
+  const stalls = new Set();
+  const waiters = [];
+  fsp.open = async function stallingOpen(file, ...args) {
+    const handle = await origOpen.call(fsp, file, ...args);
+    const key = String(file);
+    opensByPath.set(key, (opensByPath.get(key) || 0) + 1);
+    const origClose = handle.close.bind(handle);
+    handle.close = async function countedClose(...cargs) {
+      closesByPath.set(key, (closesByPath.get(key) || 0) + 1);
+      return origClose(...cargs);
+    };
+    if (stalls.has(key)) await new Promise((resolve) => waiters.push(resolve));
+    return handle;
+  };
+  t.after(() => { fsp.open = origOpen; for (const release of waiters) release(); });
+
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "aitool-midabort-"));
+  await fs.writeFile(path.join(dir, "plain.png"), "png");
+  await fs.writeFile(path.join(dir, "app.js"), 'console.log("mid abort");\n'.repeat(200));
+  const { precompressAssets } = await import("../dashboard/scripts/precompress-assets.mjs");
+  await precompressAssets(dir);
+
+  const abortMidStall = async ({ url, headers, stallPath }) => {
+    stalls.add(stallPath);
+    const res = new EventEmitter();
+    res.destroyed = false;
+    res.headersSent = false;
+    res.write = () => true;
+    res.end = () => {};
+    res.writeHead = () => { res.headersSent = true; return res; };
+    res.destroy = () => {};
+    const served = serveStaticFile(dir, url, res, { method: "GET", headers });
+    // Let the stalled open() be reached, then disconnect the client.
+    for (let i = 0; i < 100 && waiters.length === 0; i += 1) await new Promise((resolve) => setTimeout(resolve, 2));
+    assert.ok(waiters.length > 0, "request must reach the stalled open()");
+    res.destroyed = true;
+    res.emit("close");
+    const release = waiters.splice(0);
+    for (const done of release) done();
+    assert.equal(await served, true, "an aborted request still counts as served (no SPA fallback)");
+    assert.equal(res.headersSent, false, "no headers may be committed for a gone client");
+    stalls.delete(stallPath);
+  };
+
+  // Abort while the base descriptor's open is still pending (plain file).
+  await abortMidStall({ url: "/plain.png", headers: {}, stallPath: path.join(dir, "plain.png") });
+  // Abort while the base open is pending on a negotiable asset.
+  await abortMidStall({ url: "/app.js", headers: { "accept-encoding": "gzip" }, stallPath: path.join(dir, "app.js") });
+  // Abort while the pre-compressed variant's re-open is pending — both the
+  // base and the variant descriptor must be closed.
+  await abortMidStall({ url: "/app.js", headers: { "accept-encoding": "gzip" }, stallPath: path.join(dir, "app.js.gz") });
+
+  for (const [key, opened] of opensByPath) {
+    assert.equal(closesByPath.get(key) || 0, opened, `every descriptor opened for ${key} must be closed`);
+  }
+  assert.equal(opensByPath.get(path.join(dir, "app.js")), 2, "base file opened once per negotiable request");
+  assert.equal(opensByPath.get(path.join(dir, "app.js.gz")), 1, "variant opened once");
+
+  // The normal path still serves after the aborts.
+  const res = new EventEmitter();
+  res.destroyed = false;
+  const chunks = [];
+  res.write = (chunk) => { chunks.push(chunk); return true; };
+  res.writeHead = () => res;
+  res.destroy = () => {};
+  const ended = new Promise((resolve) => { res.end = () => resolve(); });
+  assert.equal(await serveStaticFile(dir, "/plain.png", res, { method: "GET", headers: {} }), true);
+  await ended;
+  assert.equal(Buffer.concat(chunks).toString(), "png");
+  await fs.rm(dir, { recursive: true, force: true });
+});

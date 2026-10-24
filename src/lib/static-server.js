@@ -52,6 +52,17 @@ async function serveStaticFile(baseDir, pathname, res, req = {}) {
   // prevent directory traversal
   if (!filePath.startsWith(baseDir)) return false;
 
+  // Watch for the client going away from the start (upstream 56e21b4a): if the
+  // browser cancels during the awaits below, "close" fires before the stream
+  // exists and a listener added later never runs, leaking the FileHandle
+  // (fatal on Node 25+). The same guard covers the variant re-open.
+  let clientGone = res.destroyed;
+  let stream = null;
+  res.once("close", () => {
+    clientGone = true;
+    if (stream) stream.destroy();
+  });
+
   // Bind the stat and the read to one checked descriptor (cc-switch-free
   // upstream d9c0226f): a stat-then-open race could swap the file for
   // something outside baseDir after the traversal check passed.
@@ -60,6 +71,7 @@ async function serveStaticFile(baseDir, pathname, res, req = {}) {
     handle = await fsPromises.open(filePath, "r");
     const stat = await handle.stat();
     if (!stat.isFile()) return false;
+    if (clientGone) return true; // finally closes the handle
 
     const ext = path.extname(filePath).toLowerCase();
     const contentType = MIME_TYPES[ext] || "application/octet-stream";
@@ -105,12 +117,21 @@ async function serveStaticFile(baseDir, pathname, res, req = {}) {
     let streamHandle;
     if (encoding) {
       streamHandle = await fsPromises.open(selectedPath, "r");
+      if (clientGone) {
+        await streamHandle.close();
+        return true; // finally closes the base handle
+      }
       selectedStat = await streamHandle.stat();
       await handle.close();
       handle = null;
     } else {
       streamHandle = handle;
       handle = null; // The stream owns and closes this descriptor.
+    }
+    if (clientGone) {
+      // No stream was created, so this descriptor is ours to close.
+      await streamHandle.close();
+      return true;
     }
 
     res.writeHead(200, {
@@ -124,12 +145,11 @@ async function serveStaticFile(baseDir, pathname, res, req = {}) {
     if (req.method === "HEAD") {
       // The descriptor was opened but will not be streamed — close it here.
       await streamHandle.close();
-      res.end();
+      if (!clientGone) res.end();
       return true;
     }
-    const stream = streamHandle.createReadStream();
+    stream = streamHandle.createReadStream();
     stream.on("error", (error) => res.destroy(error));
-    res.on("close", () => stream.destroy());
     stream.pipe(res);
     return true;
   } catch (_e) {

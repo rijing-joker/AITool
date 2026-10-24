@@ -1,6 +1,19 @@
 # 上游更新实施记录 — 2026-10-24
 
-实施[本次五上游评估](upstream-review-2026-10-24.md)（TokenTracker / cc-switch / EasyCLIProxyAPI / CLIProxyAPI / Magpie）中全部适用候选。沿用 `dev`；应用版本不变。评估中列为"不引入"的项目（赞助商预设、cc-switch usage 页、内置 proxy 修复、Claude Desktop、离线设备导出、Home 集群、Sentry）未做；**Kimi Code 全套管理按评估建议单独立项，本轮不含**；Magpie 的模型规格统一与用量别名去重为方向参考，未落地。
+实施[本次五上游评估](upstream-review-2026-10-24.md)（TokenTracker / cc-switch / EasyCLIProxyAPI / CLIProxyAPI / Magpie）中全部适用候选。沿用 `dev`；应用版本不变。评估中列为"不引入"的项目（赞助商预设、cc-switch usage 页、内置 proxy 修复、Claude Desktop、离线设备导出、Home 集群、Sentry）未做；Magpie 的模型规格统一与用量别名去重为方向参考，未落地。**Kimi Code 全套管理原计划单独立项，应用户要求在本轮一并实现**（见下文专节）。
+
+## Kimi Code 全套管理（cc-switch e4873bc / 7da2553 / 07265bc / cdd2190 移植）
+
+第 11 个受管应用 `kimi`（MoonshotAI/kimi-code，`~/.kimi-code`，`KIMI_CODE_HOME` 覆盖）：
+
+- **原生多供应商配置**（`src/lib/provider-switch/kimi.js`）：config.toml 的 `providers`/`models` 双表联动投影 —— 添加写节点不动 `default_model`；「设为默认」保留目标供应商已有模型否则选首个；模型别名全局唯一（跨供应商冲突拒绝）；删除拒绝正在使用（default/secondary_model 引用）的供应商；官方 OAuth 节点（type kimi + oauth.key）只归账号中心管理。与 cc-switch 的差异：TOML 全文档重序列化（同 Grok Build 先例），注释不保留；写入前备份。
+- **官方 OAuth 多账号**（`kimi-accounts.js`）：设备码流程（区域固定 auth.kimi.com / auth.kimi.ai，不跨区回退）；首个登录占 Kimi 自己的默认槽位（`managed:kimi-code` / `credentials/kimi-code.json`），后续账号 `kimi-code-ccs-<sha256(region:userId)[:8]>` 槽位 + "Kimi Subscription <昵称>" 可读 ID；`/me` 身份缓存在 `~/.aitool/provider-switch/kimi-accounts.json`（0600，不进云同步）；同账号重登录原位覆盖；额度走 `/usages`（5h + 周窗）；刷新遵守 Kimi 跨进程协议（`oauth/<slot>.lock` 目录锁 5s 失效、锁内重读、拒绝时先采纳他进程轮换的 token 再写 tombstone；Windows 不刷新）；「使用此账号」只选模型；独立账号删除连模型/凭据/卡片（在用先切走），默认登录只"移出列表"（从不替 Kimi 退出）；删除独立账号时其服务（moonshot_search/fetch）改指默认登录。
+- **凭据安全**：credentials 目录 0700、文件 0600；凭据路径钳制在 credentials 目录内（防路径穿越）；凭据写失败时 config 字节级回滚。
+- **接线**：store/paths/presets（开放平台国内/海外 + 自定义，协议 select 字段）、api.js（save/switch/disconnect/delete/import-live/editor-view + `/kimi/accounts*` 路由）、`/switch` 空id 走 disconnect、plan-quota 补 Kimi Coding Plan（API Key 场景 `api.kimi.com|ai/coding` 前缀匹配，quota.js 凭据解析 kimi 行）、MCP（`~/.kimi-code/mcp.json`，stdio/HTTP + 原生 `transport:"sse"`）、Prompts（`AGENTS.md`）、Skills（`skills/`）、CLI 会话第 10 个只读来源（`sessions/<wd>/<id>/state.json` + `agents/main/wire.jsonl`：agent.switched 分支链只显示活动分支、committed 投影优先于 legacy 流、step.end↔messageId 关联解析真实模型、`env KIMI_CODE_HOME=… kimi --session <id>` 恢复命令）。
+- **仪表盘**：Kimi Code 应用页 + 账号面板（区域选择、设备码展示、逐账号额度/使用/重登/删除）+ 供应商表单（协议 select + 模型 JSON 编辑器）；文案 24+9 键 ×6 语言；协议标识符键加入 locale 同文 allowlist。
+- **测试**：`test/provider-switch-kimi.test.js` 13 例（引擎语义/官方保护/登录合并与回滚/双账号与重登/区域隔离/刷新轮换/额度/API 全流程/会话投影与分支/MCP 往返）。
+
+依据：cc-switch `docs/kimi-code-integration-zh.md`（d8983bb 版）与 `kimi_config.rs` / `services/kimi_oauth/` / `session_manager/providers/kimi.rs` / `mcp/kimi.rs` / `coding_plan.rs`（query_kimi_at）。
 
 ## 实施清单
 

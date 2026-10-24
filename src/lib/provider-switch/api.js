@@ -1300,8 +1300,14 @@ async function importFromLive(app, name) {
     const kimi = require("./kimi");
     const doc = kimi.parseDocument(lives.config.content);
     const rows = kimi.extractRows(doc);
-    const wrapper = rows.length ? rows[0] : null;
-    if (!wrapper) throw new Error("No Kimi Code provider found in the live config");
+    // Official OAuth nodes are refused by provider CRUD (kimi.js), so an
+    // imported official card could never be saved or removed again.
+    const wrapper = rows.find((row) => !row.official) || null;
+    if (!wrapper) {
+      throw new Error(rows.length
+        ? "Only Kimi official accounts live in this config; manage them in the account center"
+        : "No Kimi Code provider found in the live config");
+    }
     settingsConfig = wrapper.settingsConfig;
   } else {
     settingsConfig = targets.extractGeminiConfig(lives.env.exists ? lives.env.content : "");

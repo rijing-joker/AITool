@@ -351,6 +351,72 @@ test("kimi api: save/switch/delete provider rows through the provider-switch han
   assert.equal(after.models["relay/kimi-k3"], undefined);
 });
 
+test("kimi api: import-live skips official accounts and refuses an official-only config", async () => {
+  const { handleProviderSwitchApiRequest } = require("../src/lib/provider-switch/api");
+  const handler = handleProviderSwitchApiRequest;
+  const { Readable } = require("node:stream");
+  const makeReq = ({ method = "GET", url, body }) => {
+    const base = Readable.from(body != null ? [Buffer.from(body)] : []);
+    base.method = method;
+    base.url = url;
+    base.headers = { host: "localhost" };
+    return base;
+  };
+  const makeRes = () => ({
+    statusCode: null,
+    body: null,
+    writeHead(status) { this.statusCode = status; },
+    end(payload) { this.body = payload ? String(payload) : ""; },
+  });
+  const call = async (options) => {
+    const req = makeReq(options);
+    const res = makeRes();
+    const handled = await handler(req, res, new URL(`http://localhost${options.url}`), { isAuthorizedLocalMutation: () => true });
+    assert.equal(handled, true);
+    return { status: res.statusCode, body: res.body ? JSON.parse(res.body) : null };
+  };
+
+  // The official node sits first (the usual state after an account-manager
+  // login); the import must pick the first regular provider instead, since
+  // CRUD refuses official nodes and an imported one could never be removed.
+  await writeConfig({
+    providers: {
+      "managed:kimi-code": { type: "kimi", base_url: "https://api.kimi.com/coding/v1", oauth: { storage: "file", key: "oauth/kimi-code" } },
+      relay: { type: "openai", base_url: "https://api.moonshot.cn/v1", api_key: "sk-live" },
+    },
+    models: {
+      "kimi-code/kimi-k3": { provider: "managed:kimi-code", model: "kimi-k3", max_context_size: 262144 },
+      "relay/kimi-k3": { provider: "relay", model: "kimi-k3", max_context_size: 262144 },
+    },
+    default_model: "kimi-code/kimi-k3",
+  });
+  const imported = await call({
+    method: "POST",
+    url: "/api/provider-switch/providers/import-live",
+    body: JSON.stringify({ app: "kimi" }),
+  });
+  assert.equal(imported.status, 200, JSON.stringify(imported.body));
+  assert.equal(imported.body.provider.settingsConfig.slotKey, "relay");
+  assert.equal(imported.body.provider.settingsConfig.provider.api_key, "sk-live");
+
+  // Only the official node: nothing importable, and no card may be created.
+  await writeConfig({
+    providers: { "managed:kimi-code": { type: "kimi", base_url: "https://api.kimi.com/coding/v1", oauth: { storage: "file", key: "oauth/kimi-code" } } },
+    models: { "kimi-code/kimi-k3": { provider: "managed:kimi-code", model: "kimi-k3", max_context_size: 262144 } },
+    default_model: "kimi-code/kimi-k3",
+  });
+  const refused = await call({
+    method: "POST",
+    url: "/api/provider-switch/providers/import-live",
+    body: JSON.stringify({ app: "kimi" }),
+  });
+  assert.equal(refused.status, 400);
+  assert.match(refused.body.error, /account center/);
+  const listed = await call({ method: "GET", url: "/api/provider-switch/providers?app=kimi" });
+  assert.equal(listed.body.providers.length, 1, "a refused import must not leave a second provider row behind");
+  assert.equal(listed.body.providers[0].settingsConfig.slotKey, "relay");
+});
+
 // ---------------------------------------------------------------------------
 // CLI session reader
 // ---------------------------------------------------------------------------

@@ -298,7 +298,7 @@ export function ProviderMcpPanel({ onEditorStateChange }) {
       <ConfirmModal
         open={deleteTarget !== null}
         title={copy("pswitch.mcp.delete_title")}
-        description={copy("pswitch.mcp.delete_hint", { id: deleteTarget ? deleteTarget.id : "" })}
+        description={copy("pswitch.mcp.delete_hint", { id: deleteTarget ? (deleteTarget.name || deleteTarget.id) : "" })}
         confirmLabel={copy("pswitch.action.delete")}
         cancelLabel={copy("pswitch.action.cancel")}
         destructive

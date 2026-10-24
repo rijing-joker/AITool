@@ -102,6 +102,32 @@ test("rotating refresh is serialized and live catalog/quota preserve native sema
   assert.equal((await buddy.catalog("workbuddy", options))[0].contextWindow, 100000);
   assert.deepEqual(await buddy.quota("workbuddy", options), { used: 75.5, total: 200, unit: "credits" });
 });
+test("a mid-call 401 renews once and resends (workbuddy 0.1.31 semantics)", async t => {
+  const { options } = await fixture(t);
+  // Fresh-looking token so current() does not pre-refresh; the upstream
+  // still rejects it once, then accepts the renewed one.
+  await state.write(path.join(options.root, "workbuddy-account.json"), { access: "stale-but-unexpired", refresh: "rotating", expires: Date.now() + 3600000, uid: "u" });
+  let refreshes = 0, quotaCalls = 0, rejectedOnce = false;
+  options.request = async (url, request) => {
+    if (url.includes("refresh")) {
+      refreshes += 1;
+      return { status: 200, body: Buffer.from(JSON.stringify({ data: { accessToken: "renewed", refreshToken: "rotated", expiresIn: 3600 } })) };
+    }
+    quotaCalls += 1;
+    if (!rejectedOnce && request.headers?.authorization === "Bearer stale-but-unexpired") {
+      rejectedOnce = true;
+      return { status: 401, body: Buffer.from(JSON.stringify({ code: 401, data: null })) };
+    }
+    assert.equal(request.headers?.authorization, "Bearer renewed");
+    return { status: 200, body: Buffer.from(JSON.stringify({ data: { Packages: [{ CycleTotalCapacity: "100", CycleUsedCapacity: "10" }] } })) };
+  };
+  assert.deepEqual(await buddy.quota("workbuddy", options), { used: 10, total: 100, unit: "credits" });
+  assert.equal(refreshes, 1, "exactly one renewal");
+  assert.equal(quotaCalls, 2, "the request is sent again after renewing");
+  // The renewed account persists and the next call needs no refresh.
+  assert.deepEqual(await buddy.quota("workbuddy", options), { used: 10, total: 100, unit: "credits" });
+  assert.equal(refreshes, 1);
+});
 test("desktop tokens stay in the user's file and encrypted/expiring logins fail clearly", async t => {
   const { options } = await fixture(t), target = buddy.desktopFile("workbuddy", options);
   await fs.mkdir(path.dirname(target), { recursive: true });

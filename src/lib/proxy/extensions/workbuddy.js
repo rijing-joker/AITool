@@ -105,9 +105,30 @@ async function current(kind, options = {}) {
     account = merged(account, token); await state.write(target, account); return account;
   });
 }
+// A 401 mid-call renews once and resends (magpie-community workbuddy 0.1.31).
+// The renewal runs under the same account file lock as current(), so two
+// concurrent calls cannot both spend the rotating refresh token; if another
+// call already renewed, its fresh account is reused without a second refresh.
+async function authorizedCall(kind, route, { account, ...rest }, options = {}) {
+  try {
+    return await call(kind, route, { account, ...rest }, options);
+  } catch (error) {
+    if (error.status !== 401 || !account || account.source === "desktop" || !account.refresh) throw error;
+    const target = file(kind, options);
+    const renewed = await withFileLock(target, async () => {
+      let latest = await state.read(target);
+      if (!latest || latest.source === "desktop" || typeof latest.access !== "string" || !latest.access) throw error;
+      if (latest.access !== account.access && latest.expires && latest.expires > Date.now() + 60000) return latest;
+      if (!latest.refresh || (latest.refreshExpiresAt && latest.refreshExpiresAt < Date.now())) throw new Error("WorkBuddy login expired; sign in again");
+      const token = await call(kind, "/v2/plugin/auth/token/refresh", { account: latest, extra: { "x-refresh-token": latest.refresh, "x-auth-refresh-source": "plugin" } }, options);
+      latest = merged(latest, token); await state.write(target, latest); return latest;
+    });
+    return await call(kind, route, { ...rest, account: renewed }, options);
+  }
+}
 async function catalog(kind, options = {}) {
   const account = await current(kind, options);
-  const config = await call(kind, "/v3/config", { account, method: "GET" }, options);
+  const config = await authorizedCall(kind, "/v3/config", { account, method: "GET" }, options);
   const allowed = (config.agents || []).filter(row => row.name === "cli").flatMap(row => row.models || []);
   return [...new Set(allowed)].flatMap(id => {
     const row = config.models?.find(model => model.id === id);
@@ -127,10 +148,10 @@ function quotaOf(sum) {
 }
 async function quota(kind, options = {}) {
   const account = await current(kind, options);
-  const sum = await call(kind, "/billing/meter/get-user-resource-summary", { account }, options);
+  const sum = await authorizedCall(kind, "/billing/meter/get-user-resource-summary", { account }, options);
   const personal = quotaOf(sum); if (personal) return personal;
   if (account.enterpriseId) {
-    const value = await call(kind, "/billing/meter/get-enterprise-user-usage", { account }, options);
+    const value = await authorizedCall(kind, "/billing/meter/get-enterprise-user-usage", { account }, options);
     const total = Number(value.limitNum), used = Number(value.credit);
     if (Number.isFinite(total) && total > 0 && Number.isFinite(used) && used >= 0) return { used, total, unit: "credits" };
   }

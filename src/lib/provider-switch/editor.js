@@ -547,6 +547,22 @@ async function buildEditorView(app, { settingsConfig, id, category } = {}) {
     };
   }
 
+  // Kimi Code: the editor previews the native config.toml with the draft's
+  // provider node applied — without moving default_model (that is what the
+  // switch action does). Official nodes preview the untouched live document.
+  if (app === "kimi") {
+    const kimi = require("./kimi");
+    const wrapper = additive.wrapperOf({ settingsConfig: draft });
+    const slotKey = typeof draft?.slotKey === "string" && draft.slotKey.trim() ? draft.slotKey.trim() : (row && row.name) || "";
+    const models = draft?.models && typeof draft.models === "object" && !Array.isArray(draft.models) ? draft.models : {};
+    const live = lives.config.exists ? kimi.parseDocument(lives.config.content) : {};
+    let next = live;
+    if (!kimi.isOfficialProvider(wrapper.provider)) {
+      next = kimi.applyProvider(live, slotKey, { provider: wrapper.provider, models });
+    }
+    return { ok: true, app, isCurrent, inactive: [], configText: kimi.serializeDocument(next), slotKey };
+  }
+
   // gemini
   const envText = targets.projectGemini({ prev, target, liveEnv: geminiReadLiveText(lives) });
   return { ok: true, app, isCurrent, inactive: geminiInactiveFields(draft), envText };

@@ -7,7 +7,7 @@ const sync = require("node:fs");
 const path = require("node:path");
 const { readSqliteJsonRowsAsync } = require("./sqlite-reader");
 const { statusOf } = require("./session-tool-results");
-const APPS = ["agy", "hermes", "pi", "grokbuild", "opencode", "mcode"];
+const APPS = ["agy", "hermes", "pi", "grokbuild", "opencode", "mcode", "kimi"];
 const fileMetadata = new Map();
 const parse = value => { try { return typeof value === "string" ? JSON.parse(value) : value; } catch { return null; } };
 const ts = (value, unit = "ms") => {
@@ -33,6 +33,7 @@ function roots(app, home, env = {}) {
   if (app === "mcode") return [env.MINIMAX_DATA_DIR || env.MAVIS_DATA_DIR || path.join(home, ".minimax")];
   if (app === "opencode") return [path.join(env.XDG_DATA_HOME || path.join(home, ".local", "share"), "opencode")];
   if (app === "grokbuild") return [path.join(home, ".grok", "sessions"), path.join(home, ".grok", "archived_sessions")];
+  if (app === "kimi") return [path.join(env.KIMI_CODE_HOME?.trim() || path.join(home, ".kimi-code"), "sessions")];
   if (app === "pi") {
     const agent = env.PI_CODING_AGENT_DIR || path.join(home, ".pi", "agent");
     let configured = env.PI_CODING_AGENT_SESSION_DIR;
@@ -101,6 +102,7 @@ async function validateSource(app, source, home, env, validate) {
   const valid = app === "agy" ? roots(app,home,env).some(root => /^brain\/[\w-]+\/\.system_generated\/logs\/transcript_full\.jsonl$/.test(path.relative(root,file).split(path.sep).join("/")))
     : app === "grokbuild" ? path.basename(file) === "chat_history.jsonl"
     : app === "opencode" ? file.includes(`${path.sep}storage${path.sep}session${path.sep}`) && file.endsWith(".json")
+    : app === "kimi" ? file.endsWith(`${path.sep}agents${path.sep}main${path.sep}wire.jsonl`)
     : app === "hermes" ? file.includes(`${path.sep}sessions${path.sep}`) && file.endsWith(".jsonl") : app === "pi" && file.endsWith(".jsonl");
   if (!valid) throw new Error("Not a registered session transcript");
 }
@@ -145,6 +147,7 @@ async function list(app, home, env, validate) {
       if (!/^[\w-]+$/.test(id)) return null;
       const profile = app === "agy" && dir.includes(`${path.sep}provider-switch${path.sep}agy${path.sep}`) ? path.dirname(dir) : null;
       const quote = value => `'${value.replaceAll("'", "'\\''")}'`;
+      if (app === "kimi") return /^[\w-]+$/.test(id) ? `env KIMI_CODE_HOME=${quote(path.dirname(dir))} kimi --session ${id}` : null;
       return app === "agy" ? `agy${profile ? ` --gemini_dir=${quote(profile)}` : ""} --conversation=${id}` : app === "grokbuild" ? `grok --resume ${id}` : null;
     };
     if (app === "agy") {
@@ -161,6 +164,7 @@ async function list(app, home, env, validate) {
       : app === "grokbuild" ? path.basename(file) === "chat_history.jsonl"
       : app === "opencode" ? file.includes(`${path.sep}storage${path.sep}session${path.sep}`) && file.endsWith(".json")
       : app === "hermes" ? file.includes(`${path.sep}sessions${path.sep}`) && file.endsWith(".jsonl")
+      : app === "kimi" ? file.endsWith(`${path.sep}agents${path.sep}main${path.sep}wire.jsonl`)
       : app === "pi" ? file.endsWith(".jsonl") : false, validate);
     for (const file of files) {
       try {
@@ -179,6 +183,7 @@ async function list(app, home, env, validate) {
         let id = read.id || path.basename(file, path.extname(file));
         if (app === "agy") id = path.basename(path.dirname(path.dirname(path.dirname(file))));
         if (app === "grokbuild") id = path.basename(path.dirname(file));
+        if (app === "kimi") id = path.basename(path.dirname(path.dirname(path.dirname(file))));
         if (result.some(row => row.sessionId === id)) continue;
         const summary = summaries.get(id); summaries.delete(id);
         result.push(summary ? { ...summary, sourcePath: file } : meta(app, id, file, read, { projectDir: read.cwd || null, ...(read.title ? {title:read.title} : {}),
@@ -274,6 +279,7 @@ async function readFile(app, file, validate) {
     rows.sort((a, b) => (a.time?.created || 0) - (b.time?.created || 0));
     return { ...fold(app, rows), id: summary.id, cwd: summary.directory };
   }
+  if (app === "kimi") return kimiWireSession(file, validate);
   let rows = await jsonl(file);
   let summary = null;
   if (app === "grokbuild") { try { const metadata = path.join(path.dirname(file), "summary.json"); await validate(metadata); summary = parse(await fs.readFile(metadata,"utf8")); } catch {} }
@@ -340,4 +346,166 @@ async function dependencies(app, source, validate) {
   }
   return files.sort();
 }
+// ---------------------------------------------------------------------------
+// Kimi Code sessions (cc-switch kimi_session.rs / session_manager kimi.rs):
+// sessions/<workDirKey>/<id>/state.json holds the metadata; the committed
+// main-agent history lives in agents/main/wire.jsonl. Branch switches
+// (agent.switched) hide abandoned turns; the committed human projection
+// (agent.message.appended) wins over the legacy context.append_message
+// stream; usage joins its request by messageId with the real model resolved
+// from the loop's llm.request (the human projection names "agent-loop").
+// ---------------------------------------------------------------------------
+function kimiActiveRecords(records) {
+  const segments = new Map();
+  let branch = "main", start = 0, base = null;
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index];
+    if (record?.type !== "agent.switched") continue;
+    segments.set(branch, { start, end: index, base });
+    const next = typeof record.branch === "string" ? record.branch : null;
+    const nextBase = record.base && typeof record.base.branch === "string" && Number.isInteger(record.base.line) ? [record.base.branch, record.base.line] : null;
+    if (!next || !nextBase) throw new Error("Invalid Kimi branch record");
+    branch = next; base = nextBase; start = index + 1;
+  }
+  segments.set(branch, { start, end: records.length, base });
+  const chain = [];
+  let limit = records.length;
+  const visited = new Set();
+  for (;;) {
+    if (visited.has(branch)) throw new Error("Kimi branch chain contains a cycle");
+    visited.add(branch);
+    const segment = segments.get(branch);
+    if (!segment) throw new Error("Unknown Kimi branch");
+    chain.push([segment.start, Math.min(segment.end, limit)]);
+    if (!segment.base) break;
+    [branch, limit] = segment.base;
+  }
+  const active = [];
+  for (const [from, to] of chain.reverse()) for (let index = from; index < to; index += 1) active.push(index);
+  return active;
+}
+
+// Join completed steps to committed messages by messageId, carrying the real
+// model and the tool-free request latency (llm.request kind "loop" only,
+// matched by turnStep; retries replace the failed attempt).
+function kimiRequestIndex(records, active) {
+  const messages = new Map();
+  let step = null;
+  const modelName = value => typeof value === "string" && value.trim() && !["agent-loop", "unknown"].includes(value) ? value : null;
+  const timeMs = value => {
+    const time = Number(value);
+    if (!Number.isFinite(time) || time <= 0) return null;
+    return time < 1e12 ? time * 1000 : time;
+  };
+  for (const index of active) {
+    const record = records[index];
+    if (record?.agentId && record.agentId !== "main") continue;
+    if (record?.type === "agent.switched" || record?.type === "agent.turn.started") { step = null; continue; }
+    if (record?.type === "llm.request") {
+      if (record.kind && record.kind !== "loop") continue;
+      if (!step) continue;
+      if (step.turnStep && typeof record.turnStep === "string" && step.turnStep !== record.turnStep) continue;
+      step.model = modelName(record.model);
+      step.requestMs = timeMs(record.time);
+      step.responseMs = null;
+      continue;
+    }
+    if (record?.type !== "context.append_loop_event") continue;
+    const event = record.event && typeof record.event === "object" ? record.event : null;
+    if (!event) continue;
+    if (event.type === "step.begin") {
+      step = { uuid: typeof event.uuid === "string" ? event.uuid : null, turnStep: typeof event.turnId === "string" && Number.isInteger(event.step) ? `${event.turnId}.${event.step}` : null, model: null, requestMs: null, responseMs: null };
+      continue;
+    }
+    if (event.type === "content.part" || event.type === "tool.call") {
+      if (!step || event.stepUuid !== step.uuid) continue;
+      if (event.type === "tool.call") continue;
+      const time = timeMs(record.time);
+      if (time !== null) step.responseMs = Math.max(step.responseMs ?? 0, time);
+      continue;
+    }
+    if (event.type === "step.end") {
+      if (step && event.uuid !== step.uuid) continue;
+      const current = step || { model: null, requestMs: null, responseMs: null };
+      step = null;
+      const id = typeof event.messageId === "string" && event.messageId ? event.messageId : null;
+      if (!id) continue;
+      const latency = current.requestMs !== null && current.responseMs !== null && current.responseMs >= current.requestMs ? current.responseMs - current.requestMs : null;
+      messages.set(id, { model: current.model, latencyMs: latency });
+    }
+  }
+  return { lookup(meta) {
+    const id = typeof meta?.messageId === "string" ? meta.messageId : null;
+    return id ? messages.get(id) || null : null;
+  } };
+}
+
+async function kimiWireSession(file, validate) {
+  const sessionDir = path.dirname(path.dirname(path.dirname(file)));
+  const statePaths = [path.join(sessionDir, "state.json"), path.join(sessionDir, "session-meta", "state.json")];
+  let state = null;
+  for (const statePath of statePaths) {
+    try {
+      await validate(statePath);
+      state = parse(await fs.readFile(statePath, "utf8"));
+      break;
+    } catch (error) { if (error.code !== "ENOENT" && !/Not a registered/.test(String(error?.message))) throw error; }
+  }
+  if (!state) throw new Error("Kimi session state is missing");
+  if (state.archived === true || state.custom?.session_kind === "child") throw new Error("Kimi session is archived or a child session");
+  const records = (await jsonl(file)).filter(row => row && typeof row === "object");
+  const active = kimiActiveRecords(records);
+  const requests = kimiRequestIndex(records, active);
+  const hasHuman = active.some(index => ["agent.message.appended", "human.agent.message.appended"].includes(records[index].type));
+  const rows = [];
+  for (const index of active) {
+    const record = records[index];
+    const kind = record.type;
+    let raw = null;
+    if (hasHuman && (kind === "agent.message.appended" || kind === "human.agent.message.appended")) raw = record.message?.message ?? null;
+    else if (!hasHuman && kind === "context.append_message") raw = record.message ?? null;
+    if (!raw || typeof raw !== "object") continue;
+    if (!["user", "assistant", "tool", "system"].includes(raw.role)) continue;
+    const meta = record.message && typeof record.message === "object" && record.message.meta && typeof record.message.meta === "object" ? record.message.meta : {};
+    const injected = raw.role === "system" || ["injection", "system_trigger", "retry", "compaction_summary"].includes(meta.origin?.kind ?? raw.origin?.kind ?? "");
+    const parts = Array.isArray(raw.content) ? raw.content : [];
+    const mapped = parts.map(part => part?.type === "think" ? { type: "thinking", thinking: part.think ?? "" } : part);
+    const row = {
+      role: raw.role,
+      content: mapped.length ? mapped : typeof raw.content === "string" ? raw.content : "",
+      ts: ts(record.time, "seconds"),
+      injected,
+    };
+    if (raw.role === "tool") {
+      row.tool_call_id = typeof raw.toolCallId === "string" ? raw.toolCallId : null;
+    }
+    const calls = Array.isArray(raw.toolCalls) ? raw.toolCalls : [];
+    if (calls.length) {
+      row.tool_calls = calls.map(call => ({ id: call.id ?? null, name: call.name ?? "unknown", arguments: call.arguments ?? {} }));
+    }
+    if (raw.role === "assistant" && meta.usage && typeof meta.usage === "object") {
+      const usage = meta.usage;
+      const request = requests.lookup(meta);
+      const declared = typeof meta.model?.model === "string" ? meta.model.model : null;
+      const resolved = !["agent-loop", "unknown"].includes(declared || "") ? declared : request?.model ?? null;
+      if (resolved) row.model = resolved;
+      row.usage = {
+        input_tokens: usage.inputOther ?? 0,
+        output_tokens: usage.output ?? 0,
+        cache_read_tokens: usage.inputCacheRead ?? 0,
+        cache_write_tokens: usage.inputCacheCreation ?? 0,
+      };
+    }
+    rows.push(row);
+  }
+  const folded = fold("kimi", rows);
+  return {
+    ...folded,
+    id: path.basename(sessionDir),
+    cwd: state.cwd ?? state.workDir ?? state.custom?.cwd ?? null,
+    title: typeof state.title === "string" ? state.title : null,
+    summary: typeof state.lastPrompt === "string" ? state.lastPrompt.slice(0, 160) : null,
+  };
+}
+
 module.exports = { APPS, roots, list, read, dependencies, splitReference, fold, validateSource, isAgyTranscript };

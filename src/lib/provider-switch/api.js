@@ -189,9 +189,42 @@ function computeSwitchPlan(app, prev, target, lives, stash) {
     const live = lives.config.exists ? additive.parseLive(app, lives.config.content) : {};
     const next = additive.projectAdditive(app, { prev, target, live });
     writes.push({ file: configFile, content: additive.serializeLive(app, next), skipBackupIfMissing: true });
+  } else if (app === "kimi") {
+    // Kimi Code: linked providers+models tables. Switching a regular provider
+    // rewrites its node and selects one of its models; switching an official
+    // account only moves default_model — its node belongs to the account
+    // manager (cc-switch kimi switch_and_commit / use_oauth_account).
+    const kimi = require("./kimi");
+    const configFile = files.find((f) => f.id === "config");
+    const live = lives.config.exists ? kimi.parseDocument(lives.config.content) : {};
+    const wrapper = kimiWrapperOf(target);
+    let next;
+    if (kimi.isOfficialProvider(wrapper.provider)) {
+      if (!kimi.isOfficialProvider(live.providers?.[wrapper.slotKey])) {
+        throw new Error("Sign in to Kimi Code to use this account first");
+      }
+      next = kimi.selectProviderModel(live, wrapper.slotKey);
+    } else {
+      next = kimi.selectProviderModel(
+        kimi.applyProvider(live, wrapper.slotKey, { provider: wrapper.provider, models: wrapper.models }),
+        wrapper.slotKey,
+      );
+    }
+    writes.push({ file: configFile, content: kimi.serializeDocument(next), skipBackupIfMissing: true });
   }
 
   return { writes, stashNext, catalogAction };
+}
+
+// Kimi provider rows wrap the native node plus its model aliases.
+function kimiWrapperOf(row) {
+  const config = row?.settingsConfig && typeof row.settingsConfig === "object" ? row.settingsConfig : {};
+  const slotKey = typeof config.slotKey === "string" ? config.slotKey.trim() : "";
+  return {
+    slotKey,
+    provider: config.provider && typeof config.provider === "object" ? config.provider : {},
+    models: config.models && typeof config.models === "object" && !Array.isArray(config.models) ? config.models : {},
+  };
 }
 
 // Backup each existing live file, persist the auth stash, then publish all
@@ -314,6 +347,10 @@ async function disconnectProvider(app) {
       let content;
       if (app === "claude") content = `${JSON.stringify(targets.projectClaude({ prev, target: { settingsConfig: {} }, live: JSON.parse(lives[file.id].content) }), null, 2)}\n`;
       else if (app === "gemini") content = targets.projectGemini({ prev, target: { settingsConfig: {} }, liveEnv: lives[file.id].content });
+      else if (app === "kimi") {
+        const kimi = require("./kimi");
+        content = kimi.serializeDocument(kimi.disconnectDocument(kimi.parseDocument(lives[file.id].content), kimiWrapperOf(prev).slotKey, kimiWrapperOf(prev)));
+      }
       else content = additive.serializeLive(app, additive.disconnectAdditive(app, { prev, live: additive.parseLive(app, lives[file.id].content) }));
       writes.push({ file, content });
     }
@@ -359,6 +396,26 @@ async function saveProviderUnlocked({ app, id, body }) {
   if (app === "agy") {
     const provider = id ? await store.updateProvider(app, id, body) : await store.createProvider(app, body);
     return { ok: true, provider, applied: null };
+  }
+  if (app === "kimi") {
+    // Kimi adds write the native node without moving default_model; editing
+    // rewrites the node (official nodes are refused — account-center only).
+    const kimi = require("./kimi");
+    const config = body.settingsConfig && typeof body.settingsConfig === "object" ? body.settingsConfig : {};
+    const slotKey = typeof config.slotKey === "string" && config.slotKey.trim() ? config.slotKey.trim() : String(body.name || "").trim();
+    const models = config.models && typeof config.models === "object" && !Array.isArray(config.models) ? config.models : {};
+    for (const model of Object.values(models)) if (model && typeof model === "object") model.provider = slotKey;
+    const wrapper = kimiWrapperOf({ settingsConfig: { ...config, slotKey, models } });
+    if (!wrapper.slotKey) throw new Error("Enter a Kimi Code provider key");
+    kimi.validateProviderRow(wrapper.slotKey, { provider: wrapper.provider, models: wrapper.models });
+    body = { ...body, settingsConfig: { ...config, slotKey, models } };
+    const provider = id ? await store.updateProvider(app, id, body) : await store.createProvider(app, body);
+    const applied = await kimi.setProvider(wrapper.slotKey, {
+      provider: wrapper.provider,
+      models: wrapper.models,
+      create: !id,
+    });
+    return { ok: true, provider, applied };
   }
   const editorInput = body.editor && body.editor.base ? body.editor : null;
 
@@ -560,6 +617,22 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
       else if (p === `${prefix}/agy/accounts/quota` && method === "GET") json(res, { ok: true, quota: await accounts.quota(url.searchParams.get("id")) });
       else if (p === `${prefix}/agy/accounts/switch` && method === "POST") { const body = await readJsonBody(req); json(res, { ok: true, ...await accounts.switchAccount(body.id) }); }
       else if (p === `${prefix}/agy/accounts` && method === "DELETE") { const body = await readJsonBody(req); await accounts.remove(body.id); json(res, { ok: true }); }
+      else return false;
+      return true;
+    }
+    if (p.startsWith(`${prefix}/kimi/accounts`)) {
+      if (!requireMutation()) return true;
+      const accounts = require("./kimi-accounts").manager();
+      if (p === `${prefix}/kimi/accounts` && method === "GET") json(res, { ok: true, ...await accounts.status() });
+      else if (p === `${prefix}/kimi/accounts/login` && method === "POST") {
+        const body = await readJsonBody(req);
+        json(res, { ok: true, ...await accounts.startLogin(String(body.region || "cn"), body.accountId ? String(body.accountId) : null) });
+      }
+      else if (p === `${prefix}/kimi/accounts/login` && method === "GET") json(res, { ok: true, ...await accounts.pollLogin(url.searchParams.get("flowId")) });
+      else if (p === `${prefix}/kimi/accounts/login` && method === "DELETE") { accounts.cancel(); json(res, { ok: true }); }
+      else if (p === `${prefix}/kimi/accounts/quota` && method === "GET") json(res, { ok: true, quota: await accounts.quota(url.searchParams.get("id")) });
+      else if (p === `${prefix}/kimi/accounts/use` && method === "POST") { const body = await readJsonBody(req); json(res, { ok: true, ...await accounts.useAccount(body.id) }); }
+      else if (p === `${prefix}/kimi/accounts` && method === "DELETE") { const body = await readJsonBody(req); json(res, { ok: true, ...await accounts.remove(body.id) }); }
       else return false;
       return true;
     }
@@ -1078,6 +1151,15 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
       }
       if (method === "DELETE" && providerId) {
         const app = url.searchParams.get("app");
+        const row = await store.getProvider(app, providerId);
+        if (app === "kimi" && row) {
+          // Removing a Kimi card also removes the native node and its model
+          // aliases; an in-use provider refuses here, while the SSOT row is
+          // still intact (official nodes belong to the account center).
+          const kimi = require("./kimi");
+          const wrapper = kimiWrapperOf(row);
+          if (wrapper.slotKey) await kimi.removeProvider(wrapper.slotKey);
+        }
         await store.deleteProvider(app, providerId);
         json(res, { ok: true });
         return true;
@@ -1171,7 +1253,7 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
     if (p === `${prefix}/switch` && method === "POST") {
       if (!requireMutation()) return true;
       const body = await readJsonBody(req);
-      const result = await switchProvider({ app: body.app, id: body.id });
+      const result = await switchProviderPositional(body.app, String(body.id ?? ""));
       json(res, { ok: true, ...result });
       return true;
     }
@@ -1214,6 +1296,13 @@ async function importFromLive(app, name) {
   } else if (additive.isAdditiveApp(app)) {
     const live = lives.config.exists ? additive.parseLive(app, lives.config.content) : null;
     settingsConfig = additive.extractAdditive(app, live);
+  } else if (app === "kimi") {
+    const kimi = require("./kimi");
+    const doc = kimi.parseDocument(lives.config.content);
+    const rows = kimi.extractRows(doc);
+    const wrapper = rows.length ? rows[0] : null;
+    if (!wrapper) throw new Error("No Kimi Code provider found in the live config");
+    settingsConfig = wrapper.settingsConfig;
   } else {
     settingsConfig = targets.extractGeminiConfig(lives.env.exists ? lives.env.content : "");
   }

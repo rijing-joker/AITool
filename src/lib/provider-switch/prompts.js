@@ -44,7 +44,7 @@ const MAX_PROMPT_FILE_BYTES = 1024 * 1024;
 // cc-switch's validate_prompt_content: MCode global instructions cap.
 const MCODE_CONTENT_LIMIT_BYTES = 32 * 1024;
 
-const PROMPT_APPS = ["claude", "codex", "gemini", "agy", "grokbuild", "opencode", "openclaw", "hermes", "pi", "mcode"];
+const PROMPT_APPS = ["claude", "codex", "gemini", "agy", "grokbuild", "opencode", "openclaw", "hermes", "pi", "mcode", "kimi"];
 
 function promptFilePath(app) {
   const home = os.homedir();
@@ -68,6 +68,8 @@ function promptFilePath(app) {
       return path.join(home, ".pi", "agent", "AGENTS.md");
     case "mcode":
       return path.join(home, ".minimax", "AGENTS.md");
+    case "kimi":
+      return path.join(process.env.KIMI_CODE_HOME?.trim() || path.join(home, ".kimi-code"), "AGENTS.md");
     default:
       throw new Error(`Prompts are not supported for app: ${app}`);
   }

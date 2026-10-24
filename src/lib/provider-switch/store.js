@@ -29,7 +29,7 @@ const paths = require("./paths");
 
 const additive = require("./additive");
 
-const SUPPORTED_APPS = ["claude", "codex", "gemini", "agy", "opencode", "openclaw", "mcode", "hermes", "pi", "grokbuild"];
+const SUPPORTED_APPS = ["claude", "codex", "gemini", "agy", "opencode", "openclaw", "mcode", "hermes", "pi", "grokbuild", "kimi"];
 const PROVIDER_CATEGORIES = ["official", "custom"];
 
 // Apps a universal provider (cc-switch's UniversalProvider) can project into.
@@ -159,6 +159,15 @@ function sanitizeSettingsConfig(app, settingsConfig, name) {
     // Wrapper shape { slotKey, provider, modelId? } — see additive.js. The
     // slotKey is filled from the provider name when missing.
     return additive.sanitizeWrapper(app, settingsConfig, name);
+  }
+  if (app === "kimi") {
+    // Wrapper shape { slotKey, provider, models } — see kimi.js. The slotKey
+    // is the native provider key and is filled from the provider name.
+    const value = settingsConfig && typeof settingsConfig === "object" && !Array.isArray(settingsConfig) ? settingsConfig : {};
+    const provider = value.provider && typeof value.provider === "object" && !Array.isArray(value.provider) ? value.provider : {};
+    const models = value.models && typeof value.models === "object" && !Array.isArray(value.models) ? value.models : {};
+    const slotKey = typeof value.slotKey === "string" && value.slotKey.trim() ? value.slotKey.trim() : String(name || "").trim();
+    return { slotKey, provider, models };
   }
   throw new Error(`Unsupported app: ${app}`);
 }

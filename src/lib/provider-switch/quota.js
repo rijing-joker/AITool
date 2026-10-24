@@ -42,6 +42,8 @@ const QUOTA_PROVIDERS = [
     hostname: "api.commandcode.ai",
     pathPrefix: "/provider",
   },
+  { id: "kimi_coding", label: "Kimi Coding Plan", apps: ["claude", "codex", "kimi"], hostname: "api.kimi.com", pathPrefix: "/coding" },
+  { id: "kimi_coding_global", label: "Kimi Coding Plan", apps: ["claude", "codex", "kimi"], hostname: "api.kimi.ai", pathPrefix: "/coding" },
 ];
 
 // Exact host, or a subdomain of it — `api.commandcode.ai.evil.example` shares
@@ -107,6 +109,13 @@ function resolveProviderCredential(app, provider) {
     return {
       baseUrl: String(env.GOOGLE_GEMINI_BASE_URL ?? "").trim(),
       apiKey: String(env.GEMINI_API_KEY ?? "").trim(),
+    };
+  }
+  if (app === "kimi") {
+    const provider = settings.provider ?? {};
+    return {
+      baseUrl: String(provider.base_url ?? "").trim(),
+      apiKey: String(provider.api_key ?? "").trim(),
     };
   }
   return null;
@@ -387,6 +396,7 @@ async function queryQuotaProvider({ provider: quotaProvider, baseUrl, apiKey, fe
   resolveCommandcodeOrigin(baseUrl);
   if (quotaProvider.id === "volcengine") return require("./plan-quota").volc({ baseUrl, provider: row, fetchImpl });
   if (["zhipu", "zhipu_en"].includes(quotaProvider.id)) return require("./plan-quota").zhipu({ baseUrl, apiKey, fetchImpl });
+  if (["kimi_coding", "kimi_coding_global"].includes(quotaProvider.id)) return require("./plan-quota").kimi({ baseUrl, apiKey, fetchImpl });
   // Resolve the org off the /alpha control plane, not the data-plane origin.
   const fetcher = async (path, params) => fetchCommandcodeJson({
     url: `${quotaProvider.apiBase}${path}${params?.length ? `?${new URLSearchParams(params)}` : ""}`,

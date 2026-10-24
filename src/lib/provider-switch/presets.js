@@ -1252,6 +1252,64 @@ const CODEX_COMMANDCODE = {
 
 const localPresets = require("./local-presets");
 
+// Kimi Code presets: the native provider node (protocol, endpoint, key) plus
+// the model aliases table — each alias needs the model id and a positive
+// context length (cc-switch derives its kimi presets from the Pi catalog).
+const KIMI_MOONSHOT_MODELS = {
+  "kimi-k2.7-code": { model: "kimi-k2.7-code", max_context_size: 262144, capabilities: ["tool_use"] },
+  "kimi-k3": { model: "kimi-k3", max_context_size: 262144, capabilities: ["tool_use"] },
+};
+const KIMI_MOONSHOT = {
+  id: "kimi_moonshot",
+  name: "Kimi 开放平台",
+  group: "community",
+  icon: "moon",
+  color: "indigo",
+  websiteUrl: "https://platform.kimi.com",
+  settingsConfig: {
+    slotKey: "kimi",
+    provider: { type: "openai", base_url: "https://api.moonshot.cn/v1", api_key: "" },
+    models: KIMI_MOONSHOT_MODELS,
+  },
+  formFields: [
+    { id: "type", path: "provider.type", labelKey: "pswitch.kimi.protocol.label", type: "select", options: ["kimi", "openai", "openai_responses", "anthropic", "google-genai", "vertexai"].map(value => ({ value, labelKey: `pswitch.kimi.protocol.${value.replace(/-/g, "_")}` })) },
+    { id: "api_key", path: "provider.api_key", labelKey: "pswitch.field.api_key", secret: true },
+    { id: "base_url", path: "provider.base_url", labelKey: "pswitch.field.base_url", placeholder: "https://api.moonshot.cn/v1" },
+  ],
+};
+const KIMI_MOONSHOT_GLOBAL = {
+  ...KIMI_MOONSHOT,
+  id: "kimi_moonshot_global",
+  name: "Kimi (Global)",
+  websiteUrl: "https://platform.moonshot.ai",
+  endpointCandidates: ["https://api.moonshot.ai/v1"],
+  settingsConfig: {
+    slotKey: "kimi-global",
+    provider: { type: "openai", base_url: "https://api.moonshot.ai/v1", api_key: "" },
+    models: KIMI_MOONSHOT_MODELS,
+  },
+  formFields: KIMI_MOONSHOT.formFields,
+};
+const KIMI_CUSTOM = {
+  id: "kimi_custom",
+  nameKey: "pswitch.preset.custom",
+  group: "custom",
+  icon: "moon",
+  color: "indigo",
+  settingsConfig: {
+    slotKey: "",
+    provider: { type: "openai", base_url: "", api_key: "" },
+    models: {},
+  },
+  formFields: [
+    { id: "slot_key", path: "slotKey", labelKey: "pswitch.field.provider_key", placeholder: "my-provider" },
+    { id: "type", path: "provider.type", labelKey: "pswitch.kimi.protocol.label", type: "select", options: ["kimi", "openai", "openai_responses", "anthropic", "google-genai", "vertexai"].map(value => ({ value, labelKey: `pswitch.kimi.protocol.${value.replace(/-/g, "_")}` })) },
+    { id: "api_key", path: "provider.api_key", labelKey: "pswitch.field.api_key", secret: true },
+    { id: "base_url", path: "provider.base_url", labelKey: "pswitch.field.base_url", placeholder: "https://api.moonshot.cn/v1" },
+  ],
+};
+
+
 const PRESETS = {
   claude: [CLAUDE_OFFICIAL, CLAUDE_KIMI, CLAUDE_DEEPSEEK, CLAUDE_MODELSCOPE, CLAUDE_COMMANDCODE, CLAUDE_MOARK, CLAUDE_ZEN, ...localPresets.claude, CLAUDE_CUSTOM],
   codex: [CODEX_OFFICIAL, CODEX_COMMANDCODE, CODEX_MOARK, CODEX_ZEN, ...localPresets.codex, CODEX_CUSTOM],
@@ -1270,6 +1328,7 @@ const PRESETS = {
   hermes: [HERMES_NOUS, HERMES_KIMI, HERMES_DEEPSEEK, HERMES_MODELSCOPE, HERMES_CUSTOM],
   pi: [PI_KIMI, PI_DEEPSEEK, PI_MODELSCOPE, PI_VOLCENGINE_AGENT_PLAN, PI_VOLCENGINE_CODING_PLAN, PI_MOARK, PI_CUSTOM],
   grokbuild: [GROKBUILD_XAI, GROKBUILD_OPENROUTER, GROKBUILD_CUSTOM],
+  kimi: [KIMI_MOONSHOT, KIMI_MOONSHOT_GLOBAL, KIMI_CUSTOM],
 };
 
 function listPresets(app) {

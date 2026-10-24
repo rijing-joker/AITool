@@ -16,7 +16,7 @@ const paths = require("./paths");
 // Scope notes vs cc-switch: no repo discovery/install/update yet — this v1
 // scans and projects locally present skills (import → toggle → sync).
 
-const SKILL_APPS = ["claude", "codex", "gemini", "agy", "grokbuild", "opencode", "hermes", "pi", "mcode"];
+const SKILL_APPS = ["claude", "codex", "gemini", "agy", "grokbuild", "opencode", "hermes", "pi", "mcode", "kimi"];
 
 const COPY_STAMP_FILE = ".aitool-skill-copy";
 
@@ -38,6 +38,7 @@ function appSkillsDir(app) {
       const custom = [process.env.MINIMAX_DATA_DIR, process.env.MAVIS_DATA_DIR].find((value) => value && value.trim());
       return path.join(custom && custom.trim() ? custom.trim() : path.join(home, ".minimax"), "skills");
     }
+    case "kimi": return path.join(process.env.KIMI_CODE_HOME?.trim() || path.join(home, ".kimi-code"), "skills");
     default: return null;
   }
 }

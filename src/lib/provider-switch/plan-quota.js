@@ -79,4 +79,29 @@ async function zhipu({ baseUrl, apiKey, fetchImpl = fetch }) {
   }
   return parseZhipu(body);
 }
-module.exports = { sign, parseVolc, parseZhipu, volc, zhipu };
+// Kimi For Coding (cc-switch query_kimi_at): the coding-plan /usages
+// endpoint, queried with the row's own API key (or an official OAuth token).
+function parseKimi(body) {
+  const tiers = [];
+  for (const item of Array.isArray(body?.limits) ? body.limits : []) {
+    const detail = item && typeof item.detail === "object" ? item.detail : null;
+    const limit = numeric(detail?.limit), remaining = numeric(detail?.remaining);
+    if (!detail || limit == null || remaining == null) continue;
+    tiers.push({ id: "five_hour", label: "5h", usedPercent: limit > 0 ? Math.max(0, limit - remaining) / limit * 100 : 0, resetsAt: reset(detail.resetTime) });
+  }
+  if (body?.usage && typeof body.usage === "object") {
+    const limit = numeric(body.usage.limit), remaining = numeric(body.usage.remaining);
+    if (limit != null && remaining != null) tiers.push({ id: "weekly_limit", label: "weekly", usedPercent: limit > 0 ? Math.max(0, limit - remaining) / limit * 100 : 0, resetsAt: reset(body.usage.resetTime) });
+  }
+  return tiers;
+}
+async function kimi({ baseUrl, apiKey, fetchImpl = fetch }) {
+  const base = String(baseUrl || "").trim().replace(/\/$/, "");
+  if (!base) throw new Error("Kimi quota needs a base URL");
+  const body = await request(`${base}/usages`, { headers: { authorization: `Bearer ${apiKey}`, accept: "application/json" } }, fetchImpl);
+  const tiers = parseKimi(body);
+  if (!tiers.length) throw new Error("No Kimi plan usage was returned");
+  return { plan: "Kimi Coding Plan", tiers };
+}
+
+module.exports = { sign, parseVolc, parseZhipu, volc, zhipu, parseKimi, kimi };

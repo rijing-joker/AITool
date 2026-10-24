@@ -17,6 +17,13 @@ function home() {
   return os.homedir();
 }
 
+// Kimi Code honors KIMI_CODE_HOME for every path it owns (config, sessions,
+// credentials); the server process inherits that variable.
+function kimiHome() {
+  const override = String(process.env.KIMI_CODE_HOME || "").trim();
+  return override || path.join(home(), ".kimi-code");
+}
+
 function providerSwitchRoot() {
   return path.join(home(), ".aitool", "provider-switch");
 }
@@ -157,6 +164,16 @@ function targetFiles(app) {
           id: "config",
           labelKey: "pswitch.live.file.grokbuild_config",
           path: path.join(home(), ".grok", "config.toml"),
+          format: "toml",
+          private: true,
+        },
+      ];
+    case "kimi":
+      return [
+        {
+          id: "config",
+          labelKey: "pswitch.live.file.kimi_config",
+          path: path.join(kimiHome(), "config.toml"),
           format: "toml",
           private: true,
         },

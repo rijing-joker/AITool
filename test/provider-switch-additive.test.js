@@ -457,6 +457,7 @@ test("visible apps: normalized, persisted, last-visible guard", async () => {
     hermes: true,
     pi: true,
     grokbuild: true,
+    kimi: true,
   });
 
   const next = await store.updateVisibleApps({ claude: false, opencode: false, bogus: false });
@@ -468,6 +469,7 @@ test("visible apps: normalized, persisted, last-visible guard", async () => {
     opencode: false,
     openclaw: true,
     mcode: true,
+    kimi: true,
     hermes: true,
     pi: true,
     grokbuild: true,

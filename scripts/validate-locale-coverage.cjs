@@ -16,6 +16,7 @@ const REQUIRED_COLUMNS = ["key", "module", "page", "component", "slot", "text"];
 // this key-based so a newly added English sentence cannot silently pass.
 const SOURCE_IDENTICAL_KEY_ALLOWLIST = [
   /^sessions[.]storage[.]size$/, // MiB is an international unit symbol.
+  /^pswitch[.]kimi[.]protocol[.]/, // literal protocol ids, identical by design.
   /^landing[.]install[.]command$/,
   /^(landing|share)[.]meta[.]/,
   /^landing[.]cta[.]secondary$/,

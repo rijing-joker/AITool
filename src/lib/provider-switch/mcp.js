@@ -48,7 +48,7 @@ const toolRules = require("./mcp-tool-rules");
 // abort the batch — live files are independent, and the caller sees every
 // failure aggregated (cc-switch 81c0ff2).
 
-const MCP_APPS = ["claude", "codex", "gemini", "agy", "grokbuild", "opencode", "hermes", "mcode", "pi"];
+const MCP_APPS = ["claude", "codex", "gemini", "agy", "grokbuild", "opencode", "hermes", "mcode", "pi", "kimi"];
 
 // The unified spec allows stdio/http/sse. Transport resolution follows
 // cc-switch's spec_transport_type: an explicit type wins, and a spec with a
@@ -386,6 +386,23 @@ function toPiSpec(spec) {
 // never touched.
 const PI_TRANSPORT_FIELDS = ["command", "args", "env", "cwd", "url", "headers", "type"];
 
+// Kimi Code mcp.json entries: stdio {command,args,env} or remote {url} with
+// the native transport field selecting SSE ("transport": "sse"); HTTP needs
+// no transport field (cc-switch mcp/kimi.rs).
+const KIMI_TRANSPORT_FIELDS = ["command", "args", "env", "cwd", "url", "headers", "transport"];
+function toKimiSpec(spec) {
+  const clean = {};
+  for (const field of ["command", "args", "env", "cwd"]) {
+    if (spec[field] !== undefined) clean[field] = spec[field];
+  }
+  if (typeof spec.url === "string" && spec.url) {
+    clean.url = spec.url;
+    if (specTransportType(spec) === "sse") clean.transport = "sse";
+    if (spec.headers && typeof spec.headers === "object") clean.headers = spec.headers;
+  }
+  return clean;
+}
+
 // ---------------------------------------------------------------------------
 // TOML projection (codex + grokbuild)
 // ---------------------------------------------------------------------------
@@ -519,6 +536,7 @@ const HOME_SUBDIRS = {
   hermes: ".hermes",
   mcode: ".minimax",
   pi: ".pi/agent",
+  kimi: ".kimi-code",
 };
 
 function mcpLiveFiles() {
@@ -534,6 +552,7 @@ function mcpLiveFiles() {
     hermes: { path: path.join(home, ".hermes", "config.yaml"), mapKey: "mcp_servers" },
     mcode: { path: path.join(home, ".minimax", "mcp.json"), mapKey: "mcpServers" },
     pi: { path: path.join(home, ".pi", "agent", "mcp.json"), mapKey: "mcpServers" },
+    kimi: { path: path.join(String(process.env.KIMI_CODE_HOME || "").trim() || path.join(home, ".kimi-code"), "mcp.json"), mapKey: "mcpServers" },
   };
 }
 
@@ -606,6 +625,17 @@ async function upsertServerInFile(app, file, id, spec) {
     });
     return;
   }
+  if (app === "kimi") {
+    const clean = toKimiSpec(spec);
+    await updateJsonFile(app, file.path, (doc) => {
+      if (!doc.mcpServers || typeof doc.mcpServers !== "object") doc.mcpServers = {};
+      const merged = doc.mcpServers[id] && typeof doc.mcpServers[id] === "object" && !Array.isArray(doc.mcpServers[id]) ? doc.mcpServers[id] : {};
+      for (const field of KIMI_TRANSPORT_FIELDS) delete merged[field];
+      Object.assign(merged, clean);
+      doc.mcpServers[id] = merged;
+    });
+    return;
+  }
   if (app === "hermes") {
     await updateYamlFile(app, file.path, (doc) => {
       const servers = jsonMapGet(doc, "mcp_servers");
@@ -652,7 +682,7 @@ async function removeServerFromFile(app, file, id, { mode = "off" } = {}) {
     if (!doc?.mcpServers?.[id]) return;
     await updateJsonFile(app, file.path, current => { if (current.mcpServers?.[id]) current.mcpServers[id].disabled = true; }); return;
   }
-  if (app === "claude" || app === "gemini" || app === "opencode") {
+  if (app === "claude" || app === "gemini" || app === "opencode" || app === "kimi") {
     await removeFromJsonMap(app, file.path, file.mapKey, id);
     return;
   }
@@ -844,7 +874,7 @@ async function importFromApps(apps) {
 async function importFromApp(app) {
   const file = mcpLiveFiles()[app];
   let entries = null;
-  if (app === "agy" || app === "claude" || app === "gemini" || app === "opencode" || app === "mcode" || app === "pi") {
+  if (app === "agy" || app === "claude" || app === "gemini" || app === "opencode" || app === "mcode" || app === "pi" || app === "kimi") {
     const doc = await readJsonDoc(file.path).catch(() => null);
     const map = doc ? jsonMapGet(doc, file.mapKey) : null;
     if (!map) return { changed: 0, skipped: [] };
@@ -892,6 +922,12 @@ async function importFromApp(app) {
         for (const field of PI_TRANSPORT_FIELDS) {
           if (Object.prototype.hasOwnProperty.call(unified, field)) spec[field] = unified[field];
         }
+      }
+      else if (app === "kimi") {
+        const unified = mcodeUnifiedSpec(value);
+        spec = { ...unified };
+        if (value?.transport === "sse") spec.type = "sse";
+        delete spec.transport;
       }
       else spec = tomlEntryToSpec(value, { codexStyle: app === "codex" });
       spec = envrefs.importReferences(app, JSON.parse(JSON.stringify(spec)));

@@ -296,11 +296,18 @@ async function resolveBinaryPath(binary, { commandRunner, home, platform = proce
 
 // Resolving an npm CLI's absolute path does not resolve its /usr/bin/env node
 // shebang. Finder-launched apps have a minimal PATH even when the CLI lives
-// beside a working nvm/fnm/Homebrew Node. Scope this environment to the child;
-// preserve the install's own runtime and use our running Node as a fallback.
-function resolvedCliEnvironment(binaryPath, { env = process.env, platform = process.platform } = {}) {
+// beside a working nvm/fnm/Homebrew Node (cc-switch #8653). Scope this
+// environment to the child: the binary's own directory, the inherited PATH,
+// the common global-install directories (stat-probed set, no login shell),
+// and our running Node as the last fallback.
+function resolvedCliEnvironment(binaryPath, { env = process.env, platform = process.platform, home } = {}) {
   if (platform === "win32") return { ...env };
-  const dirs = [path.dirname(binaryPath), ...(env.PATH || "/usr/bin:/bin").split(path.delimiter), path.dirname(process.execPath)];
+  const dirs = [
+    path.dirname(binaryPath),
+    ...(env.PATH || "/usr/bin:/bin").split(path.delimiter),
+    ...commonGlobalBinDirectories({ home, platform }),
+    path.dirname(process.execPath),
+  ];
   return { ...env, PATH: [...new Set(dirs.filter(Boolean))].join(path.delimiter) };
 }
 

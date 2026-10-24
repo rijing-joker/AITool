@@ -127,3 +127,23 @@ test("Windows .cmd path with cmd metacharacters survives both spawn modes", asyn
     restore();
   }
 });
+
+test("resolvedCliEnvironment merges global-install dirs for env-node shebangs (cc-switch #8653)", () => {
+  const { resolvedCliEnvironment } = require("../src/lib/command-runner");
+  const path = require("node:path");
+  const scoped = resolvedCliEnvironment("/opt/homebrew/bin/codex", {
+    env: { PATH: "/usr/bin:/bin", KEEP: "me" },
+    platform: "darwin",
+    home: "/Users/fixture",
+  });
+  const dirs = scoped.PATH.split(":");
+  assert.equal(dirs[0], "/opt/homebrew/bin", "the binary's own directory leads");
+  assert.ok(dirs.includes("/usr/bin") && dirs.includes("/bin"), "inherited PATH is preserved");
+  assert.ok(dirs.includes("/Users/fixture/.local/bin"), "stat-probed global-install dirs are merged");
+  assert.ok(dirs.includes(path.dirname(process.execPath)), "the running node is reachable (deduped if already present)");
+  assert.equal(new Set(dirs).size, dirs.length, "no duplicate entries");
+  assert.equal(scoped.KEEP, "me");
+  // Windows passes the environment through untouched.
+  const winEnv = { PATH: "C:\\Windows" };
+  assert.deepEqual(resolvedCliEnvironment("C:\\x\\arkcli.cmd", { env: winEnv, platform: "win32" }), { PATH: "C:\\Windows" });
+});

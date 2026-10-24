@@ -23,6 +23,7 @@ const PROMPT_APPS = [
   { id: "hermes", labelKey: "pswitch.tab.hermes" },
   { id: "pi", labelKey: "pswitch.tab.pi" },
   { id: "mcode", labelKey: "pswitch.tab.mcode" },
+  { id: "kimi", labelKey: "pswitch.tab.kimi" },
 ];
 
 const inputClass = "h-9 w-full rounded-lg border border-oai-gray-200 bg-transparent px-3 text-sm placeholder:text-oai-gray-400 focus:outline-none focus:ring-2 focus:ring-oai-brand-500 dark:border-oai-gray-700";

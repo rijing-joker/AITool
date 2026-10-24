@@ -23,6 +23,7 @@ const MCP_APPS = [
   { id: "hermes", labelKey: "pswitch.tab.hermes" },
   { id: "mcode", labelKey: "pswitch.tab.mcode" },
   { id: "pi", labelKey: "pswitch.tab.pi" },
+  { id: "kimi", labelKey: "pswitch.tab.kimi" },
 ];
 
 const MCP_PRESETS = [

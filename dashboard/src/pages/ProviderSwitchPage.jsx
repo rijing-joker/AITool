@@ -51,6 +51,7 @@ import { ProviderQuotaLine } from "./provider-quota-line";
 import { ProviderEnvBanner } from "./provider-env-banner";
 import { ProviderSkillsPanel } from "./provider-skills-panel";
 import { ProviderAgyAccounts } from "./provider-agy-accounts";
+import { ProviderKimiAccounts } from "./provider-kimi-accounts";
 import { ProviderCodexClient } from "./provider-codex-client";
 
 // Provider config management — an interaction port of cc-switch's provider
@@ -76,6 +77,7 @@ const APPS = [
   { id: "hermes", labelKey: "pswitch.tab.hermes" },
   { id: "pi", labelKey: "pswitch.tab.pi" },
   { id: "grokbuild", labelKey: "pswitch.tab.grokbuild" },
+  { id: "kimi", labelKey: "pswitch.tab.kimi" },
 ];
 
 function SectionTitle({ children, action = null }) {
@@ -965,6 +967,7 @@ export function ProviderSwitchPage() {
         </div>
       ) : null}
       {activeApp === "agy" ? <ProviderAgyAccounts /> : null}
+      {activeApp === "kimi" ? <ProviderKimiAccounts /> : null}
       {activeApp === "codex" ? <ProviderCodexClient revision={status} /> : null}
       <ProviderDiagnostics key={activeApp} app={activeApp} revision={status} onChanged={refreshStatus} />
       <section className="mb-8">
@@ -1164,11 +1167,11 @@ export function ProviderSwitchPage() {
 }
 
 function officialIconFor(app) {
-  return { claude: "sparkles", codex: "terminal", gemini: "gem", opencode: "boxes", openclaw: "globe", mcode: "sparkles", hermes: "sparkles", pi: "boxes", grokbuild: "terminal" }[app] || "sparkles";
+  return { claude: "sparkles", codex: "terminal", gemini: "gem", opencode: "boxes", openclaw: "globe", mcode: "sparkles", hermes: "sparkles", pi: "boxes", grokbuild: "terminal", kimi: "moon" }[app] || "sparkles";
 }
 
 function officialColorFor(app) {
-  return { claude: "orange", codex: "green", gemini: "sky", opencode: "violet", openclaw: "teal", mcode: "amber", hermes: "violet", pi: "sky", grokbuild: "gray" }[app] || "gray";
+  return { claude: "orange", codex: "green", gemini: "sky", opencode: "violet", openclaw: "teal", mcode: "amber", hermes: "violet", pi: "sky", grokbuild: "gray", kimi: "indigo" }[app] || "gray";
 }
 
 function appLabel(app) {

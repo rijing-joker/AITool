@@ -79,6 +79,40 @@ function additiveInitialDraft(app, settingsConfig) {
   return additiveWrapperToDoc(app, settingsConfig);
 }
 
+// Kimi Code model aliases: a map of alias -> { model, max_context_size,
+// capabilities? } rendered as a JSON textarea; parse errors block the save.
+function KimiModelsEditor({ value, onChange }) {
+  const [raw, setRaw] = useState(() => JSON.stringify(value ?? {}, null, 2));
+  const [error, setError] = useState(false);
+  useEffect(() => { setRaw(JSON.stringify(value ?? {}, null, 2)); setError(false); }, [value]);
+  return (
+    <div>
+      <FieldLabel label={copy("pswitch.kimi.models.editor")} />
+      <textarea
+        value={raw}
+        spellCheck={false}
+        aria-label={copy("pswitch.kimi.models.editor")}
+        onChange={(event) => {
+          const next = event.target.value;
+          setRaw(next);
+          try {
+            const parsed = JSON.parse(next);
+            if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+              setError(false);
+              onChange(parsed);
+            } else setError(true);
+          } catch {
+            setError(true);
+          }
+        }}
+        rows={8}
+        className="w-full rounded-lg border border-oai-gray-200 bg-white px-3 py-2 font-mono text-xs text-oai-black focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-oai-brand-500 dark:border-oai-gray-800 dark:bg-oai-gray-900 dark:text-white"
+      />
+      {error ? <p className="mt-1 text-xs text-red-600">{copy("pswitch.kimi.models.invalid")}</p> : null}
+    </div>
+  );
+}
+
 function parseAdditiveText(app, text) {
   const raw = String(text || "").trim();
   if (ADDITIVE_CONFIG_FORMAT[app] === "yaml") {
@@ -1715,6 +1749,13 @@ export function ProviderEditDialog({
                 );
               })}
             </div>
+          ) : null}
+
+          {app === "kimi" ? (
+            <KimiModelsEditor
+              value={draft?.models && typeof draft.models === "object" && !Array.isArray(draft.models) ? draft.models : {}}
+              onChange={(models) => setDraft((current) => ({ ...(current ?? {}), models }))}
+            />
           ) : null}
 
           {showNoFieldsHint ? (

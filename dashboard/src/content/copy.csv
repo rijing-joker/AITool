@@ -2749,6 +2749,39 @@ pswitch.validate.key.mcode,pswitch,ProviderSwitchPage,ProviderEditDialog,mcode,M
 pswitch.tab.hermes,pswitch,ProviderSwitchPage,ProviderSwitchPage,tab_hermes,Hermes,,active
 pswitch.tab.pi,pswitch,ProviderSwitchPage,ProviderSwitchPage,tab_pi,Pi,,active
 pswitch.tab.grokbuild,pswitch,ProviderSwitchPage,ProviderSwitchPage,tab_grokbuild,Grok Build,,active
+pswitch.tab.kimi,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_kimi,"Kimi Code",,active
+pswitch.live.file.kimi_config,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_kimi_config,"Kimi Code config.toml",,active
+pswitch.field.provider_key,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_provider_key,"Provider key",,active
+pswitch.kimi.account.title,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_title,"Kimi Code accounts",,active
+pswitch.kimi.account.add,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_add,"Sign in to Kimi",,active
+pswitch.kimi.account.hint,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_hint,"Device-code sign-in against the official Kimi hosts; accounts and credentials stay local.",,active
+pswitch.kimi.account.region,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_region,"Sign-in region",,active
+pswitch.kimi.account.region.cn,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_cn,"Mainland China",,active
+pswitch.kimi.account.region.global,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_global,"Global",,active
+pswitch.kimi.account.verify,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_verify,"Open the verification page and confirm the code",,active
+pswitch.kimi.account.pending,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_pending,"Waiting for confirmation",,active
+pswitch.kimi.account.expired,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_expired,"The sign-in code expired; start again",,active
+pswitch.kimi.account.denied,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_denied,"Sign-in was denied",,active
+pswitch.kimi.account.cancelled,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_cancelled,"Sign-in was cancelled",,active
+pswitch.kimi.account.current,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_current,"Current",,active
+pswitch.kimi.account.use,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_use,"Use this account",,active
+pswitch.kimi.account.quota,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_quota,"Quota",,active
+pswitch.kimi.account.relogin,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_relogin,"Sign in again",,active
+pswitch.kimi.account.remove,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_remove,"Remove",,active
+pswitch.kimi.account.removeHint,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_removeHint,"Separate accounts lose their provider, models and local credentials. Kimi's own default login is only hidden from this list.",,active
+pswitch.kimi.account.reauth,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_reauth,"Sign in again to use this account",,active
+pswitch.kimi.account.primary,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_primary,"default slot",,active
+pswitch.kimi.account.used,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_used,"{value}% used",,active
+pswitch.kimi.account.error,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_error,"Kimi account operation failed",,active
+pswitch.kimi.protocol.label,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_proto_0,"Protocol",,active
+pswitch.kimi.protocol.kimi,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_proto_1,"kimi",,active
+pswitch.kimi.protocol.openai,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_proto_2,"openai",,active
+pswitch.kimi.protocol.openai_responses,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_proto_3,"openai_responses",,active
+pswitch.kimi.protocol.anthropic,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_proto_4,"anthropic",,active
+pswitch.kimi.protocol.google_genai,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_proto_5,"google-genai",,active
+pswitch.kimi.protocol.vertexai,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_proto_6,"vertexai",,active
+pswitch.kimi.models.editor,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_proto_7,"Models (JSON: alias -> { model, max_context_size, capabilities? })",,active
+pswitch.kimi.models.invalid,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_proto_8,"Models must be a JSON object of model entries",,active
 pswitch.preset.hermes_custom,pswitch,ProviderSwitchPage,ProviderEditDialog,preset_hermes_custom,Custom Relay,,active
 pswitch.preset.pi_custom,pswitch,ProviderSwitchPage,ProviderEditDialog,preset_pi_custom,Custom Relay,,active
 pswitch.preset.grokbuild_custom,pswitch,ProviderSwitchPage,ProviderEditDialog,preset_grokbuild_custom,Custom Relay,,active

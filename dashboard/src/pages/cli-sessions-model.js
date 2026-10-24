@@ -12,6 +12,7 @@ const APP_LABELS = {
   grokbuild: "pswitch.tab.grokbuild",
   pi: "pswitch.tab.pi",
   mcode: "pswitch.tab.mcode",
+  kimi: "pswitch.tab.kimi",
 };
 export const sessionAppLabel = (app) =>
   APP_LABELS[app] ? copy(APP_LABELS[app]) : app;

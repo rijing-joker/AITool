@@ -191,6 +191,35 @@ test("claude custom title wins and agent files are excluded", async () => {
   assert.equal(list[0].title, "fix-login-bug");
 });
 
+test("claude sessions group by the last /cd relocated cwd, not cwd drift (cc-switch ea8bc2c)", async () => {
+  // The relocated record sits more than 30 lines before EOF (outside the
+  // tail window used for titles) but inside the 64 KiB metadata zone Claude
+  // Code itself uses. Ordinary records' drifting cwd must not move the
+  // session; only the last relocated record does.
+  const filler = [];
+  for (let i = 0; i < 200; i += 1) {
+    filler.push(JSON.stringify({
+      type: "assistant",
+      message: { role: "assistant", content: `step ${i}` },
+      cwd: `/tmp/project-a/drifting-sub-${i}`,
+      timestamp: "2026-10-01T10:30:00Z",
+    }));
+  }
+  writeClaudeSession(tmpHome, "session-cd", [
+    JSON.stringify({ sessionId: "session-cd", cwd: "/tmp/project-a", timestamp: "2026-10-01T10:00:00Z" }),
+    JSON.stringify({ type: "user", message: { role: "user", content: "start" }, timestamp: "2026-10-01T10:00:01Z" }),
+    JSON.stringify({ type: "relocated", relocatedCwd: "/tmp/project-b", sessionId: "session-cd" }),
+    ...filler,
+    JSON.stringify({ type: "assistant", message: { role: "assistant", content: "after move" }, timestamp: "2026-10-01T11:00:00Z" }),
+  ]);
+
+  const list = await sessions.listSessions({ app: "claude", home: tmpHome });
+  const meta = list.find((row) => row.sessionId === "session-cd");
+  assert.ok(meta, "the /cd session is listed");
+  assert.equal(meta.projectDir, "/tmp/project-b", "the last relocated cwd wins over the starting cwd");
+  assert.equal(meta.title, "start");
+});
+
 test("claude transcripts: tool_use renders as [Tool:], tool_result rows reclassify", async () => {
   const filePath = writeClaudeSession(tmpHome, "session-tools", [
     JSON.stringify({ sessionId: "session-tools", cwd: "/tmp/p" }),

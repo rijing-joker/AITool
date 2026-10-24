@@ -219,6 +219,39 @@ function thinkingText(text) {
   return trimmed;
 }
 
+// Claude Code keeps session metadata (custom-title, relocated, …) within the
+// last 64 KiB of the transcript instead of appending it after every turn, so
+// a `/cd` record can sit tens of kilobytes before EOF — beyond the tail-line
+// window used for titles (cc-switch ea8bc2c). Returns the last relocated
+// target, or null when the transcript never moved.
+const RELOCATED_TAIL_BYTES = 64 * 1024;
+
+async function lastRelocatedCwd(filePath) {
+  let file;
+  try {
+    file = await fsp.open(filePath, "r");
+    const { size } = await file.stat();
+    const start = Math.max(0, size - RELOCATED_TAIL_BYTES);
+    const buffer = Buffer.alloc(size - start);
+    const { bytesRead } = await file.read(buffer, 0, buffer.length, start);
+    const lines = buffer.subarray(0, bytesRead).toString("utf8").split("\n");
+    // Seeking into the middle of a line leaves a partial first line.
+    if (start > 0 && lines.length) lines.shift();
+    for (let i = lines.length - 1; i >= 0; i -= 1) {
+      if (!lines[i].includes("\"relocated\"")) continue;
+      const value = parseJsonLine(lines[i]);
+      if (value?.type !== "relocated") continue;
+      const cwd = typeof value.relocatedCwd === "string" ? value.relocatedCwd.trim() : "";
+      if (cwd !== "") return cwd;
+    }
+    return null;
+  } catch {
+    return null;
+  } finally {
+    if (file) await file.close().catch(() => {});
+  }
+}
+
 async function readHeadTailLines(filePath, headN = HEAD_LINES, tailN = TAIL_LINES) {
   const file = await fsp.open(filePath, "r");
   try {
@@ -472,6 +505,13 @@ async function claudeParseSession(filePath) {
       if (text.trim() !== "") summary = text;
     }
   }
+
+  // `/cd` moved the session: the last relocated record wins over the cwd the
+  // transcript started with. Ordinary records' `cwd` is the Bash tool's
+  // tracked working directory and drifts into subdirectories as commands run,
+  // which must not move the session (cc-switch ea8bc2c).
+  const relocatedCwd = await lastRelocatedCwd(filePath);
+  if (relocatedCwd !== null) projectDir = relocatedCwd;
 
   const resolvedId = sessionId ?? claudeSessionIdFromPath(filePath);
   if (!resolvedId) return null;

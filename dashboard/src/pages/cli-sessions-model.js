@@ -139,7 +139,7 @@ export function stepText(step) {
 }
 
 export function isChangeStep(step) {
-  return Boolean(step.call?.patch || step.result?.diff || step.result?.structuredPatch) || toolCategory(step.call) === "edit";
+  return Boolean(step.call?.patch || step.call?.patchRef || step.result?.diff || step.result?.diffRef || step.result?.structuredPatch || step.result?.structuredPatchRef) || toolCategory(step.call) === "edit";
 }
 
 export function isFailedStep(step) {

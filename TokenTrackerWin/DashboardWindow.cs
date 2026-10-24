@@ -57,6 +57,7 @@ internal sealed class DashboardWindow : Window
     private bool _tiltForwardLogged;
     private nint _hwnd;
     private string _pendingPathAndQuery = "/?app=1";
+    private bool _providersPending;
 
     /// <summary>Raised (on the UI thread) when the dashboard's currency/rate localStorage changes.</summary>
     public event Action? CurrencyChanged;
@@ -454,6 +455,7 @@ internal sealed class DashboardWindow : Window
             {
                 Log($"nav completed uri={_webView.CoreWebView2.Source}");
                 PushVisibility();
+                await PushProvidersAsync();
                 if (_oauthInFlight
                     && Uri.TryCreate(_webView.CoreWebView2.Source, UriKind.Absolute, out var completedUri)
                     && completedUri.AbsolutePath is "/" or "/dashboard")
@@ -1014,8 +1016,20 @@ internal sealed class DashboardWindow : Window
     /// <summary>Navigate to the dashboard Settings page, mirroring macOS `showSettings()`.</summary>
     public void ShowProviders()
     {
+        _providersPending = true;
         ShowDashboard();
-        NavigateWhenServerReady("/?quick=providers&app=1");
+        if (_coreReady) _ = PushProvidersAsync();
+    }
+
+    private async Task PushProvidersAsync()
+    {
+        if (!_providersPending || !_coreReady || _webView.CoreWebView2 is null) return;
+        try
+        {
+            var delivered = await _webView.CoreWebView2.ExecuteScriptAsync("(() => { if (document.readyState === 'loading' || location.href === 'about:blank') return false; window.__aitoolProvidersPending=true;window.dispatchEvent(new CustomEvent('native:providers'));return true; })()");
+            if (delivered == "true") _providersPending = false;
+        }
+        catch (Exception ex) { Log($"provider selector dispatch failed: {ex.Message}"); }
     }
 
     public void ShowSettings()

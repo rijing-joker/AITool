@@ -17,9 +17,10 @@ function referenceNames(spec) {
   const names = new Set();
   mapStrings(spec, value => { for (const match of value.matchAll(REF)) names.add(match[1]); return value; });
   // Imported native Codex references can also be checked without expansion on disk.
-  for (const name of spec.env_vars || []) names.add(name);
-  if (spec.bearer_token_env_var) names.add(spec.bearer_token_env_var);
-  for (const name of Object.values(spec.env_http_headers || {})) names.add(name);
+  const validName = value => typeof value === "string" && /^[A-Za-z_][A-Za-z0-9_]*$/.test(value);
+  for (const name of Array.isArray(spec?.env_vars) ? spec.env_vars : []) if (validName(name)) names.add(name);
+  if (validName(spec?.bearer_token_env_var)) names.add(spec.bearer_token_env_var);
+  for (const name of spec?.env_http_headers && typeof spec.env_http_headers === "object" && !Array.isArray(spec.env_http_headers) ? Object.values(spec.env_http_headers) : []) if (validName(name)) names.add(name);
   return [...names].sort();
 }
 

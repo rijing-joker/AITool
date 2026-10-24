@@ -5,12 +5,40 @@ import { maskIdentifier, maskSensitiveText } from "../lib/privacy-mask";
 import { ProxyPrivacyNotice, ProxyPrivacyToggle, setProxyPrivacy } from "../lib/proxy-privacy";
 import { managementApi } from "../lib/easy-providers";
 import { AuthFilesTab } from "./auth-files-tab";
+import { AgyAccountSelect, ProviderAgyAccounts } from "./provider-agy-accounts";
+import { UnsavedChangesGuard } from "../ui/components/UnsavedChangesGuard";
+import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { showToast } from "../ui/components/Toast";
 
 vi.mock("../lib/copy", () => ({ copy: (key, vars) => vars ? `${key} ${JSON.stringify(vars)}` : key }));
 vi.mock("../lib/local-api-auth", () => ({ getLocalApiAuthHeaders: async () => ({}) }));
 vi.mock("../ui/components/Toast", () => ({ showToast: vi.fn() }));
 afterEach(() => { cleanup(); setProxyPrivacy(false); vi.restoreAllMocks(); vi.clearAllMocks(); vi.unstubAllGlobals(); });
+it("masks Antigravity account names in the list and binding selector", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true, supported: true, accounts: [{ id: "private-account", email: "alice@example.com", name: "Alice" }] }) }));
+  setProxyPrivacy(true);
+  const { container } = render(<><ProviderAgyAccounts /><AgyAccountSelect onChange={() => {}} /></>);
+  await waitFor(() => expect(container.querySelectorAll("option")).toHaveLength(2));
+  expect(container.textContent).not.toMatch(/alice|example\.com|Alice|private-account/);
+});
+it("blocks browser back with a credential settings draft and keeps editing after cancellation", async () => {
+  vi.spyOn(managementApi, "get").mockImplementation(async route => route === "/auth-files" ? { files: [{ name: "fixture.json", provider: "codex", source: "file" }] } : {});
+  function Fixture() {
+    const [state, setState] = React.useState({ dirty: false, busy: false });
+    return <><UnsavedChangesGuard {...state} /><AuthFilesTab onEditorStateChange={setState} /></>;
+  }
+  const router = createMemoryRouter([{ path: "/other", element: <div /> }, { path: "/proxy", element: <Fixture /> }], { initialEntries: ["/other", "/proxy"], initialIndex: 1 });
+  render(<RouterProvider router={router} />);
+  fireEvent.click(await screen.findByRole("button", { name: "proxy.creds.settings.button" }));
+  const dialog = await screen.findByRole("dialog");
+  const rules = await within(dialog).findByPlaceholderText(/gpt-example/);
+  fireEvent.change(rules, { target: { value: "edited-*" } });
+  await act(async () => { await router.navigate(-1); });
+  await screen.findByText("shared.unsaved.description");
+  expect(router.state.location.pathname).toBe("/proxy");
+  fireEvent.click(screen.getByRole("button", { name: "shared.unsaved.keep_editing" }));
+  expect(rules.value).toBe("edited-*");
+});
 
 it("shows the saved privacy state and a visible explanation after enabling", async () => {
   const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true, enabled: false }) });

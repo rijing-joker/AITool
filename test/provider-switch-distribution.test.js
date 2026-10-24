@@ -36,6 +36,7 @@ test("project copies use selected scopes and preserve user MCP neighbors", async
   await mcp.upsertServer({ id: "fixture", server: { command: "node", args: ["fixture"] }, apps: {} });
   const project = path.join(dir, "project"); await fs.mkdir(project); await fs.writeFile(path.join(project, ".mcp.json"), '{"mcpServers":{"user":{"command":"user"}},"custom":true}');
   const row = { dir: project, apps: ["claude"], skills: ["example"], mcp: ["fixture"] };
+  await fs.writeFile(path.join(project, ".gitignore"), "node_modules/\n.env\n");
   await apply("project", row);
   const doc = JSON.parse(await fs.readFile(path.join(project, ".mcp.json"))); assert.equal(doc.custom, true); assert.equal(doc.mcpServers.user.command, "user"); assert.equal(doc.mcpServers.fixture.command, "node");
   assert.match(await fs.readFile(path.join(project, ".claude/skills/example/SKILL.md"), "utf8"), /Synthetic skill/);
@@ -46,6 +47,10 @@ test("project copies use selected scopes and preserve user MCP neighbors", async
   await apply("project", { ...row, apps: [], skills: [], mcp: [] });
   assert.equal(JSON.parse(await fs.readFile(path.join(project, ".mcp.json"))).mcpServers.user.command, "user");
   assert.equal((await fs.readFile(path.join(project, ".gitignore"), "utf8")).includes("AiTool project distribution"), false);
+  await apply("project", { ...row, apps: [], skills: [], mcp: [] });
+  assert.match(await fs.readFile(path.join(project, ".gitignore"), "utf8"), /node_modules\/\n\.env\n/);
+  const ownership = JSON.parse(await fs.readFile(path.join(dir, ".aitool/provider-switch/distribution.json")));
+  assert.equal(ownership.owned[path.join(project, ".gitignore")], undefined);
 });
 test("recovery manifests describe new files and back up replaced files", async () => {
   const first = await apply("subagent", role);

@@ -68,11 +68,15 @@ function validateServerSpec(spec) {
     throw new Error(`${type} MCP server requires a url`);
   }
   if (spec.args !== undefined && (!Array.isArray(spec.args) || spec.args.some(arg => typeof arg !== "string"))) throw new Error("MCP args must be a list of strings");
-  for (const key of ["env", "headers"]) {
+  const validName = value => typeof value === "string" && /^[A-Za-z_][A-Za-z0-9_]*$/.test(value);
+  if (spec.env_vars !== undefined && (!Array.isArray(spec.env_vars) || spec.env_vars.some(value => !validName(value)))) throw new Error("MCP env_vars must be a list of environment variable names");
+  if (spec.bearer_token_env_var !== undefined && !validName(spec.bearer_token_env_var)) throw new Error("MCP bearer_token_env_var must be an environment variable name");
+  for (const key of ["env", "headers", "env_http_headers"]) {
     if (spec[key] !== undefined && (!spec[key] || typeof spec[key] !== "object" || Array.isArray(spec[key]) || Object.values(spec[key]).some(value => typeof value !== "string"))) {
       throw new Error(`MCP ${key} must be a string map`);
     }
   }
+  if (spec.env_http_headers && Object.values(spec.env_http_headers).some(value => !validName(value))) throw new Error("MCP env_http_headers must contain environment variable names");
   return spec;
 }
 

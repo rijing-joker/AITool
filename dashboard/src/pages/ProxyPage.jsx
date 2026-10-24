@@ -523,7 +523,7 @@ export function ProxyPage() {
           ) : null}
           {tab === "overview" ? <OverviewTab status={status} statusError={statusError} onRefresh={refreshStatus} onInstallCore={openCoreInstall} onSelectTab={selectTab} /> : null}
           {tab === "upstreams" ? <UpstreamsTab onEditorStateChange={setEditorState} /> : null}
-          {tab === "providers" ? <AuthFilesTab onDirty={refreshStatus} /> : null}
+          {tab === "providers" ? <AuthFilesTab onDirty={refreshStatus} onEditorStateChange={setEditorState} /> : null}
           {tab === "keys" ? <KeysTab status={status} onEditorStateChange={setEditorState} /> : null}
           {tab === "aliases" ? <ModelAliasesTab onEditorStateChange={setEditorState} /> : null}
           {tab === "requests" ? <RequestsTab /> : null}

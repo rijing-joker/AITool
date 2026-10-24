@@ -36,6 +36,7 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
     /// ServerManager has replaced the listener on the fixed dashboard port.
     private var dashboardNavigationAllowed = false
     private var pendingDashboardURL: URL?
+    private var providersPending = false
     /// Preserve the WebView's sessionStorage only while a native OAuth round trip
     /// needs its PKCE verifier. Normal dashboard closes release the browser runtime.
     private var oauthInFlight = false
@@ -452,7 +453,7 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
     // MARK: - NSWindowDelegate
 
     private func pushVisibility() {
-        let visible = window?.isVisible == true && window?.isMiniaturized != true
+        let visible = window?.isVisible == true && window?.isMiniaturized != true && window?.occlusionState.contains(.visible) == true
         webView?.evaluateJavaScript("window.dispatchEvent(new CustomEvent('native:visibility',{detail:{visible:\(visible ? "true" : "false")}}))", completionHandler: nil)
     }
     func windowDidMiniaturize(_ notification: Notification) { pushVisibility() }
@@ -572,8 +573,15 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
 
     /// Open the dashboard and navigate directly to the Settings page.
     func showProviders() {
+        providersPending = true
         DashboardPresentationCoordinator.shared.showDashboard()
-        if let url = URL(string: Constants.serverBaseURL + "/?quick=providers&app=1") { loadDashboard(url) }
+        if webView?.isLoading == false { pushProviders() }
+    }
+
+    private func pushProviders() {
+        guard providersPending, let webView, webView.url != nil else { return }
+        providersPending = false
+        webView.evaluateJavaScript("window.__aitoolProvidersPending=true;window.dispatchEvent(new CustomEvent('native:providers'))", completionHandler: nil)
     }
 
     func showSettings() {
@@ -678,6 +686,7 @@ final class DashboardWindowController: NSObject, NSWindowDelegate, WKNavigationD
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         retryCount = 0
         pushVisibility()
+        pushProviders()
         dismissLoadFailureOverlay()
         let completedNativeOAuth = webView.url?.path == "/dashboard" || webView.url?.path == "/"
         if oauthInFlight && completedNativeOAuth {

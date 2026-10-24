@@ -47,13 +47,14 @@ function createManager({ root = paths.providerSwitchRoot(), login = systemLogin,
     let value; try { value = decode(raw); } catch {}
     const claims = identity(value);
     if (claims && value.token) {
-      if (switching || !(store.dismissed || []).includes(claims.sub)) {
+      if (!(store.dismissed || []).includes(claims.sub)) {
         const previous = Object.hasOwn(store.accounts, claims.sub) ? store.accounts[claims.sub] : null;
         if (!previous || previous.credential.token.refresh_token !== value.token.refresh_token) upsert(store, value);
       }
       return claims.sub;
     }
-    if (switching) { const stash = path.join(root, "agy-login-stash.json"); await privateDirectory(root, root); await privateFile(stash); await writeFileAtomic(stash, JSON.stringify({ raw }) + "\n", { mode: 0o600 }); await chmod600IfPossible(stash); }
+    // Do not overwrite an unknown keychain format or make a plaintext copy.
+    if (switching) throw new Error("Cannot decode the current Antigravity login; sign in with a supported client before switching");
     return null;
   };
   const requirePlatform = () => { if (!supported) throw new Error("Antigravity account switching currently requires macOS"); };

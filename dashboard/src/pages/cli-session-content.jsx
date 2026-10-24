@@ -592,6 +592,27 @@ function ProcessOutput({ output, reference, query }) {
 function SingleProcessStep({ step, query, onCopy, projectDir }) {
   const [expanded, setExpanded] = useState(() => Boolean(isFailedStep(step)));
   const forced = textHits(stepText(step), query);
+  const input = useSessionText(typeof step.call?.input === "string" ? step.call.input : null, step.call?.inputRef, false);
+  const args = useSessionText(step.call?.arguments, step.call?.argumentsRef, false);
+  const nativeArgs = useSessionText(null, step.call?.argsRef, false);
+  const callPatch = useSessionText(null, step.call?.patchRef, false);
+  const resultPatch = useSessionText(null, step.result?.structuredPatchRef, false);
+  const resultDiff = useSessionText(step.result?.diff, step.result?.diffRef, false);
+  useEffect(() => {
+    if (expanded || forced) for (const field of [input, args, nativeArgs, callPatch, resultPatch, resultDiff]) {
+      if (!field.complete && !field.busy && !field.error) void field.load(true).catch(() => {});
+    }
+  });
+  const parsed = field => { try { return field.complete && field.text ? JSON.parse(field.text) : undefined; } catch { return undefined; } };
+  step = { ...step,
+    call: step.call && { ...step.call,
+      input: step.call.inputRef ? step.call.inputRef.encoding === "json" ? parsed(input) : input.text : step.call.input,
+      arguments: step.call.argumentsRef ? args.text : step.call.arguments,
+      args: step.call.argsRef ? parsed(nativeArgs) : step.call.args,
+      patch: parsed(callPatch) ?? step.call.patch },
+    result: step.result && { ...step.result, structuredPatch: step.result.structuredPatch ?? parsed(resultPatch),
+      diff: step.result.diffRef ? resultDiff.text : step.result.diff },
+  };
   const thinkingContent = useSessionText(step.message?.thinking, step.message?.thinkingRef, expanded || forced);
   const outputs = step.outputParts || [{ key: "output", output: step.output, reference: step.outputRef }];
   const hasOutput = outputs.some(part => part.output || part.reference);
@@ -702,6 +723,7 @@ function SingleProcessStep({ step, query, onCopy, projectDir }) {
         ) : null}
       </summary>
       {expanded || forced ? <div className="mb-2 ml-6 min-w-0 border-l border-oai-gray-200 pl-3 dark:border-oai-gray-700">
+        {[input, args, nativeArgs, callPatch, resultPatch, resultDiff].filter(field => field.error || field.busy).map((field, index) => <ContentLoadControl key={index} content={field} />)}
         {facts.length ? <dl className="mb-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs leading-6">
           {facts.map(fact => <React.Fragment key={fact.key}>
             <dt className="text-oai-gray-600 dark:text-oai-gray-400">{copy(`clisessions.fact.${fact.key}`)}</dt>

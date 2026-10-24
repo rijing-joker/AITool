@@ -428,7 +428,7 @@ function CredentialRequestTimeline({ file }) {
 
 // --- settings dialog (AuthFileSettingsDialog port) ---------------------------
 
-function CredentialSettingsDialog({ name, provider, onClose, onSaved }) {
+function CredentialSettingsDialog({ name, provider, onClose, onSaved, onEditorStateChange }) {
   const display = usePrivacyText();
   const [original, setOriginal] = useState(null);
   const [draft, setDraft] = useState(null);
@@ -442,6 +442,8 @@ function CredentialSettingsDialog({ name, provider, onClose, onSaved }) {
   const [discard, setDiscard] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const dirty = draft !== null && JSON.stringify(draft) !== JSON.stringify(original);
+  useEffect(() => { onEditorStateChange?.({ dirty, busy: saving }); }, [dirty, saving, onEditorStateChange]);
+  useEffect(() => () => { onEditorStateChange?.({ dirty: false, busy: false }); }, [onEditorStateChange]);
 
   useEffect(() => {
     let active = true;
@@ -1034,7 +1036,7 @@ function OauthModelsDialog({ target, onClose }) {
 
 // --- main tab ----------------------------------------------------------------
 
-export function AuthFilesTab({ onDirty }) {
+export function AuthFilesTab({ onDirty, onEditorStateChange }) {
   const [snapshot, setSnapshot] = useState({ files: [], receivedAtMs: 0, observedAt: undefined });
   const [filter, setFilter] = useState("");
   const [selectedNames, setSelectedNames] = useState(new Set());
@@ -1576,6 +1578,7 @@ export function AuthFilesTab({ onDirty }) {
         <CredentialSettingsDialog
           key={settingsName}
           name={settingsName}
+          onEditorStateChange={onEditorStateChange}
           provider={providerKeyForFile(files.find(file => authFileName(file) === settingsName) || {})}
           onClose={() => setSettingsName(null)}
           onSaved={() => {

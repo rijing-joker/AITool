@@ -450,7 +450,9 @@ function disconnectAdditive(app, { prev, live }) {
   const spec = specOf(app), doc = structuredClone(live);
   const wrapper = wrapperOf(prev);
   if (!wrapper.slotKey) return doc;
-  if (stableEqual(readSlot(doc, spec, wrapper.slotKey), wrapper.provider)) removeSlot(doc, spec, wrapper.slotKey);
+  const slot = readSlot(doc, spec, wrapper.slotKey);
+  if (slot !== undefined && !stableEqual(slot, wrapper.provider)) return doc;
+  removeSlot(doc, spec, wrapper.slotKey);
   if (spec.pointerProviderKey && valueAt(doc, spec.pointerProviderKey) === wrapper.slotKey) deleteValueAt(doc, spec.pointerProviderKey);
   if (spec.modelPointer && stableEqual(valueAt(doc, spec.modelPointer), pointerValueOf(app, wrapper))) deleteValueAt(doc, spec.modelPointer);
   return doc;

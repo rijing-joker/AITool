@@ -263,6 +263,23 @@ test("skills: copy fallback remains removable and preserves a stamped source", a
   assert.equal(fs.existsSync(target), false);
   assert.equal(fs.existsSync(path.join(source, "SKILL.md")), true);
 });
+test("skills: failed fallback keeps the old projection and retries without a partial live directory", async t => {
+  const skills = require("../src/lib/provider-switch/skills"), fsp = require("node:fs/promises");
+  const source = makeSkill(path.join(tmpHome, ".claude/skills"), "demo");
+  const target = path.join(tmpHome, ".gemini/skills/demo");
+  fs.mkdirSync(path.dirname(target), { recursive: true }); await skills.importSkills();
+  t.mock.method(fsp, "symlink", async () => { throw Object.assign(new Error("No symlinks"), { code: "EPERM" }); });
+  assert.deepEqual((await skills.toggleSkill("demo", "gemini", true)).failures, []);
+  fs.writeFileSync(path.join(source, "helper.txt"), "new");
+  const copy = fsp.cp;
+  const broken = t.mock.method(fsp, "cp", async (...args) => { if (args[0].endsWith("helper.txt")) throw new Error("Disk full"); return copy(...args); });
+  assert.equal((await skills.syncSkills(["gemini"])).failures.length, 1);
+  assert.equal(fs.readFileSync(path.join(target, "helper.txt"), "utf8"), "x");
+  assert.equal(fs.readdirSync(path.dirname(target)).some(name => name.startsWith(".aitool-skill-")), false);
+  broken.mock.restore();
+  assert.deepEqual((await skills.syncSkills(["gemini"])).failures, []);
+  assert.equal(fs.readFileSync(path.join(target, "helper.txt"), "utf8"), "new");
+});
 
 test("skills: copy fallback preserves an entry created during the symlink attempt", async (t) => {
   const skills = require("../src/lib/provider-switch/skills");

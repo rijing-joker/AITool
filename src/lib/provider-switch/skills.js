@@ -225,16 +225,43 @@ async function projectSkill(app, skill) {
     return null;
   }
   await ensureDir(targetDir);
-  await removeManaged();
+  // Prepare a complete replacement before moving the old projection. A
+  // failed fallback must never expose an incomplete skill at its live path.
+  const staging = await fsp.mkdtemp(path.join(targetDir, ".aitool-skill-"));
+  const prepared = path.join(staging, "next"), previous = path.join(staging, "previous");
+  let moved = false, installed = false, committed = false;
   try {
-    await fsp.symlink(skill.sourceDir, targetPath, "dir");
+    try { await fsp.symlink(skill.sourceDir, prepared, "dir"); }
+    catch (error) {
+      if (!["EPERM", "EACCES", "ENOSYS", "ENOTSUP"].includes(error.code)) throw error;
+      await copySkill(skill.sourceDir, prepared);
+    }
+    // Recheck after copying, with no await between ownership and replacement.
+    if (fs.lstatSync(targetPath, { throwIfNoEntry: false })) {
+      if (!isManagedLinkOrCopy(targetPath, managedLinks)) throw new Error("A user-managed entry appeared during skill projection");
+      fs.renameSync(targetPath, previous); moved = true;
+    }
+    fs.renameSync(prepared, targetPath); installed = true;
+    const receipt = fs.lstatSync(targetPath).isSymbolicLink() ? linkIdentity(targetPath) : null;
+    await mutateSkillsStore(store => {
+      if (receipt) store.managedLinks[targetPath] = receipt;
+      else delete store.managedLinks[targetPath];
+    });
+    committed = true;
   } catch (error) {
-    if (!["EPERM", "EACCES", "ENOSYS", "ENOTSUP"].includes(error.code)) throw error;
-    await copySkill(skill.sourceDir, targetPath);
-    return null;
+    if (installed) fs.rmSync(targetPath, { recursive: true, force: true });
+    if (moved) {
+      fs.renameSync(previous, targetPath);
+      moved = false;
+      if (fs.lstatSync(targetPath).isSymbolicLink()) {
+        await mutateSkillsStore(store => { store.managedLinks[targetPath] = linkIdentity(targetPath); });
+      }
+    }
+    throw error;
+  } finally {
+    // Keep the original in staging if a filesystem failure prevented restore.
+    if (!moved || committed) await fsp.rm(staging, { recursive: true, force: true });
   }
-  const receipt = linkIdentity(targetPath);
-  await mutateSkillsStore((store) => { store.managedLinks[targetPath] = receipt; });
   return null;
 }
 

@@ -24,6 +24,17 @@ test("model alias edits into the routing adapter are rejected on request revalid
   await assert.rejects(routing.checkModels(["two"], { request: async () => ({ ok: true, data: [{ name: "another", "base-url": "http://127.0.0.1:9999/routing/v1", models: [{ name: "two" }] }] }) }), /points back/);
   await assert.rejects(routing.checkModels(["two"], { request: async () => ({ ok: false }) }), /Read native/);
 });
+test("request loop checks share snapshots, tolerate short outages, and reject new loop mappings", async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "aitool-route-check-")); t.after(() => fs.rm(root, { recursive: true, force: true }));
+  let now = 100000, calls = 0, outage = false, loop = false;
+  t.mock.method(Date, "now", () => now);
+  const options = { root, request: async () => { calls++; return outage ? { ok: false } : { ok: true, data: loop ? [{ name: "other", "base-url": "http://127.0.0.1:9000/routing/v1", models: [{ name: "two" }] }] : [] }; } };
+  await Promise.all(Array.from({ length: 20 }, () => routing.checkModels(["two"], options, true)));
+  assert.equal(calls, 1);
+  now += 5001; outage = true; await routing.checkModels(["two"], options, true); assert.equal(calls, 2);
+  now += 30000; await assert.rejects(routing.checkModels(["two"], options, true), /Read native/);
+  outage = false; loop = true; await assert.rejects(routing.checkModels(["two"], options, true), /points back/);
+});
 for (const streaming of [false, true]) test(`outer dispatch removes only usage and preserves response (${streaming})`, async () => {
   const body = { model: "served", choices: [{ delta: { content: "你好" } }], usage: { prompt_tokens: 100, completion_tokens: 10 } };
   const input = streaming ? `data: ${JSON.stringify(body)}\r\n\r\ndata: [DONE]\n\n` : JSON.stringify(body);

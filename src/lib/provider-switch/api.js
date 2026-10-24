@@ -257,8 +257,16 @@ async function officialCodexRowAuths() {
     .filter((auth) => auth && typeof auth === "object" && !Array.isArray(auth));
 }
 
-function switchProvider(payload) {
-  return withFileLock(path.join(paths.providerSwitchRoot(), `${payload.app}.projection`), () => switchProviderUnlocked(payload));
+function withProjectionLock(app, action) {
+  if (!store.isSupportedApp(app)) throw new Error(`Unsupported app: ${app}`);
+  return withFileLock(path.join(paths.providerSwitchRoot(), `${app}.projection`), action);
+}
+async function recordProjection(app, provider, writes) {
+  try { await diagnostics.record(app, provider, writes); return []; }
+  catch { return ["Configuration applied, but its diagnostic receipt could not be saved; preview and repair to retry."]; }
+}
+async function switchProvider(payload) {
+  return withProjectionLock(payload.app, () => switchProviderUnlocked(payload));
 }
 async function switchProviderUnlocked({ app, id }) {
   if (!store.isSupportedApp(app)) throw new Error(`Unsupported app: ${app}`);
@@ -280,14 +288,15 @@ async function switchProviderUnlocked({ app, id }) {
   const plan = computeSwitchPlan(app, prev, target, lives, stash);
   const { wrote, backups } = await persistSwitchPlan(app, plan);
 
-  await diagnostics.record(app, target, plan.writes);
-  // Commit the pointer only after every write and its receipt landed.
+  // The live config is authoritative; an auxiliary receipt cannot prevent
+  // committing the matching current provider after all projection writes.
   await store.setCurrentProvider(app, id);
-  return { app, current: id, wrote, backups };
+  const warnings = await recordProjection(app, target, plan.writes);
+  return { app, current: id, wrote, backups, warnings };
 }
 
 async function disconnectProvider(app) {
-  return withFileLock(path.join(paths.providerSwitchRoot(), `${app}.projection`), async () => {
+  return withProjectionLock(app, async () => {
     const state = await store.listProviders(app);
     const prev = state.providers.find(row => row.id === state.current);
     if (!prev && app !== "codex") { await store.setCurrentProvider(app, null); return { wrote: [] }; }
@@ -341,8 +350,8 @@ async function diagnosticRepairPlan(app) {
 
 const CONFLICT_POLICIES = ["keepMine", "keepTheirs"];
 
-function saveProvider(payload) {
-  return withFileLock(path.join(paths.providerSwitchRoot(), `${payload.app}.projection`), () => saveProviderUnlocked(payload));
+async function saveProvider(payload) {
+  return withProjectionLock(payload.app, () => saveProviderUnlocked(payload));
 }
 async function saveProviderUnlocked({ app, id, body }) {
   if (!store.isSupportedApp(app)) throw new Error(`Unsupported app: ${app}`);
@@ -432,12 +441,13 @@ async function saveProviderUnlocked({ app, id, body }) {
   const provider = id
     ? await store.updateProvider(app, id, { ...body, settingsConfig: plan.rowSettings })
     : await store.createProvider(app, { ...body, settingsConfig: plan.rowSettings });
+  let warnings = [];
   if (applied) {
     const freshLives = await readLives(app);
-    await diagnostics.record(app, provider, paths.targetFiles(app).filter(file => freshLives[file.id].exists)
+    warnings = await recordProjection(app, provider, paths.targetFiles(app).filter(file => freshLives[file.id].exists)
       .map(file => ({ file, content: freshLives[file.id].content })));
   }
-  return { ok: true, provider, applied, wrote, backups };
+  return { ok: true, provider, applied, wrote, backups, warnings };
 }
 
 // Write only the files the editor's global changes touched (backup first).
@@ -517,18 +527,19 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
       const body = await readJsonBody(req);
       const preview = await diagnosticRepairPlan(body.app);
       json(res, { ok: true, revision: preview.revision, providerId: preview.target.id, files: preview.plan.writes.map(write => ({
-        id: write.file.id, path: write.file.path, before: preview.lives[write.file.id]?.content || "", after: write.content,
+        id: write.file.id, path: write.file.path, changed: (preview.lives[write.file.id]?.content || "") !== write.content,
+        ...(body.showValues === true ? { before: preview.lives[write.file.id]?.content || "", after: write.content } : {}),
       })) }); return true;
     }
     if (p === `${prefix}/diagnostics/repair` && method === "POST") {
       if (!requireMutation()) return true;
       const body = await readJsonBody(req);
-      const result = await withFileLock(path.join(paths.providerSwitchRoot(), `${body.app}.projection`), async () => {
+      const result = await withProjectionLock(body.app, async () => {
         const preview = await diagnosticRepairPlan(body.app);
         if (!body.revision || preview.revision !== body.revision) throw Object.assign(new Error("Configuration changed; reload the repair preview"), { status: 409 });
         const applied = await persistSwitchPlan(body.app, preview.plan);
-        await diagnostics.record(body.app, preview.target, preview.plan.writes);
-        return applied;
+        const warnings = await recordProjection(body.app, preview.target, preview.plan.writes);
+        return { ...applied, warnings };
       });
       json(res, { ok: true, ...result }); return true;
     }

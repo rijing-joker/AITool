@@ -43,7 +43,7 @@ export function ProviderDiagnostics({ app, revision, onChanged }) {
     if (!signal?.aborted) setDiagnostic(result.diagnostic);
   }, [app]);
   useEffect(() => {
-    setPreview(null); setProbe(null); setError("");
+    setPreview(null); setShowValues(false); setProbe(null); setError("");
     const request = new AbortController();
     void load(request.signal).catch(() => {});
     return () => { request.abort(); controller.current?.abort(); };
@@ -61,6 +61,17 @@ export function ProviderDiagnostics({ app, revision, onChanged }) {
     finally { controller.current = null; }
   });
   const previewRepair = () => run(async () => { setPreview(await providerSwitchApi.previewDiagnostic(app)); setShowValues(false); });
+  const revealValues = checked => {
+    if (!checked) {
+      setShowValues(false);
+      setPreview(current => current && { ...current, files: current.files.map(({ before, after, ...file }) => file) });
+      return;
+    }
+    void run(async () => {
+      const next = await providerSwitchApi.previewDiagnostic(app, true);
+      setPreview(next); setShowValues(true);
+    });
+  };
   const repair = () => run(async () => {
     await providerSwitchApi.repairDiagnostic(app, preview.revision); setPreview(null); await load(); await onChanged?.();
   });
@@ -96,12 +107,12 @@ export function ProviderDiagnostics({ app, revision, onChanged }) {
           {probe ? <p role="status" className="text-xs">{copy(probeKeys[probe.status] || "pswitch.diagnostic.unreachable")}{probe.httpStatus ? ` · HTTP ${probe.httpStatus}` : ""}</p> : null}
           {preview ? <div className="space-y-3">
             <p className="text-xs text-oai-gray-500 dark:text-oai-gray-400">{copy("pswitch.diagnostic.preview_hint")}</p>
-            <label className="flex min-h-10 items-center gap-2 text-xs"><input type="checkbox" className="h-4 w-4 accent-oai-brand-600" checked={showValues} onChange={event => setShowValues(event.currentTarget.checked)} />{copy("pswitch.diagnostic.show_values")}</label>
+            <label className="flex min-h-10 items-center gap-2 text-xs"><input type="checkbox" className="h-4 w-4 accent-oai-brand-600" disabled={busy} checked={showValues} onChange={event => revealValues(event.currentTarget.checked)} />{copy("pswitch.diagnostic.show_values")}</label>
             {preview.files.map(file => <div key={file.id}>
               <p className="break-all font-mono text-xs">{file.path}</p>
               {showValues ? <pre className="mt-2 max-h-72 overflow-auto rounded-lg bg-oai-gray-50 p-3 text-xs dark:bg-oai-gray-950">
                 {diffRows(file.before, file.after).map((row, index) => <div key={index} className={row.type === "removed" ? "text-red-700 dark:text-red-300" : row.type === "added" ? "text-oai-brand-700 dark:text-oai-brand-300" : "text-oai-gray-500"}>{`${row.type === "removed" ? "-" : row.type === "added" ? "+" : " "} ${row.text}`}</div>)}
-              </pre> : <p className="mt-1 text-xs text-oai-gray-500 dark:text-oai-gray-400">{copy(file.before === file.after ? "pswitch.diagnostic.no_changes" : "pswitch.diagnostic.values_hidden")}</p>}
+              </pre> : <p className="mt-1 text-xs text-oai-gray-500 dark:text-oai-gray-400">{copy(file.changed === false ? "pswitch.diagnostic.no_changes" : "pswitch.diagnostic.values_hidden")}</p>}
             </div>)}
             <div className="flex gap-2"><Button size="sm" disabled={busy} onClick={() => void repair()}>{copy("pswitch.diagnostic.repair")}</Button><Button variant="secondary" size="sm" disabled={busy} onClick={() => setPreview(null)}>{copy("pswitch.action.cancel")}</Button></div>
           </div> : null}

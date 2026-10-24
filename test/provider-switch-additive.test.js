@@ -42,6 +42,11 @@ const editor = require("../src/lib/provider-switch/editor");
 const paths = require("../src/lib/provider-switch/paths");
 const presets = require("../src/lib/provider-switch/presets");
 const { handleProviderSwitchApiRequest, switchProvider } = require("../src/lib/provider-switch/api");
+test("disconnect keeps pointers to a provider entry edited by the user", () => {
+  const prev = { settingsConfig: { slotKey: "relay", modelId: "model", provider: { options: { apiKey: "key" } } } };
+  const live = { provider: { relay: { options: { apiKey: "user-edited" } } }, model: "relay/model" };
+  assert.deepEqual(additive.disconnectAdditive("opencode", { prev, live }), live);
+});
 
 for (const current of [false,true]) test(`Hermes conflicting ID migration preserves unrelated config (current=${current})`,async()=>{
   const row=await store.createProvider("hermes",{name:"DeepSeek",settingsConfig:{slotKey:"deepseek",modelId:"deepseek-chat",provider:{name:"deepseek",base_url:"https://relay.test",api_key:"private-key"}}});

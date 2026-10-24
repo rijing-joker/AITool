@@ -36,6 +36,46 @@ const SMALL_FILE_BYTES = 16_384;
 const metadataCache = new Map();
 const titleIndexCache = new Map();
 const transcriptCache = new TranscriptCache();
+const codexLineageCache = new Map();
+
+async function codexTranscriptFiles(resolved, realPath, roots) {
+  const candidates = [];
+  for (const root of roots) await collectJsonlFiles(root, candidates, { compressed: true });
+  const inventory = codexFiles.dedupeSiblings(candidates);
+  const thread = codexFiles.rolloutIds(resolved)?.thread || codexFiles.rolloutIds(realPath)?.thread;
+  const pages = [];
+  for (const file of thread ? inventory.filter(file => codexFiles.rolloutIds(file)?.thread === thread) : [realPath]) {
+    try { pages.push(await resolveSessionPath(file, roots)); } catch { /* root clamp every page */ }
+  }
+  if (!pages.length) pages.push(await resolveSessionPath(realPath, roots));
+  pages.sort((a, b) => path.basename(a).localeCompare(path.basename(b)));
+  const parents = new Set();
+  for (const file of pages) {
+    const stamp = codexFiles.signature(await fsp.stat(file));
+    let lineage = codexLineageCache.get(file);
+    if (lineage?.stamp !== stamp) {
+      const ids = new Set();
+      for (const line of (await codexFiles.readText(file)).split("\n")) {
+        const row = parseJsonLine(line);
+        if (row?.type === "session_meta") {
+          const metadata = require("./codex-fork-replay").forkReplayMetadata(row.payload);
+          for (const id of Object.values(metadata || {})) if (id) ids.add(id);
+        }
+      }
+      lineage = { stamp, ids: [...ids] };
+      codexLineageCache.set(file, lineage);
+      if (codexLineageCache.size > 256) codexLineageCache.delete(codexLineageCache.keys().next().value);
+    }
+    for (const id of lineage.ids) parents.add(id);
+  }
+  const dependencies = new Set(pages);
+  for (const file of inventory) {
+    const ids = codexFiles.rolloutIds(file);
+    if (!ids || (!parents.has(ids.thread) && !parents.has(ids.rollout))) continue;
+    try { dependencies.add(await resolveSessionPath(file, roots)); } catch { /* root clamp every parent */ }
+  }
+  return { pages: [...new Set(pages)], dependencies: [...dependencies].sort() };
+}
 
 async function transcriptRevision(app, files) {
   const stats = await Promise.all(files.map(async file => {
@@ -1298,22 +1338,10 @@ async function readSession({ app, sourcePath, home, env = process.env, preview =
   let dependencies = [realPath];
   let resolveForkReplay;
   if (app === "codex") {
-    const inventory = [];
-    const candidates = [];
-    for (const root of rootsForApp(app, resolvedHome)) await collectJsonlFiles(root, candidates, { compressed: true });
-    for (const candidate of codexFiles.dedupeSiblings(candidates)) {
-      try { inventory.push({ candidate, real: await resolveSessionPath(candidate, rootsForApp(app, resolvedHome)) }); }
-      catch { /* every physical page must pass the same root clamp */ }
-    }
-    const thread = codexFiles.rolloutIds(resolved)?.thread || codexFiles.rolloutIds(realPath)?.thread;
-    if (thread) codexPages = inventory.filter((row) => codexFiles.rolloutIds(row.candidate)?.thread === thread)
-      .sort((a, b) => path.basename(a.candidate).localeCompare(path.basename(b.candidate))).map((row) => row.real);
-    if (!codexPages.length) codexPages = [realPath];
-    codexPages = [...new Set(codexPages)];
-    resolveForkReplay = require("./codex-fork-replay").createForkReplayResolver(inventory.map((row) => row.real));
-    // Conservative invalidation includes all possible native fork parents.
-    // New pages/parents and preferred compressed siblings change this set.
-    dependencies = [...new Set([...inventory.map(row => row.real), realPath])].sort();
+    const related = await codexTranscriptFiles(resolved, realPath, rootsForApp(app, resolvedHome));
+    codexPages = related.pages;
+    dependencies = related.dependencies;
+    resolveForkReplay = require("./codex-fork-replay").createForkReplayResolver(dependencies);
   }
   const revision = await transcriptRevision(app, dependencies);
   const key = `${app}:${realPath}`;
@@ -1326,7 +1354,8 @@ async function readSession({ app, sourcePath, home, env = process.env, preview =
         : await geminiReadMessages(realPath);
     // Don't commit a snapshot of a log that changed during parsing, or usage
     // whose fork parent is not yet available. A later request must retry.
-    if (await transcriptRevision(app, dependencies) !== revision) {
+    const after = app === "codex" ? (await codexTranscriptFiles(resolved, realPath, rootsForApp(app, resolvedHome))).dependencies : dependencies;
+    if (await transcriptRevision(app, after) !== revision) {
       throw new Error("Session changed during reading; reload the session");
     }
     if (!transcript.usageDeferred) {

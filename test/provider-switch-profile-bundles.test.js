@@ -81,6 +81,22 @@ test("partial failures do not mark a profile fully applied", async () => {
   assert.equal(result.results[0].status, "partial"); assert.equal((await profiles.listProfiles()).currentIds.claude, null);
   assert.equal((await store.listProviders("claude")).current, other.id); assert.notEqual(row.id, other.id);
 });
+test("partial bundle clears the previous marker without autosaving mixed configuration into it", async t => {
+  const old = await seed("claude"), before = await profiles.createProfile({ name: "Old", apps: ["claude"] });
+  const next = await store.createProvider("claude", { name: "Next", settingsConfig: { env: { ANTHROPIC_MODEL: "next" } } });
+  await api.switchProvider({ app: "claude", id: next.id });
+  await mcp.upsertServer({ id: "fixture", server: { command: "node" }, apps: { claude: true } });
+  const after = await profiles.createProfile({ name: "Next", apps: ["claude"] });
+  await api.switchProvider({ app: "claude", id: old.id }); await mcp.toggleServerApp("fixture", "claude", false);
+  await profiles.restoreCurrentMarker("claude", before.id);
+  t.mock.method(mcp, "toggleServerApp", async () => { throw new Error("MCP failure"); });
+  const plan = await bundles.preview({ id: after.id, apps: ["claude"] });
+  const result = await bundles.apply({ id: after.id, apps: ["claude"], revision: plan.revision, applyProvider: (app, id) => api.switchProvider({ app, id }) });
+  assert.equal(result.results[0].status, "partial");
+  assert.equal((await profiles.listProfiles()).currentIds.claude, null);
+  assert.equal((await store.listProviders("claude")).current, next.id);
+  assert.equal((await profiles.listProfiles()).profiles.find(row => row.id === before.id).payload.providers.claude, old.id);
+});
 
 test("shared MCP state changes do not invalidate another selected app's plan", async () => {
   await seed("claude"); await seed("codex");

@@ -26,6 +26,15 @@ test("account switching preserves the live login, summaries hide credentials, re
   assert.equal((await fs.stat(path.join(x.root,"agy-accounts.json"))).mode & 0o777,0o600);
   await manager.remove("a"); assert.equal(x.writes(),1);
   assert.deepEqual((await manager.status()).accounts.map(row => row.id),["b"]);
+  await manager.switchAccount("b");
+  assert.deepEqual((await manager.status()).accounts.map(row => row.id), ["b"]);
+});
+test("undecodable keychain values stop switching without writing a plaintext stash", async t => {
+  const x = await fixture(t), manager = createManager({ ...x, supported: true });
+  await manager.status(); x.set("unknown-format-private-token");
+  await assert.rejects(manager.switchAccount("a"), /Cannot decode/);
+  assert.equal(x.raw(), "unknown-format-private-token"); assert.equal(x.writes(), 0);
+  await assert.rejects(fs.stat(path.join(x.root, "agy-login-stash.json")), { code: "ENOENT" });
 });
 test("quota refresh is per saved account and revocation survives status reads", async t => {
   const x = await fixture(t); const calls = [];

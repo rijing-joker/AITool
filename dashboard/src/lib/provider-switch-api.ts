@@ -341,8 +341,8 @@ export const providerSwitchApi = {
   probeDiagnostic(app: ProviderSwitchApp, signal?: AbortSignal): Promise<{ ok: true; probe: { status: string; httpStatus?: number; latencyMs?: number } }> {
     return mutate("/api/provider-switch/diagnostics/probe", "POST", { app }, signal);
   },
-  previewDiagnostic(app: ProviderSwitchApp): Promise<{ ok: true; revision: string; providerId: string; files: { id: string; path: string; before: string; after: string }[] }> {
-    return mutate("/api/provider-switch/diagnostics/preview", "POST", { app });
+  previewDiagnostic(app: ProviderSwitchApp, showValues = false): Promise<{ ok: true; revision: string; providerId: string; files: { id: string; path: string; changed: boolean; before?: string; after?: string }[] }> {
+    return mutate("/api/provider-switch/diagnostics/preview", "POST", { app, showValues });
   },
   repairDiagnostic(app: ProviderSwitchApp, revision: string): Promise<{ ok: true; wrote: string[] }> {
     return mutate("/api/provider-switch/diagnostics/repair", "POST", { app, revision });

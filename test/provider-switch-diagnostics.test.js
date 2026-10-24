@@ -14,8 +14,8 @@ afterEach(async () => { if (home === undefined) delete process.env.HOME; else pr
 async function create() {
   return store.createProvider("claude", { name: "Fixture", category: "custom", settingsConfig: { env: { ANTHROPIC_BASE_URL: "http://127.0.0.1:19000", ANTHROPIC_AUTH_TOKEN: "private-test-secret", ANTHROPIC_MODEL: "fixture-model" } } });
 }
-async function call(endpoint, payload, authorized = true) {
-  const req = Readable.from(payload ? [Buffer.from(JSON.stringify(payload))] : []); req.method = payload ? "POST" : "GET"; req.headers = {};
+async function call(endpoint, payload, authorized = true, method) {
+  const req = Readable.from(payload ? [Buffer.from(JSON.stringify(payload))] : []); req.method = method || (payload ? "POST" : "GET"); req.headers = {};
   let status, data;
   const res = { writeHead(code) { status = code; }, end(raw) { data = JSON.parse(raw); } };
   await handleProviderSwitchApiRequest(req, res, new URL(endpoint, "http://localhost"), { isAuthorizedLocalMutation: () => authorized });
@@ -44,7 +44,12 @@ test("repair previews the real projection, rejects stale revisions, then preserv
   const live = JSON.parse(await fs.readFile(file)); live.env.ANTHROPIC_MODEL = "other"; live.permissions = { allow: ["Read"] }; await fs.writeFile(file, JSON.stringify(live));
   const preview = await call("/api/provider-switch/diagnostics/preview", { app: "claude" });
   assert.equal(preview.status, 200, JSON.stringify(preview.data));
-  assert.equal(JSON.parse(preview.data.files[0].after).env.ANTHROPIC_MODEL, "fixture-model");
+  assert.equal(preview.data.files[0].changed, true);
+  assert.equal(preview.data.files[0].after, undefined);
+  assert.ok(!JSON.stringify(preview.data).includes("private-test-secret"));
+  const revealed = await call("/api/provider-switch/diagnostics/preview", { app: "claude", showValues: true });
+  assert.equal(JSON.parse(revealed.data.files[0].after).env.ANTHROPIC_MODEL, "fixture-model");
+  assert.equal(revealed.data.revision, preview.data.revision);
   live.permissions.allow.push("Edit"); await fs.writeFile(file, JSON.stringify(live));
   const stale = await call("/api/provider-switch/diagnostics/repair", { app: "claude", revision: preview.data.revision });
   assert.equal(stale.status, 409); assert.equal(JSON.parse(await fs.readFile(file)).env.ANTHROPIC_MODEL, "other");
@@ -52,6 +57,25 @@ test("repair previews the real projection, rejects stale revisions, then preserv
   const repaired = await call("/api/provider-switch/diagnostics/repair", { app: "claude", revision: fresh.data.revision });
   assert.equal(repaired.status, 200); assert.equal((await diagnostics.inspect("claude")).status, "applied");
   assert.deepEqual(JSON.parse(await fs.readFile(file)).permissions.allow, ["Read", "Edit"]);
+});
+test("receipt failures cannot prevent the live provider's current marker from committing", async t => {
+  const old = await create(); await switchProvider({ app: "claude", id: old.id });
+  const next = await store.createProvider("claude", { name: "Next", settingsConfig: { env: { ANTHROPIC_MODEL: "next" } } });
+  t.mock.method(diagnostics, "record", async () => { throw new Error("Receipt unavailable"); });
+  const result = await switchProvider({ app: "claude", id: next.id });
+  assert.equal((await store.listProviders("claude")).current, next.id);
+  assert.equal(JSON.parse(await fs.readFile(path.join(dir, ".claude/settings.json"))).env.ANTHROPIC_MODEL, "next");
+  assert.equal(result.warnings.length, 1);
+  const saved = await call(`/api/provider-switch/providers/${next.id}`, { app: "claude", name: "Updated" }, true, "PUT");
+  assert.equal(saved.status, 200); assert.equal(saved.data.applied.warnings.length, 1);
+});
+test("invalid app paths are rejected before any projection lock directory is created", async t => {
+  const invalid = "../../escaped/nested/app";
+  await assert.rejects(switchProvider({ app: invalid, id: "test" }), /Unsupported/);
+  assert.equal((await call("/api/provider-switch/providers", { app: invalid, name: "Invalid" })).status, 400);
+  const result = await call("/api/provider-switch/diagnostics/repair", { app: invalid });
+  assert.equal(result.status, 400);
+  await assert.rejects(fs.stat(path.join(dir, "escaped")), { code: "ENOENT" });
 });
 test("a broken live file is diagnosed and never overwritten by repair", async () => {
   const provider = await create(); await switchProvider({ app: "claude", id: provider.id });

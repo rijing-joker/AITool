@@ -3,6 +3,7 @@ import { copy } from "../lib/copy";
 import { getLocalApiAuthHeaders } from "../lib/local-api-auth";
 import { Button, Card, ConfirmModal } from "../ui/components";
 import { useVisiblePolling } from "../hooks/use-visible-polling";
+import { usePrivacyText } from "../lib/proxy-privacy";
 
 async function api(route = "", method = "GET", body) {
   const response = await fetch(`/api/provider-switch/agy/accounts${route}`, { method, headers: { ...await getLocalApiAuthHeaders(), "content-type": "application/json" }, ...(body ? { body: JSON.stringify(body) } : {}) });
@@ -10,6 +11,7 @@ async function api(route = "", method = "GET", body) {
 }
 export function ProviderAgyAccounts() {
   const [data, setData] = useState(null);
+  const display = usePrivacyText(data?.accounts.flatMap(row => [row.email, row.name, row.id].filter(Boolean)) || []);
   const operation = useRef(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -36,7 +38,7 @@ export function ProviderAgyAccounts() {
     {flow ? <div className="flex flex-wrap items-center gap-3"><a href={flow.authUrl} target="_blank" rel="noreferrer" className="text-sm underline">{copy("pswitch.agy.account.browser")}</a><Button size="sm" variant="secondary" onClick={() => void run(async () => { await api("/login", "DELETE"); setFlow(null); })}>{copy("shared.cancel")}</Button></div> : null}
     {error ? <p role="alert" className="text-xs text-red-600">{error}</p> : null}
     {data?.accounts.map(row => <div key={row.id} className="space-y-2 border-t border-oai-gray-200 pt-3 dark:border-oai-gray-800">
-      <div className="flex flex-wrap items-center gap-2"><span className="w-full min-w-0 break-words text-sm sm:w-auto sm:flex-1">{row.email || row.name || row.id}</span>
+      <div className="flex flex-wrap items-center gap-2"><span className="w-full min-w-0 break-words text-sm sm:w-auto sm:flex-1">{display(row.email || row.name || row.id)}</span>
         <Button size="sm" variant="secondary" disabled={busy || !data.supported || row.id === data.currentAccountId || row.requiresReauth} onClick={() => void run(async () => { await api("/switch", "POST", { id: row.id }); await load(); })}>{copy(row.id === data.currentAccountId ? "pswitch.agy.account.current" : "pswitch.agy.account.switch")}</Button>
         <Button size="sm" variant="secondary" disabled={busy} onClick={() => void run(async () => { const response = await api(`/quota?id=${encodeURIComponent(row.id)}`); setQuotas(current => ({ ...current, [row.id]: response.quota })); })}>{copy("pswitch.agy.account.quota")}</Button>
         <Button size="sm" variant="secondary" disabled={busy} onClick={() => setRemoving(row)}>{copy("pswitch.agy.account.remove")}</Button>
@@ -50,6 +52,7 @@ export function ProviderAgyAccounts() {
 
 export function AgyAccountSelect({ value, onChange }) {
   const [data, setData] = useState(null);
+  const display = usePrivacyText(data?.accounts.flatMap(row => [row.email, row.name, row.id].filter(Boolean)) || []);
   const [error, setError] = useState("");
   useEffect(() => { let alive = true; api().then(result => { if (alive) setData(result); }).catch(() => { if (alive) setError(copy("pswitch.agy.account.error")); }); return () => { alive = false; }; }, []);
   function matchesAccount(row) { return row.id === value; }
@@ -57,7 +60,7 @@ export function AgyAccountSelect({ value, onChange }) {
   return <label className="block space-y-1 text-sm">{copy("pswitch.agy.account.binding")}
     <select value={value || ""} onChange={event => onChange(event.target.value || undefined)} className="block w-full rounded-lg border border-oai-gray-200 bg-transparent p-2 dark:border-oai-gray-700">
       <option value="">{copy("pswitch.agy.account.follow")}</option>
-      {data?.accounts.map(row => <option key={row.id} value={row.id} disabled={row.requiresReauth}>{row.email || row.name || row.id}</option>)}
+      {data?.accounts.map(row => <option key={row.id} value={row.id} disabled={row.requiresReauth}>{display(row.email || row.name || row.id)}</option>)}
       {missing ? <option value={value}>{copy("pswitch.agy.account.missing")}</option> : null}
     </select>
     <span className="block text-xs text-oai-gray-500">{error || copy("pswitch.agy.account.bindingHint")}</span>

@@ -7,6 +7,22 @@ const { withFileLock, writeFileAtomic } = require("../../fs");
 const state = require("../managed-upstream");
 const direct = require("./http");
 const ID = "aitool/auto";
+const modelChecks = new Map(), quotaChecks = new Map(), eventBatches = new Map();
+async function cachedRead(cache, key, ttl, read, staleMs = 0) {
+  let entry = cache.get(key);
+  if (entry?.pending) return entry.pending;
+  if (entry?.value !== undefined && Date.now() - entry.checkedAt < ttl && (!entry.stale || Date.now() - entry.at < staleMs)) return entry.value;
+  if (!entry) { entry = {}; cache.set(key, entry); }
+  entry.pending = (async () => {
+    try { entry.value = await read(); entry.at = Date.now(); entry.checkedAt = entry.at; entry.stale = false; return entry.value; }
+    catch (error) {
+      if (entry.value !== undefined && Date.now() - entry.at < staleMs) { entry.checkedAt = Date.now(); entry.stale = true; return entry.value; }
+      cache.delete(key); throw error;
+    } finally { entry.pending = null; }
+  })();
+  while (cache.size > 32) cache.delete(cache.keys().next().value);
+  return entry.pending;
+}
 async function file(options = {}) { return path.join(state.root(options), "routing-events.json"); }
 function validate(input) {
   if (typeof input.enabled !== "boolean") throw new Error("enabled must be boolean");
@@ -38,11 +54,17 @@ async function configure(input, options = {}) {
   await state.saveSettings(value => ({ ...value, enabled: { ...value.enabled, routing: true }, routing: { mode: input.mode, apiKey: input.apiKey, models: [...new Set(input.models)], rules: input.rules, intent: input.intent === true, classifier: input.classifier || "", quota: input.quota === true } }), options);
   return status(options);
 }
-async function checkModels(selected, options = {}) {
-  const native = await (options.request || require("../management").request)("GET", "/v8/management/config/api-keys/openai-compatibility");
-  if (!native.ok) throw new Error("Read native upstream groups before configuring routing");
-  const groups = Array.isArray(native.data) ? native.data : native.data?.data;
-  if (!Array.isArray(groups)) throw new Error("Invalid upstream group list");
+async function checkModels(selected, options = {}, cached = false) {
+  const read = async () => {
+    const native = await (options.request || require("../management").request)("GET", "/v8/management/config/api-keys/openai-compatibility");
+    if (!native.ok) throw new Error("Read native upstream groups before configuring routing");
+    const groups = Array.isArray(native.data) ? native.data : native.data?.data;
+    if (!Array.isArray(groups)) throw new Error("Invalid upstream group list");
+    return groups;
+  };
+  // Keep loop checks, coalesce concurrent reads, and tolerate only a brief
+  // management outage after a successful snapshot. Cold reads fail closed.
+  const groups = cached ? await cachedRead(modelChecks, `${state.root(options)}:${options.corePort || 0}`, 5000, read, 30000) : await read();
   const config = await state.settings(options), corePort = options.corePort || require("../config").getServerPort();
   for (const group of groups) {
     const endpoint = String(group["base-url"] || "");
@@ -54,15 +76,31 @@ async function checkModels(selected, options = {}) {
   }
 }
 async function status(options = {}) {
+  await flushEvents(options);
   const config = await state.settings(options), routing = config.routing || {};
   return { enabled: config.enabled.routing === true, mode: routing.mode || "rules", models: routing.models || [], rules: routing.rules || [], intent: routing.intent === true, classifier: routing.classifier || "", quota: routing.quota === true, routeId: ID, events: await state.read(await file(options), []) };
 }
-async function event(value, options) {
-  const target = await file(options);
-  await withFileLock(target, async () => {
-    const rows = await state.read(target, []); rows.push(value);
-    await writeFileAtomic(target, JSON.stringify(rows.slice(-200)), { mode: 0o600 });
+function event(value, options) {
+  const key = state.root(options);
+  let batch = eventBatches.get(key);
+  if (!batch) { batch = { rows: [], pending: null, timer: null }; eventBatches.set(key, batch); }
+  batch.rows.push(value);
+  batch.rows = batch.rows.slice(-200);
+  if (!batch.timer) batch.timer = setTimeout(() => { batch.timer = null; void flushEvents(options).catch(() => {}); }, 100);
+}
+async function flushEvents(options) {
+  const key = state.root(options), batch = eventBatches.get(key);
+  if (!batch) return;
+  if (batch.pending) await batch.pending;
+  if (!batch.rows.length) return;
+  clearTimeout(batch.timer); batch.timer = null;
+  const values = batch.rows.splice(0), target = path.join(key, "routing-events.json");
+  batch.pending = withFileLock(target, async () => {
+    const rows = await state.read(target, []);
+    await writeFileAtomic(target, JSON.stringify([...rows, ...values].slice(-200)), { mode: 0o600 });
   });
+  try { await batch.pending; }
+  finally { batch.pending = null; if (!batch.rows.length) eventBatches.delete(key); }
 }
 function facts(body) {
   let image = false;
@@ -87,7 +125,14 @@ async function quotaOrder(routing, options) {
   const config = await state.settings(options), order = {};
   for (const kind of ["workbuddy", "workbuddy-ai"]) {
     const ids = routing.models.filter(id => id.startsWith(`${kind}/`)); if (!ids.length) continue;
-    try { const quota = await require("./workbuddy").quota(kind, options); if (Number.isFinite(quota.used) && quota.total > 0) for (const id of ids) order[id] = quota.used / quota.total; } catch { /* Unknown remains explicitly unknown. */ }
+    try {
+      const key = `${state.root(options)}:${kind}:${crypto.createHash("sha256").update(JSON.stringify(config)).digest("hex")}`;
+      const quota = await cachedRead(quotaChecks, key, 30000, async () => {
+        try { return await (options.quota || require("./workbuddy").quota)(kind, options); }
+        catch { return {}; }
+      });
+      if (Number.isFinite(quota.used) && quota.total > 0) for (const id of ids) order[id] = quota.used / quota.total;
+    } catch { /* Unknown remains explicitly unknown. */ }
   }
   return order;
 }
@@ -102,7 +147,7 @@ async function classify(routing, body, signal, options) {
 async function forward({ req, res, body, signal, options, pipeline }) {
   const config = await state.settings(options), routing = config.routing;
   if (!routing || body.model !== ID || req.headers["x-aitool-route-hop"]) throw new Error("Routing loop or unknown route");
-  await checkModels([...routing.models, ...(routing.intent ? [routing.classifier] : [])], options);
+  await checkModels([...routing.models, ...(routing.intent ? [routing.classifier] : [])], options, true);
   const session = typeof req.headers["x-magpie-session"] === "string" && req.headers["x-magpie-session"].length <= 128 ? req.headers["x-magpie-session"] : crypto.randomUUID(), at = new Date().toISOString();
   let classification = null, classifierState = "disabled";
   const hasClassifier = routing.intent && routing.rules.some(rule => rule.when === "intent");
@@ -130,7 +175,7 @@ async function forward({ req, res, body, signal, options, pipeline }) {
     });
     record.status = record.httpStatus < 400 ? "completed" : "failed";
   } catch (error) { record.status = signal.aborted ? "canceled" : "failed"; throw error; }
-  finally { await event(record, options); }
+  finally { event(record, options); }
 }
 function stripDispatchUsage(streaming) {
   let buffer = "";

@@ -92,6 +92,65 @@ function expandStep(label) {
   fireEvent(details, new Event("toggle"));
   return details;
 }
+it("loads full lazy tool arguments and patch objects only after disclosure", async () => {
+  const body = "*** Begin Patch\n*** Add File: test.txt\n" + "+line\n".repeat(2000) + "+LAZYPATCHTAIL\n*** End Patch";
+  const full = { revision: "v1", messages: [{ role: "user", content: "Make a file" }, { role: "assistant", content: "", toolCalls: [{ name: "apply_patch", input: body, patch: { body, files: [{ kind: "add", path: "test.txt" }], additions: 2001, deletions: 0, status: "success" } }] }] };
+  const refs = [];
+  await openTranscript(full.messages, url => {
+    if (url.pathname.endsWith("/content")) {
+      const options = Object.fromEntries(url.searchParams); refs.push(options.ref);
+      return { ok: true, ...contentPage(full, options) };
+    }
+    return { ok: true, ...previewTranscript(full) };
+  });
+  expect(refs).toEqual([]);
+  fireEvent.click(screen.getByRole("button", { name: "clisessions.expand_processes" }));
+  expandStep("apply_patch");
+  await waitFor(() => expect(refs.sort()).toEqual(["1:call:0:input", "1:call:0:patch"]));
+  expect((await screen.findAllByText("test.txt")).length).toBeGreaterThan(0);
+  await waitFor(() => expect(screen.getByText("apply_patch").closest("summary")).toHaveTextContent("+2001"));
+});
+
+it("counts rejected lazy Codex patches before loading their bodies", async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "aitool-patch-failure-"));
+  let release;
+  const ready = new Promise(resolve => { release = resolve; });
+  try {
+    const sourcePath = path.join(home, ".codex/sessions/rejected.jsonl");
+    fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
+    const body = "*** Begin Patch\n*** Update File: app.js\n@@\n" + "-old\n+new\n".repeat(600) + "*** End Patch";
+    const rows = [
+      { type: "response_item", payload: { type: "message", role: "user", content: [{ type: "input_text", text: "Update the file" }] } },
+      { type: "response_item", payload: { type: "custom_tool_call", call_id: "patch", name: "apply_patch", input: body } },
+      { type: "response_item", payload: { type: "custom_tool_call_output", call_id: "patch", output: "apply_patch verification failed: Expected lines were not found" } },
+    ];
+    fs.writeFileSync(sourcePath, rows.map(row => JSON.stringify(row)).join("\n"));
+    const full = await readSession({ app: "codex", home, sourcePath });
+    const refs = [];
+    await openTranscript(full.messages, async url => {
+      if (url.pathname.endsWith("/content")) {
+        const options = Object.fromEntries(url.searchParams); refs.push(options.ref);
+        await ready;
+        return { ok: true, ...contentPage(full, options) };
+      }
+      return { ok: true, ...previewTranscript(full) };
+    });
+    expect(screen.getByText('clisessions.process_failed:{"count":1}')).toBeInTheDocument();
+    const details = screen.getByText("apply_patch").closest("details");
+    expect(details).toHaveAttribute("open");
+    expect(details).toHaveClass("bg-red-50/60");
+    expect(details.querySelector("summary")).toHaveTextContent("app.js");
+    expect(details.querySelector("summary")).toHaveTextContent("clisessions.status.failed");
+    await waitFor(() => expect(refs.sort()).toEqual(["1:call:0:input", "1:call:0:patch"]));
+    await act(async () => { release(); await ready; });
+    await waitFor(() => expect(details.querySelector("summary")).toHaveTextContent("+600 −600clisessions.patch.failed"));
+    expect(screen.getByText('clisessions.process_failed:{"count":1}')).toBeInTheDocument();
+  } finally {
+    release();
+    cleanup();
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
 
 it("keeps successful groups collapsed and opens matching children without merging failures", async () => {
   await openTranscript([

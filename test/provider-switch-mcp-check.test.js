@@ -9,6 +9,13 @@ const { test, beforeEach, afterEach } = require("node:test");
 const checker = require("../src/lib/provider-switch/mcp-check");
 const mcp = require("../src/lib/provider-switch/mcp");
 const refs = require("../src/lib/provider-switch/mcp-envrefs");
+test("malformed imported env references stay listable and cannot be saved", async () => {
+  for (const fields of [{ env_vars: 42 }, { env_vars: "SECRET" }, { env_http_headers: [] }, { env_http_headers: "bad" }, { env_vars: [{}] }]) {
+    const server = { command: "node", ...fields };
+    assert.doesNotThrow(() => checker.snapshot({ id: "bad", server }));
+    await assert.rejects(mcp.upsertServer({ id: "bad", server, apps: {} }), /MCP/);
+  }
+});
 const { parse } = require("smol-toml");
 const YAML = require("yaml");
 let dir, oldHome, oldProfile;

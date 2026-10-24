@@ -5,7 +5,7 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const YAML = require("yaml");
 const { parse } = require("smol-toml");
-const { ensureDir, writeFileAtomic, withFileLock } = require("../fs");
+const { writeFileAtomic, withFileLock } = require("../fs");
 const paths = require("./paths");
 const store = require("./store");
 const profiles = require("./profiles");
@@ -83,48 +83,57 @@ async function apply({ id, apps, revision, applyProvider }) {
     if (!revision || revision !== plan.revision) throw Object.assign(new Error("Profile or configuration changed; reload the preview"), { status: 409 });
     if (plan.results.some(row => !row.ready)) throw new Error("Fix the profile references before applying");
     const recoveryPath = path.join(paths.providerSwitchRoot(), "profile-recovery", crypto.randomUUID());
-    await ensureDir(recoveryPath);
-    const manifest = { version: 1, profileId: id, apps: plan.apps, createdAt: new Date().toISOString(), files: [], links: [], results: [] };
-    // Capture every affected config and store before the first application.
-    const allFiles = new Map();
-    for (const snapshot of Object.values(plan.states)) for (const file of snapshot.live) allFiles.set(file.path, file.content);
-    for (const file of [paths.storePath(), paths.mcpStorePath(), paths.promptsStorePath(), paths.profilesStorePath(), paths.codexAuthStashPath(),
-      path.join(paths.providerSwitchRoot(), "skills.json"), path.join(paths.providerSwitchRoot(), "mcp-tool-rules.json"), path.join(paths.providerSwitchRoot(), "projection-receipts.json")]) {
-      try { allFiles.set(file, await fs.readFile(file, "utf8")); } catch (error) { if (error.code !== "ENOENT") throw error; allFiles.set(file, null); }
-    }
-    for (const [target, content] of allFiles) {
-      const backup = content === null ? null : `${manifest.files.length}.txt`;
-      if (backup) await writeFileAtomic(path.join(recoveryPath, backup), content, { mode: 0o600 });
-      manifest.files.push({ target, backup, existed: content !== null });
-    }
-    for (const state of Object.values(plan.states)) for (const link of state.links) {
-      const entry = { ...link };
-      if (link.type === "directory") {
-        const files = await require("./library-distribution").skillFiles(link.target);
-        if (digest(files.map(({ path, hash }) => ({ path, hash }))) !== digest(link.files)) throw new Error("Skill changed while creating recovery copies");
-        entry.backup = `skills/${manifest.links.length}`;
-        for (const item of files) await writeFileAtomic(path.join(recoveryPath, entry.backup, item.path), Buffer.from(item.data, "base64"), { mode: 0o600 });
+    await fs.mkdir(recoveryPath, { recursive: true, mode: 0o700 });
+    let applicationStarted = false;
+    try {
+      const manifest = { version: 1, profileId: id, apps: plan.apps, createdAt: new Date().toISOString(), files: [], links: [], results: [] };
+      // Capture every affected config and store before the first application.
+      const allFiles = new Map();
+      for (const snapshot of Object.values(plan.states)) for (const file of snapshot.live) allFiles.set(file.path, file.content);
+      for (const file of [paths.storePath(), paths.mcpStorePath(), paths.promptsStorePath(), paths.profilesStorePath(), paths.codexAuthStashPath(),
+        path.join(paths.providerSwitchRoot(), "skills.json"), path.join(paths.providerSwitchRoot(), "mcp-tool-rules.json"), path.join(paths.providerSwitchRoot(), "projection-receipts.json")]) {
+        try { allFiles.set(file, await fs.readFile(file, "utf8")); } catch (error) { if (error.code !== "ENOENT") throw error; allFiles.set(file, null); }
       }
-      manifest.links.push(entry);
-    }
-    await save();
-    if ((await preview({ id, apps })).revision !== plan.revision) throw Object.assign(new Error("Profile or configuration changed while creating recovery copies; reload the preview"), { status: 409 });
-    const previous = await profiles.listProfiles();
-    for (const app of plan.apps) {
-      let result;
-      try {
-        // Earlier applications can legitimately change the shared stores.
-        // Recheck this app's files against its original preflight snapshot.
-        const fresh = await readSnapshot(app);
-        if (digest(fresh) !== digest(plan.states[app])) throw new Error("Live configuration or profile references changed during profile application");
-        result = await profiles.applyProfile({ id, app, applyProvider });
-        if (result.warnings.length) await profiles.restoreCurrentMarker(app, previous.currentIds[app]);
-        manifest.results.push({ app, status: result.warnings.length ? "partial" : "applied", warnings: result.warnings });
-      } catch (error) { manifest.results.push({ app, status: "failed", warnings: [error.message] }); }
+      for (const [target, content] of allFiles) {
+        const backup = content === null ? null : `${manifest.files.length}.txt`;
+        if (backup) await writeFileAtomic(path.join(recoveryPath, backup), content, { mode: 0o600 });
+        manifest.files.push({ target, backup, existed: content !== null });
+      }
+      for (const state of Object.values(plan.states)) for (const link of state.links) {
+        const entry = { ...link };
+        if (link.type === "directory") {
+          const files = await require("./library-distribution").skillFiles(link.target);
+          if (digest(files.map(({ path, hash }) => ({ path, hash }))) !== digest(link.files)) throw new Error("Skill changed while creating recovery copies");
+          entry.backup = `skills/${manifest.links.length}`;
+          for (const item of files) await writeFileAtomic(path.join(recoveryPath, entry.backup, item.path), Buffer.from(item.data, "base64"), { mode: 0o600 });
+        }
+        manifest.links.push(entry);
+      }
       await save();
+      if ((await preview({ id, apps })).revision !== plan.revision) throw Object.assign(new Error("Profile or configuration changed while creating recovery copies; reload the preview"), { status: 409 });
+      applicationStarted = true;
+      for (const app of plan.apps) {
+        let result;
+        try {
+          // Earlier applications can legitimately change the shared stores.
+          // Recheck this app's files against its original preflight snapshot.
+          const fresh = await readSnapshot(app);
+          if (digest(fresh) !== digest(plan.states[app])) throw new Error("Live configuration or profile references changed during profile application");
+          result = await profiles.applyProfile({ id, app, applyProvider });
+          // Partial configuration belongs to neither the old nor new profile.
+          // Clearing the marker also prevents autosave from corrupting either.
+          if (result.warnings.length) await profiles.restoreCurrentMarker(app, null);
+          manifest.results.push({ app, status: result.warnings.length ? "partial" : "applied", warnings: result.warnings });
+        } catch (error) { await profiles.restoreCurrentMarker(app, null); manifest.results.push({ app, status: "failed", warnings: [error.message] }); }
+        await save();
+      }
+      await require("./recovery-retention").pruneRecovery("profile-recovery", recoveryPath).catch(() => {});
+      return { ok: true, results: manifest.results, recoveryPath };
+      async function save() { await writeFileAtomic(path.join(recoveryPath, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 }); }
+    } finally {
+      // A rejected second preflight has not written any live state.
+      if (!applicationStarted) await fs.rm(recoveryPath, { recursive: true, force: true });
     }
-    return { ok: true, results: manifest.results, recoveryPath };
-    async function save() { await writeFileAtomic(path.join(recoveryPath, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 }); }
   });
 }
 

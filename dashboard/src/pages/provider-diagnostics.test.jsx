@@ -9,7 +9,7 @@ afterEach(() => { cleanup(); vi.clearAllMocks(); });
 const diagnostic = { app: "claude", status: "replaced", providerId: "p1", differences: [{ fileId: "settings", field: "env.ANTHROPIC_MODEL" }], environment: [] };
 it("starts with a local diagnosis and requires review before repairing", async () => {
   providerSwitchApi.diagnostic.mockResolvedValue({ diagnostic });
-  providerSwitchApi.previewDiagnostic.mockResolvedValue({ revision: "rev1", files: [{ id: "settings", path: "/tmp/settings.json", before: "old-secret", after: "new-secret" }] });
+  providerSwitchApi.previewDiagnostic.mockImplementation(async (_app, showValues) => ({ revision: "rev1", files: [{ id: "settings", path: "/tmp/settings.json", changed: true, ...(showValues ? { before: "old-secret", after: "new-secret" } : {}) }] }));
   providerSwitchApi.repairDiagnostic.mockResolvedValue({ wrote: [] });
   render(<ProviderDiagnostics app="claude" />);
   await screen.findByText("pswitch.diagnostic.replaced");
@@ -19,8 +19,10 @@ it("starts with a local diagnosis and requires review before repairing", async (
   fireEvent.click(screen.getByRole("button", { name: "pswitch.diagnostic.preview" }));
   await screen.findByText("pswitch.diagnostic.values_hidden");
   expect(screen.queryByText(/new-secret/)).toBeNull();
+  expect(providerSwitchApi.previewDiagnostic).toHaveBeenCalledWith("claude");
   fireEvent.click(screen.getByRole("checkbox"));
-  expect(screen.getByText(/new-secret/)).toBeTruthy();
+  expect(await screen.findByText(/new-secret/)).toBeTruthy();
+  expect(providerSwitchApi.previewDiagnostic).toHaveBeenCalledWith("claude", true);
   fireEvent.click(screen.getByRole("button", { name: "pswitch.diagnostic.repair" }));
   await waitFor(() => expect(providerSwitchApi.repairDiagnostic).toHaveBeenCalledWith("claude", "rev1"));
 });

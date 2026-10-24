@@ -135,7 +135,12 @@ async function preview(input) {
   }
   const desired = new Set(changes.map(item => item.path));
   for (const [target, receipt] of Object.entries(store.owned)) if (receipt.owner === id && !desired.has(target)) {
-    if (receipt.entries && !Object.keys(receipt.entries).length && !receipt.pendingEntries) {
+    if (receipt.ignoreBlock !== undefined || receipt.pendingIgnoreBlock !== undefined) {
+      const before = await read(target);
+      const block = (before || "").match(/# >>> AiTool project distribution >>>\n[\s\S]*?# <<< AiTool project distribution <<</)?.[0];
+      if (block && ![receipt.ignoreBlock, receipt.pendingIgnoreBlock].includes(block)) errors.push("git: user changed the managed gitignore block");
+      changes.push({ path: target, next: block ? before.replace(block, "") : before, app: receipt.app, partial: true, ignoreBlock: "", release: !block });
+    } else if (receipt.entries && !Object.keys(receipt.entries).length && !receipt.pendingEntries) {
       changes.push({ path: target, next: await read(target), app: receipt.app, partial: true, release: true });
     } else changes.push({ path: target, next: null, app: receipt.app });
   }
@@ -158,7 +163,7 @@ async function preview(input) {
         if (original && ![receipt?.ignoreBlock, receipt?.pendingIgnoreBlock].includes(original)) throw new Error("User gitignore block exists or was edited");
       }
       if (before && !change.partial && (!receipt || ![receipt.hash, receipt.pendingHash].includes(change.beforeHash))) throw new Error("User file already exists or was edited; kept unchanged");
-      if (change.next === null && receipt?.entries) throw new Error("Remove project MCP selections while retaining their app first; whole user config will not be removed");
+      if (change.next === null && receipt?.entries && !change.release) throw new Error("Remove project MCP selections while retaining their app first; whole user config will not be removed");
     } catch (error) { errors.push(`${change.app}: ${error.message}`); }
   }
   const revision = hash(JSON.stringify({ store, input: { kind: input.kind, row }, ordered }));
@@ -170,6 +175,7 @@ async function apply(input) {
     if (plan.errors.length) throw new Error(plan.errors.join("\n"));
     if (!input.revision || input.revision !== plan.revision) throw Object.assign(new Error("Distribution preview changed; preview again"), { status: 409 });
     const store = await load(), results = [], recovery = path.join(paths.providerSwitchRoot(), "distribution-backups", crypto.randomUUID());
+    await fs.mkdir(recovery, { recursive: true, mode: 0o700 });
     const manifest = { version: 1, owner: plan.id, createdAt: new Date().toISOString(), files: plan.changes.map((change, index) => ({ target: change.path, beforeHash: change.beforeHash, beforeMode: change.beforeMode, existed: change.beforeHash !== null, backup: change.beforeHash !== null ? `${index}.bak` : null, status: "skipped" })) };
     await stateSave();
     for (const change of plan.changes) {
@@ -192,7 +198,7 @@ async function apply(input) {
               if (change.mode !== undefined) await fs.chmod(change.path, change.mode);
             } else await fs.rm(change.path, { force: true });
           }
-          if (next && !change.release) store.owned[change.path] = { ...store.owned[change.path], hash: hash(next), pendingHash: undefined, entries: change.entries, ignoreBlock: change.ignoreBlock, pendingEntries: undefined, pendingIgnoreBlock: undefined };
+          if (next && !change.release && change.ignoreBlock !== "") store.owned[change.path] = { ...store.owned[change.path], hash: hash(next), pendingHash: undefined, entries: change.entries, ignoreBlock: change.ignoreBlock, pendingEntries: undefined, pendingIgnoreBlock: undefined };
           else delete store.owned[change.path];
           await writeFileAtomic(file(), JSON.stringify(store, null, 2), { mode: 0o600 });
         });
@@ -204,6 +210,7 @@ async function apply(input) {
     const collection = plan.kind === "subagent" ? "subagents" : "projects", identity = plan.kind === "subagent" ? "name" : "dir";
     store[collection] = [...store[collection].filter(row => row[identity] !== plan.row[identity]), { ...plan.row, partial: results.some(row => row.status === "failed") }];
     await writeFileAtomic(file(), JSON.stringify(store, null, 2), { mode: 0o600 });
+    await require("./recovery-retention").pruneRecovery("distribution-backups", recovery).catch(() => {});
     return { results, recoveryPath: recovery };
     async function stateSave() { await writeFileAtomic(path.join(recovery, "manifest.json"), JSON.stringify(manifest, null, 2), { mode: 0o600 }); }
   });

@@ -1622,6 +1622,7 @@
   "proxy.requests.detail.reasoning": "推論",
   "proxy.requests.detail.cacheRead": "キャッシュ読取",
   "proxy.requests.detail.cacheCreation": "キャッシュ書込",
+  "proxy.requests.detail.serviceTier": "サービス層",
   "proxy.requests.detail.total": "合計",
   "proxy.requests.detail.failureMessage": "失敗メッセージ",
   "proxy.requests.range.1h": "1時間",

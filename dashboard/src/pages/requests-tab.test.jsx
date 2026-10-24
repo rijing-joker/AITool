@@ -291,6 +291,22 @@ it("remembers the chosen page size across mounts", async () => {
   clearDisplayPrefs();
 });
 
+it("pulls the page back when the total shrinks below the current page (cc-switch 29f8bef)", async () => {
+  clearDisplayPrefs();
+  // 60 records at the default page size of 50 span two pages; sit on the second.
+  const many = Array.from({ length: 60 }, (_, index) => ({ ...response.records[0], id: `r${index}`, model: `model-${index}` }));
+  await setup({ total: 60, records: many.slice(0, 50) });
+  const nextButtons = screen.getAllByRole("button", { name: "proxy.requests.next" });
+  fireEvent.click(nextButtons.find((button) => !button.disabled));
+  await waitFor(() => expect(String(recordsCalls().at(-1)[0])).toContain("page=1"));
+  // The window rolls over and the total drops to a single page: the page
+  // must be pulled back instead of leaving an empty out-of-range table.
+  fetch.mockImplementationOnce(async () => ({ json: async () => ({ ...response, total: 5, records: many.slice(0, 5) }) }));
+  fireEvent.click(screen.getByRole("button", { name: "proxy.upstream.common.refresh" }));
+  await waitFor(() => expect(String(recordsCalls().at(-1)[0])).toContain("page=0"), { timeout: 4000 });
+  clearDisplayPrefs();
+});
+
 it.each([
   [40_000, "text-red-600"],
   [16_000, "text-amber-600"],

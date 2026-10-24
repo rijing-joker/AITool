@@ -10,6 +10,13 @@ const { test } = require("node:test");
 const paths = require("../src/lib/proxy/paths");
 const core = require("../scripts/fetch-core.cjs");
 
+// Mocked "latest" release: always one patch above the pin so these tests
+// survive core-version.txt bumps without edits.
+function newerThanPin() {
+  const [major, minor, patch] = core.pinnedVersion().split(".").map(Number);
+  return `v${major}.${minor}.${patch + 1}`;
+}
+
 test("staging a release preserves the live binary and marker until commit", async () => {
   const root = makeHome();
   let staged;
@@ -177,11 +184,11 @@ test("resolveRelease rejects stale, prerelease and malformed mirror tags", async
 test("resolveRelease falls back to GitHub's latest when the mirror lags or is down", async () => {
   const fetchImpl = async (url) => {
     if (String(url).includes("api.gitcode.com")) return { ok: false, status: 502, headers: new Headers(), body: null };
-    if (String(url).includes("api.github.com")) return githubApi({ tag_name: "v8.0.38" });
+    if (String(url).includes("api.github.com")) return githubApi({ tag_name: newerThanPin() });
     throw new Error(`unexpected fetch: ${url}`);
   };
   const release = await core.resolveRelease({ fetchImpl });
-  assert.equal(release.version, "8.0.38");
+  assert.equal(release.version, newerThanPin().slice(1));
   assert.equal(release.source, "github");
 });
 
@@ -221,12 +228,12 @@ test("resolveRelease carries GitHub asset digests for download verification", as
   const fetchImpl = async (url) => {
     if (String(url).includes("api.gitcode.com")) return { ok: false, status: 502, headers: new Headers(), body: null };
     return githubApi({
-      tag_name: "v8.0.38",
-      assets: [{ name: core.platformAsset("8.0.38").name, digest: `sha256:${digest}` }],
+      tag_name: newerThanPin(),
+      assets: [{ name: core.platformAsset(newerThanPin().slice(1)).name, digest: `sha256:${digest}` }],
     });
   };
   const release = await core.resolveRelease({ fetchImpl });
-  assert.equal(release.digests[core.platformAsset("8.0.38").name], digest);
+  assert.equal(release.digests[core.platformAsset(newerThanPin().slice(1)).name], digest);
 });
 
 test("resolveRelease rethrows aborts instead of falling back", async () => {
@@ -447,13 +454,13 @@ test("checkUpdate reports installed, latest and hasUpdate", async () => {
     fs.writeFileSync(paths.coreVersionPath, "v8.0.9\n");
     const fetchImpl = async (url) => {
       if (String(url).includes("api.gitcode.com")) return { ok: false, status: 502, headers: new Headers(), body: null };
-      if (String(url).includes("api.github.com")) return githubApi({ tag_name: "v8.0.38" });
+      if (String(url).includes("api.github.com")) return githubApi({ tag_name: newerThanPin() });
       throw new Error(`unexpected fetch: ${url}`);
     };
     assert.deepEqual(await core.checkUpdate({ fetchImpl }), {
-      installed: "8.0.9", latest: "8.0.38", source: "github", hasUpdate: true,
+      installed: "8.0.9", latest: newerThanPin().slice(1), source: "github", hasUpdate: true,
     });
-    fs.writeFileSync(paths.coreVersionPath, "v8.0.38\n");
+    fs.writeFileSync(paths.coreVersionPath, `${newerThanPin()}\n`);
     assert.equal((await core.checkUpdate({ fetchImpl })).hasUpdate, false);
     fs.writeFileSync(paths.coreVersionPath, "dev-local+abc1234\n");
     assert.equal((await core.checkUpdate({ fetchImpl })).hasUpdate, false);

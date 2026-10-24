@@ -1216,6 +1216,7 @@
   "proxy.requests.detail.reasoning": "推理",
   "proxy.requests.detail.cacheRead": "缓存读取",
   "proxy.requests.detail.cacheCreation": "缓存写入",
+  "proxy.requests.detail.serviceTier": "服务层级",
   "proxy.requests.detail.total": "总计",
   "proxy.requests.detail.failureMessage": "失败信息",
   "proxy.requests.range.1h": "1小时",

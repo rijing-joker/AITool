@@ -1622,6 +1622,7 @@
   "proxy.requests.detail.reasoning": "추론",
   "proxy.requests.detail.cacheRead": "캐시 읽기",
   "proxy.requests.detail.cacheCreation": "캐시 쓰기",
+  "proxy.requests.detail.serviceTier": "서비스 티어",
   "proxy.requests.detail.total": "합계",
   "proxy.requests.detail.failureMessage": "실패 메시지",
   "proxy.requests.range.1h": "1시간",

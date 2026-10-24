@@ -1633,6 +1633,7 @@
   "proxy.requests.detail.reasoning": "Reasoning",
   "proxy.requests.detail.cacheRead": "Cache-Lesen",
   "proxy.requests.detail.cacheCreation": "Cache-Schreiben",
+  "proxy.requests.detail.serviceTier": "Service-Tier",
   "proxy.requests.detail.total": "Gesamt",
   "proxy.requests.detail.failureMessage": "Fehlermeldung",
   "proxy.requests.range.1h": "1 Std.",

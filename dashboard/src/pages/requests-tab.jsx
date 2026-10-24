@@ -540,6 +540,9 @@ function RequestDetails({ record, id, onReplay, replayState }) {
     ["proxy.requests.detail.reasoning", formatCount(tokens.reasoningTokens)],
     ["proxy.requests.detail.cacheRead", formatCount(tokens.cacheReadTokens)],
     ["proxy.requests.detail.cacheCreation", formatCount(tokens.cacheCreationTokens)],
+    // v8.0.39+ publishes the tier rules settled on (effective_service_tier);
+    // v8.0.40+ adds what the upstream reported back (response_service_tier).
+    ["proxy.requests.detail.serviceTier", record.effective_service_tier || record.response_service_tier || "—"],
     ["proxy.requests.latency", formatDuration(record.latencyMs)],
     ["proxy.requests.col.ttft", formatDuration(record.ttftMs)],
     ["proxy.requests.col.speed", formatSpeed(tokens.outputTokens, record.latencyMs)],
@@ -941,6 +944,13 @@ export function RequestsTab() {
   const missingUpstream = upstream && !(filterOptions?.upstreams || []).some(option => option.key === upstream);
   const clearFilters = () => { setKeyHash(""); setUpstream(""); setModel(""); setProvider(""); setQuery({ model: "", provider: "" }); setResult("all"); setRange("24h"); setPage(0); };
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  // Sitting past the end when the total shrinks (the "today" window rolled
+  // over, records were pruned) leaves an empty table, and with a single page
+  // the pagination bar is hidden with no way back — pull the page in once
+  // real (non-loading) data arrives (cc-switch 29f8bef).
+  useEffect(() => {
+    if (records !== null && !loading && page >= totalPages) setPage(totalPages - 1);
+  }, [records, loading, page, totalPages]);
 
   // Page/pageSize-only loads skip the stats recompute: the filtered
   // aggregation is independent of the slice (easy ffdc53c "refresh filter

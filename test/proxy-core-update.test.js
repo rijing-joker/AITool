@@ -6,6 +6,14 @@ const { test } = require("node:test");
 const paths = require("../src/lib/proxy/paths");
 const { handleProxyApiRequest } = require("../src/lib/proxy/api");
 
+// Mocked "latest" release: always one patch above the pin so these tests
+// survive core-version.txt bumps without edits.
+function newerThanPin() {
+  const pinned = fs.readFileSync(path.join(__dirname, "..", "core-version.txt"), "utf8").trim();
+  const [major, minor, patch] = pinned.replace(/^v/, "").split(".").map(Number);
+  return `v${major}.${minor}.${patch + 1}`;
+}
+
 // The settings-page update check endpoint: GitCode → GitHub latest resolution
 // (stubbed fetch) compared against the installed version marker.
 
@@ -35,13 +43,13 @@ test("core-update reports installed, latest and hasUpdate", async (t) => {
   t.mock.method(globalThis, "fetch", async (url) => {
     if (String(url).includes("api.gitcode.com")) return { ok: false, status: 502, headers: new Headers(), body: null };
     if (String(url).includes("api.github.com")) {
-      return { ok: true, status: 200, headers: new Headers(), json: async () => ({ tag_name: "v8.0.38" }) };
+      return { ok: true, status: 200, headers: new Headers(), json: async () => ({ tag_name: newerThanPin() }) };
     }
     throw new Error(`unexpected fetch: ${url}`);
   });
   const payload = await getUpdate();
   assert.equal(payload.ok, true);
-  assert.deepEqual(payload.update, { installed: "8.0.9", latest: "8.0.38", source: "github", hasUpdate: true });
+  assert.deepEqual(payload.update, { installed: "8.0.9", latest: newerThanPin().slice(1), source: "github", hasUpdate: true });
 });
 
 test("core-update falls back to the repo pin and reports no update without an install marker", async (t) => {

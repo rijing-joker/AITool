@@ -2312,6 +2312,7 @@ proxy.requests.detail.output,proxy,ProxyPage,Proxy,detail_output,"Output",,activ
 proxy.requests.detail.reasoning,proxy,ProxyPage,Proxy,detail_reasoning,"Reasoning",,active
 proxy.requests.detail.cacheRead,proxy,ProxyPage,Proxy,detail_cacheRead,"Cache read",,active
 proxy.requests.detail.cacheCreation,proxy,ProxyPage,Proxy,detail_cacheCreation,"Cache creation",,active
+proxy.requests.detail.serviceTier,proxy,ProxyPage,Proxy,detail_serviceTier,"Service tier",,active
 proxy.requests.detail.total,proxy,ProxyPage,Proxy,detail_total,"Total",,active
 proxy.requests.detail.failureMessage,proxy,ProxyPage,Proxy,detail_failureMessage,"Failure message",,active
 proxy.requests.range.1h,proxy,ProxyPage,Proxy,range_1h,"1h",,active

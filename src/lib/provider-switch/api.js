@@ -1377,7 +1377,13 @@ async function fetchModelList({ baseUrl, apiKey, modelsUrl, isFullUrl, requestHe
     // cc-switch probes /v1/models then /models; a full-URL endpoint is used
     // verbatim (the user already included the models path).
     if (isFullUrl) candidates.push(base);
-    else candidates.push(`${base}/v1/models`, `${base}/models`);
+    else {
+      candidates.push(`${base}/v1/models`, `${base}/models`);
+      // Qianwen / Bailian Token Plan anthropic endpoints (`…/apps/anthropic`)
+      // return 404 for /v1/models — their list lives only under the OpenAI
+      // compatible path (cc-switch c3ad9bb, #8755).
+      if (base.endsWith("/apps/anthropic")) candidates.push(`${base}/compatible-mode/v1/models`);
+    }
   }
 
   const errors = [];

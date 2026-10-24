@@ -1545,6 +1545,13 @@ function startMockUpstream() {
         res.end(JSON.stringify({ data: [{ id: "gpt-5.2" }, { id: "gpt-5.2-codex" }] }));
         return;
       }
+      // Qianwen/Bailian Token Plan fixture: the anthropic app endpoint has no
+      // /v1/models of its own; the list lives only under compatible-mode.
+      if (req.url.startsWith("/apps/anthropic") && !req.url.startsWith("/apps/anthropic/compatible-mode")) {
+        res.writeHead(404);
+        res.end("not found");
+        return;
+      }
       if (req.url.endsWith("/models")) {
         res.writeHead(200, { "content-type": "application/json" });
         res.end(JSON.stringify([{ id: "deepseek-v4-pro" }, { id: "deepseek-flash" }]));
@@ -1608,6 +1615,15 @@ test("provider-switch speed-test probes endpoints and fetch-models discovers lis
       }),
     });
     assert.deepEqual(explicit.body.models, ["deepseek-v4-pro", "deepseek-flash"]);
+
+    // fetch models: /apps/anthropic bases fall through to the compatible-mode
+    // list (cc-switch c3ad9bb — Qianwen/Bailian Token Plan, #8755)
+    const compatible = await call(handler, {
+      method: "POST",
+      url: `${prefix}/fetch-models`,
+      body: JSON.stringify({ baseUrl: `http://127.0.0.1:${port}/apps/anthropic` }),
+    });
+    assert.deepEqual(compatible.body.models, ["deepseek-v4-pro", "deepseek-flash"]);
 
     // fetch models: no model list anywhere -> error
     const empty = await call(handler, {

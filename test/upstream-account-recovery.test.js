@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const os = require("node:os");
-const { createManager, encode, decode } = require("../src/lib/provider-switch/agy-accounts");
+const { createManager, encode, decode, probeAgyCliVersion } = require("../src/lib/provider-switch/agy-accounts");
 const { createRecovery } = require("../src/lib/proxy/recovery");
 const keys = require("../src/lib/provider-api-key-store");
 const credential = id => ({ id_token: `header.${Buffer.from(JSON.stringify({ sub: id, email: `${id}@example.test` })).toString("base64url")}.signature`, token: { access_token: `private-${id}`, refresh_token: `refresh-${id}`, expiry: "2030-01-01T00:00:00Z" } });
@@ -13,7 +13,7 @@ async function fixture(t) {
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   let raw = encode(credential("a")); let writes = 0;
   const login = { read: async () => raw, write: async value => { raw = value; writes++; } };
-  return { root, login, set: value => { raw = value; }, raw: () => raw, writes: () => writes };
+  return { root, login, versionOf: async () => "1.4.6-fixture", set: value => { raw = value; }, raw: () => raw, writes: () => writes };
 }
 test("account switching preserves the live login, summaries hide credentials, removal never signs out", async t => {
   const x = await fixture(t); const manager = createManager({ ...x, supported: true });
@@ -53,6 +53,19 @@ test("quota response is sanitized and never rewrites global login", async t => {
   assert.equal(quota.groups[0].buckets[0].remainingFraction,1);
   assert.equal(JSON.stringify(quota).includes("secret"),false); assert.equal(x.writes(),0);
 });
+test("direct Google quota asks as antigravity/cli so the Gemini tier is returned (cc-switch b5aa7fb)", async t => {
+  const x = await fixture(t); let probes = 0;
+  const versionOf = async () => { probes += 1; return "1.5.2"; };
+  let quotaAgent = "";
+  const manager = createManager({ ...x, supported: true, versionOf, fetchImpl: async (url, options) => {
+    if (String(url).includes("retrieveUserQuotaSummary")) quotaAgent = options.headers["User-Agent"];
+    return new Response(JSON.stringify({ groups: [{ displayName: "Gemini", buckets: [{ bucketId: "gemini-day", remainingFraction: 0.5 }] }] }));
+  } });
+  await manager.status(); await manager.quota("a");
+  assert.equal(quotaAgent, "aitool (antigravity/cli/1.5.2)");
+  await manager.quota("a");
+  assert.equal(probes, 2, "the version is the caller's to inject; the production probe caches per process");
+});
 test("OAuth rejects wrong state and uses PKCE before storing a renewable identity", async t => {
   const x = await fixture(t); let exchange;
   const manager = createManager({ ...x,supported:true,fetchImpl:async (_url,options) => { exchange = options.body; return new Response(JSON.stringify({ access_token:"oauth-private", refresh_token:"oauth-refresh",id_token:credential("oauth").id_token })); } });
@@ -69,6 +82,11 @@ test("account storage refuses symlink files without reading outside credentials"
   const x = await fixture(t); const outside=path.join(x.root,"outside.json"); await fs.writeFile(outside,"{}"); await fs.symlink(outside,path.join(x.root,"agy-accounts.json"));
   await assert.rejects(createManager({...x,supported:true}).status(),/store/);
   assert.equal(await fs.readFile(outside,"utf8"),"{}");
+});
+test("the agy version probe parses the CLI banner and caches per process", async () => {
+  assert.equal(await probeAgyCliVersion({ exec: (bin, args, options, done) => done(null, "Antigravity CLI version: 1.7.0 (built 2026)\n") }), "1.7.0");
+  // The per-process cache now answers without touching exec again.
+  assert.equal(await probeAgyCliVersion({ exec: (_bin, _args, _options, done) => done(new Error("must not run")) }), "1.7.0");
 });
 test("local quota keys validate opaque values and tighten existing permissions", async t => {
   const x = await fixture(t); const args={home:x.root,provider:"command-code",apiKey:"  fixture-private-key  "};

@@ -17,6 +17,24 @@ const decode = raw => JSON.parse(raw.startsWith("go-keyring-base64:") ? Buffer.f
 function identity(credential) {
   try { const value = JSON.parse(Buffer.from(credential.id_token.split(".")[1], "base64url")); return typeof value.sub === "string" && value.sub ? value : null; } catch { return null; }
 }
+// Google's retrieveUserQuotaSummary decides what it returns from the
+// User-Agent: anything without "antigravity" gets 403, but a plain
+// "(antigravity)" marker only receives the Claude and GPT groups — the
+// Gemini group is returned to "antigravity/cli/<version>" clients from 1.2.0
+// on (cc-switch b5aa7fb). Probe the local CLI once per process; when it
+// cannot be found or read, assume a current version rather than losing the
+// Gemini tier.
+const FALLBACK_AGY_CLI_VERSION = "1.4.6";
+let agyCliVersionPromise = null;
+function probeAgyCliVersion({ exec = execFile } = {}) {
+  agyCliVersionPromise ||= new Promise(resolve => {
+    exec("agy", ["--version"], { timeout: 5000, maxBuffer: 16384 }, (error, stdout) => {
+      const match = error ? null : String(stdout).match(/(\d+\.\d+\.\d+)/);
+      resolve(match ? match[1] : FALLBACK_AGY_CLI_VERSION);
+    });
+  });
+  return agyCliVersionPromise;
+}
 const systemLogin = {
   read: () => new Promise((resolve, reject) => execFile("/usr/bin/security", ["find-generic-password", "-s", "gemini", "-a", "antigravity", "-w"], { timeout: 10000, maxBuffer: 65536 }, (error, stdout) => error?.code === 44 ? resolve(null) : error ? reject(new Error("Cannot read Antigravity keychain")) : resolve(stdout.trimEnd()))),
   write: raw => new Promise((resolve, reject) => {
@@ -30,7 +48,7 @@ const systemLogin = {
     child.stdin.on("error", () => {}); child.stdin.end(line);
   }),
 };
-function createManager({ root = paths.providerSwitchRoot(), login = systemLogin, supported = process.platform === "darwin", fetchImpl = fetch, now = Date.now } = {}) {
+function createManager({ root = paths.providerSwitchRoot(), login = systemLogin, supported = process.platform === "darwin", fetchImpl = fetch, now = Date.now, versionOf = probeAgyCliVersion } = {}) {
   let pending = Promise.resolve(); let flow;
   const serial = action => { const next = pending.catch(() => {}).then(action); pending = next; return next; };
   const storeFile = path.join(root, "agy-accounts.json");
@@ -87,7 +105,8 @@ function createManager({ root = paths.providerSwitchRoot(), login = systemLogin,
       catch (error) { if (error.code === "REAUTH") { row.requiresReauth = true; await save(store); } throw error; }
     };
     if (!(Date.parse(row.credential.token.expiry) > now() + 120000)) await refresh();
-    const post = method => jsonResponse(`https://cloudcode-pa.googleapis.com/v1internal:${method}`, { method: "POST", headers: { Authorization: `Bearer ${row.credential.token.access_token}`, "User-Agent": "aitool (antigravity)", "content-type": "application/json" }, body: JSON.stringify(method === "loadCodeAssist" ? { metadata: { ideType: "ANTIGRAVITY" } } : {}) });
+    const agyVersion = await versionOf();
+    const post = method => jsonResponse(`https://cloudcode-pa.googleapis.com/v1internal:${method}`, { method: "POST", headers: { Authorization: `Bearer ${row.credential.token.access_token}`, "User-Agent": `aitool (antigravity/cli/${agyVersion})`, "content-type": "application/json" }, body: JSON.stringify(method === "loadCodeAssist" ? { metadata: { ideType: "ANTIGRAVITY" } } : {}) });
     let result = await post("retrieveUserQuotaSummary");
     if (result.response.status === 401) { await refresh(); result = await post("retrieveUserQuotaSummary"); }
     if (result.response.status === 403) { const eligibility = await post("loadCodeAssist"); const reason = eligibility.body.ineligibleTiers?.map(row => row.reasonMessage).filter(value => typeof value === "string").join("; "); if (reason) throw new Error(reason.slice(0, 512)); }
@@ -125,4 +144,4 @@ function createManager({ root = paths.providerSwitchRoot(), login = systemLogin,
   return { status, switchAccount, remove, quota, startLogin, cancel, pollLogin: id => { if (!flow || flow.id !== id) throw new Error("Sign-in link expired"); return { status: flow.status }; } };
 }
 let manager;
-module.exports = { createManager, identity, encode, decode, manager: () => manager ||= createManager() };
+module.exports = { createManager, identity, encode, decode, probeAgyCliVersion, manager: () => manager ||= createManager() };

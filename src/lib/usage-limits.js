@@ -403,7 +403,11 @@ function normalizeCodexCreditWindow(individualLimit) {
     }
   }
 
-  const resetAt = toFiniteNumberOrNull(individualLimit.reset_at);
+  // An unused window can carry a placeholder reset_at (backend "now + window
+  // length"); hide it so the UI never draws a fake countdown on a window with
+  // nothing used (cc-switch e1821b5, #8631).
+  const windowUnused = !(usedPercent > 0) && !(usedCredits > 0);
+  const resetAt = windowUnused ? null : toFiniteNumberOrNull(individualLimit.reset_at);
   const source = typeof individualLimit.source === "string" && individualLimit.source.trim()
     ? individualLimit.source.trim()
     : null;

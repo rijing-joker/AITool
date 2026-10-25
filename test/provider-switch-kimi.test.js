@@ -339,7 +339,11 @@ test("kimi api: save/switch/delete provider rows through the provider-switch han
   const busy = await call({ method: "DELETE", url: `/api/provider-switch/providers/${rowId}?app=kimi` });
   assert.equal(busy.status, 400, "removing the current provider is refused while the row survives");
   assert.equal((await kimi.readDocument()).providers.relay.api_key, "sk-1");
-  const disconnected = await call({ method: "POST", url: "/api/provider-switch/switch", body: JSON.stringify({ app: "kimi", id: "" }) });
+  // A missing id must fail loudly instead of clearing the live provider.
+  const missingId = await call({ method: "POST", url: "/api/provider-switch/switch", body: JSON.stringify({ app: "kimi" }) });
+  assert.equal(missingId.status, 400, "a switch without an id is refused");
+  assert.equal((await kimi.readDocument()).providers.relay.api_key, "sk-1", "the refused switch left the live node alone");
+  const disconnected = await call({ method: "POST", url: "/api/provider-switch/switch", body: JSON.stringify({ app: "kimi", id: "", disconnect: true }) });
   assert.equal(disconnected.status, 200);
   const docAfterDisconnect = await kimi.readDocument();
   assert.equal(docAfterDisconnect.providers.relay, undefined, "disconnecting removes the live node");
@@ -488,4 +492,212 @@ test("kimi mcp: stdio and sse entries round-trip through mcp.json", async () => 
   const after = JSON.parse(await fsp.readFile(file, "utf8"));
   assert.equal(after.mcpServers.fetch, undefined);
   assert.equal(after.mcpServers.remote.transport, "sse");
+});
+
+// ---------------------------------------------------------------------------
+// Regression tests for the 2026-10-24 review findings
+// ---------------------------------------------------------------------------
+
+test("kimi engine: config.toml keeps 0600 across engine writes", async () => {
+  await writeConfig({ providers: {}, models: {} });
+  await fsp.chmod(configPath(), 0o600);
+  await kimi.setProvider("relay", openaiRow());
+  assert.equal((await fsp.stat(configPath())).mode & 0o777, 0o600, "writeDocument must not downgrade the private mode");
+  // A file that lost its mode outside AiTool is tightened by the next write.
+  await fsp.chmod(configPath(), 0o644);
+  await kimi.useProvider("relay", openaiRow());
+  assert.equal((await fsp.stat(configPath())).mode & 0o777, 0o600);
+});
+
+test("kimi api: a save refused by the native engine leaves no ghost row behind", async () => {
+  const { handleProviderSwitchApiRequest } = require("../src/lib/provider-switch/api");
+  const { Readable } = require("node:stream");
+  const call = async (options) => {
+    const req = Readable.from(options.body != null ? [Buffer.from(options.body)] : []);
+    req.method = options.method;
+    req.url = options.url;
+    req.headers = { host: "localhost" };
+    const res = { statusCode: null, body: null, writeHead(status) { this.statusCode = status; }, end(payload) { this.body = payload ? String(payload) : ""; } };
+    const handled = await handleProviderSwitchApiRequest(req, res, new URL(`http://localhost${options.url}`), { isAuthorizedLocalMutation: () => true });
+    assert.equal(handled, true);
+    return { status: res.statusCode, body: res.body ? JSON.parse(res.body) : null };
+  };
+  // The live config carries the account-managed official node; a card that
+  // claims the same slot must be refused before either store is touched.
+  await writeConfig({
+    providers: { "managed:kimi-code": { type: "kimi", base_url: "https://api.kimi.com/coding/v1", oauth: { storage: "file", key: "oauth/kimi-code" } } },
+    models: { "kimi-code/kimi-k3": { provider: "managed:kimi-code", model: "kimi-k3", max_context_size: 262144 } },
+    default_model: "kimi-code/kimi-k3",
+  });
+  const refused = await call({
+    method: "POST",
+    url: "/api/provider-switch/providers",
+    body: JSON.stringify({
+      app: "kimi", name: "Ghost", category: "custom",
+      settingsConfig: { slotKey: "managed:kimi-code", provider: { type: "openai", base_url: "https://example.com/v1", api_key: "sk-1" }, models: { "ghost/m": { model: "m", max_context_size: 8192 } } },
+    }),
+  });
+  assert.equal(refused.status, 400, JSON.stringify(refused.body));
+  const listed = await call({ method: "GET", url: "/api/provider-switch/providers?app=kimi" });
+  assert.equal(listed.body.providers.length, 0, "no store row may survive a refused save");
+  // An official-shaped node handed to provider CRUD is refused the same way.
+  const official = await call({
+    method: "POST",
+    url: "/api/provider-switch/providers",
+    body: JSON.stringify({
+      app: "kimi", name: "Impostor", category: "custom",
+      settingsConfig: { slotKey: "evil", provider: { type: "kimi", base_url: "https://evil.example/v1", oauth: { key: "oauth/kimi-code" } }, models: { "evil/m": { model: "m", max_context_size: 8192 } } },
+    }),
+  });
+  assert.equal(official.status, 400);
+  assert.match(official.body.error, /account center/);
+});
+
+test("kimi api: deleting a card only drops the native node this row wrote", async () => {
+  const { handleProviderSwitchApiRequest } = require("../src/lib/provider-switch/api");
+  const { Readable } = require("node:stream");
+  const call = async (options) => {
+    const req = Readable.from(options.body != null ? [Buffer.from(options.body)] : []);
+    req.method = options.method;
+    req.url = options.url;
+    req.headers = { host: "localhost" };
+    const res = { statusCode: null, body: null, writeHead(status) { this.statusCode = status; }, end(payload) { this.body = payload ? String(payload) : ""; } };
+    const handled = await handleProviderSwitchApiRequest(req, res, new URL(`http://localhost${options.url}`), { isAuthorizedLocalMutation: () => true });
+    assert.equal(handled, true);
+    return { status: res.statusCode, body: res.body ? JSON.parse(res.body) : null };
+  };
+  const create = (name, slotKey, apiKey) => call({
+    method: "POST",
+    url: "/api/provider-switch/providers",
+    body: JSON.stringify({
+      app: "kimi", name, category: "custom",
+      settingsConfig: { slotKey, provider: { type: "openai", base_url: "https://example.com/v1", api_key: apiKey }, models: { [`${slotKey}/m`]: { model: "m", max_context_size: 8192 } } },
+    }),
+  });
+  // Two cards share one slot key (the legacy import/duplicate fork) but
+  // describe different nodes; the live node matches card A, so removing B
+  // must keep it. The second row is seeded directly into the SSOT exactly
+  // like the pre-dedupe import did.
+  await writeConfig({ providers: {}, models: {} });
+  const first = await create("Relay", "relay", "sk-a");
+  assert.equal(first.status, 200);
+  const store = require("../src/lib/provider-switch/store");
+  const second = await store.createProvider("kimi", {
+    name: "Relay Too", category: "custom",
+    settingsConfig: { slotKey: "relay", provider: { type: "openai", base_url: "https://example.com/v1", api_key: "sk-b" }, models: { "relay/m": { model: "m", max_context_size: 8192, provider: "relay" } } },
+  });
+  const switchFirst = await call({ method: "POST", url: "/api/provider-switch/switch", body: JSON.stringify({ app: "kimi", id: first.body.provider.id }) });
+  assert.equal(switchFirst.status, 200);
+  const removed = await call({ method: "DELETE", url: `/api/provider-switch/providers/${second.id}?app=kimi` });
+  assert.equal(removed.status, 200);
+  const doc = await kimi.readDocument();
+  assert.equal(doc.providers.relay.api_key, "sk-a", "the node card A wrote survives deleting card B");
+  assert.equal(doc.models["relay/m"].provider, "relay");
+  // A card pointing at the account-managed official node deletes its row but
+  // never the official node itself.
+  const officialCard = await call({
+    method: "POST",
+    url: "/api/provider-switch/providers",
+    body: JSON.stringify({
+      app: "kimi", name: "Points At Official", category: "custom",
+      settingsConfig: { slotKey: "managed:kimi-code", provider: { type: "openai", base_url: "https://example.com/v1", api_key: "sk-c" }, models: { "official/m": { model: "m", max_context_size: 8192 } } },
+    }),
+  });
+  assert.equal(officialCard.status, 200);
+  const removedOfficial = await call({ method: "DELETE", url: `/api/provider-switch/providers/${officialCard.body.provider.id}?app=kimi` });
+  assert.equal(removedOfficial.status, 200);
+  assert.equal((await kimi.readDocument()).providers.relay.api_key, "sk-a", "the unrelated native node still stands");
+});
+
+test("kimi api: re-importing the same live slot updates its row instead of forking cards", async () => {
+  const { handleProviderSwitchApiRequest } = require("../src/lib/provider-switch/api");
+  const { Readable } = require("node:stream");
+  const call = async (options) => {
+    const req = Readable.from(options.body != null ? [Buffer.from(options.body)] : []);
+    req.method = options.method;
+    req.url = options.url;
+    req.headers = { host: "localhost" };
+    const res = { statusCode: null, body: null, writeHead(status) { this.statusCode = status; }, end(payload) { this.body = payload ? String(payload) : ""; } };
+    const handled = await handleProviderSwitchApiRequest(req, res, new URL(`http://localhost${options.url}`), { isAuthorizedLocalMutation: () => true });
+    assert.equal(handled, true);
+    return { status: res.statusCode, body: res.body ? JSON.parse(res.body) : null };
+  };
+  await writeConfig({
+    providers: { relay: { type: "openai", base_url: "https://api.moonshot.cn/v1", api_key: "sk-live" } },
+    models: { "relay/kimi-k3": { provider: "relay", model: "kimi-k3", max_context_size: 262144 } },
+    default_model: "relay/kimi-k3",
+  });
+  const first = await call({ method: "POST", url: "/api/provider-switch/providers/import-live", body: JSON.stringify({ app: "kimi" }) });
+  const second = await call({ method: "POST", url: "/api/provider-switch/providers/import-live", body: JSON.stringify({ app: "kimi" }) });
+  assert.equal(first.status, 200);
+  assert.equal(second.status, 200);
+  assert.equal(first.body.provider.id, second.body.provider.id, "the same slot re-imports into the same row");
+  const listed = await call({ method: "GET", url: "/api/provider-switch/providers?app=kimi" });
+  assert.equal(listed.body.providers.length, 1);
+});
+
+test("kimi engine: removeOauthAccount guards the secondary model and dangling service refs", async () => {
+  const ccsSlot = "kimi-code-ccs-aabbccdd";
+  const baseDoc = {
+    providers: {
+      "managed:kimi-code": { type: "kimi", base_url: "https://api.kimi.com/coding/v1", oauth: { storage: "file", key: "oauth/kimi-code" } },
+      [ccsSlot]: { type: "kimi", base_url: "https://api.kimi.com/coding/v1", oauth: { storage: "file", key: `oauth/${ccsSlot}` } },
+    },
+    models: {
+      "kimi-code/kimi-k3": { provider: "managed:kimi-code", model: "kimi-k3", max_context_size: 262144 },
+      [`${ccsSlot}/k3`]: { provider: ccsSlot, model: "k3", max_context_size: 262144 },
+    },
+    default_model: "kimi-code/kimi-k3",
+    secondary_model: { default_model: `${ccsSlot}/k3` },
+    services: { moonshot_search: { base_url: "https://api.kimi.com/search", api_key: "", oauth: { storage: "file", key: `oauth/${ccsSlot}` } } },
+  };
+  await writeConfig(baseDoc);
+  await assert.rejects(() => kimi.removeOauthAccount(ccsSlot), /secondary model/, "a referenced secondary model refuses removal");
+  // Without the reference the removal repoints services at the default login.
+  await writeConfig({ ...baseDoc, secondary_model: { default_model: "kimi-code/kimi-k3" } });
+  await kimi.removeOauthAccount(ccsSlot);
+  let doc = await kimi.readDocument();
+  assert.equal(doc.providers[ccsSlot], undefined);
+  assert.equal(doc.services.moonshot_search.oauth.key, "oauth/kimi-code", "services repoint at the default login");
+  // No default login to repoint at: the reference is dropped, not left dangling.
+  await writeConfig({
+    providers: {
+      [ccsSlot]: { type: "kimi", base_url: "https://api.kimi.com/coding/v1", oauth: { storage: "file", key: `oauth/${ccsSlot}` } },
+      other: { type: "openai", base_url: "https://example.com/v1", api_key: "k" },
+    },
+    models: {
+      [`${ccsSlot}/k3`]: { provider: ccsSlot, model: "k3", max_context_size: 262144 },
+      "other/m": { provider: "other", model: "m", max_context_size: 8192 },
+    },
+    default_model: "other/m",
+    services: { moonshot_search: { base_url: "https://api.kimi.com/search", api_key: "", oauth: { storage: "file", key: `oauth/${ccsSlot}` } } },
+  });
+  await kimi.removeOauthAccount(ccsSlot);
+  doc = await kimi.readDocument();
+  assert.equal(doc.services.moonshot_search.oauth, undefined, "an unrepointable service ref is cleared");
+});
+
+test("kimi accounts: token endpoints are pinned to the official region hosts", () => {
+  const { officialRegionOf } = kimiAccounts;
+  const official = { type: "kimi", base_url: "https://api.kimi.com/coding/v1", oauth: { storage: "file", key: "oauth/kimi-code" } };
+  assert.equal(officialRegionOf(official).id, "cn");
+  assert.equal(officialRegionOf({ ...official, base_url: "https://api.kimi.ai/coding/v1", oauth: { ...official.oauth, oauth_host: "https://auth.kimi.ai" } }).id, "global");
+  // A hand-edited endpoint must not receive the account's tokens.
+  assert.equal(officialRegionOf({ ...official, base_url: "https://evil.example/v1" }), null);
+  assert.equal(officialRegionOf({ ...official, oauth: { ...official.oauth, oauth_host: "https://evil.example" } }), null);
+  assert.equal(officialRegionOf({ type: "openai", base_url: "https://api.kimi.com/coding/v1", api_key: "k" }), null, "non-kimi nodes never count as official");
+});
+
+test("kimi store: duplicating a card re-keys the slot and its model aliases", async () => {
+  const store = require("../src/lib/provider-switch/store");
+  const created = await store.createProvider("kimi", {
+    name: "Relay", category: "custom",
+    settingsConfig: { slotKey: "relay", provider: { type: "openai", base_url: "https://example.com/v1", api_key: "sk-1" }, models: { "relay/kimi-k3": { model: "kimi-k3", max_context_size: 262144 } } },
+  });
+  const clone = await store.duplicateProvider("kimi", created.id);
+  assert.notEqual(clone.settingsConfig.slotKey, "relay", "the clone must not claim the source's slot");
+  const aliases = Object.keys(clone.settingsConfig.models);
+  assert.equal(aliases.length, 1);
+  assert.match(aliases[0], new RegExp(`^${clone.settingsConfig.slotKey}/`), "aliases move under the clone's slot");
+  assert.equal(clone.settingsConfig.models[aliases[0]].provider, clone.settingsConfig.slotKey);
 });

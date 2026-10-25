@@ -520,7 +520,13 @@ function tomlEntryToSpec(entry, { codexStyle }) {
 
 function shouldSyncDir(homeSubdir) {
   try {
-    return fs.existsSync(path.join(require("node:os").homedir(), homeSubdir));
+    // Kimi honors KIMI_CODE_HOME for everything it owns (paths.kimiHome),
+    // including the mcp.json written below — the existence guard must look at
+    // the same resolved home, not always ~/.kimi-code.
+    const home = homeSubdir === HOME_SUBDIRS.kimi
+      ? require("./paths").kimiHome()
+      : path.join(require("node:os").homedir(), homeSubdir);
+    return fs.existsSync(home);
   } catch {
     return false;
   }

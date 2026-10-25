@@ -189,6 +189,7 @@ function targetFile(app, fileId) {
 
 module.exports = {
   providerSwitchRoot,
+  kimiHome,
   storePath,
   mcpStorePath,
   promptsStorePath,

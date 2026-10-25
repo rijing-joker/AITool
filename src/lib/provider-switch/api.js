@@ -400,6 +400,12 @@ async function saveProviderUnlocked({ app, id, body }) {
   if (app === "kimi") {
     // Kimi adds write the native node without moving default_model; editing
     // rewrites the node (official nodes are refused — account-center only).
+    // Transaction ordering mirrors the switch path: stage the native patch in
+    // memory (official-node conflicts, model-key collisions and serialization
+    // errors abort before anything is written), write the native config
+    // first, and commit the SSOT row last — a store failure rolls the native
+    // node back instead of leaving a row whose save can never be retried and
+    // whose delete would keep failing on the same native error.
     const kimi = require("./kimi");
     const config = body.settingsConfig && typeof body.settingsConfig === "object" ? body.settingsConfig : {};
     const slotKey = typeof config.slotKey === "string" && config.slotKey.trim() ? config.slotKey.trim() : String(body.name || "").trim();
@@ -409,12 +415,20 @@ async function saveProviderUnlocked({ app, id, body }) {
     if (!wrapper.slotKey) throw new Error("Enter a Kimi Code provider key");
     kimi.validateProviderRow(wrapper.slotKey, { provider: wrapper.provider, models: wrapper.models });
     body = { ...body, settingsConfig: { ...config, slotKey, models } };
-    const provider = id ? await store.updateProvider(app, id, body) : await store.createProvider(app, body);
-    const applied = await kimi.setProvider(wrapper.slotKey, {
+    const before = await kimi.readDocument();
+    const after = kimi.stageProvider(before, wrapper.slotKey, {
       provider: wrapper.provider,
       models: wrapper.models,
       create: !id,
     });
+    const applied = await kimi.writeDocument(before, after);
+    let provider;
+    try {
+      provider = id ? await store.updateProvider(app, id, body) : await store.createProvider(app, body);
+    } catch (error) {
+      await kimi.writeDocument(after, before).catch(() => {});
+      throw error;
+    }
     return { ok: true, provider, applied };
   }
   const editorInput = body.editor && body.editor.base ? body.editor : null;
@@ -1151,6 +1165,7 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
       }
       if (method === "DELETE" && providerId) {
         const app = url.searchParams.get("app");
+        if (!store.isSupportedApp(app)) throw new Error(`Unsupported app: ${app}`);
         const row = await store.getProvider(app, providerId);
         if (app === "kimi" && row) {
           // Removing a Kimi card also removes the native node and its model
@@ -1158,7 +1173,18 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
           // still intact (official nodes belong to the account center).
           const kimi = require("./kimi");
           const wrapper = kimiWrapperOf(row);
-          if (wrapper.slotKey) await kimi.removeProvider(wrapper.slotKey);
+          if (wrapper.slotKey) {
+            await withProjectionLock(app, async () => {
+              // Only remove the node this row wrote (same ownership rule as
+              // disconnect): an account-managed official node or a live node
+              // another card with the same slot key owns is not ours to drop.
+              const doc = await kimi.readDocument();
+              const node = doc.providers?.[wrapper.slotKey];
+              if (node === undefined || kimi.isOfficialProvider(node)) return;
+              if (JSON.stringify(node) !== JSON.stringify(wrapper.provider)) return;
+              await kimi.removeProvider(wrapper.slotKey);
+            });
+          }
         }
         await store.deleteProvider(app, providerId);
         json(res, { ok: true });
@@ -1253,7 +1279,15 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
     if (p === `${prefix}/switch` && method === "POST") {
       if (!requireMutation()) return true;
       const body = await readJsonBody(req);
-      const result = await switchProviderPositional(body.app, String(body.id ?? ""));
+      // A missing id must not silently clear the live provider: only an
+      // explicit disconnect intent routes into disconnectProvider (profiles/
+      // universal disconnect through the positional adapter's "").
+      if (typeof body.id !== "string" || !body.id.trim()) {
+        if (body.disconnect !== true) throw new Error("Provider id is required");
+        json(res, { ok: true, ...await disconnectProvider(body.app) });
+        return true;
+      }
+      const result = await switchProvider({ app: body.app, id: body.id.trim() });
       json(res, { ok: true, ...result });
       return true;
     }
@@ -1313,6 +1347,19 @@ async function importFromLive(app, name) {
     settingsConfig = targets.extractGeminiConfig(lives.env.exists ? lives.env.content : "");
   }
   const providerName = String(name || "").trim() || "Imported config";
+  // Importing twice must not fork the live config into same-slot cards whose
+  // deletes would then fight over one native node — re-importing an
+  // already-imported slot updates its row instead.
+  if (app === "kimi" && settingsConfig && typeof settingsConfig.slotKey === "string" && settingsConfig.slotKey) {
+    const existing = (await store.listProviders(app)).providers
+      .find((row) => row.settingsConfig?.slotKey === settingsConfig.slotKey);
+    if (existing) {
+      return store.updateProvider(app, existing.id, {
+        ...(String(name || "").trim() ? { name: providerName } : {}),
+        settingsConfig,
+      });
+    }
+  }
   return store.createProvider(app, {
     name: providerName,
     category: "custom",

@@ -117,9 +117,13 @@ async function writeDocument(before, after, options = {}) {
     throw new Error(`Cannot serialize Kimi Code config: ${error.message}`);
   }
   // The first structural edit snapshots the original bytes; writeFileAtomic
-  // is tmp+rename, so a failed write never leaves a partial file behind.
+  // is tmp+rename, so a failed write never leaves a partial file behind. The
+  // document holds api_key values and OAuth references: write it 0600 from
+  // creation (the tmp file inherits the mode), then re-assert on the renamed
+  // file so a pre-existing 0644 file cannot survive the rename.
   await createBackup("kimi", file);
-  await writeFileAtomic(file, content.endsWith("\n") ? content : `${content}\n`);
+  await writeFileAtomic(file, content.endsWith("\n") ? content : `${content}\n`, { mode: 0o600 });
+  await chmod600IfPossible(file);
   return file;
 }
 
@@ -233,6 +237,13 @@ function applyProvider(doc, id, config) {
     for (const key of Object.keys(modelsOfProvider(next, id))) delete models[key];
     return next;
   }
+  // An official-shaped node handed to provider CRUD would make the account
+  // manager treat the caller's endpoint as an official host. Only the account
+  // manager (saveOauthLogin) writes official nodes — it never passes through
+  // here.
+  if (isOfficialProvider(config.provider)) {
+    throw new Error("Kimi official accounts are managed in the account center");
+  }
   validateProviderRow(id, config);
   if (existing !== undefined && config.create === true) {
     throw new Error(`Kimi Code provider '${id}' already exists`);
@@ -267,13 +278,22 @@ function selectProviderModel(doc, id) {
 // Write a provider row (add or edit) without moving default_model — the
 // cc-switch "add" semantics: adding never changes the selected model unless
 // no default exists.
-async function setProvider(id, config, options = {}) {
-  const before = await readDocument(options);
+// The pure half of setProvider: compute the post-apply document (validation,
+// official-node conflicts and serialization errors all surface here) without
+// touching disk, so transactional callers can stage the native patch before
+// committing the SSOT row.
+function stageProvider(before, id, config) {
   const after = applyProvider(before, id, { ...config, create: config.create === true });
   if (after.default_model === undefined || !isPlainObject(after.models) || after.models[after.default_model] === undefined) {
-    const first = Object.keys(config.models)[0];
+    const first = Object.keys(config.models || {})[0];
     if (first) after.default_model = first;
   }
+  return after;
+}
+
+async function setProvider(id, config, options = {}) {
+  const before = await readDocument(options);
+  const after = stageProvider(before, id, config);
   await writeDocument(before, after, options);
   return { id };
 }
@@ -391,7 +411,9 @@ async function saveOauthLogin({ accountId, credentialPath, credential, baseUrl, 
 }
 // Remove an official account's node: provider + its models + credential
 // references in services, repointed at Kimi's own default login first
-// (cc-switch remove_oauth_account + repoint_services).
+// (cc-switch remove_oauth_account + repoint_services). The same in-use guards
+// as provider removal apply: the conversation default and the secondary-model
+// pool may not keep referencing the account's aliases.
 async function removeOauthAccount(accountId, options = {}) {
   const before = await readDocument(options);
   if (currentProviderKey(before) === accountId) {
@@ -402,11 +424,24 @@ async function removeOauthAccount(accountId, options = {}) {
   const removedKey = removed?.oauth?.key;
   const defaultProvider = after.providers?.[OFFICIAL_PROVIDER_ID];
   const fallback = isPlainProviderOauth(defaultProvider?.oauth) ? defaultProvider.oauth : null;
-  for (const key of Object.keys(modelsOfProvider(after, accountId))) delete after.models[key];
+  const owned = new Set(Object.keys(modelsOfProvider(after, accountId)));
+  const secondary = after.secondary_model;
+  for (const field of isPlainObject(secondary) ? [secondary.default_model] : []) {
+    if (typeof field === "string" && owned.has(field)) {
+      throw new Error("A model of this account is still selected as Kimi Code's secondary model; change it there first");
+    }
+  }
+  for (const key of owned) delete after.models[key];
   delete after.providers[accountId];
-  if (removedKey && fallback && accountId !== OFFICIAL_PROVIDER_ID && isPlainObject(after.services)) {
+  if (removedKey && accountId !== OFFICIAL_PROVIDER_ID && isPlainObject(after.services)) {
     for (const service of Object.values(after.services)) {
-      if (isPlainObject(service) && service.oauth?.key === removedKey) service.oauth = structuredClone(fallback);
+      if (!isPlainObject(service) || service.oauth?.key !== removedKey) continue;
+      // With the default login to repoint at, a kept reference would dangle
+      // at a deleted credential file — drop it instead (cc-switch only ever
+      // repoints, but it only removes non-default accounts when a default
+      // exists; this port can remove without one).
+      if (fallback) service.oauth = structuredClone(fallback);
+      else delete service.oauth;
     }
   }
   await writeDocument(before, after, options);
@@ -461,6 +496,7 @@ module.exports = {
   validateProviderRow,
   modelsOfProvider,
   applyProvider,
+  stageProvider,
   selectProviderModel,
   disconnectDocument,
   setProvider,

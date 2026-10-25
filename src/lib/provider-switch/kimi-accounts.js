@@ -17,8 +17,9 @@ const fsp = require("node:fs/promises");
 const path = require("node:path");
 const os = require("node:os");
 const crypto = require("node:crypto");
-const { writeFileAtomic, chmod600IfPossible } = require("../fs");
+const { writeFileAtomic, chmod600IfPossible, withFileLock } = require("../fs");
 const paths = require("./paths");
+const store = require("./store");
 const kimi = require("./kimi");
 
 const CLIENT_ID = "17e5f671-d194-4dfb-9706-5516cb48c098";
@@ -28,6 +29,29 @@ const REGIONS = {
 };
 const LOCK_STALE_MS = 5000;
 const USER_AGENT = "aitool/kimi";
+// Credentials only ever travel to Kimi's own region hosts. The guard runs on
+// every token-bearing request: a hand-edited config.toml that rewrites an
+// official node's base_url/oauth_host must make the account manager fail
+// closed instead of POSTing the refresh token to an arbitrary host.
+const OFFICIAL_API_HOSTS = ["api.kimi.com", "api.kimi.ai"];
+const OFFICIAL_OAUTH_HOSTS = ["auth.kimi.com", "auth.kimi.ai"];
+
+// The region a node's tokens may be sent to, or null when any endpoint is
+// off the official hosts (the node was edited outside the account manager).
+function officialRegionOf(provider) {
+  if (!kimi.isOfficialProvider(provider)) return null;
+  const region = regionOfProvider(provider);
+  const hostOf = (value) => {
+    try {
+      return new URL(String(value)).host;
+    } catch {
+      return "";
+    }
+  };
+  if (provider.oauth?.oauth_host !== undefined && !OFFICIAL_OAUTH_HOSTS.includes(hostOf(provider.oauth.oauth_host))) return null;
+  if (!OFFICIAL_API_HOSTS.includes(hostOf(provider.base_url))) return null;
+  return region;
+}
 
 function sha256Hex(text) {
   return crypto.createHash("sha256").update(text, "utf8").digest("hex");
@@ -70,10 +94,18 @@ function slotNameOf(credentialPath) {
 }
 
 // Kimi's cross-process lock: a directory whose mtime goes stale after 5s.
+// An action never runs without holding the lock: losing the stale-takeover
+// race waits for the new holder (bounded, then fails closed) — two processes
+// refreshing the same single-use refresh token would tombstone it for both.
+// A marker file keeps the release from deleting a lock another process took
+// over while the action ran.
+const SLOT_LOCK_MAX_ATTEMPTS = 80;
 async function withSlotLock(home, slot, action) {
   if (process.platform === "win32") return action();
   const dir = path.join(home, "oauth", `${slot}.lock`);
+  const ownerFile = path.join(dir, "owner");
   await fsp.mkdir(path.dirname(dir), { recursive: true });
+  const marker = `${process.pid}-${crypto.randomUUID()}`;
   for (let attempt = 0; ; attempt += 1) {
     try {
       await fsp.mkdir(dir);
@@ -85,12 +117,22 @@ async function withSlotLock(home, slot, action) {
         continue;
       }
       await fsp.rm(dir, { recursive: true, force: true }).catch(() => {});
-      await fsp.mkdir(dir).catch(() => {});
+      try {
+        await fsp.mkdir(dir);
+      } catch {
+        if (attempt >= SLOT_LOCK_MAX_ATTEMPTS) throw new Error("Kimi Code OAuth slot is busy; try again shortly");
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        continue;
+      }
     }
+    await fsp.writeFile(ownerFile, marker, "utf8").catch(() => {});
     try {
       return await action();
     } finally {
-      await fsp.rm(dir, { recursive: true, force: true }).catch(() => {});
+      const owner = await fsp.readFile(ownerFile, "utf8").catch(() => null);
+      if (owner === marker) {
+        await fsp.rm(dir, { recursive: true, force: true }).catch(() => {});
+      }
     }
   }
 }
@@ -104,6 +146,10 @@ function createManager({
   now = Date.now,
 } = {}) {
   const storeFile = path.join(root, "kimi-accounts.json");
+  // Account flows rewrite the whole config.toml document; holding the same
+  // lock as the provider-switch layer's switch/save/delete (api.js) keeps an
+  // interleaved card write from being last-writer-wins over a login commit.
+  const projectionLock = (action) => withFileLock(path.join(paths.providerSwitchRoot(), "kimi.projection"), action);
   let pending = Promise.resolve();
   let flow = null;
   const serial = (action) => {
@@ -157,24 +203,24 @@ function createManager({
     "x-msh-os-version": os.platform(),
   });
 
-  async function postForm(url, form, device, { token } = {}) {
+  async function postForm(url, form, device, { token, timeoutMs = 30000 } = {}) {
     const body = new URLSearchParams(form);
     const response = await fetchImpl(url, {
       method: "POST",
       headers: { ...identifyHeaders(device), "content-type": "application/x-www-form-urlencoded", ...(token ? { authorization: `Bearer ${token}` } : {}) },
       body,
-      signal: AbortSignal.timeout(30000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
     return { status: response.status, body: await response.json().catch(() => ({})) };
   }
 
-  async function getJson(url, device, token) {
-    const response = await fetchImpl(url, { headers: { ...identifyHeaders(device), authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(30000) });
+  async function getJson(url, device, token, timeoutMs = 30000) {
+    const response = await fetchImpl(url, { headers: { ...identifyHeaders(device), authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(timeoutMs) });
     return { status: response.status, body: await response.json().catch(() => ({})) };
   }
 
-  async function fetchIdentity(baseUrl, token, device) {
-    const { status, body } = await getJson(`${baseUrl.replace(/\/$/, "")}/me`, device, token);
+  async function fetchIdentity(baseUrl, token, device, timeoutMs = 30000) {
+    const { status, body } = await getJson(`${baseUrl.replace(/\/$/, "")}/me`, device, token, timeoutMs);
     if (status !== 200) throw new Error(`Kimi account lookup failed (HTTP ${status})`);
     const pick = (key) => {
       const value = body[key];
@@ -368,6 +414,8 @@ function createManager({
   // A usable access token for an account's provider, refreshing under the
   // slot lock with re-read/adopt/tombstone semantics (see file header).
   async function accessTokenFor(provider, device) {
+    const region = officialRegionOf(provider);
+    if (!region) throw new Error("Kimi account endpoints are not official hosts; check Kimi Code config.toml");
     const file = credentialPathFor(home, provider.oauth);
     const first = await readCredential(file);
     if (first.state !== "valid") return { state: first.state === "missing" ? "needsReauth" : "needsReauth", token: null };
@@ -382,8 +430,7 @@ function createManager({
       if (!shouldRefresh(current.value)) return { state: "ok", token: current.value.access_token };
       const refresh = current.value.refresh_token;
       if (!refresh) return { state: "needsReauth", token: null };
-      const host = typeof provider.oauth.oauth_host === "string" ? provider.oauth.oauth_host : regionOfProvider(provider).oauthHost;
-      const { status, body } = await postForm(`${host}/api/oauth/token`, {
+      const { status, body } = await postForm(`${region.oauthHost}/api/oauth/token`, {
         client_id: CLIENT_ID, grant_type: "refresh_token", refresh_token: refresh,
       }, device);
       if (status === 200) {
@@ -405,8 +452,10 @@ function createManager({
     });
   }
 
-  // Best-effort /me for accounts whose cached identity is stale, using only
-  // still-valid access tokens — never refresh just for a name.
+  // Best-effort /me for accounts with no cached identity yet, using only
+  // still-valid access tokens — never refresh just for a name. Restricted to
+  // official hosts and a short timeout so a status read can never hang on the
+  // network for half a minute per account.
   async function identifyAccounts() {
     let doc;
     try {
@@ -418,7 +467,8 @@ function createManager({
     if (!store) return;
     let device = null;
     for (const [id, provider] of Object.entries(isPlainObject(doc.providers) ? doc.providers : {})) {
-      if (!kimi.isOfficialProvider(provider)) continue;
+      const region = officialRegionOf(provider);
+      if (!region) continue;
       let file;
       try {
         file = credentialPathFor(home, provider.oauth);
@@ -427,14 +477,13 @@ function createManager({
       }
       const read = await readCredential(file).catch(() => null);
       if (!read || read.state !== "valid" || !accessValid(read.value)) continue;
-      const marker = tokenMarker(read.value);
-      if (store.accounts[id]?.token === marker) continue;
+      if (store.accounts[id]) continue;
       if (!device) device = await deviceId().catch(() => null);
       if (!device) return;
       try {
-        const identity = await fetchIdentity(provider.base_url, read.value.access_token, device);
+        const identity = await fetchIdentity(region.baseUrl, read.value.access_token, device, 5000);
         await updateStore((value) => {
-          value.accounts[id] = { ...identity, token: marker };
+          value.accounts[id] = { ...identity, token: tokenMarker(read.value) };
         });
       } catch { /* naming is best-effort */
       }
@@ -442,7 +491,10 @@ function createManager({
   }
 
   const status = () => serial(async () => {
-    await identifyAccounts().catch(() => {});
+    // Identity lookup joins the serial queue in the background: the panel
+    // renders from the cached store immediately and the next read picks the
+    // names up (a status read never blocks on the network, project rule).
+    void serial(() => identifyAccounts()).catch(() => {});
     const doc = await readConfigDoc();
     const store = await loadStore();
     const accounts = [];
@@ -609,14 +661,14 @@ function createManager({
     const nickname = flow.identity?.nickname || null;
     const slot = slotNameOf(credentialPath);
     const scoped = scopeModels(models, accountId, slot, nickname);
-    await withSlotLock(home, slot, () => kimi.saveOauthLogin({
+    await projectionLock(() => withSlotLock(home, slot, () => kimi.saveOauthLogin({
       accountId,
       credentialPath,
       credential: flow.credential,
       baseUrl: flow.region.baseUrl,
       oauth,
       models: scoped,
-    }, { home }));
+    }, { home })));
     if (flow.identity) {
       const identity = { ...flow.identity, token: tokenMarker(flow.credential) };
       await updateStore((value) => {
@@ -633,6 +685,8 @@ function createManager({
     if (!kimi.isOfficialProvider(provider)) {
       return { credentialStatus: "notFound", tiers: [] };
     }
+    const region = officialRegionOf(provider);
+    if (!region) throw new Error("Kimi account endpoints are not official hosts; check Kimi Code config.toml");
     const file = credentialPathFor(home, provider.oauth);
     if (!(await credentialExists(file))) return { credentialStatus: "notFound", tiers: [] };
     const device = await deviceId();
@@ -643,9 +697,7 @@ function createManager({
     if (access.state === "needsReauth") {
       return { credentialStatus: "expired", message: "Sign in again", tiers: [] };
     }
-    const base = String(provider.base_url || "").replace(/\/$/, "");
-    if (!base) throw new Error("Kimi account has no base URL");
-    const response = await fetchImpl(`${base}/usages`, {
+    const response = await fetchImpl(`${region.baseUrl.replace(/\/$/, "")}/usages`, {
       headers: { authorization: `Bearer ${access.token}`, accept: "application/json" },
       signal: AbortSignal.timeout(15000),
     });
@@ -687,7 +739,12 @@ function createManager({
     const read = await readCredential(credentialPathFor(home, provider.oauth));
     const usable = read.state === "valid" && (read.value.refresh_token !== "" || accessValid(read.value));
     if (!usable) throw new Error("Sign in to Kimi Code first");
-    return kimi.useOauthAccount(accountId, { home });
+    const result = await projectionLock(() => kimi.useOauthAccount(accountId, { home }));
+    // Official accounts have no card row; moving the store pointer off the
+    // previously used card keeps the page's highlight and the disconnect
+    // target aligned with the live default_model this call just changed.
+    await store.setCurrentProvider("kimi", accountId).catch(() => {});
+    return result;
   });
 
   // Separate accounts lose provider node, models and (ccs-owned) credential.
@@ -707,14 +764,16 @@ function createManager({
     }
     const file = credentialPathFor(home, provider.oauth);
     const owned = slotNameOf(file).startsWith("kimi-code-ccs-");
-    await kimi.removeOauthAccount(accountId, { home });
-    if (owned) {
-      await withSlotLock(home, slotNameOf(file), async () => {
-        await fsp.unlink(file).catch((error) => {
-          if (error.code !== "ENOENT") throw error;
+    await projectionLock(async () => {
+      await kimi.removeOauthAccount(accountId, { home });
+      if (owned) {
+        await withSlotLock(home, slotNameOf(file), async () => {
+          await fsp.unlink(file).catch((error) => {
+            if (error.code !== "ENOENT") throw error;
+          });
         });
-      });
-    }
+      }
+    });
     await updateStore((value) => {
       delete value.accounts[accountId];
     });
@@ -742,6 +801,7 @@ module.exports = {
   CLIENT_ID,
   accountSuffix,
   credentialPathFor,
+  officialRegionOf,
   createManager,
   manager: () => manager ||= createManager(),
 };

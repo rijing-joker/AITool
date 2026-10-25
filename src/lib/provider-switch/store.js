@@ -366,6 +366,36 @@ async function duplicateProvider(app, id) {
     }
     settingsConfig.slotKey = slotKey;
   }
+  if (app === "kimi") {
+    // Kimi keeps providers and models in one linked document: the clone must
+    // not claim the source's slot (deleting one card would drop the node the
+    // other still references) and its aliases must not collide with the
+    // source's entries in the shared models table — re-key both to the new
+    // slot the way separate official accounts are scoped.
+    const taken = new Set(
+      state.providers
+        .map((p) => (p.settingsConfig && typeof p.settingsConfig.slotKey === "string" ? p.settingsConfig.slotKey : ""))
+        .filter(Boolean),
+    );
+    const base = String(`${source.name} copy`).trim() || "kimi-copy";
+    let slotKey = base;
+    for (let n = 2; taken.has(slotKey); n += 1) slotKey = `${base}-${n}`;
+    settingsConfig.slotKey = slotKey;
+    const models = {};
+    const used = new Set();
+    const existingModels = settingsConfig.models && typeof settingsConfig.models === "object" && !Array.isArray(settingsConfig.models)
+      ? settingsConfig.models
+      : {};
+    for (const [key, model] of Object.entries(existingModels)) {
+      const row = model && typeof model === "object" && !Array.isArray(model) ? model : {};
+      const modelId = typeof row.model === "string" && row.model ? row.model : key;
+      let alias = `${slotKey}/${modelId}`;
+      for (let n = 2; used.has(alias); n += 1) alias = `${slotKey}/${modelId}-${n}`;
+      used.add(alias);
+      models[alias] = { ...row, provider: slotKey };
+    }
+    settingsConfig.models = models;
+  }
   return createProvider(app, {
     name: `${source.name} copy`,
     category: source.category,

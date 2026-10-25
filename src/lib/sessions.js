@@ -232,11 +232,21 @@ async function lastRelocatedCwd(filePath) {
     file = await fsp.open(filePath, "r");
     const { size } = await file.stat();
     const start = Math.max(0, size - RELOCATED_TAIL_BYTES);
+    // Seeking into the middle of a line leaves a partial first line — but a
+    // seek landing exactly on a newline keeps the first record complete, and
+    // that record may be the last relocated entry. Probe the byte before the
+    // window (0x0a cannot occur inside a multi-byte UTF-8 sequence) instead of
+    // dropping the first line unconditionally.
+    let boundary = start === 0;
+    if (start > 0) {
+      const probe = Buffer.alloc(1);
+      const head = await file.read(probe, 0, 1, start - 1);
+      boundary = head.bytesRead === 1 && probe[0] === 0x0a;
+    }
     const buffer = Buffer.alloc(size - start);
     const { bytesRead } = await file.read(buffer, 0, buffer.length, start);
     const lines = buffer.subarray(0, bytesRead).toString("utf8").split("\n");
-    // Seeking into the middle of a line leaves a partial first line.
-    if (start > 0 && lines.length) lines.shift();
+    if (!boundary && lines.length) lines.shift();
     for (let i = lines.length - 1; i >= 0; i -= 1) {
       if (!lines[i].includes("\"relocated\"")) continue;
       const value = parseJsonLine(lines[i]);

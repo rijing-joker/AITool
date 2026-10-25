@@ -981,3 +981,25 @@ test("Codex session usage imports cache writes and falls through stub-zero cache
   );
   assert.equal(cost, (600 * 1 + 50 * 2 + 400 * 0.1 + 300 * 1.25) / 1e6);
 });
+
+test("claude sessions: a /cd record landing exactly on the 64 KiB window boundary still counts", async () => {
+  // The tail window must only drop its first line when the seek landed
+  // mid-line. With the seek aligned on a newline, the window's first record
+  // is complete — and it may be the last relocated record.
+  const header = JSON.stringify({ sessionId: "session-cd-edge", cwd: "/tmp/project-a", timestamp: "2026-10-01T10:00:00Z" }) + "\n";
+  const relocated = JSON.stringify({ type: "relocated", relocatedCwd: "/tmp/project-b", sessionId: "session-cd-edge" }) + "\n";
+  const padBase = JSON.stringify({ type: "user", message: { role: "user", content: "" }, timestamp: "2026-10-01T10:00:05Z" }) + "\n";
+  const padNeeded = 64 * 1024 - relocated.length - padBase.length;
+  assert.ok(padNeeded >= 0, "padding fits");
+  const padLine = JSON.stringify({ type: "user", message: { role: "user", content: "x".repeat(padNeeded) }, timestamp: "2026-10-01T10:00:05Z" }) + "\n";
+  const content = header + relocated + padLine;
+  assert.equal(content.length - header.length, 64 * 1024, "the relocated record starts exactly at the window boundary");
+  const projectDir = path.join(tmpHome, ".claude", "projects", "-tmp-project");
+  fs.mkdirSync(projectDir, { recursive: true });
+  fs.writeFileSync(path.join(projectDir, "session-cd-edge.jsonl"), content);
+
+  const list = await sessions.listSessions({ app: "claude", home: tmpHome });
+  const meta = list.find((row) => row.sessionId === "session-cd-edge");
+  assert.ok(meta, "the boundary session is listed");
+  assert.equal(meta.projectDir, "/tmp/project-b", "the boundary-aligned relocated record is not dropped as a partial line");
+});

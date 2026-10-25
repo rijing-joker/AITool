@@ -238,3 +238,112 @@ test("WorkBuddy non-streaming responses reject failed or incomplete SSE without 
   const response = await request(); assert.equal(response.status, 200);
   const result = await response.json(); assert.equal(result.choices[0].message.content, "OK"); assert.equal(result.usage, undefined);
 });
+
+test("a chat 401 renews once and resends before any bytes reach the client", async t => {
+  const { options } = await fixture(t);
+  await state.write(path.join(options.root, "workbuddy-account.json"), { access: "stale-but-unexpired", refresh: "rotating", expires: Date.now() + 3600000, uid: "u" });
+  await state.saveSettings(value => ({ ...value, enabled: { workbuddy: true }, workbuddy: { models: ["native"] } }), options);
+  let refreshes = 0, chats = 0, rejectedOnce = false;
+  const body = { model: "native", stream: true, messages: [{ role: "user", content: "Synthetic" }] };
+  const upstream = http.createServer((req, res) => {
+    req.resume(); chats += 1;
+    if (!rejectedOnce && req.headers.authorization === "Bearer stale-but-unexpired") {
+      rejectedOnce = true;
+      res.writeHead(401, { "content-type": "application/json" });
+      res.end(JSON.stringify({ code: 401 }));
+      return;
+    }
+    assert.equal(req.headers.authorization, "Bearer renewed");
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.end('data: {"choices":[{"index":0,"delta":{"content":"OK"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n');
+  });
+  upstream.listen(0, "127.0.0.1"); await once(upstream, "listening"); t.after(() => { upstream.close(); upstream.closeAllConnections(); });
+  options.request = async url => {
+    if (url.includes("refresh")) {
+      refreshes += 1;
+      return { status: 200, body: Buffer.from(JSON.stringify({ data: { accessToken: "renewed", refreshToken: "rotated", expiresIn: 3600 } })) };
+    }
+    throw new Error(url);
+  };
+  options.streamRequest = (_url, config, callback) => http.request(`http://127.0.0.1:${upstream.address().port}`, config, callback);
+  const proxy = http.createServer((req, res) => buddy.forward({ kind: "workbuddy", req, res, body, signal: new AbortController().signal, options, pipeline }).catch(() => { res.writeHead(502); res.end(); }));
+  proxy.listen(0, "127.0.0.1"); await once(proxy, "listening"); t.after(() => { proxy.close(); proxy.closeAllConnections(); });
+  const raw = await (await fetch(`http://127.0.0.1:${proxy.address().port}`)).text();
+  assert.match(raw, /\[DONE\]/);
+  assert.equal(refreshes, 1, "exactly one renewal");
+  assert.equal(chats, 2, "the chat request is sent again after renewing");
+});
+
+test("a chat 401 that survives renewal maps to the client without a second refresh", async t => {
+  const { options } = await fixture(t);
+  await state.write(path.join(options.root, "workbuddy-account.json"), { access: "stale-but-unexpired", refresh: "rotating", expires: Date.now() + 3600000, uid: "u" });
+  await state.saveSettings(value => ({ ...value, enabled: { workbuddy: true }, workbuddy: { models: ["native"] } }), options);
+  let refreshes = 0, chats = 0;
+  const body = { model: "native", stream: true, messages: [{ role: "user", content: "Synthetic" }] };
+  const upstream = http.createServer((req, res) => {
+    req.resume(); chats += 1;
+    res.writeHead(401, { "content-type": "application/json" });
+    res.end(JSON.stringify({ code: 401 }));
+  });
+  upstream.listen(0, "127.0.0.1"); await once(upstream, "listening"); t.after(() => { upstream.close(); upstream.closeAllConnections(); });
+  options.request = async url => {
+    if (url.includes("refresh")) {
+      refreshes += 1;
+      return { status: 200, body: Buffer.from(JSON.stringify({ data: { accessToken: "renewed", refreshToken: "rotated", expiresIn: 3600 } })) };
+    }
+    throw new Error(url);
+  };
+  options.streamRequest = (_url, config, callback) => http.request(`http://127.0.0.1:${upstream.address().port}`, config, callback);
+  const proxy = http.createServer((req, res) => buddy.forward({ kind: "workbuddy", req, res, body, signal: new AbortController().signal, options, pipeline }).catch(() => { res.writeHead(502); res.end(); }));
+  proxy.listen(0, "127.0.0.1"); await once(proxy, "listening"); t.after(() => { proxy.close(); proxy.closeAllConnections(); });
+  const response = await fetch(`http://127.0.0.1:${proxy.address().port}`);
+  assert.equal(response.status, 401);
+  const payload = await response.json();
+  assert.equal(payload.error.code, "workbuddy_http_401");
+  assert.doesNotMatch(JSON.stringify(payload), /stale-but-unexpired/);
+  assert.equal(refreshes, 1, "the retry is not renewed again");
+  assert.equal(chats, 2);
+});
+
+test("concurrent chat 401s share one renewal and both resend with the renewed token", async t => {
+  const { options } = await fixture(t);
+  await state.write(path.join(options.root, "workbuddy-account.json"), { access: "stale-but-unexpired", refresh: "rotating", expires: Date.now() + 3600000, uid: "u" });
+  await state.saveSettings(value => ({ ...value, enabled: { workbuddy: true }, workbuddy: { models: ["native"] } }), options);
+  let refreshes = 0, staleRejects = 0, renewedChats = 0;
+  const body = { model: "native", stream: true, messages: [{ role: "user", content: "Synthetic" }] };
+  const upstream = http.createServer(async (req, res) => {
+    req.resume();
+    if (req.headers.authorization === "Bearer stale-but-unexpired") {
+      // Hold both 401s briefly so both chats are in flight before either
+      // renewal starts — that is the concurrent-reuse path.
+      staleRejects += 1;
+      await new Promise(resolve => setTimeout(resolve, 50));
+      res.writeHead(401); res.end("{}"); return;
+    }
+    assert.equal(req.headers.authorization, "Bearer renewed");
+    renewedChats += 1;
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.end('data: {"choices":[{"index":0,"delta":{"content":"OK"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n');
+  });
+  upstream.listen(0, "127.0.0.1"); await once(upstream, "listening"); t.after(() => { upstream.close(); upstream.closeAllConnections(); });
+  options.request = async url => {
+    if (url.includes("refresh")) {
+      refreshes += 1;
+      await new Promise(resolve => setTimeout(resolve, 50));
+      return { status: 200, body: Buffer.from(JSON.stringify({ data: { accessToken: "renewed", refreshToken: "rotated", expiresIn: 3600 } })) };
+    }
+    throw new Error(url);
+  };
+  options.streamRequest = (_url, config, callback) => http.request(`http://127.0.0.1:${upstream.address().port}`, config, callback);
+  const proxy = http.createServer((req, res) => buddy.forward({ kind: "workbuddy", req, res, body, signal: new AbortController().signal, options, pipeline }).catch(() => { res.writeHead(502); res.end(); }));
+  proxy.listen(0, "127.0.0.1"); await once(proxy, "listening"); t.after(() => { proxy.close(); proxy.closeAllConnections(); });
+  const [first, second] = await Promise.all([
+    fetch(`http://127.0.0.1:${proxy.address().port}`, { method: "POST", body: "x" }),
+    fetch(`http://127.0.0.1:${proxy.address().port}`, { method: "POST", body: "x" }),
+  ]);
+  assert.equal(first.status, 200);
+  assert.equal(second.status, 200);
+  assert.equal(refreshes, 1, "the second caller reuses the renewed account");
+  assert.equal(staleRejects, 2);
+  assert.equal(renewedChats, 2);
+});

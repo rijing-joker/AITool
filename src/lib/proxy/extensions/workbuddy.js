@@ -238,20 +238,31 @@ async function forward({ kind, req, res, body, signal, options, pipeline }) {
     res.writeHead(400, { "content-type": "application/json" }); res.end(JSON.stringify({ error: { code: "unsupported_tool_name", message: "WorkBuddy requires ASCII tool names; tool names and instructions are preserved" } })); return;
   }
   const account = await current(kind, options);
-  const signed = headers(kind, account); signed.accept = "text/event-stream"; signed["x-conversation-id"] = crypto.randomUUID(); signed["x-request-id"] = crypto.randomUUID();
   const session = req.headers["x-magpie-session"] || req.headers["session_id"];
   const conversation = typeof session === "string" && session.length <= 128 ? session : JSON.stringify(body.messages.find(row => row.role === "user")?.content || crypto.randomUUID());
-  signed["x-conversation-id"] = crypto.createHmac("sha256", config.token).update(conversation).digest("hex").slice(0, 32);
   const turn = body.messages.map((row, index) => row.role === "user" ? index : -1).filter(index => index >= 0).at(-1);
-  signed["x-conversation-request-id"] = crypto.createHmac("sha256", config.token).update(conversation).update(JSON.stringify([turn, body.messages[turn]?.content])).digest("hex").slice(0, 32);
-  signed["x-conversation-message-id"] = signed["x-request-id"];
-  await new Promise((resolve, reject) => {
+  const refusal = (statusCode) => {
+    // Refusals often echo system text. Fixed errors keep bodies out of logs.
+    res.writeHead(statusCode, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: { type: statusCode === 429 ? "insufficient_quota" : "upstream_error", code: `workbuddy_http_${statusCode}`, message: "WorkBuddy refused this request; instructions were preserved. Check login, quota or choose another provider." } }));
+  };
+  // Chat signs per-request headers, so the 401 renewal cannot reuse
+  // authorizedCall directly: one renewal under the same account-file lock,
+  // then one re-signed resend. Nothing has been written to the client before
+  // the first response arrives, so a mid-stream failure is never retried.
+  const send = (current, allowRenew) => new Promise((resolve, reject) => {
+    const signed = headers(kind, current); signed.accept = "text/event-stream"; signed["x-conversation-id"] = crypto.randomUUID(); signed["x-request-id"] = crypto.randomUUID();
+    signed["x-conversation-id"] = crypto.createHmac("sha256", config.token).update(conversation).digest("hex").slice(0, 32);
+    signed["x-conversation-request-id"] = crypto.createHmac("sha256", config.token).update(conversation).update(JSON.stringify([turn, body.messages[turn]?.content])).digest("hex").slice(0, 32);
+    signed["x-conversation-message-id"] = signed["x-request-id"];
     const upstream = (options.streamRequest || https.request)(site(kind) + "/v2/chat/completions", { method: "POST", signal, headers: signed, agent: false }, response => {
       if (response.statusCode >= 300 && response.statusCode < 400) { response.resume(); return reject(new Error("WorkBuddy redirect refused")); }
       if (response.statusCode >= 400) {
-        // Refusals often echo system text. Fixed errors keep bodies out of logs.
-        response.resume(); res.writeHead(response.statusCode, { "content-type": "application/json" });
-        res.end(JSON.stringify({ error: { type: response.statusCode === 429 ? "insufficient_quota" : "upstream_error", code: `workbuddy_http_${response.statusCode}`, message: "WorkBuddy refused this request; instructions were preserved. Check login, quota or choose another provider." } })); resolve(); return;
+        response.resume();
+        if (allowRenew && response.statusCode === 401 && current.source !== "desktop" && current.refresh) {
+          const error = new Error(`WorkBuddy HTTP ${response.statusCode}`); error.status = response.statusCode; return reject(error);
+        }
+        refusal(response.statusCode); resolve(); return;
       }
       if (body.stream === true) {
         res.writeHead(response.statusCode, { "content-type": response.headers["content-type"] || "text/event-stream" });
@@ -266,5 +277,25 @@ async function forward({ kind, req, res, body, signal, options, pipeline }) {
     upstream.on("error", reject);
     upstream.end(JSON.stringify({ ...body, stream: true, stream_options: { ...body.stream_options, include_usage: true } }));
   });
+  try {
+    await send(account, true);
+  } catch (error) {
+    if (error.status !== 401) throw error;
+    const target = file(kind, options);
+    try {
+      const renewed = await withFileLock(target, async () => {
+        let latest = await state.read(target);
+        if (!latest || latest.source === "desktop" || typeof latest.access !== "string" || !latest.access) throw error;
+        if (latest.access !== account.access && latest.expires && latest.expires > Date.now() + 60000) return latest;
+        if (!latest.refresh || (latest.refreshExpiresAt && latest.refreshExpiresAt < Date.now())) throw new Error("WorkBuddy login expired; sign in again");
+        const token = await call(kind, "/v2/plugin/auth/token/refresh", { account: latest, extra: { "x-refresh-token": latest.refresh, "x-auth-refresh-source": "plugin" } }, options);
+        latest = merged(latest, token); await state.write(target, latest); return latest;
+      });
+      await send(renewed, false);
+    } catch (renewError) {
+      if (renewError === error || (renewError && renewError.status === 401)) { refusal(401); return; }
+      throw renewError;
+    }
+  }
 }
 module.exports = { SITES, headers, merged, desktopFile, desktop, useDesktop, begin, poll, current, catalog, quotaOf, quota, status, configure, forget, forward };

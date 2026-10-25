@@ -349,10 +349,10 @@ function lookupPricing(model, { curated, litellm, source } = {}) {
       if (!match || !ref) continue;
       const needle = match.toLowerCase();
       if (!curated.exact[ref]) continue;
-      if (lower.includes(needle)) {
+      if (fuzzyContains(lower, needle)) {
         return { hit: true, source: "curated:fuzzy", value: curated.exact[ref] };
       }
-      if (dotForm && dotForm.includes(needle)) {
+      if (dotForm && fuzzyContains(dotForm, needle)) {
         return { hit: true, source: "curated:fuzzy", value: curated.exact[ref] };
       }
     }
@@ -392,13 +392,28 @@ function lookupPricing(model, { curated, litellm, source } = {}) {
       const keyLower = key.toLowerCase();
       // Only accept if model is a superset of key (model contains key), to
       // avoid e.g. "gpt-5" matching "gpt-5-pro" in the wrong direction.
-      if (lower.includes(keyLower) || (dotForm && dotForm.includes(keyLower))) {
+      if (fuzzyContains(lower, keyLower) || (dotForm && fuzzyContains(dotForm, keyLower))) {
         return { hit: true, source: "litellm:fuzzy", value: litellm[key] };
       }
     }
   }
 
   return { hit: false, source: "miss", value: null };
+}
+
+// Substring hit with a numeric-version boundary: a needle that continues into
+// a longer number or dotted segment — "haiku-5-5" inside "claude-haiku-5-50",
+// "gpt-5.1" inside "gpt-5.10" — would price an unknown version with the
+// needle's rate. Dashes stay open so dated/variant suffixes ("…-20241022",
+// "glm-5.1-0") keep resolving. Same rule as lookupContainedExactCaseInsensitive.
+function fuzzyContains(haystack, needle) {
+  let at = haystack.indexOf(needle);
+  while (at !== -1) {
+    const next = haystack[at + needle.length];
+    if (next === undefined || !/[\d.]/.test(next)) return true;
+    at = haystack.indexOf(needle, at + 1);
+  }
+  return false;
 }
 
 // Convert one LiteLLM entry (per-token) to internal per-million USD shape.

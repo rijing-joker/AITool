@@ -58,6 +58,15 @@ test("Claude Haiku 5.5 seeds the standard tier (cc-switch 3da322eb3)", () => {
   const row = { source: "claude", model: "claude-haiku-5-5", input_tokens: 1e6, output_tokens: 5e5,
     cached_input_tokens: 1e6, cache_creation_input_tokens: 1e6 };
   assert.ok(Math.abs(pricing.computeRowCost(row) - (0.1 + 0.25 + 0.01 + 0.125)) < 1e-9);
+  // A fuzzy needle must not price a longer numeric version with its rate:
+  // "claude-haiku-5-50" (and its dot-restored form) is not Haiku 5.5.
+  for (const model of ["claude-haiku-5-50", "my-haiku-5.50", "claude-haiku-5.50"]) {
+    const info = pricing.getModelPricingInfo(model);
+    assert.equal(info.status, "unpriced", `${model} must not inherit Haiku 5.5's rate (${info.source})`);
+  }
+  // Dash-joined variant suffixes still resolve (no numeric continuation).
+  const padded = pricing.getModelPricingInfo("glm-5-1-0");
+  assert.equal(padded.status, "priced", "Droid's dash-normalized GLM naming keeps resolving");
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

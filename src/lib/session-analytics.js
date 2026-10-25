@@ -3011,4 +3011,6 @@ module.exports = {
   discoverSessionFiles,
   dedupeClaudeFilesAcrossRoots,
   analyticsEntryStatKey,
+  // Exported for the contract test that pins the dense model_usage shape.
+  MODEL_USAGE_SUM_FIELDS,
 };

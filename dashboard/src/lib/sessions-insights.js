@@ -75,7 +75,10 @@ function finiteValue(value) {
 }
 
 const USAGE_FIELDS = ["input_tokens", "output_tokens", "cached_input_tokens", "cache_creation_input_tokens", "reasoning_output_tokens", "total_tokens"];
-const PRICING_FIELDS = ["long_context_", "priority_", "priority_long_context_"].flatMap((prefix) => USAGE_FIELDS.filter((field) => field !== "total_tokens").map((field) => prefix + field));
+// Keep in sync with MODEL_USAGE_SUM_FIELDS (src/lib/session-analytics.js):
+// date-range pruning re-zeroes exactly these fields, so a server-side
+// sum field missing here survives pruning with its lifetime value.
+const PRICING_FIELDS = ["long_context_", "priority_", "priority_long_context_", "ultrafast_", "ultrafast_long_context_"].flatMap((prefix) => USAGE_FIELDS.filter((field) => field !== "total_tokens").map((field) => prefix + field));
 
 export function sessionModels(session) {
   const observed = Array.isArray(session?.model_usage)

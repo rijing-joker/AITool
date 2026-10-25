@@ -14,6 +14,7 @@ const {
   listSessionsForBrowser,
   resumeCommandFor,
   sessionsToCsv,
+  MODEL_USAGE_SUM_FIELDS,
 } = require("../src/lib/session-analytics");
 
 function writeGrokSessionFixture(home, {
@@ -1104,30 +1105,13 @@ test("model_usage reaches the browser dense whatever the sidecar stored", async 
   // sessions-api.ts is describing a row shape that only one of them sends.
   assert.deepEqual(keySets[0], keySets[1]);
   assert.deepEqual(keySets[0], keySets[2]);
-  for (const field of [
-    "model",
-    "input_tokens",
-    "cached_input_tokens",
-    "cache_creation_input_tokens",
-    "output_tokens",
-    "reasoning_output_tokens",
-    "total_tokens",
-    "long_context_input_tokens",
-    "long_context_cached_input_tokens",
-    "long_context_cache_creation_input_tokens",
-    "long_context_output_tokens",
-    "long_context_reasoning_output_tokens",
-    "usage_events",
-    "rerouted_usage_events",
-    "long_context_usage_events",
-    "edit_turns",
-    "selected_models",
-    "reroute_reasons",
-    "model_attribution",
-    "cost_usd",
-  ]) {
-    assert.ok(keySets[0].includes(field), `model_usage row is missing ${field}`);
-  }
+  // Exact key-set pin (not just a subset): every MODEL_USAGE_SUM_FIELDS entry
+  // — including the ultrafast_* columns — must ride the dense row, or the
+  // dashboard's SessionModelUsage type and date-range pruning silently drift
+  // from what the server emits.
+  const expectedKeys = ["model", ...MODEL_USAGE_SUM_FIELDS,
+    "selected_models", "reroute_reasons", "model_attribution", "cost_usd", "performance", "pricing"].sort();
+  assert.deepEqual(keySets[0], expectedKeys, "the dense row shape must match MODEL_USAGE_SUM_FIELDS exactly");
 });
 
 test("sidecar omits reconstructible model_usage fields without losing information", async () => {

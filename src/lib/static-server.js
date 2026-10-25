@@ -67,6 +67,12 @@ async function serveStaticFile(baseDir, pathname, res, req = {}) {
   // upstream d9c0226f): a stat-then-open race could swap the file for
   // something outside baseDir after the traversal check passed.
   let handle;
+  // The variant/base descriptor createReadStream will consume, declared out
+  // here so the finally guard can close it on the error paths: any throw
+  // between the open and the stream (variant stat, writeHead,
+  // createReadStream) must not leak the fd (fatal on Node 25+ once GC'd).
+  let streamHandle = null;
+  let streamHandleNeedsClose = false;
   try {
     handle = await fsPromises.open(filePath, "r");
     const stat = await handle.stat();
@@ -114,11 +120,12 @@ async function serveStaticFile(baseDir, pathname, res, req = {}) {
     // a variant, the base descriptor's job (the checked stat) is done, so it
     // must be closed explicitly — nulling it without closing leaked one fd
     // per compressible-asset request.
-    let streamHandle;
     if (encoding) {
       streamHandle = await fsPromises.open(selectedPath, "r");
+      streamHandleNeedsClose = true;
       if (clientGone) {
         await streamHandle.close();
+        streamHandleNeedsClose = false;
         return true; // finally closes the base handle
       }
       selectedStat = await streamHandle.stat();
@@ -127,10 +134,12 @@ async function serveStaticFile(baseDir, pathname, res, req = {}) {
     } else {
       streamHandle = handle;
       handle = null; // The stream owns and closes this descriptor.
+      streamHandleNeedsClose = true;
     }
     if (clientGone) {
       // No stream was created, so this descriptor is ours to close.
       await streamHandle.close();
+      streamHandleNeedsClose = false;
       return true;
     }
 
@@ -145,10 +154,12 @@ async function serveStaticFile(baseDir, pathname, res, req = {}) {
     if (req.method === "HEAD") {
       // The descriptor was opened but will not be streamed — close it here.
       await streamHandle.close();
+      streamHandleNeedsClose = false;
       if (!clientGone) res.end();
       return true;
     }
     stream = streamHandle.createReadStream();
+    streamHandleNeedsClose = false; // the stream owns and closes it now
     stream.on("error", (error) => res.destroy(error));
     stream.pipe(res);
     return true;
@@ -162,6 +173,7 @@ async function serveStaticFile(baseDir, pathname, res, req = {}) {
     return false;
   } finally {
     if (handle) await handle.close();
+    if (streamHandleNeedsClose && streamHandle) await streamHandle.close().catch(() => {});
   }
 }
 

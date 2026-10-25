@@ -263,3 +263,48 @@ test("clients aborting mid-open cannot leak the static FileHandles (upstream 56e
   assert.equal(Buffer.concat(chunks).toString(), "png");
   await fs.rm(dir, { recursive: true, force: true });
 });
+
+test("an error after the stream descriptor opens cannot leak it", async (t) => {
+  // Regression guard for the error path the abort fix did not cover: a throw
+  // after the stream handle exists (variant stat, writeHead,
+  // createReadStream) reaches finally with the base descriptor already nulled
+  // — the stream descriptor must be closed there too (fatal GC on Node 25+).
+  const fsp = require("node:fs/promises");
+  const origOpen = fsp.open;
+  const opensByPath = new Map();
+  const closesByPath = new Map();
+  fsp.open = async function countedOpen(file, ...args) {
+    const handle = await origOpen.call(fsp, file, ...args);
+    const key = String(file);
+    opensByPath.set(key, (opensByPath.get(key) || 0) + 1);
+    const origClose = handle.close.bind(handle);
+    handle.close = async function countedClose(...cargs) {
+      closesByPath.set(key, (closesByPath.get(key) || 0) + 1);
+      return origClose(...cargs);
+    };
+    return handle;
+  };
+  t.after(() => { fsp.open = origOpen; });
+
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "aitool-streamfail-"));
+  await fs.writeFile(path.join(dir, "app.js"), 'console.log("stream failure");\n'.repeat(200));
+  const { precompressAssets } = await import("../dashboard/scripts/precompress-assets.mjs");
+  await precompressAssets(dir);
+
+  const res = new EventEmitter();
+  res.destroyed = false;
+  res.headersSent = false;
+  res.write = () => true;
+  res.end = () => {};
+  res.writeHead = () => { throw new Error("synthetic header failure"); };
+  res.destroy = () => {};
+  const served = await serveStaticFile(dir, "/app.js", res, { method: "GET", headers: { "accept-encoding": "gzip" } });
+  assert.equal(served, false, "the failure still falls back before commit");
+  assert.equal(res.headersSent, false);
+  await new Promise((resolve) => setImmediate(resolve));
+  for (const [key, opened] of opensByPath) {
+    assert.equal(closesByPath.get(key) || 0, opened, `every descriptor opened for ${key} must be closed on the error path`);
+  }
+  assert.equal(opensByPath.get(path.join(dir, "app.js.gz")), 1, "the variant descriptor was opened");
+  await fs.rm(dir, { recursive: true, force: true });
+});

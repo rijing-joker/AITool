@@ -529,8 +529,11 @@ export const providerSwitchApi = {
   switchProvider(
     app: ProviderSwitchApp,
     id: string,
+    disconnect = false,
   ): Promise<{ ok: true; app: string; current: string; wrote: string[]; backups: string[] }> {
-    return mutate("/api/provider-switch/switch", "POST", { app, id });
+    // An empty id only disconnects when the explicit intent flag rides along
+    // (the server refuses to clear the live provider on a missing id alone).
+    return mutate("/api/provider-switch/switch", "POST", { app, id, ...(disconnect ? { disconnect: true } : {}) });
   },
 };
 

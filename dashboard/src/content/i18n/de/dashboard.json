@@ -866,6 +866,7 @@
   "pswitch.validate.key.hermes": "Der Hermes-API-Key ist leer.",
   "pswitch.validate.key.pi": "Der Pi-API-Key ist leer.",
   "pswitch.validate.key.grokbuild": "Der Grok-Build-API-Key ist leer.",
+  "pswitch.validate.key.kimi": "Der Kimi-API-Key ist leer.",
   "pswitch.validate.model.pi": "Der Pi-Anbieter benötigt mindestens eine Modell-ID.",
   "pswitch.quota.loading": "Kontingent wird geladen…",
   "pswitch.quota.left": "{{value}}% übrig",

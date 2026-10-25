@@ -358,3 +358,81 @@ it("saves Codex subagent fields through the TOML editor while retaining unrelate
   const saved = providerSwitchApi.updateProvider.mock.calls[0][2];
   expect(saved.settingsConfig.config.agents).toEqual({ max_threads: 3, default_subagent_model: "gpt-5-mini", default_subagent_reasoning_effort: "high" });
 });
+
+const kimiEngine = require("../../../src/lib/provider-switch/kimi");
+
+function kimiProps() {
+  const presets = listPresets("kimi");
+  const settingsConfig = structuredClone(presets.find((row) => row.id === "kimi_moonshot").settingsConfig);
+  settingsConfig.provider.api_key = "before-fixture-key";
+  // The backend stamps model.provider with the slot key on save; stored rows
+  // never carry unstamped aliases.
+  for (const model of Object.values(settingsConfig.models)) model.provider = settingsConfig.slotKey;
+  return {
+    ...props(), app: "kimi", presets,
+    editing: { id: "saved-kimi", name: "Relay", category: "custom", settingsConfig },
+  };
+}
+
+// The editor view projects the FULL native config.toml (official node left
+// alone, the draft's node applied); the dialog must turn that back into the
+// row's wrapper, not fall through to the gemini {env} branch.
+function kimiEditorView(settingsConfig) {
+  const live = {
+    providers: {
+      "managed:kimi-code": { type: "kimi", base_url: "https://api.kimi.com/coding/v1", oauth: { storage: "file", key: "oauth/kimi-code" } },
+    },
+    models: { "kimi-code/kimi-k2.7-code": { provider: "managed:kimi-code", model: "kimi-k2.7-code", max_context_size: 262144 } },
+    default_model: "kimi-code/kimi-k2.7-code",
+  };
+  const next = kimiEngine.applyProvider(live, "kimi", { provider: settingsConfig.provider, models: settingsConfig.models });
+  return { configText: kimiEngine.serializeDocument(next), slotKey: "kimi", inactive: [] };
+}
+
+it("saves a Kimi row as its wrapper and blocks an invalid alias table", async () => {
+  const callbacks = kimiProps();
+  providerSwitchApi.getEditorView.mockResolvedValue(kimiEditorView(callbacks.editing.settingsConfig));
+  providerSwitchApi.updateProvider.mockResolvedValue({ provider: { name: "Relay" } });
+  render(<ProviderEditDialog {...callbacks} />);
+  const save = screen.getByRole("button", { name: "pswitch.action.save" });
+  await waitFor(() => expect(save).toBeEnabled());
+  const keyField = screen.getAllByLabelText("pswitch.field.api_key")[0];
+  expect(keyField).toHaveValue("before-fixture-key");
+  expect(screen.getByLabelText("pswitch.field.endpoint")).toHaveValue("https://api.moonshot.cn/v1");
+  const wrapper = JSON.parse(screen.getByRole("textbox", { name: "pswitch.provider.config" }).value);
+  expect(wrapper.slotKey).toBe("kimi");
+  expect(wrapper.provider).toMatchObject({ type: "openai", api_key: "before-fixture-key" });
+  expect(wrapper.models).toEqual(callbacks.editing.settingsConfig.models);
+
+  fireEvent.change(keyField, { target: { value: "after-fixture-key" } });
+  fireEvent.click(save);
+  await waitFor(() => expect(providerSwitchApi.updateProvider).toHaveBeenCalledTimes(1));
+  const payload = providerSwitchApi.updateProvider.mock.calls[0][2];
+  expect(payload.settingsConfig).toEqual({
+    slotKey: "kimi",
+    provider: { ...callbacks.editing.settingsConfig.provider, api_key: "after-fixture-key" },
+    models: callbacks.editing.settingsConfig.models,
+  });
+
+  // A half-typed alias table blocks the save instead of writing the stale
+  // last-valid models silently.
+  fireEvent.change(screen.getByLabelText("pswitch.kimi.models.editor"), { target: { value: "{ not json" } });
+  expect(screen.getByText("pswitch.kimi.models.invalid")).toBeTruthy();
+  fireEvent.click(save);
+  expect(providerSwitchApi.updateProvider).toHaveBeenCalledTimes(1);
+});
+
+it("repopulates the config editor when the dialog switches from Claude to Kimi", async () => {
+  const callbacks = props();
+  const { rerender } = render(<ProviderEditDialog {...callbacks} />);
+  await waitFor(() => expect(screen.getByRole("textbox", { name: "pswitch.provider.config" })).toHaveValue(JSON.stringify(base, null, 2)));
+
+  const kimi = kimiProps();
+  providerSwitchApi.getEditorView.mockResolvedValue(kimiEditorView(kimi.editing.settingsConfig));
+  rerender(<ProviderEditDialog {...kimi} />);
+  await waitFor(() => {
+    const wrapper = JSON.parse(screen.getByRole("textbox", { name: "pswitch.provider.config" }).value);
+    expect(wrapper).toMatchObject({ slotKey: "kimi", provider: { api_key: "before-fixture-key" } });
+  });
+  expect(screen.getAllByLabelText("pswitch.field.api_key")[0]).toHaveValue("before-fixture-key");
+});

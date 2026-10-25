@@ -855,6 +855,7 @@
   "pswitch.validate.key.hermes": "Hermes API 키가 비어 있습니다.",
   "pswitch.validate.key.pi": "Pi API 키가 비어 있습니다.",
   "pswitch.validate.key.grokbuild": "Grok Build API 키가 비어 있습니다.",
+  "pswitch.validate.key.kimi": "Kimi API 키가 비어 있습니다.",
   "pswitch.validate.model.pi": "Pi 공급자에는 최소 한 개의 모델 ID가 필요합니다.",
   "pswitch.quota.loading": "쿼터를 불러오는 중…",
   "pswitch.quota.left": "{{value}}% 남음",

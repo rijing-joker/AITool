@@ -1630,6 +1630,7 @@
   "pswitch.validate.key.hermes": "Hermes API Key 为空。",
   "pswitch.validate.key.pi": "Pi API Key 为空。",
   "pswitch.validate.key.grokbuild": "Grok Build API Key 为空。",
+  "pswitch.validate.key.kimi": "Kimi API Key 为空。",
   "pswitch.validate.model.pi": "Pi 供应商至少需要填写一个模型 ID。",
   "proxy.requests.col.key": "密钥",
   "proxy.requests.col.source": "来源",

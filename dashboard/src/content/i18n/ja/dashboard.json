@@ -855,6 +855,7 @@
   "pswitch.validate.key.hermes": "Hermes の API キーが空です。",
   "pswitch.validate.key.pi": "Pi の API キーが空です。",
   "pswitch.validate.key.grokbuild": "Grok Build の API キーが空です。",
+  "pswitch.validate.key.kimi": "Kimi の API キーが空です。",
   "pswitch.validate.model.pi": "Pi プロバイダーには少なくとも 1 つのモデル ID が必要です。",
   "pswitch.quota.loading": "クォータを読み込み中…",
   "pswitch.quota.left": "残り {{value}}%",

@@ -80,11 +80,18 @@ function additiveInitialDraft(app, settingsConfig) {
 }
 
 // Kimi Code model aliases: a map of alias -> { model, max_context_size,
-// capabilities? } rendered as a JSON textarea; parse errors block the save.
-function KimiModelsEditor({ value, onChange }) {
+// capabilities? } rendered as a JSON textarea; parse errors block the save —
+// the invalid flag is lifted to the dialog via onError so stale last-valid
+// models are never saved silently.
+function KimiModelsEditor({ value, onChange, onError }) {
   const [raw, setRaw] = useState(() => JSON.stringify(value ?? {}, null, 2));
   const [error, setError] = useState(false);
-  useEffect(() => { setRaw(JSON.stringify(value ?? {}, null, 2)); setError(false); }, [value]);
+  useEffect(() => {
+    setRaw(JSON.stringify(value ?? {}, null, 2));
+    setError(false);
+    onError?.(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
   return (
     <div>
       <FieldLabel label={copy("pswitch.kimi.models.editor")} />
@@ -99,10 +106,15 @@ function KimiModelsEditor({ value, onChange }) {
             const parsed = JSON.parse(next);
             if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
               setError(false);
+              onError?.(false);
               onChange(parsed);
-            } else setError(true);
+            } else {
+              setError(true);
+              onError?.(true);
+            }
           } catch {
             setError(true);
+            onError?.(true);
           }
         }}
         rows={8}
@@ -279,11 +291,8 @@ const DEFAULT_MODEL_PATH = {
   codex: "config.model",
   agy: "config.model.name",
   gemini: "env.GEMINI_MODEL",
-  // Additive apps: the model field edits where the tool reads "this
-  // provider's model" from. opencode/openclaw use the sentinel (the
-  // default-model pointer — see ADDITIVE_SPEC); hermes/grokbuild/pi edit the
-  // entry itself (singular model / models[0].id) and the engine syncs the
-  // pointers on switch; mcode has none — MiniMax Code owns model selection.
+  // Kimi has no single default-model pointer — the model aliases table below
+  // is the dialog's model editor, and default_model is the switch's job.
   opencode: "ADDITIVE_MODEL_POINTER",
   openclaw: "ADDITIVE_MODEL_POINTER",
   hermes: "custom_providers.$slot.model",
@@ -294,6 +303,9 @@ const ENDPOINT_PATH = {
   codex: "config.model_providers.custom.base_url",
   agy: "env.GOOGLE_GEMINI_BASE_URL",
   gemini: "env.GOOGLE_GEMINI_BASE_URL",
+  // Kimi's draft is the native wrapper ({ slotKey, provider, models }); the
+  // dialog reads/writes the node fragment inside it.
+  kimi: "provider.base_url",
   opencode: "provider.$slot.options.baseURL",
   openclaw: "models.providers.$slot.baseUrl",
   mcode: "custom_provider.$slot.options.baseURL",
@@ -306,6 +318,7 @@ const API_KEY_PATH = {
   codex: "auth.OPENAI_API_KEY",
   agy: "env.GEMINI_API_KEY",
   gemini: "env.GEMINI_API_KEY",
+  kimi: "provider.api_key",
   opencode: "provider.$slot.options.apiKey",
   openclaw: "models.providers.$slot.apiKey",
   mcode: "custom_provider.$slot.options.apiKey",
@@ -407,7 +420,9 @@ function envTextOf(envObject) {
 // The editor view payload → the dialog's draft (and save base): the FULL
 // config file as it would look after switching to this provider. Claude is
 // the projected settings.json object, codex is auth.json + the parsed full
-// config.toml, gemini is the parsed full .env.
+// config.toml, gemini is the parsed full .env. Kimi's draft is the row's
+// wrapper ({ slotKey, provider, models }) extracted back out of the projected
+// native TOML — the save contract the backend's kimi branch expects.
 function viewToConfig(app, view) {
   if (app === "claude" || app === "agy") return JSON.parse(JSON.stringify(view.settings ?? {}));
   if (app === "codex") {
@@ -419,7 +434,32 @@ function viewToConfig(app, view) {
   if (isAdditiveApp(app)) {
     return parseAdditiveText(app, view.configText || "");
   }
+  if (app === "kimi") {
+    let doc = {};
+    try {
+      doc = tomlParse(view.configText || "");
+    } catch {
+      doc = {};
+    }
+    return kimiWrapperOfDoc(doc, view.slotKey);
+  }
   return { env: parseEnvText(view.envText || "") ?? {} };
+}
+
+// Pull one provider node + its owned aliases out of a parsed config.toml.
+function kimiWrapperOfDoc(doc, slotKey) {
+  const slot = typeof slotKey === "string" && slotKey.trim() ? slotKey.trim() : "";
+  const providers = doc && typeof doc.providers === "object" && doc.providers !== null ? doc.providers : {};
+  const node = providers[slot];
+  const provider = node && typeof node === "object" && !Array.isArray(node) ? JSON.parse(JSON.stringify(node)) : {};
+  const models = {};
+  const modelTable = doc && typeof doc.models === "object" && doc.models !== null ? doc.models : {};
+  for (const [key, model] of Object.entries(modelTable)) {
+    if (model && typeof model === "object" && !Array.isArray(model) && model.provider === slot) {
+      models[key] = JSON.parse(JSON.stringify(model));
+    }
+  }
+  return { slotKey: slot, provider, models };
 }
 
 // ---------------------------------------------------------------------------
@@ -608,6 +648,9 @@ export function ProviderEditDialog({
   const [claudeApiKeyName, setClaudeApiKeyName] = useState("ANTHROPIC_AUTH_TOKEN");
   const [rawText, setRawText] = useState("");
   const [rawError, setRawError] = useState(null);
+  // Kimi's model-alias editor lifts its parse errors here; a stale
+  // last-valid alias table must not save silently while the text is invalid.
+  const [kimiModelsError, setKimiModelsError] = useState(false);
   // Codex (cc-switch's CodexConfigEditor): two editors instead of the merged
   // JSON one — auth.json as JSON, config.toml as TOML. Both mirror the draft
   // two-way and are the save source (same contract as rawText).
@@ -656,7 +699,7 @@ export function ProviderEditDialog({
   const [initialSnapshot, setInitialSnapshot] = useState(null);
   const [discardOpen, setDiscardOpen] = useState(false);
   const snapshot = JSON.stringify({ name, category, notes, websiteUrl, icon, iconColor, meta, draft });
-  const dirty = open && initialSnapshot !== null && (snapshot !== initialSnapshot || !!rawError || !!codexAuthError || !!codexTomlError || !!envError);
+  const dirty = open && initialSnapshot !== null && (snapshot !== initialSnapshot || !!rawError || !!codexAuthError || !!codexTomlError || !!envError || (app === "kimi" && kimiModelsError));
   useEffect(() => { onDirtyChange?.(dirty, saving); }, [dirty, saving, onDirtyChange]);
   const requestClose = () => {
     if (busy || savingRef.current) return;
@@ -828,6 +871,7 @@ export function ProviderEditDialog({
     setLoading(false);
     setError(null);
     setRawError(null);
+    setKimiModelsError(false);
     setCodexAuthError(null);
     setCodexTomlError(null);
     setEnvError(null);
@@ -1137,9 +1181,9 @@ export function ProviderEditDialog({
   };
   useEffect(() => {
     // Codex uses the two cc-switch editors below (auth.json + config.toml)
-    // and gemini edits the real .env text — claude and the additive apps
-    // keep the merged editor.
-    if (app !== "claude" && !isAdditiveApp(app)) return;
+    // and gemini edits the real .env text — claude, kimi (the row wrapper as
+    // JSON) and the additive apps keep the merged editor.
+    if (app !== "claude" && app !== "kimi" && !isAdditiveApp(app)) return;
     let parsed = null;
     try {
       parsed = isAdditiveApp(app) ? parseAdditiveText(app, rawText) : JSON.parse(rawText);
@@ -1387,6 +1431,10 @@ export function ProviderEditDialog({
         setRawError(configInvalid(err));
         return;
       }
+    }
+    if (app === "kimi" && kimiModelsError) {
+      setError(copy("pswitch.kimi.models.invalid"));
+      return;
     }
     if (!force) {
       const issues = collectIssues();
@@ -1755,6 +1803,7 @@ export function ProviderEditDialog({
             <KimiModelsEditor
               value={draft?.models && typeof draft.models === "object" && !Array.isArray(draft.models) ? draft.models : {}}
               onChange={(models) => setDraft((current) => ({ ...(current ?? {}), models }))}
+              onError={setKimiModelsError}
             />
           ) : null}
 

@@ -186,9 +186,14 @@ function computeSwitchPlan(app, prev, target, lives, stash) {
     // Additive apps: one native config document; a missing file is created on
     // the first switch (cc-switch's edit_config does the same for OpenCode).
     const configFile = files.find((f) => f.id === "config");
-    const live = lives.config.exists ? additive.parseLive(app, lives.config.content) : {};
+    let live = lives.config.exists ? additive.parseLive(app, lives.config.content) : {};
+    if (app === "dsh") live = require("./dsh").hydrate(live, lives.credentials?.content || "");
     const next = additive.projectAdditive(app, { prev, target, live });
-    writes.push({ file: configFile, content: additive.serializeLive(app, next), skipBackupIfMissing: true });
+    if (app === "dsh") {
+      const staged = require("./dsh").stage(lives.config.content || "", lives.credentials?.content || "", next, prev);
+      writes.push({ file: configFile, content: staged.profileText, skipBackupIfMissing: true });
+      writes.push({ file: files.find(file => file.id === "credentials"), content: staged.credentialsText, skipBackupIfMissing: true });
+    } else writes.push({ file: configFile, content: additive.serializeLive(app, next, lives.config.content || ""), skipBackupIfMissing: true });
   } else if (app === "kimi") {
     // Kimi Code: linked providers+models tables. Switching a regular provider
     // rewrites its node and selects one of its models; switching an official
@@ -319,13 +324,47 @@ async function switchProviderUnlocked({ app, id }) {
       ? await readCodexStash(await officialCodexRowAuths(), lives.auth.exists ? JSON.parse(lives.auth.content) : {})
       : null;
   const plan = computeSwitchPlan(app, prev, target, lives, stash);
-  const { wrote, backups } = await persistSwitchPlan(app, plan);
+  const { wrote, backups } = await persistTargetPlan(app, target, plan, lives);
 
   // The live config is authoritative; an auxiliary receipt cannot prevent
   // committing the matching current provider after all projection writes.
   await store.setCurrentProvider(app, id);
   const warnings = await recordProjection(app, target, plan.writes);
   return { app, current: id, wrote, backups, warnings };
+}
+async function persistTargetPlan(app, target, plan, lives) {
+  if (app !== "claude" || target.category !== "official" || !target.meta?.claudeAccountId) return persistSwitchPlan(app, plan);
+  let applied;
+  const account = await require("./claude-accounts").manager().switchAccount(target.meta.claudeAccountId, {
+    prepare: async () => {
+      const changes = [];
+      for (const write of plan.writes) {
+        const now = await readLiveFile(write.file);
+        if (now.content !== lives[write.file.id].content) throw new Error("Claude settings changed; reload before switching");
+        // Journals can outlive ordinary rotating projection backups.
+        let snapshot = null;
+        if (now.exists) {
+          const root = path.join(paths.providerSwitchRoot(), "claude-accounts", "projection-backups");
+          await require("./agy-fs").privateDirectory(root, paths.providerSwitchRoot());
+          snapshot = path.join(root, `${require("node:crypto").randomUUID()}.bak`);
+          await writeFileAtomic(snapshot, now.content, { mode: 0o600 });
+        }
+        if (now.exists && !snapshot) throw new Error("Claude settings backup failed; nothing was switched");
+        changes.push({ file: write.file.path, backup: snapshot, beforeExists: now.exists, beforeHash: require("./claude-account-runtime").hash(now.exists ? now.content : null), afterHash: require("./claude-account-runtime").hash(write.content) });
+      }
+      return changes;
+    },
+    apply: async () => { applied = await persistSwitchPlan(app, plan); },
+    rollback: async () => {
+      for (const write of plan.writes) {
+        const now = await readLiveFile(write.file);
+        if (now.content !== write.content) throw new Error("Claude settings changed after a failed switch; backups were kept for recovery");
+        if (lives[write.file.id].exists) await writeLiveFile(write.file, lives[write.file.id].content);
+        else await fs.rm(write.file.path, { force: true });
+      }
+    },
+  });
+  return { ...applied, account };
 }
 
 async function disconnectProvider(app) {
@@ -342,8 +381,16 @@ async function disconnectProvider(app) {
       return applied;
     }
     const lives = await readLives(app), writes = [];
+    if (app === "dsh") {
+      const dsh = require("./dsh");
+      const live = dsh.hydrate(dsh.parse(lives.config.content || ""), lives.credentials.content || "");
+      const staged = dsh.stage(lives.config.content || "", lives.credentials.content || "", additive.disconnectAdditive(app, { prev, live }), prev);
+      for (const file of paths.targetFiles(app)) writes.push({ file, content: file.id === "config" ? staged.profileText : staged.credentialsText });
+      const applied = await persistSwitchPlan(app, { writes, catalogAction: { action: "keep" }, stashNext: null });
+      await store.setCurrentProvider(app, null); return applied;
+    }
     for (const file of paths.targetFiles(app)) {
-      if (!lives[file.id].exists) continue;
+      if (!lives[file.id].exists || (app === "dsh" && file.id === "credentials")) continue;
       let content;
       if (app === "claude") content = `${JSON.stringify(targets.projectClaude({ prev, target: { settingsConfig: {} }, live: JSON.parse(lives[file.id].content) }), null, 2)}\n`;
       else if (app === "gemini") content = targets.projectGemini({ prev, target: { settingsConfig: {} }, liveEnv: lives[file.id].content });
@@ -351,7 +398,7 @@ async function disconnectProvider(app) {
         const kimi = require("./kimi");
         content = kimi.serializeDocument(kimi.disconnectDocument(kimi.parseDocument(lives[file.id].content), kimiWrapperOf(prev).slotKey, kimiWrapperOf(prev)));
       }
-      else content = additive.serializeLive(app, additive.disconnectAdditive(app, { prev, live: additive.parseLive(app, lives[file.id].content) }));
+      else content = additive.serializeLive(app, additive.disconnectAdditive(app, { prev, live: additive.parseLive(app, lives[file.id].content) }), lives[file.id].content);
       writes.push({ file, content });
     }
     const applied = await persistSwitchPlan(app, { writes, catalogAction: { action: "keep" }, stashNext: null });
@@ -392,6 +439,12 @@ async function saveProvider(payload) {
 }
 async function saveProviderUnlocked({ app, id, body }) {
   if (!store.isSupportedApp(app)) throw new Error(`Unsupported app: ${app}`);
+  if (app === "claude" && body.meta?.claudeAccountId) {
+    const existing = id ? await store.getProvider(app, id) : null;
+    if ((body.category || existing?.category) !== "official") throw new Error("Claude account binding requires an official provider");
+    const accounts = await require("./claude-accounts").manager().status();
+    if (!accounts.accounts.some(row => row.id === body.meta.claudeAccountId)) throw new Error("Claude account is missing on this device; choose another account or follow the default login");
+  }
   if (app === "hermes" && body.settingsConfig && require("./hermes-builtins").conflicts(body.settingsConfig.slotKey)) throw new Error("HERMES_BUILTIN_ID_CONFLICT");
   if (app === "agy") {
     const provider = id ? await store.updateProvider(app, id, body) : await store.createProvider(app, body);
@@ -510,7 +563,7 @@ async function saveProviderUnlocked({ app, id, body }) {
         ? await readCodexStash(await officialCodexRowAuths(), lives.auth.exists ? JSON.parse(lives.auth.content) : {})
         : null;
     const switchPlan = computeSwitchPlan(app, existing, target, patchedLives, stash);
-    ({ wrote, backups } = await persistSwitchPlan(app, switchPlan));
+    ({ wrote, backups } = await persistTargetPlan(app, target, switchPlan, lives));
     applied = { wrote: wrote.slice(), backups };
   } else if (accepted.length > 0) {
     // Global-settings changes reach live regardless of which provider row is
@@ -576,6 +629,38 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
   };
 
   try {
+    if (p.startsWith(`${prefix}/claude/accounts`)) {
+      if (!requireMutation()) return true;
+      const accounts = require("./claude-accounts").manager();
+      if (p === `${prefix}/claude/accounts` && method === "GET") json(res, { ok: true, ...await accounts.status() });
+      else if (p === `${prefix}/claude/accounts/login` && method === "POST") json(res, { ok: true, ...await accounts.startLogin() });
+      else if (p === `${prefix}/claude/accounts/login` && method === "GET") json(res, { ok: true, ...await accounts.pollLogin(url.searchParams.get("flowId")) });
+      else if (p === `${prefix}/claude/accounts/login` && method === "DELETE") { const body = await readJsonBody(req); await accounts.cancel(body.flowId); json(res, { ok: true }); }
+      else if (p === `${prefix}/claude/accounts/paste` && method === "POST") { const body = await readJsonBody(req); await accounts.paste(body.flowId, body.value); json(res, { ok: true }); }
+      else if (p === `${prefix}/claude/accounts/quota` && method === "GET") json(res, { ok: true, quota: await accounts.quota(url.searchParams.get("id")) });
+      else if (p === `${prefix}/claude/accounts/switch` && method === "POST") { const body = await readJsonBody(req); json(res, { ok: true, ...await accounts.switchAccount(body.id) }); }
+      else if (p === `${prefix}/claude/accounts/launch` && method === "POST") { const body = await readJsonBody(req); json(res, { ok: true, ...await accounts.launch(body.id) }); }
+      else if (p === `${prefix}/claude/accounts/recover` && method === "POST") json(res, { ok: true, ...await accounts.recover() });
+      else if (p === `${prefix}/claude/accounts` && method === "DELETE") { const body = await readJsonBody(req); await accounts.remove(body.id); json(res, { ok: true }); }
+      else json(res, { ok: false, error: "Not Found" }, 404);
+      return true;
+    }
+    if (p === `${prefix}/claude/launch` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req), row = await store.getProvider("claude", body.id);
+      if (!row || row.category !== "official" || !row.meta?.claudeAccountId) throw new Error("Bind a local Claude account to this official provider first");
+      json(res, { ok: true, ...await require("./claude-accounts").manager().launch(row.meta.claudeAccountId) }); return true;
+    }
+    if (p === `${prefix}/codex/subagents`) {
+      const subagents = require("./codex-subagents");
+      if (method === "GET") json(res, { ok: true, ...await subagents.read() });
+      else if (method === "PUT") {
+        if (!requireMutation()) return true;
+        const body = await readJsonBody(req);
+        json(res, { ok: true, ...await withProjectionLock("codex", () => subagents.save(body.config, body.revision)) });
+      } else json(res, { ok: false, error: "Method Not Allowed" }, 405);
+      return true;
+    }
     if (p === `${prefix}/status`) {
       json(res, await buildStatus());
       return true;
@@ -629,6 +714,14 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
       const row = await store.getProvider("agy", id);
       if (!row) throw new Error("Provider not found");
       json(res, { ok: true, ...await require("./agy").launch(row) }); return true;
+    }
+    if (p === `${prefix}/launch` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      if (!["dsh", "omp"].includes(body.app)) throw new Error("Unsupported CLI launch");
+      const state = await store.listProviders(body.app);
+      if (state.current !== body.id) throw new Error("Switch to this provider before launching");
+      json(res, { ok: true, ...await require("./terminal").launchNative(body.app) }); return true;
     }
     if (p.startsWith(`${prefix}/agy/accounts`)) {
       if (!requireMutation()) return true;
@@ -908,9 +1001,19 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
     // MCP server management (cc-switch's unified mcp_servers module). Reads
     // are open; every mutation projects into the enabled apps' live configs
     // and reports per-server projection failures instead of aborting.
+    if (p === `${prefix}/mcp/hub` && method === "GET") {
+      if (!requireMutation()) return true;
+      json(res, { ok: true, hub: await require("./mcp-hub-config").status(), connection: await require("./mcp-hub-config").connection(url.searchParams.get("app") || "all") }); return true;
+    }
+    if (p === `${prefix}/mcp/hub` && method === "POST") {
+      if (!requireMutation()) return true;
+      const body = await readJsonBody(req);
+      json(res, { ok: true, hub: await require("./mcp-hub-config").setEnabled(body.enabled, req.socket.localPort) }); return true;
+    }
     if (p === `${prefix}/mcp` && method === "GET") {
       const servers = await mcp.listServers();
       json(res, { ok: true, servers, apps: mcp.MCP_APPS, toolFilterApps: require("./mcp-tool-rules").APPS,
+        hub: await require("./mcp-hub-config").status(),
         checks: Object.fromEntries(servers.map(server => [server.id, mcpCheck.snapshot(server)])) });
       return true;
     }
@@ -1344,7 +1447,8 @@ async function importFromLive(app, name) {
     settingsConfig = targets.extractCodexConfig(lives.config.exists ? lives.config.content : "");
     meta = await importCodexCatalogMeta(settingsConfig.config);
   } else if (additive.isAdditiveApp(app)) {
-    const live = lives.config.exists ? additive.parseLive(app, lives.config.content) : null;
+    let live = lives.config.exists ? additive.parseLive(app, lives.config.content) : null;
+    if (app === "dsh" && live) live = require("./dsh").hydrate(live, lives.credentials?.content || "");
     settingsConfig = additive.extractAdditive(app, live);
   } else if (app === "kimi") {
     const kimi = require("./kimi");

@@ -1,6 +1,6 @@
 # AiTool 项目架构与能力矩阵
 
-核对日期：2026-10-23。本文描述当前工作区实现，包括尚未提交的改动；历史调研与测试记录见[文档索引](README.md)。项目约定以 [CLAUDE.md](../CLAUDE.md) 为准。
+核对日期：2026-10-29。本文描述当前工作区实现，包括尚未提交的改动；历史调研与测试记录见[文档索引](README.md)。项目约定以 [CLAUDE.md](../CLAUDE.md) 为准。
 
 ## 项目定位
 
@@ -15,7 +15,7 @@ AiTool 是本地优先的 AI 工具箱，整合 TokenTracker 用量分析、Easy
 | CLI / 本地 API | CommonJS；`bin/tracker.js` → `src/cli.js`；`src/commands/serve.js` | 当前依赖需 Node ≥22.19，开发/CI 推荐 Node 24；包元数据仍声明 ≥20 |
 | Dashboard | React 18、Vite 7、ESM、严格 TypeScript 配置、Tailwind 3；`dashboard/src/App.jsx` | 同时包含 JSX/JS 与 TS/TSX；构建到 `dashboard/dist/`，由本地服务提供 |
 | AI Proxy 管理层 | `src/lib/proxy/` | Node 管理配置、进程、凭据和用量；推理由外部 Go core 执行 |
-| CLIProxyAPI core | `core-version.txt` 固定 **v8.0.37**；`scripts/fetch-core.cjs` 下载 | 独立进程，HTTP Management API 与 RESP `SUBSCRIBE usage`；pin 更新不自动替换现有安装 |
+| CLIProxyAPI core | `core-version.txt` 固定 **v8.0.47**；`scripts/fetch-core.cjs` 下载 | 独立进程，HTTP Management API 与 RESP `SUBSCRIBE usage`；pin 更新不自动替换现有安装 |
 | 配置管理 | `src/lib/provider-switch/` | 本地 JSON SSOT → 各客户端原生配置；保留用户字段和恢复副本 |
 | 可选接入层 | `proxy/opencode-free/`、`proxy/extensions/` | 本地适配服务与受管上游组；发现、登录和工具能力需显式启用 |
 | 云功能 | `dashboard/src/lib/insforge*`、`dashboard/edge-patches/` | 上游账号、排行榜和可选统计同步；不承载本地配置/会话阅读 |
@@ -48,6 +48,8 @@ flowchart TD
 
 主队列是 `~/.tokentracker/tracker/queue.jsonl`。按 UTC 半小时分桶，追加累计快照，读取时对 `(source, model, hour_start)` 取最后一条。代理成功请求以 `source: "cliproxy"` 进入同一队列；`proxy/usage/buckets.json` 保存连续累计状态，避免重启重复计数。代理请求记录与原生日志都可能记录同一次推理，不能把所有来源简单视为互不重叠的账单。
 
+会话侧表 schema 为 **30**；DSH 与 OMP 只记录用量及工具活动元数据，缺失 usage 不从正文推算。
+
 `project.queue.jsonl`、`session.queue.jsonl` 是本地项目/会话侧表，不参与云上传；`auto-outcomes.jsonl` 的保守 Git 归因也只在本地计算。CLI Sessions 正文仅用于本地读取、有界内存缓存及显式 Markdown 导出，不写进统计队列或正文磁盘缓存。
 
 ## 功能覆盖
@@ -68,10 +70,15 @@ flowchart TD
 | Hermes / `hermes` | `~/.hermes/config.yaml` | 是 | 是 | 是 | 是 |
 | Pi / `pi` | `~/.pi/agent/models.json` | Pi 1.0+ | 是 | 是 | 是 |
 | MiniMax Code / `mcode` | `~/.minimax/config.yaml` | 是 | 是 | 是 | 是 |
+| Kimi Code / `kimi` | `~/.kimi-code/config.toml` 与原生 OAuth slots | 是 | 是 | 是 | 是 |
+| oh-my-pi / `omp` | profile 下 `agent/models.yml`；保留 YAML 文本 | 是 | 是 | 是 | 是；具名 profile / fork 保护 |
+| DeepSeek Harness / `dsh` | `~/.dsh/config.yaml` 与原生 credentials v1 refs | 是 | 是 | 是 | 是；版本日志 / replay 去重 |
 
-MCP 共九个客户端投影目标。Pi 使用 `~/.pi/agent/mcp.json`，停用只改 `enabled` 并保留 Pi 设置；agy 的 MCP/技能/提示词共享 `~/.gemini/config`。单工具过滤仅支持 Claude、Codex、Gemini、OpenCode、Hermes。MCP 检查执行初始化和 `tools/list`，不调用工具；检查需用户触发，有超时、分页与取消。
+配置管理覆盖 **13** 款客户端，正文阅读覆盖 **12** 款。MCP 共 **12** 个客户端投影目标。Pi 使用 `~/.pi/agent/mcp.json`，停用只改 `enabled` 并保留 Pi 设置；agy 的 MCP/技能/提示词共享 `~/.gemini/config`。单工具过滤仅支持 Claude、Codex、Gemini、OpenCode、Hermes。MCP 检查执行初始化和 `tools/list`，不调用工具；检查需用户触发，有超时、分页与取消。OpenCode 支持旧 `mcp.<id>` 与新版 `mcp.servers.<id>`，同名新版优先。可选 Hub 用独立 Bearer HTTP 入口聚合工具，按需启动进程；调用与检查使用不同 transport。
 
 ## 配置写入与恢复
+
+Claude 官方账号注册表只保存身份与本地目录 ID；凭据保留在原生 0600 文件/macOS Keychain，切换采用原生锁、指纹日志和独立备份。共享 Skill 从 `~/.agents/skills` 显式移交到受管库后才按客户端切换；归还恢复共享发现。Hub 与 Skill 的中断回执可从页面恢复，外部修改阻止覆盖。详细路径、限制与操作说明见 [10-29 实施记录](upstream-integration-2026-10-29.md)。
 
 - Claude/Codex/Gemini 通过 floor 字段最小补丁切换；其他客户端使用各自的原生结构或 additive slot。断开时，用户编辑过的 slot 和必要指针保留。
 - 添加/编辑窗口显示切换后的完整配置；floor 字段保存回 provider，其余编辑写入 live 文件，并用三方冲突检查处理并发修改。

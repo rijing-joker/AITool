@@ -7,10 +7,10 @@ register: product
 Local-first AI toolbox that merges three products into one dashboard:
 
 1. **AI gateway** (EasyCLIProxyAPI / CLIProxyAPI parity) — a Node management layer driving the external `cli-proxy-api` core: OpenAI / Anthropic / Gemini-compatible endpoints on loopback, with per-request usage records and cost estimates (models.dev pricing).
-2. **Provider config management** (cc-switch parity) — named per-tool provider presets one-click projected into the live config files or launch profiles of ten tools (Claude Code, Codex, Gemini, Antigravity CLI, Grok Build, OpenCode, OpenClaw, Hermes, Pi and MiniMax Code), plus shared MCP servers and skills, per-app prompts, reusable profiles, multi-app bundles, drift diagnostics and project/role distribution.
+2. **Provider config management** (cc-switch parity) — named per-tool provider presets one-click projected into the live config files or launch profiles of thirteen tools (Claude Code, Codex, Gemini, Antigravity CLI, Grok Build, OpenCode, OpenClaw, Hermes, Pi, MiniMax Code, Kimi Code, oh-my-pi and DeepSeek Harness), plus shared MCP servers and skills, per-app prompts, reusable profiles, multi-app bundles, drift diagnostics and project/role distribution.
 3. **Token usage analytics** (vendored TokenTracker) — 45 AI coding tools parsed into local half-hour buckets; proxied requests fold into the same trends, model breakdown, and cost views as native CLI usage.
 
-Read-only CLI history is a separate local surface for nine tools: transcripts, tool results, diffs, full-content search and Markdown export. It reads existing logs and caches them in bounded memory; conversation bodies do not enter analytics queues or cloud sync.
+Read-only CLI history is a separate local surface for twelve tools: transcripts, tool results, diffs, full-content search and Markdown export. It reads existing logs and caches them in bounded memory; conversation bodies do not enter analytics queues or cloud sync.
 
 Local-first: managed config writes have backups and conflict checks; automatic cloud sync is off until enabled. A manual `aitool sync` is a one-time upload request when account/device credentials are available, without changing that preference. Proxy inference forwards content to the selected upstream; optional search, vision and intent classification have their own explicit activation. See [Privacy](docs/PRIVACY.md).
 

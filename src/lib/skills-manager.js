@@ -13,6 +13,8 @@ const DEFAULT_REPOS = [
 ];
 
 const TARGETS = {
+  dsh: { id: "dsh", label: "DeepSeek Harness", dir: () => path.join(process.env.DSH_HOME?.trim() || path.join(os.homedir(), ".dsh"), "skills") },
+  omp: { id: "omp", label: "oh-my-pi", dir: () => path.join(require("./provider-switch/omp").agentDir(process.env), "skills") },
   claude: { id: "claude", label: "Claude", dir: () => path.join(os.homedir(), ".claude", "skills") },
   codex: { id: "codex", label: "Codex", dir: () => path.join(resolveCodexHome(), "skills") },
   acode: { id: "acode", label: "AStudio", dir: () => path.join(resolveAcodeHome(), "skills") },
@@ -799,6 +801,7 @@ function removeEmptyAncestors(startDir, stopDir) {
 }
 
 function syncSkillToTarget(directory, targetId) {
+  if (targetId === "agents" && require("./shared-skills").sharedInfo(directory)) return;
   const target = TARGETS[targetId];
   if (!target || target.manageable === false) throw new Error(`Unsupported target: ${targetId}`);
   const source = managedSkillPath(directory);
@@ -817,7 +820,8 @@ function syncSkillToTarget(directory, targetId) {
   }
 }
 
-function removeSkillFromTarget(directory, targetId) {
+function removeSkillFromTarget(directory, targetId, { explicitSharedDelete = false } = {}) {
+  if (!explicitSharedDelete && targetId === "agents" && require("./shared-skills").sharedInfo(directory)) return;
   const target = TARGETS[targetId];
   if (!target) return;
   for (const baseDir of targetDirs(target)) {
@@ -872,7 +876,7 @@ function listInstalledSkills() {
         targetStates[id] = state;
         if (state === "synced") targets.push(id);
       }
-      return { ...skill, managed: true, targets, targetStates };
+      return { ...skill, managed: true, targets, targetStates, shared: require("./shared-skills").sharedInfo(skill.directory) };
     });
 
   const managedDirs = new Set(managed.map((skill) => skill.directory.toLowerCase()));
@@ -913,7 +917,7 @@ function listInstalledSkills() {
     }
   }
 
-  return [...managed, ...unmanaged.values(), ...listInventorySkills()].sort((a, b) => {
+  return [...managed, ...[...unmanaged.values()].map(skill => ({ ...skill, shared: require("./shared-skills").sharedInfo(skill.directory) })), ...listInventorySkills()].sort((a, b) => {
     const byName = a.name.localeCompare(b.name);
     if (byName !== 0) return byName;
     return String(a.id || a.key || "").localeCompare(String(b.id || b.key || ""));
@@ -1198,7 +1202,7 @@ function deleteLocalSkill(directory, targetIds = []) {
   const installName = sanitizeLocalSkillPath(directory);
   if (!installName) throw new Error("Invalid skill directory");
   const selectedTargets = targetIds.length ? targetIds : Object.keys(TARGETS);
-  for (const targetId of selectedTargets) removeSkillFromTarget(installName, targetId);
+  for (const targetId of selectedTargets) removeSkillFromTarget(installName, targetId, { explicitSharedDelete: true });
   appendActivity({ action: "delete_local", directory: installName, targets: selectedTargets });
   return { ok: true };
 }
@@ -1570,7 +1574,19 @@ async function fetchPopularSkillsSh({ force = false, limit = 60 } = {}) {
   return { skills: skills.slice(0, cap), cached: false, generatedAt: Date.now() };
 }
 
+const sharedController = () => require("./shared-skills").createController({ readRegistry, saveRegistry, registryPath, dataDir, ssotDir, TARGETS, targetDirs, metadata: readSkillMetadata });
+function handOverSharedSkills(names) { return sharedController().handOver(names); }
+function handBackSharedSkill(id) { return sharedController().handBack(id); }
+function recoverSharedSkill(id) { return sharedController().recover(id); }
+function listSharedSkillRecovery() { return sharedController().listRecovery(); }
+function isSharedSkillTargetOwned(directory, targetPath) { return sharedController().ownsTarget(directory, targetPath); }
+
 module.exports = {
+  isSharedSkillTargetOwned,
+  listSharedSkillRecovery,
+  recoverSharedSkill,
+  handOverSharedSkills,
+  handBackSharedSkill,
   addRepo,
   assertNotNested,
   checkUpdates,

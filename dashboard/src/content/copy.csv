@@ -3452,3 +3452,70 @@ proxy.route.status.started,proxy,ProxyPage,RoutingPanel,status.started,Started,,
 proxy.route.status.completed,proxy,ProxyPage,RoutingPanel,status.completed,Completed,,active
 proxy.route.status.failed,proxy,ProxyPage,RoutingPanel,status.failed,Failed,,active
 proxy.route.status.canceled,proxy,ProxyPage,RoutingPanel,status.canceled,Canceled,,active
+proxy.alias.tier.standard,dashboard,*,*,label,Standard,,active
+proxy.alias.tier.fast,dashboard,*,*,label,Fast,,active
+proxy.alias.tier.ultrafast,dashboard,*,*,label,Ultra Fast,,active
+proxy.models.refresh,dashboard,*,*,label,Refresh model directories,,active
+proxy.models.refreshing,dashboard,*,*,label,Refreshing models…,,active
+proxy.models.refreshed,dashboard,*,*,label,Both model directories refreshed.,,active
+proxy.models.unsupported,dashboard,*,*,label,This core does not support manual model refresh. Update the core.,,active
+proxy.models.failed,dashboard,*,*,label,Some model directories could not be refreshed. Try again.,,active
+limits.label.kimi_month,dashboard,*,*,label,Month,,active
+pswitch.mcp.sse_notice,dashboard,*,*,label,SSE transport is unsupported in Codex and Antigravity. Use a Streamable HTTP endpoint for those clients.,,active
+proxy.integration.key_login,dashboard,*,*,label,Sign in with API key,,active
+proxy.integration.free_only,dashboard,*,*,label,Free models only,,active
+proxy.integration.free_hint,dashboard,*,*,label,Prices come from the official directory and are checked before every request. Unknown or changed prices stop forwarding.,,active
+proxy.integration.wallet,dashboard,*,*,label,Wallet: {{balance}} credits,,active
+proxy.integration.paid_model,dashboard,*,*,label,Paid or unknown price,,active
+pswitch.tab.dsh,dashboard,*,*,label,DeepSeek Harness,,active
+pswitch.live.file.omp_config,dashboard,*,*,label,OMP models.yml,,active
+pswitch.live.file.dsh_config,dashboard,*,*,label,DSH web profile,,active
+pswitch.live.file.dsh_credentials,dashboard,*,*,label,DSH credentials,,active
+pswitch.subagent.global_title,dashboard,*,*,label,Global subagent settings,,active
+pswitch.subagent.global_hint,dashboard,*,*,label,Changes save automatically. These settings apply to every provider; model and reasoning effort stay on each provider card.,,active
+pswitch.subagent.enabled,dashboard,*,*,label,Enable subagents,,active
+pswitch.subagent.concurrency,dashboard,*,*,label,Maximum concurrent threads,,active
+pswitch.subagent.interrupt,dashboard,*,*,label,Send interruption messages,,active
+pswitch.subagent.invalid_concurrency,dashboard,*,*,label,"Enter a positive integer, or leave empty for the CLI default.",,active
+pswitch.action.reload,dashboard,*,*,label,Reload configuration,,active
+pswitch.action.saving,dashboard,*,*,label,Saving…,,active
+shared.loading,dashboard,*,*,label,Loading…,,active
+pswitch.claude.account.title,dashboard,*,*,label,Claude accounts,,active
+pswitch.claude.account.add,dashboard,*,*,label,Add account,,active
+pswitch.claude.account.browser,dashboard,*,*,label,Continue in browser,,active
+pswitch.claude.account.local,dashboard,*,*,label,Sign-ins stay on this device. Switch accounts explicitly; quota queries keep the active login.,,active
+pswitch.claude.account.error,dashboard,*,*,label,Sign-in did not complete. Try adding the account again.,,active
+pswitch.claude.account.current,dashboard,*,*,label,Current,,active
+pswitch.claude.account.switch,dashboard,*,*,label,Switch,,active
+pswitch.claude.account.quota,dashboard,*,*,label,Query quota,,active
+pswitch.claude.account.remove,dashboard,*,*,label,Remove,,active
+pswitch.claude.account.removeHint,dashboard,*,*,label,Remove the saved copy from AiTool? The CLI stays signed in.,,active
+pswitch.claude.account.binding,dashboard,*,*,label,Account,,active
+pswitch.claude.account.follow,dashboard,*,*,label,Follow current Claude login,,active
+pswitch.claude.account.missing,dashboard,*,*,label,Account unavailable on this computer,,active
+pswitch.claude.account.bindingHint,dashboard,*,*,label,Switching this official provider selects the account. Launch opens an isolated Claude configuration.,,active
+pswitch.claude.account.reauth,dashboard,*,*,label,This account needs a new login. Add it again to reconnect.,,active
+pswitch.claude.account.recover,dashboard,*,*,label,Finish interrupted switch,,active
+pswitch.claude.account.launch,dashboard,*,*,label,Launch separately,,active
+pswitch.claude.account.callback,dashboard,*,*,label,Callback URL or code#state,,active
+pswitch.claude.account.submit,dashboard,*,*,label,Submit code,,active
+pswitch.claude.account.empty,dashboard,*,*,label,Add an account to sign in with the official Claude CLI.,,active
+pswitch.claude.account.used,dashboard,*,*,label,{{value}}% used,,active
+pswitch.mcp.hub.title,dashboard,*,*,label,MCP Hub,,active
+pswitch.mcp.hub.connect,dashboard,*,*,label,Connection configuration,,active
+pswitch.mcp.hub.hint,dashboard,*,*,label,One authenticated entry per client. Backend servers run on demand and stop after 10 idle minutes. Turning this off restores individual entries.,,active
+pswitch.mcp.hub.recover,dashboard,*,*,label,Retry configuration restore,,active
+pswitch.mcp.hub.secret,dashboard,*,*,label,This configuration contains a local access key. Paste it only into a client you trust.,,active
+skills.shared.scope,dashboard,*,*,label,Shared discovery,,active
+skills.shared.handover,dashboard,*,*,label,Manage in AiTool,,active
+skills.shared.handback,dashboard,*,*,label,Return to shared folder,,active
+skills.shared.hint,dashboard,*,*,label,Clients may discover this skill from ~/.agents/skills even when their individual toggle is off. Hand it over to control the supported client projections.,,active
+skills.shared.managed_hint,dashboard,*,*,label,AiTool manages this skill. You can return its current contents to the shared folder.,,active
+skills.shared.confirm_over,dashboard,*,*,label,"Move the skill into the local library with a verified recovery copy. Codex, Gemini, OpenCode and existing linked clients retain their projections; individual toggles then control those projections. External linked folders stay in place.",,active
+skills.shared.confirm_back,dashboard,*,*,label,Return the current skill contents to ~/.agents/skills. Clients that scan the shared folder can discover it regardless of individual toggles. A conflicting shared entry is kept.,,active
+limits.zcode.reset_bank.card,dashboard,*,*,label,Reset card {{index}},,active
+limits.zcode.reset_bank.remaining,dashboard,*,*,label,Expires in {{time}},,active
+limits.zcode.reset_bank.lifetime,dashboard,*,*,label,Remaining validity,,active
+skills.shared.recovery_title,dashboard,*,*,label,Interrupted shared Skill operations,,active
+skills.shared.recovery_hint,dashboard,*,*,label,Recover the operation from its verified receipt. Changed files are preserved and reported for review.,,active
+skills.shared.recover,dashboard,*,*,label,Recover,,active

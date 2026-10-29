@@ -863,22 +863,7 @@ function createManager({
     if (!response.ok) throw new Error(`Kimi quota failed (HTTP ${response.status})`);
     const body = await response.json().catch(() => null);
     if (!isPlainObject(body)) throw new Error("Unrecognized Kimi quota");
-    const tiers = [];
-    for (const item of Array.isArray(body.limits) ? body.limits : []) {
-      const detail = isPlainObject(item.detail) ? item.detail : null;
-      if (!detail) continue;
-      const limit = Number(detail.limit);
-      const remaining = Number(detail.remaining);
-      if (!Number.isFinite(limit) || !Number.isFinite(remaining)) continue;
-      const used = Math.max(0, limit - remaining);
-      tiers.push({ id: "five_hour", label: "5h", usedPercent: limit > 0 ? (used / limit) * 100 : 0, resetsAt: resetTimeOf(detail.resetTime) });
-    }
-    if (isPlainObject(body.usage)) {
-      const limit = Number(body.usage.limit);
-      const remaining = Number(body.usage.remaining);
-      const used = Math.max(0, limit - remaining);
-      tiers.push({ id: "weekly_limit", label: "weekly", usedPercent: limit > 0 ? (used / limit) * 100 : 0, resetsAt: resetTimeOf(body.usage.resetTime) });
-    }
+    const tiers = require("../kimi-usage").parseKimiTiers(body);
     return { credentialStatus: "valid", tiers };
   });
 

@@ -101,7 +101,7 @@
 
 @media (min-width: 768px) {
   .sessions-row-grid {
-    grid-template-columns: minmax(0, 1fr) 72px 80px 96px 32px;
+    grid-template-columns: minmax(0, 1fr) 72px 80px 112px 32px;
     gap: 16px;
   }
 
@@ -163,3 +163,6 @@
     grid-column: auto;
   }
 }
+
+.sessions-row-metrics { font-variant-numeric: tabular-nums; }
+.sessions-row-metrics dd { overflow-wrap: anywhere; }

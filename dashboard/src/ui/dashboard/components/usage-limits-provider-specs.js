@@ -82,7 +82,7 @@ export const PROVIDER_LIMIT_SPECS = {
       return [
         { key: "weekly", labelKey: "limits.label.kimi_weekly", window: data.primary_window, windowSeconds: 7 * 86400 },
         { key: "5h", labelKey: "limits.label.kimi_5h", window: data.secondary_window, windowSeconds: 5 * 3600 },
-        { key: "total", labelKey: "limits.label.kimi_total", window: data.tertiary_window },
+        { key: "total", labelKey: data.monthly_window ? "limits.label.kimi_month" : "limits.label.kimi_total", window: data.tertiary_window },
       ];
     },
   },
@@ -295,6 +295,7 @@ export function usageLimitsLabelCopyAnchor() {
     copy("limits.label.kimi_weekly"),
     copy("limits.label.kimi_5h"),
     copy("limits.label.kimi_total"),
+    copy("limits.label.kimi_month"),
     copy("limits.label.kiro_month"),
     copy("limits.label.kiro_bonus"),
     copy("limits.label.grok_month"),

@@ -87,6 +87,13 @@ async function cmdServe(argv) {
     return;
   }
 
+  // Resume only an existing native-account transaction; ordinary startup is
+  // read-only for Claude sign-ins and never starts login or quota discovery.
+  try {
+    const accounts = require("../lib/provider-switch/claude-accounts").manager();
+    if (fssync.existsSync(path.join(accounts.runtime.root, "switch-journal.json"))) await accounts.recover();
+  } catch { process.stderr.write("Claude account switch needs recovery. Open Provider Switch → Claude accounts.\n"); }
+
   // 0. First-time setup: if tracker dir doesn't exist, run init first
   const { trackerDir, binDir } = await resolveTrackerPaths();
   if (!fssync.existsSync(path.join(trackerDir, "cursors.json"))) {
@@ -242,6 +249,13 @@ async function cmdServe(argv) {
     process.exitCode = 1;
     return;
   }
+
+  try {
+    const hubConfig = require("../lib/provider-switch/mcp-hub-config");
+    const hubState = await hubConfig.read();
+    if (hubState.enabled && hubState.port !== port) await hubConfig.setEnabled(true, port);
+  } catch { process.stderr.write("MCP Hub configuration needs recovery. Open Provider Switch → MCP.\n"); }
+  server.once("close", () => { void require("../lib/provider-switch/mcp-hub").hub().close(); });
 
   // AiTool proxy layer: when the dashboard boots, bring up the proxy usage
   // bridge (and, if enabled in ~/.aitool/proxy/settings.json, the core

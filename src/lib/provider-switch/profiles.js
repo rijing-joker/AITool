@@ -19,7 +19,7 @@ const mcp = require("./mcp");
 const skills = require("./skills");
 const prompts = require("./prompts");
 
-const PROFILE_APPS = ["claude", "codex", "gemini", "grokbuild", "opencode", "hermes", "mcode", "pi"];
+const PROFILE_APPS = ["claude", "codex", "gemini", "grokbuild", "opencode", "hermes", "mcode", "pi", "omp", "dsh"];
 
 function isProfileApp(app) {
   return PROFILE_APPS.includes(app);

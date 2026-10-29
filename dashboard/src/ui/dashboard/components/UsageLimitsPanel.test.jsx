@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { createElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { copy, setCopyLocale } from "../../../lib/copy";
@@ -116,6 +116,24 @@ describe("UsageLimitsPanel", () => {
       time: formatExpiry("2030-10-20T09:00:00Z"),
     }))).toBeInTheDocument();
     expect(screen.getByText("2%")).toBeInTheDocument();
+  });
+
+  it("counts reset-card ISO expiry in hours and updates its remaining lifetime", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2030-10-18T10:00:00Z"));
+    try {
+      render(<UsageLimitsPanel order={["zcode"]} zcode={{
+        configured: true, plan_label: "Pro", plan_kind: "coding-plan",
+        primary_window: { used_percent: 2 },
+        reset_credits: { five_hour: [{ granted_at: "2030-10-17T13:00:00Z", expires_at: "2030-10-18T13:00:00Z" }], weekly: [] },
+      }} />);
+      const bank = screen.getByText(copy("limits.zcode.reset_bank.title")).closest("details");
+      expect(within(bank).getByText(copy("limits.zcode.reset_bank.remaining", { time: "3h" }))).toBeInTheDocument();
+      expect(within(bank).getByRole("progressbar", { hidden: true }).value).toBeCloseTo(12.5);
+      act(() => { vi.advanceTimersByTime(3600000); });
+      expect(within(bank).getByText(copy("limits.zcode.reset_bank.remaining", { time: "2h" }))).toBeInTheDocument();
+      expect(within(bank).getByRole("progressbar", { hidden: true }).value).toBeCloseTo(100 / 12);
+    } finally { vi.useRealTimers(); }
   });
 
   it("keeps reset inventory failures separate from normal Pro quota bars", () => {

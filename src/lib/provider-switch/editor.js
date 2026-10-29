@@ -532,7 +532,8 @@ async function buildEditorView(app, { settingsConfig, id, category } = {}) {
   // an empty document — the projection creates it on save (cc-switch does the
   // same for OpenCode).
   if (additive.isAdditiveApp(app)) {
-    const live = lives.config.exists ? additive.parseLive(app, lives.config.content) : {};
+    let live = lives.config.exists ? additive.parseLive(app, lives.config.content) : {};
+    if (app === "dsh") live = require("./dsh").hydrate(live, lives.credentials?.content || "");
     const next = additive.projectAdditive(app, { prev, target, live });
     // Echo the slot key the projection pinned the draft under, so the save
     // can split the row's entry back out of the edited document.
@@ -542,7 +543,7 @@ async function buildEditorView(app, { settingsConfig, id, category } = {}) {
       app,
       isCurrent,
       inactive: [],
-      configText: additive.serializeLive(app, next),
+      configText: app === "dsh" ? require("yaml").stringify(next) : additive.serializeLive(app, next, lives.config.content || ""),
       slotKey: draftSlotKey || additive.normalizeSlotKey(row && row.name, app),
     };
   }

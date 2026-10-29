@@ -28,6 +28,7 @@ async function request(method, route, { query, body, ifMatch, contentType = "app
       signal: controller.signal,
       headers: {
         authorization: `Bearer ${token}`,
+        "accept-encoding": "identity",
         ...(body !== undefined ? { "content-type": contentType } : {}),
         ...(typeof ifMatch === "string" ? { "if-match": ifMatch } : {}),
       },

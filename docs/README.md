@@ -1,13 +1,13 @@
 # 文档索引
 
-当前使用与实现说明按 2026-10-23 的工作区代码核对。项目规则只维护在 [CLAUDE.md](../CLAUDE.md)，[AGENTS.md](../AGENTS.md) 保持入口指针。
+当前使用与实现说明按 2026-10-29 的工作区代码核对。项目规则只维护在 [CLAUDE.md](../CLAUDE.md)，[AGENTS.md](../AGENTS.md) 保持入口指针。
 
 ## 入门与项目全貌
 
 | 文档 | 内容 |
 | --- | --- |
 | [README](../README.md) / [简体中文](../README.zh-CN.md) | 产品功能、快速启动与入口 |
-| [architecture.md](architecture.md) | 技术栈、数据流、45/10/9 支持边界、代码/API/存储定位 |
+| [architecture.md](architecture.md) | 技术栈、数据流、45/13/12 支持边界（统计/配置/正文）、代码/API/存储定位 |
 | [running.md](running.md) | CLI、开发服务器、桌面壳、平台应用、Docker 与排错 |
 | [PRODUCT.md](../PRODUCT.md) / [DESIGN.md](../DESIGN.md) | 产品原则、设计 token、主题与组件约定 |
 | [CONTRIBUTING.md](../CONTRIBUTING.md) | 本地验证、修改入口和个人 fork 工作流 |
@@ -45,6 +45,8 @@
 | --- | --- |
 | [Magpie 调研](magpie-integration-research.md)、[实施计划](magpie-implementation-plan.md) | 固定上游快照、选型、实施与原始验证依据 |
 | [WorkBuddy 代理调研](workbuddy-proxy-research.md) | 协议、身份/usage 语义与适配验证 |
+| [2026-10-29 五上游实施](upstream-integration-2026-10-29.md) | 全部适用候选、账号/Hub/Skill 恢复、原生应用与最终验收 |
+| [2026-10-29 五上游候选审阅](upstream-review-2026-10-29.md) | 核心 v8.0.47、Qoder/MCP/Kimi/WorkBuddy 兼容修复与新增功能建议 |
 | [2026-10-21 上游实施](upstream-integration-2026-10-21.md)、[候选审阅](upstream-review-2026-10-21.md) | agy、多来源正文、配额、恢复和桌面增量 |
 | [2026-10-20 上游实施](upstream-integration-2026-10-20.md)、[候选审阅](upstream-review-2026-10-20.md) | 当日上游吸收范围 |
 | [2026-10-17 上游实施](upstream-integration-2026-10-17.md)、[2026-10 上游实施](upstream-integration-2026-10.md) | 更早迁移与兼容记录 |

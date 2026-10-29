@@ -32,6 +32,7 @@ function isTraeCnUsageEnabled(env = process.env) {
   return normalized === "1" || normalized === "true";
 }
 const TRAE_CN_APP_DIR = "TRAE SOLO CN";
+const TRAE_CN_APP_DIRS = [TRAE_CN_APP_DIR, "Trae CN"];
 const TRAE_CN_AUTH_KEY = "iCubeAuthInfo://icube.cloudide";
 
 const TRAE_CN_USAGE_URL = "https://api.trae.cn/trae/api/v1/pay/query_user_usage_group_by_session";
@@ -82,6 +83,8 @@ function resolveTraeCnHome({ env = process.env, home = os.homedir(), platform = 
   if (typeof override === "string" && override.trim()) {
     return path.resolve(override.trim());
   }
+  const storage = resolveTraeCnStoragePath({ env, home, platform });
+  if (storage) return path.dirname(path.dirname(path.dirname(storage)));
   if (platform === "darwin") {
     return path.join(home, "Library", "Application Support", TRAE_CN_APP_DIR);
   }
@@ -98,9 +101,46 @@ function resolveTraeCnHome({ env = process.env, home = os.homedir(), platform = 
   return null;
 }
 
+function traeCnDataParent({ env = process.env, home = os.homedir(), platform = process.platform } = {}) {
+  if (platform === "darwin") {
+    return path.join(home, "Library", "Application Support");
+  }
+  if (platform === "win32") {
+    // Windows keeps the CN app under the roaming profile, mirroring the
+    // macOS Application Support layout (<parent>/<app dir>/User/...).
+    return typeof env.APPDATA === "string" && env.APPDATA.trim()
+      ? env.APPDATA.trim()
+      : path.join(home, "AppData", "Roaming");
+  }
+  // No verified CN app-data layout on other platforms yet.
+  return null;
+}
+
 function resolveTraeCnStoragePath(options = {}) {
-  const home = resolveTraeCnHome(options);
-  return home ? path.join(home, "User", "globalStorage", "storage.json") : null;
+  const env = options.env ?? process.env;
+  const override = env[TRAE_CN_HOME_ENV];
+  if (typeof override === "string" && override.trim()) {
+    return path.join(path.resolve(override.trim()), "User", "globalStorage", "storage.json");
+  }
+  const parent = traeCnDataParent({ env, home: options.home ?? os.homedir(), platform: options.platform ?? process.platform });
+  if (!parent) return null;
+  for (const dir of TRAE_CN_APP_DIRS) {
+    const candidate = path.join(parent, dir, "User", "globalStorage", "storage.json");
+    try {
+      // Any successful stat means this client dir is the discovery hit —
+      // including a non-file path (e.g. a directory named storage.json).
+      // Hand that to the reader so EISDIR surfaces as TRAE_CN_STORAGE_UNREADABLE
+      // instead of silently skipping to the next client or reporting absent.
+      fs.statSync(candidate);
+      return candidate;
+    } catch (err) {
+      // Permission failures must reach the reader's diagnostics, not
+      // masquerade as an absent installation and silently drop an entire
+      // usage history (same discovery policy as trae-db.js).
+      if (err.code !== "ENOENT" && err.code !== "ENOTDIR") return candidate;
+    }
+  }
+  return path.join(parent, TRAE_CN_APP_DIR, "User", "globalStorage", "storage.json");
 }
 
 // ---------------------------------------------------------------------------

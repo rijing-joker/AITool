@@ -110,6 +110,8 @@ export function SettingsTab({ status, onRefresh, onInstallCore }) {
   const [notice, setNotice] = useState(null);
   const [error, setError] = useState(null);
   const [busyField, setBusyField] = useState("");
+  const [refreshNotice, setRefreshNotice] = useState("");
+  const [refreshingModels, setRefreshingModels] = useState(false);
   const [autoStart, setAutoStart] = useState(status?.core.autoStart ?? true);
   useEffect(() => {
     if (typeof status?.core?.autoStart === "boolean") setAutoStart(status.core.autoStart);
@@ -393,6 +395,15 @@ export function SettingsTab({ status, onRefresh, onInstallCore }) {
               {copy("proxy.settings.fetch_core")}
             </Button>
           </div>
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          <Button size="sm" variant="secondary" disabled={refreshingModels || busyField !== "" || !status?.core?.running} onClick={async () => {
+            setRefreshingModels(true); setRefreshNotice("");
+            try { const result = await proxyApi.refreshModels(); setRefreshNotice(copy(result.results.every(row => row.ok) ? "proxy.models.refreshed" : result.results.some(row => row.unsupported) ? "proxy.models.unsupported" : "proxy.models.failed")); }
+            catch (error) { setRefreshNotice(configErrorMessage(String(error))); }
+            finally { setRefreshingModels(false); }
+          }}>{copy(refreshingModels ? "proxy.models.refreshing" : "proxy.models.refresh")}</Button>
+          {refreshNotice ? <p role="status" className="text-xs text-oai-gray-500 dark:text-oai-gray-400">{refreshNotice}</p> : null}
         </div>
       </Card>
 

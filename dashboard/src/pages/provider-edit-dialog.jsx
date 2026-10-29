@@ -1,3 +1,4 @@
+import { ClaudeAccountSelect } from "./provider-claude-accounts";
 import { AgyAccountSelect } from "./provider-agy-accounts";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, Download, ExternalLink, Eye, EyeOff, Wand2, X } from "lucide-react";
@@ -27,9 +28,11 @@ import { mergePresetMeta, prefillProviderMeta, claudeApiKeyName as resolveClaude
 // apps store "<key>/<modelId>" refs, Hermes writes model.default (model id)
 // alongside model.provider (the slot key), and Grok Build's models.default
 // points at the table name itself.
-const ADDITIVE_APPS = ["opencode", "openclaw", "mcode", "hermes", "pi", "grokbuild"];
-const ADDITIVE_CONFIG_FORMAT = { opencode: "json", openclaw: "json", mcode: "yaml", hermes: "yaml", pi: "json", grokbuild: "toml" };
+const ADDITIVE_APPS = ["opencode", "openclaw", "mcode", "hermes", "pi", "grokbuild", "omp", "dsh"];
+const ADDITIVE_CONFIG_FORMAT = { omp: "yaml", dsh: "yaml", opencode: "json", openclaw: "json", mcode: "yaml", hermes: "yaml", pi: "json", grokbuild: "toml" };
 const ADDITIVE_SPEC = {
+  omp: { container: "providers", pointer: null },
+  dsh: { container: "providers", pointer: null },
   opencode: { container: "provider", pointer: "model" },
   openclaw: { container: "models.providers", pointer: "agents.defaults.model.primary" },
   mcode: { container: "custom_provider", pointer: null },
@@ -61,7 +64,7 @@ function additiveWrapperToDoc(app, wrapper) {
   }
   // Pi entries carry their model in the models list; the dialog edits
   // models[0].id, so seed one slot when the fragment has none.
-  if (app === "pi") {
+  if (["pi", "omp", "dsh"].includes(app)) {
     const entryPath = `${spec.container}.${slotKey}.models`;
     const models = getPath(doc, entryPath);
     if (!Array.isArray(models) || models.length === 0 || !models.some((model) => model && typeof model === "object")) {
@@ -297,6 +300,8 @@ const DEFAULT_MODEL_PATH = {
   openclaw: "ADDITIVE_MODEL_POINTER",
   hermes: "custom_providers.$slot.model",
   pi: "providers.$slot.models.0.id",
+  omp: "providers.$slot.models.0.id",
+  dsh: "providers.$slot.models.0.id",
 };
 const ENDPOINT_PATH = {
   claude: "env.ANTHROPIC_BASE_URL",
@@ -311,6 +316,8 @@ const ENDPOINT_PATH = {
   mcode: "custom_provider.$slot.options.baseURL",
   hermes: "custom_providers.$slot.base_url",
   pi: "providers.$slot.baseUrl",
+  omp: "providers.$slot.baseUrl",
+  dsh: "providers.$slot.baseURL",
   grokbuild: "model.$slot.base_url",
 };
 const API_KEY_PATH = {
@@ -324,6 +331,8 @@ const API_KEY_PATH = {
   mcode: "custom_provider.$slot.options.apiKey",
   hermes: "custom_providers.$slot.api_key",
   pi: "providers.$slot.apiKey",
+  omp: "providers.$slot.apiKey",
+  dsh: "providers.$slot.apiKey",
   grokbuild: "model.$slot.api_key",
 };
 // Endpoint path inside the stored row wrapper (settingsConfig), used when
@@ -1859,6 +1868,7 @@ export function ProviderEditDialog({
             />
           ) : null}
 
+          {app === "claude" && officialSelected ? <ClaudeAccountSelect value={meta.claudeAccountId} onChange={value => setMetaValue("claudeAccountId", value)} /> : null}
           {app === "agy" && officialSelected ? <AgyAccountSelect value={meta.agyAccountId} onChange={value => setMetaValue("agyAccountId", value)} /> : null}
 
           {/\.volces\.com(?:\/|$)/i.test(currentEndpoint) ? <div className="space-y-2">

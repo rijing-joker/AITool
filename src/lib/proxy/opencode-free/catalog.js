@@ -4,6 +4,8 @@ const VERIFIED_FREE_IDS = Object.freeze([
   "mimo-v2.6-flash-free", "muse-spark-1.3-contributor-free",
   "nemotron-3.5-lightning-free", "nemotron-3.5-super-vl-free", "space-bunny-free",
 ]);
+// Community adapter measured accepted usage at this floor (Zen Free 0.1.18).
+const CONTEXT_FLOOR = { "deepseek-v4.1-flash-free": 258624 };
 const POLICY_URL = "https://opencode.ai/docs/zen/";
 const TTL_MS = 60 * 60 * 1000;
 
@@ -20,6 +22,9 @@ function selectModels(live, metadata) {
       && m.modalities?.output?.includes("text") && m.tool_call === true;
   }).map((m) => ({
     id: m.id, name: m.name || m.id,
+    contextWindow: Math.max(Number(m.limit?.context) || 0, CONTEXT_FLOOR[m.id] || 0) || null,
+    maxOutputTokens: Number(m.limit?.output) > 0 ? m.limit.output : null,
+    contextSource: CONTEXT_FLOOR[m.id] && Number(m.limit?.context) < CONTEXT_FLOOR[m.id] ? "reviewed-zen-floor" : "models.dev",
     protocol: (m.provider?.npm || provider.npm) === "@ai-sdk/openai" ? "responses" : "chat",
     policy: m.id.startsWith("muse-") ? "training" : m.id.startsWith("mimo-") ? "improvement"
       : /^(deepseek-|glm-)/.test(m.id) ? "no_training" : "review",

@@ -92,7 +92,7 @@ const {
 // v28 retains Codex Ultrafast (service_tier "ultrafast") subset columns so
 // date-filtered session views and cached sidecars keep the 6x premium.
 // v29 adds oh-my-pi (omp) sessions from ~/.omp/agent/sessions/**/*.jsonl.
-const SIDECAR_VERSION = 29;
+const SIDECAR_VERSION = 30;
 const EDIT_TOOLS = new Set([
   "apply_patch",
   "edit",
@@ -1985,6 +1985,17 @@ async function scanOmpSessions(filePaths, options = {}) {
   return mapped;
 }
 
+async function scanDshSessions(filePaths) {
+  const rows = await require("./dsh-session").readDshSessions(Array.isArray(filePaths) ? filePaths : [filePaths]);
+  if (!rows.length && rows.skippedFiles) throw new Error("dsh inventory incomplete");
+  const mapped = rows.map(({ identity, files, title, ...row }) => finalizeRecord({
+    ...row, title: cleanSessionTitle(title), version: SIDECAR_VERSION, source: "dsh",
+    session_hash: sessionHash("dsh", identity), project_key: projectKey(row.project_ref, files[0]), ...sessionStorageUsage(files),
+  }));
+  Object.defineProperty(mapped, "skippedFiles", { value: rows.skippedFiles || 0, enumerable: false });
+  return mapped;
+}
+
 async function scanOmpSession(filePath) {
   const rows = await scanOmpSessions([filePath]);
   return rows[0] || null;
@@ -2087,7 +2098,10 @@ async function discoverSessionFiles(home, env = process.env, deps = {}) {
     ? { ...env, HOME: home }
     : { HOME: home, OMP_HOME: path.join(home, ".omp") };
   const omp = discoverOmpSessionFiles(ompEnv, incomplete);
-  return { claude, codex: groupCodexFiles([...codex, ...archived]), grok, zcode, opencode, kimi, omp, incomplete };
+  const dshRoots = providerRoots(home, ".dsh", env, deps);
+  if (usingMachineHome && env.DSH_HOME) dshRoots[0] = expandHome(env.DSH_HOME, home);
+  const dsh = require("./dsh-session").discoverDshSessionFiles(dedupeDirsByRealpath(dshRoots), incomplete);
+  return { dsh, claude, codex: groupCodexFiles([...codex, ...archived]), grok, zcode, opencode, kimi, omp, incomplete };
 }
 
 // Warn once per unreadable directory per process: the dashboard polls this
@@ -2278,6 +2292,7 @@ async function buildSessionAnalyticsInternal({ home = os.homedir(), force = fals
     ...discovered.kimi,
     ...kimiSessionDependencies(discovered.kimi),
     ...discovered.omp,
+    ...discovered.dsh,
     ...ompSessionDependencies(discovered.omp),
     ...discovered.grok,
     ...discovered.grok.map(grokSummaryPathFor),
@@ -2309,6 +2324,7 @@ async function buildSessionAnalyticsInternal({ home = os.homedir(), force = fals
     ...(discovered.zcode.length ? [{ source: "zcode", filePath: discovered.zcode, scan: scanZcodeSessions }] : []),
     ...(discovered.opencode.length ? [{ source: "opencode", filePath: discovered.opencode, scan: scanOpencodeSessions }] : []),
     ...(discovered.kimi.length ? [{ source: "kimi", filePath: discovered.kimi, scan: scanKimiSessions }] : []),
+    ...(discovered.dsh.length ? [{ source: "dsh", filePath: discovered.dsh, scan: scanDshSessions }] : []),
     ...(discovered.omp.length ? [{ source: "omp", filePath: discovered.omp, scan: scanOmpSessions }] : []),
   ];
   // Files we could not turn into a row (permission denied, half-written line,
@@ -2332,12 +2348,12 @@ async function buildSessionAnalyticsInternal({ home = os.homedir(), force = fals
       if (entry.source === "zcode") incompleteZcodeScan = true;
       if (entry.source === "opencode") incompleteOpencodeScan = true;
       if (entry.source === "kimi") incompleteKimiScan = true;
-      if (entry.source === "omp") incompleteOmpScan = true;
+      if ((entry.source === "omp" || entry.source === "dsh")) incompleteOmpScan = true;
       continue;
     }
     let rows = null;
-    if (!force && !(entry.source === "zcode" && retryZcodeScan) && !(entry.source === "opencode" && retryOpencodeScan) && !(entry.source === "kimi" && retryKimiScan) && !(entry.source === "omp" && retryOmpScan) && !(entry.source === "codex" && retryCodexScan) && previousFiles[cacheKey]?.stat_key === statKey) {
-      if (entry.source === "zcode" || entry.source === "opencode" || entry.source === "kimi" || entry.source === "omp") {
+    if (!force && !(entry.source === "zcode" && retryZcodeScan) && !(entry.source === "opencode" && retryOpencodeScan) && !(entry.source === "kimi" && retryKimiScan) && !((entry.source === "omp" || entry.source === "dsh") && retryOmpScan) && !(entry.source === "codex" && retryCodexScan) && previousFiles[cacheKey]?.stat_key === statKey) {
+      if (entry.source === "zcode" || entry.source === "opencode" || entry.source === "kimi" || (entry.source === "omp" || entry.source === "dsh")) {
         // One db scans to many cached rows; recover them all from the previous
         // pass. An empty recovery means the sidecar lost its rows — rescan.
         const cached = previousRows.filter((row) => row?.source === entry.source);
@@ -2350,7 +2366,7 @@ async function buildSessionAnalyticsInternal({ home = os.homedir(), force = fals
     if (!rows) {
       try {
         const scanned = await entry.scan(entry.filePath);
-        if (entry.source === "omp" && Number.isFinite(scanned?.skippedFiles)) {
+        if ((entry.source === "omp" || entry.source === "dsh") && Number.isFinite(scanned?.skippedFiles)) {
           skippedFiles += scanned.skippedFiles;
           if (scanned.skippedFiles > 0) incompleteOmpScan = true;
         }
@@ -2362,7 +2378,7 @@ async function buildSessionAnalyticsInternal({ home = os.homedir(), force = fals
         if (entry.source === "zcode") incompleteZcodeScan = true;
         if (entry.source === "opencode") incompleteOpencodeScan = true;
         if (entry.source === "kimi") incompleteKimiScan = true;
-        if (entry.source === "omp") incompleteOmpScan = true;
+        if ((entry.source === "omp" || entry.source === "dsh")) incompleteOmpScan = true;
         if (entry.source === "codex" && error.code === "CODEX_FORK_DEFERRED") incompleteCodexScan = true;
         if (!process.env.NODE_TEST_CONTEXT) {
           console.warn(`[session-analytics] skipped ${entry.source} session file: ${error?.message || error}`);
@@ -2370,7 +2386,7 @@ async function buildSessionAnalyticsInternal({ home = os.homedir(), force = fals
         rows = [];
       }
     }
-    if (rows.length === 0 && !["zcode", "opencode", "kimi", "omp"].includes(entry.source)) {
+    if (rows.length === 0 && !["zcode", "opencode", "kimi", "omp", "dsh"].includes(entry.source)) {
       const previous = previousRowsByFile.get(cacheKey);
       if (previous) { sessions.push(previous); nextFiles[cacheKey] = previousFiles[cacheKey]; }
       continue;
@@ -2382,7 +2398,7 @@ async function buildSessionAnalyticsInternal({ home = os.homedir(), force = fals
       // so key each by the db path plus its session id; a bare session id as a
       // separate path element would be path.resolve()d against the process cwd
       // and never match across runs.
-      row._cache_key = (entry.source === "zcode" || entry.source === "opencode" || entry.source === "kimi" || entry.source === "omp") && (row.session_id || row.session_hash)
+      row._cache_key = (entry.source === "zcode" || entry.source === "opencode" || entry.source === "kimi" || (entry.source === "omp" || entry.source === "dsh")) && (row.session_id || row.session_hash)
         ? `${cacheKey}#${sessionHash(entry.source, row.session_id || row.session_hash)}`
         : cacheKey;
       sessions.push(row);
@@ -2411,11 +2427,11 @@ async function buildSessionAnalyticsInternal({ home = os.homedir(), force = fals
   }
   if (incompleteOmpScan) {
     await writeAtomic(incompleteOmpPath, "1\n");
-    const complete = readSidecar(sidecarPath).filter((row) => row.source === "omp" && row.version === SIDECAR_VERSION);
+    const complete = readSidecar(sidecarPath).filter((row) => ["omp", "dsh"].includes(row.source) && row.version === SIDECAR_VERSION);
     // OMP deduplicates fork entries across the whole inventory. Mixing a
     // partial scan with cached rows could count the same turn twice; retain
     // the complete snapshot until every transcript can be read again.
-    if (complete.length) sessions = [...sessions.filter((row) => row.source !== "omp"), ...complete];
+    if (complete.length) sessions = [...sessions.filter((row) => !["omp", "dsh"].includes(row.source)), ...complete];
   }
   if (incompleteCodexScan) {
     await writeAtomic(incompleteCodexPath, "1\n");
@@ -2727,6 +2743,7 @@ function resumeCommandFor(source, sessionId) {
   // Grok Build: `grok --resume <session-id>` (also accepts a title). The
   // command must still be run from the session's project_ref cwd.
   if (source === "grok") return `grok --resume ${id}`;
+  if (source === "dsh") return `dsh --session ${id}`;
   if (source === "omp") return `omp --resume ${id}`;
   return null;
 }

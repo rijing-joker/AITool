@@ -1,5 +1,6 @@
 import React from "react";
 import { copy } from "../lib/copy";
+import { ModelDropdown } from "./provider-model-dropdown";
 
 const efforts = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
 export function CodexSubagentFields({ agents = {}, models = [], onChange, onAddModel }) {
@@ -15,7 +16,10 @@ export function CodexSubagentFields({ agents = {}, models = [], onChange, onAddM
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
       <label className="space-y-1 text-sm">
         <span>{copy("pswitch.subagent.model")}</span>
-        <input value={model} onChange={event => change("default_subagent_model", event.target.value)} placeholder={copy("pswitch.subagent.inherit")} className="w-full rounded-lg border border-oai-gray-300 bg-transparent px-3 py-2 font-mono dark:border-oai-gray-700" />
+        <div className="flex gap-1">
+          <input value={model} onChange={event => change("default_subagent_model", event.target.value)} placeholder={copy("pswitch.subagent.inherit")} className="min-w-0 w-full rounded-lg border border-oai-gray-300 bg-transparent px-3 py-2 font-mono dark:border-oai-gray-700" />
+          <ModelDropdown models={[...new Set(models.map(row => String(row.model || "").trim()).filter(Boolean))]} onSelect={value => change("default_subagent_model", value)} />
+        </div>
       </label>
       <label className="space-y-1 text-sm">
         <span>{copy("pswitch.subagent.effort")}</span>

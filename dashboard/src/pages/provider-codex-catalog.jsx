@@ -1,5 +1,8 @@
 import React from "react";
-import { ChevronDown, Download, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, Download, GripVertical, Plus, Trash2 } from "lucide-react";
+import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
+import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { copy } from "../lib/copy";
 import { ModelDropdown } from "./provider-model-dropdown";
 import { FetchedModelPicker } from "./provider-fetched-model-picker";
@@ -131,9 +134,24 @@ function ReasoningLevelsPicker({ levels, defaultLevel, onLevelsChange, onDefault
     </details>
   );
 }
+function SortableCatalogRow({ id, label, children }) {
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id });
+  return <div ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition }} className={`flex items-start gap-2 ${isDragging ? "relative z-10 bg-white dark:bg-oai-gray-950" : ""}`}>
+    <button ref={setActivatorNodeRef} type="button" aria-label={label} {...attributes} {...listeners} className="flex h-10 w-7 shrink-0 touch-none items-center justify-center rounded-md text-oai-gray-500 hover:bg-oai-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 dark:hover:bg-oai-gray-800"><GripVertical className="h-4 w-4" /></button>
+    <div className="min-w-0 flex-1">{children}</div>
+  </div>;
+}
 
 export function CodexCatalogEditor({ models, onChange, fetchedModels, fetchState, onFetch, defaultModel, onAddToMapping, modelMetadata, officialModelsReason }) {
   const rows = Array.isArray(models) ? models : [];
+  const rowIds = React.useRef(new WeakMap());
+  const nextRowId = React.useRef(0);
+  const identify = row => {
+    if (!rowIds.current.has(row)) rowIds.current.set(row, `catalog-${++nextRowId.current}`);
+    return rowIds.current.get(row);
+  };
+  const ids = rows.map(identify);
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
   const hasFetched = Array.isArray(fetchedModels);
   const [pickerOpen, setPickerOpen] = React.useState(false);
   const previousFetched = React.useRef(fetchedModels);
@@ -145,7 +163,10 @@ export function CodexCatalogEditor({ models, onChange, fetchedModels, fetchState
   }, [fetchedModels]);
 
   const updateRow = (index, patch) => {
-    onChange(rows.map((row, i) => (i === index ? { ...row, ...patch } : row)));
+    onChange(rows.map((row, i) => {
+      if (i !== index) return row;
+      const next = { ...row, ...patch }; rowIds.current.set(next, identify(row)); return next;
+    }));
   };
   const removeRow = (index) => {
     const next = rows.filter((row, i) => i !== index);
@@ -239,8 +260,13 @@ export function CodexCatalogEditor({ models, onChange, fetchedModels, fetchState
             <span>{copy("pswitch.catalog.col_reasoning")}</span>
             <span />
           </div>
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={({ active, over }) => {
+            if (over && active.id !== over.id) onChange(arrayMove(rows, ids.indexOf(active.id), ids.indexOf(over.id)));
+          }}>
+          <SortableContext items={ids} strategy={verticalListSortingStrategy}>
           {rows.map((row, index) => (
-            <div key={index} className="grid grid-cols-1 gap-2 md:grid-cols-[1fr_1fr_110px_150px_28px]">
+            <SortableCatalogRow key={ids[index]} id={ids[index]} label={copy("pswitch.provider.drag_handle", { name: row.displayName || row.model || String(index + 1) })}>
+            <div className="grid grid-cols-1 gap-2 md:grid-cols-[1fr_1fr_110px_150px_28px]">
               <RowInput
                 value={row.displayName}
                 onChange={(value) => updateRow(index, { displayName: value })}
@@ -309,7 +335,10 @@ export function CodexCatalogEditor({ models, onChange, fetchedModels, fetchState
                 </p>
               </details>
             </div>
+            </SortableCatalogRow>
           ))}
+          </SortableContext>
+          </DndContext>
         </div>
       ) : null}
       {showNotInCatalog ? (

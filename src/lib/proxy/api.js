@@ -417,6 +417,14 @@ async function handleProxyApiRequest(req, res, url, ctx) {
   };
 
   try {
+    if (p === "/api/proxy/models/refresh" && method === "POST") {
+      if (!requireMutation()) return true;
+      const results = await Promise.all(["/v8/management/models/refresh", "/v8/management/routing/model-definitions/refresh"].map(async route => {
+        const result = await management.request("POST", route, { timeoutMs: 60_000 });
+        return { route, ok: result.ok, status: result.status, unsupported: [404, 405].includes(result.status), data: result.data, error: result.error };
+      }));
+      json(res, { ok: true, results }); return true;
+    }
     if (p === "/api/proxy/routing" && method === "GET") { json(res, { ok: true, ...await require("./extensions/routing").status() }); return true; }
     if (p === "/api/proxy/routing" && method === "POST") {
       if (!requireMutation()) return true;
@@ -461,6 +469,7 @@ async function handleProxyApiRequest(req, res, url, ctx) {
         } else {
           const buddy = require("./extensions/workbuddy");
           if (body.action === "desktop") return buddy.useDesktop(body.kind);
+          if (body.action === "key") return buddy.useKey(body.kind, body.apiKey);
           if (body.action === "begin") return buddy.begin(body.kind);
           if (body.action === "poll") return buddy.poll(body.kind, body.id);
           if (body.action === "catalog") return { models: await buddy.catalog(body.kind) };

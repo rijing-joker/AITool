@@ -878,14 +878,17 @@ function normalizeKimiUsageResponse(body) {
   const firstLimit = Array.isArray(body?.limits) ? body.limits[0] : null;
   const detail = firstLimit?.detail && typeof firstLimit.detail === "object" ? firstLimit.detail : firstLimit;
   const parallelLimit = kimiNumber(body?.parallel?.limit);
+  const tiers = require("./kimi-usage").parseKimiTiers(body);
+  const tierWindow = id => { const tier = tiers.find(row => row.id === id); return tier ? buildWindow({ usedPercent: tier.usedPercent, resetAt: tier.resetsAt }) : null; };
 
   return {
     membership_level: typeof body?.user?.membership?.level === "string" ? body.user.membership.level : null,
     subscription_type: typeof body?.subType === "string" ? body.subType : null,
     parallel_limit: parallelLimit !== null ? parallelLimit : null,
-    primary_window: kimiWindowFromUsage(body?.usage),
-    secondary_window: kimiWindowFromUsage(detail),
-    tertiary_window: kimiWindowFromUsage(body?.totalQuota),
+    primary_window: tierWindow("weekly_limit") || kimiWindowFromUsage(body?.usage),
+    secondary_window: tierWindow("five_hour") || kimiWindowFromUsage(detail),
+    tertiary_window: tierWindow("monthly_limit") || kimiWindowFromUsage(body?.totalQuota),
+    monthly_window: Boolean(tierWindow("monthly_limit")),
   };
 }
 

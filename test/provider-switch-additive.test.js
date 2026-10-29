@@ -457,6 +457,8 @@ test("visible apps: normalized, persisted, last-visible guard", async () => {
     hermes: true,
     pi: true,
     grokbuild: true,
+    omp: true,
+    dsh: true,
     kimi: true,
   });
 
@@ -473,6 +475,8 @@ test("visible apps: normalized, persisted, last-visible guard", async () => {
     hermes: true,
     pi: true,
     grokbuild: true,
+    omp: true,
+    dsh: true,
   });
   // Persisted across a fresh read.
   assert.equal((await store.readVisibleApps()).claude, false);
@@ -794,6 +798,7 @@ test("additive hermes: existing custom entries that overlap the readonly dict re
 for (const app of additive.ADDITIVE_APPS) {
   test(`additive ${app}: invalid container types leave the file and active provider unchanged`, async () => {
     const preset = presets.listPresets(app).find((item) => item.group === "custom");
+    if (app === "dsh") { preset.settingsConfig.provider.baseURL = "https://example.com/v1"; preset.settingsConfig.provider.apiKey = "fixture-key"; preset.settingsConfig.provider.models = [{ id: "test" }]; }
     const row = await store.createProvider(app, { name: "Custom", settingsConfig: preset.settingsConfig });
     const spec = additive.specOf(app);
     const invalid = {};

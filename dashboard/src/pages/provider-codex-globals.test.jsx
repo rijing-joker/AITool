@@ -1,0 +1,35 @@
+import React from "react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { ProviderCodexGlobals } from "./provider-codex-globals";
+import { providerSwitchApi } from "../lib/provider-switch-api";
+vi.mock("../lib/copy", () => ({ copy: key => key }));
+vi.mock("../lib/provider-switch-api", () => ({ providerSwitchApi: { getCodexSubagents: vi.fn(), saveCodexSubagents: vi.fn() } }));
+const config = { enabled: true, interruptMessage: true, maxConcurrentThreadsPerSession: 3 };
+beforeEach(() => { vi.clearAllMocks(); providerSwitchApi.getCodexSubagents.mockResolvedValue({ config, revision: "r1" }); });
+afterEach(cleanup);
+it("saves controls independently with the latest native revision and validates concurrency", async () => {
+  providerSwitchApi.saveCodexSubagents.mockImplementation(async (next, revision) => ({ config: next, revision: revision === "r1" ? "r2" : "r3" }));
+  render(<ProviderCodexGlobals />);
+  const enabled = await screen.findByLabelText("pswitch.subagent.enabled");
+  fireEvent.click(enabled);
+  await waitFor(() => expect(enabled).not.toBeChecked());
+  expect(providerSwitchApi.saveCodexSubagents).toHaveBeenCalledWith({ ...config, enabled: false }, "r1");
+  const field = screen.getByRole("spinbutton");
+  fireEvent.change(field, { target: { value: "0" } }); fireEvent.blur(field);
+  expect(screen.getByRole("alert")).toHaveTextContent("pswitch.subagent.invalid_concurrency");
+  expect(providerSwitchApi.saveCodexSubagents).toHaveBeenCalledTimes(1);
+  fireEvent.change(field, { target: { value: "5" } }); fireEvent.blur(field);
+  await waitFor(() => expect(providerSwitchApi.saveCodexSubagents).toHaveBeenLastCalledWith({ ...config, enabled: false, maxConcurrentThreadsPerSession: 5 }, "r2"));
+});
+it("preserves a failed draft and reloads a conflicted revision only after the user's action", async () => {
+  providerSwitchApi.saveCodexSubagents.mockRejectedValue(new Error("native conflict"));
+  render(<ProviderCodexGlobals />);
+  const field = await screen.findByRole("spinbutton");
+  fireEvent.change(field, { target: { value: "5" } }); fireEvent.blur(field);
+  expect(await screen.findByRole("alert")).toHaveTextContent("native conflict");
+  expect(field).toHaveValue(5); expect(providerSwitchApi.getCodexSubagents).toHaveBeenCalledTimes(1);
+  providerSwitchApi.getCodexSubagents.mockResolvedValue({ config: { ...config, maxConcurrentThreadsPerSession: 8 }, revision: "external" });
+  fireEvent.click(screen.getByRole("button", { name: "pswitch.action.reload" }));
+  await waitFor(() => expect(field).toHaveValue(8));
+});

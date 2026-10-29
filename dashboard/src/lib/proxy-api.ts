@@ -227,6 +227,7 @@ export const proxyApi = {
   start: () => mutate<{ ok: true }>("/api/proxy/start", "POST"),
   stop: () => mutate<{ ok: true }>("/api/proxy/stop", "POST"),
   restart: () => mutate<{ ok: true }>("/api/proxy/restart", "POST"),
+  refreshModels: () => mutate<{ ok: true; results: { route: string; ok: boolean; unsupported: boolean; status: number }[] }>("/api/proxy/models/refresh", "POST"),
   coreUpdateCheck: (signal?: AbortSignal) =>
     get<{ ok: true; update: CoreUpdateCheck }>("/api/proxy/core-update", signal),
   install: () => mutate<{ ok: true; task: CoreInstallTask }>("/api/proxy/install", "POST"),

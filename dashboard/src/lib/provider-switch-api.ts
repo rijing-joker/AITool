@@ -52,7 +52,13 @@ export type ProviderSwitchApp =
   | "mcode"
   | "hermes"
   | "pi"
-  | "grokbuild";
+  | "grokbuild"
+  | "kimi"
+  | "omp"
+  | "dsh";
+
+export interface CodexGlobalSubagents { enabled: boolean; maxConcurrentThreadsPerSession: number | null; interruptMessage: boolean }
+export interface CodexSubagentsResult { ok: true; config: CodexGlobalSubagents; revision: string; path: string }
 
 export interface ProviderDiagnostic {
   app: string;
@@ -347,7 +353,11 @@ export const providerSwitchApi = {
   repairDiagnostic(app: ProviderSwitchApp, revision: string): Promise<{ ok: true; wrote: string[] }> {
     return mutate("/api/provider-switch/diagnostics/repair", "POST", { app, revision });
   },
+  launchClaude(id: string) { return mutate("/api/provider-switch/claude/launch", "POST", { id }); },
   launchAgy(id: string) { return mutate("/api/provider-switch/agy/launch", "POST", { id }); },
+  launchNative(app: "dsh" | "omp", id: string) { return mutate("/api/provider-switch/launch", "POST", { app, id }); },
+  getCodexSubagents(): Promise<CodexSubagentsResult> { return get("/api/provider-switch/codex/subagents"); },
+  saveCodexSubagents(config: CodexGlobalSubagents, revision: string): Promise<CodexSubagentsResult> { return mutate("/api/provider-switch/codex/subagents", "PUT", { config, revision }); },
   migrateHermesId(id: string): Promise<{ ok: true; slotKey: string }> {
     return mutate("/api/provider-switch/hermes/migrate-id", "POST", { id });
   },
@@ -583,7 +593,7 @@ export type PiPromptFile = {
   content: string;
 };
 
-export type McpAppId = "claude" | "codex" | "gemini" | "agy" | "grokbuild" | "opencode" | "hermes" | "mcode" | "pi";
+export type McpAppId = "claude" | "codex" | "gemini" | "agy" | "grokbuild" | "opencode" | "hermes" | "mcode" | "pi" | "kimi" | "omp" | "dsh";
 
 export interface McpServerSpec {
   type?: "stdio" | "http" | "sse" | string;
@@ -637,8 +647,11 @@ export interface McpMutationResult {
   failures: string[];
 }
 
+export interface McpHubStatus { enabled: boolean; address: string | null; connectedApps: string[]; recoveryRequired: boolean; failures?: string[] }
 export const mcpApi = {
-  list(): Promise<{ ok: true; servers: McpServer[]; apps: McpAppId[]; checks: Record<string, McpCheckResult | null>; toolFilterApps: McpAppId[] }> {
+  setHub(enabled: boolean): Promise<{ ok: true; hub: McpHubStatus & { failures: string[] } }> { return mutate("/api/provider-switch/mcp/hub", "POST", { enabled }); },
+  async hubConnection(app = "all"): Promise<{ ok: true; hub: McpHubStatus; connection: unknown }> { const response = await fetch(`/api/provider-switch/mcp/hub?app=${encodeURIComponent(app)}`, { headers: await getLocalApiAuthHeaders() }); return parseResponse(response); },
+  list(): Promise<{ ok: true; servers: McpServer[]; apps: McpAppId[]; checks: Record<string, McpCheckResult | null>; toolFilterApps: McpAppId[]; hub?: McpHubStatus }> {
     return get("/api/provider-switch/mcp");
   },
 
@@ -676,6 +689,9 @@ export const mcpApi = {
 // ---------------------------------------------------------------------------
 
 export type PromptAppId =
+  | "dsh"
+  | "omp"
+  | "kimi"
   | "claude"
   | "codex"
   | "gemini"

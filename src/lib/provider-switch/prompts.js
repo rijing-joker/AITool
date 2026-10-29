@@ -44,7 +44,7 @@ const MAX_PROMPT_FILE_BYTES = 1024 * 1024;
 // cc-switch's validate_prompt_content: MCode global instructions cap.
 const MCODE_CONTENT_LIMIT_BYTES = 32 * 1024;
 
-const PROMPT_APPS = ["claude", "codex", "gemini", "agy", "grokbuild", "opencode", "openclaw", "hermes", "pi", "mcode", "kimi"];
+const PROMPT_APPS = ["claude", "codex", "gemini", "agy", "grokbuild", "opencode", "openclaw", "hermes", "pi", "mcode", "kimi", "omp", "dsh"];
 
 function promptFilePath(app) {
   const home = os.homedir();
@@ -64,6 +64,10 @@ function promptFilePath(app) {
       return path.join(home, ".openclaw", "AGENTS.md");
     case "hermes":
       return path.join(home, ".hermes", "SOUL.md");
+    case "dsh":
+      return path.join(process.env.DSH_HOME?.trim() || path.join(home, ".dsh"), "AGENTS.md");
+    case "omp":
+      return path.join(require("./omp").agentDir(process.env), "AGENTS.md");
     case "pi":
       return path.join(home, ".pi", "agent", "AGENTS.md");
     case "mcode":

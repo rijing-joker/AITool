@@ -117,7 +117,7 @@ function createAdapter({ token, selectedModels = () => [], catalog = createCatal
     if ((req.method === "POST" && route === "/refresh") || (req.method === "GET" && route === "/v1/models")) {
       const result = await catalog.refresh(route === "/refresh");
       if (route === "/refresh") return json(res, result);
-      return json(res, { object: "list", data: result.lastError ? [] : result.models.filter((m) => selectedModels().includes(m.id)).map((m) => ({ id: m.id, object: "model", owned_by: "opencode" })) });
+      return json(res, { object: "list", data: result.lastError ? [] : result.models.filter((m) => selectedModels().includes(m.id)).map((m) => ({ id: m.id, object: "model", owned_by: "opencode", context_window: m.contextWindow, max_output_tokens: m.maxOutputTokens })) });
     }
     if (req.method !== "POST" || route !== "/v1/chat/completions") { req.resume(); return json(res, { error: { code: "not_found" } }, 404); }
     const controller = new AbortController();

@@ -16,7 +16,7 @@ const paths = require("./paths");
 // Scope notes vs cc-switch: no repo discovery/install/update yet — this v1
 // scans and projects locally present skills (import → toggle → sync).
 
-const SKILL_APPS = ["claude", "codex", "gemini", "agy", "grokbuild", "opencode", "hermes", "pi", "mcode", "kimi"];
+const SKILL_APPS = ["claude", "codex", "gemini", "agy", "grokbuild", "opencode", "hermes", "pi", "mcode", "kimi", "omp", "dsh"];
 
 const COPY_STAMP_FILE = ".aitool-skill-copy";
 
@@ -39,6 +39,8 @@ function appSkillsDir(app) {
       return path.join(custom && custom.trim() ? custom.trim() : path.join(home, ".minimax"), "skills");
     }
     case "kimi": return path.join(process.env.KIMI_CODE_HOME?.trim() || path.join(home, ".kimi-code"), "skills");
+    case "omp": return path.join(require("./omp").agentDir(), "skills");
+    case "dsh": return path.join(process.env.DSH_HOME?.trim() || path.join(home, ".dsh"), "skills");
     default: return null;
   }
 }
@@ -102,7 +104,7 @@ async function scanSkillsDir(dir) {
   }
   const found = [];
   for (const entry of entries) {
-    if (!entry.isDirectory() || entry.name.startsWith(".")) continue;
+    if ((!entry.isDirectory() && !entry.isSymbolicLink()) || entry.name.startsWith(".")) continue;
     const skillDir = path.join(dir, entry.name);
     try {
       const skillMd = await fsp.readFile(path.join(skillDir, "SKILL.md"), "utf8");
@@ -141,7 +143,17 @@ async function importSkills() {
 }
 
 async function listSkills() {
-  return (await readSkillsStore()).skills;
+  // The main library can hand over a source discovered here earlier. Resolve
+  // only entries carrying its handover receipt; ordinary native sources stay
+  // user-owned. Listing does not mutate either registry.
+  let managed = [];
+  try { const raw = JSON.parse(await fsp.readFile(path.join(os.homedir(), ".tokentracker", "skills", "registry.json"), "utf8")); managed = raw.skills || []; }
+  catch (error) { if (error.code !== "ENOENT") throw error; }
+  return (await readSkillsStore()).skills.map(skill => {
+    const owner = managed.find(row => row.directory === skill.id && row.sharedHandover && !row.trashedAt);
+    const sourceDir = owner ? path.join(os.homedir(), ".tokentracker", "skills", "managed", skill.id) : skill.sourceDir;
+    return { ...skill, sourceDir, shared: require("../shared-skills").sharedInfo(skill.id) };
+  });
 }
 
 // Enable: symlink the skill into the app's skills dir, falling back to a
@@ -186,8 +198,10 @@ async function projectSkill(app, skill) {
   // copy stamp from an older installation.
   if (skill.sourceDir && path.resolve(skill.sourceDir) === path.resolve(targetPath)) return null;
   const { managedLinks } = await readSkillsStore();
+  const isManaged = () => isManagedLinkOrCopy(targetPath, managedLinks)
+    || require("../skills-manager").isSharedSkillTargetOwned(skill.id, targetPath);
   const removeManaged = async () => {
-    if (!isManagedLinkOrCopy(targetPath, managedLinks)) return;
+    if (!isManaged()) return;
     // No await between checking ownership and unlinking the entry.
     if (fs.lstatSync(targetPath).isSymbolicLink()) fs.unlinkSync(targetPath);
     else fs.rmSync(targetPath, { recursive: true, force: true });
@@ -217,7 +231,7 @@ async function projectSkill(app, skill) {
   if (samePlace) return null;
   // A plain directory with the same id that we did not write is the user's:
   // refuse to replace it and surface the collision instead.
-  if (fs.lstatSync(targetPath, { throwIfNoEntry: false }) && !isManagedLinkOrCopy(targetPath, managedLinks)) {
+  if (fs.lstatSync(targetPath, { throwIfNoEntry: false }) && !isManaged()) {
     return `${app}/${skill.id}: a user-managed entry with this name exists`;
   }
   if (!fs.existsSync(path.dirname(targetDir))) {
@@ -239,7 +253,7 @@ async function projectSkill(app, skill) {
     }
     // Recheck after copying, with no await between ownership and replacement.
     if (fs.lstatSync(targetPath, { throwIfNoEntry: false })) {
-      if (!isManagedLinkOrCopy(targetPath, managedLinks)) throw new Error("A user-managed entry appeared during skill projection");
+      if (!isManaged()) throw new Error("A user-managed entry appeared during skill projection");
       fs.renameSync(targetPath, previous); moved = true;
     }
     fs.renameSync(prepared, targetPath); installed = true;
@@ -278,6 +292,7 @@ async function toggleSkill(id, app, enabled) {
     return store;
   });
   if (!skill) throw new Error(`Skill not found: ${id}`);
+  skill = (await listSkills()).find(row => row.id === id);
   const failures = [];
   try {
     const failure = await projectSkill(app, skill);

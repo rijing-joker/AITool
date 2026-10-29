@@ -32,6 +32,8 @@ const { parse: tomlParse, stringify: tomlStringify } = require("smol-toml");
 const SLOT_KEY_PATTERN = /^[a-z0-9_-]{1,40}$/;
 
 const APP_SPECS = {
+  dsh: { format: "yaml", slotContainer: ["providers"], modelPointer: null, modelIdFrom: "modelListFirst" },
+  omp: { format: "yaml", slotContainer: ["providers"], modelPointer: null, modelIdFrom: "modelListFirst" },
   opencode: {
     format: "json",
     slotContainer: ["provider"],
@@ -238,6 +240,15 @@ function sanitizeWrapper(app, settingsConfig, name) {
     );
   }
   let provider = JSON.parse(JSON.stringify(config.provider));
+  if (app === "dsh") {
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slotKey) || slotKey === "deepseek-official") throw new Error("DSH provider ids must be lowercase hyphenated identifiers; deepseek-official is reserved");
+    if (!["openai-completions", "openai-responses", "anthropic-messages"].includes(provider.api)) throw new Error("Select a supported DSH API protocol");
+    let url; try { url = new URL(provider.baseURL); } catch {}
+    if (!url || !["http:", "https:"].includes(url.protocol) || url.username || url.password) throw new Error("Enter a valid DSH endpoint URL");
+    if (!provider.apiKey?.trim() && !provider.apiKeyEnv?.trim()) throw new Error("Enter an API key or retain a native DSH credential reference");
+    if (!Array.isArray(provider.models) || !provider.models.length || provider.models.some(model => !model?.id?.trim())) throw new Error("Add at least one DSH model");
+    for (const model of provider.models) for (const field of ["contextWindow", "maxTokens"]) if (model[field] != null && (!Number.isSafeInteger(model[field]) || model[field] <= 0)) throw new Error("DSH model capacities must be positive integers");
+  }
   if (app === "hermes") provider = normalizeHermesEntry(provider);
   let modelId = typeof config.modelId === "string" ? config.modelId.trim().slice(0, 300) : "";
   if (spec.modelIdFrom) {
@@ -352,6 +363,7 @@ function removeSlot(doc, spec, key) {
 
 function parseLive(app, text) {
   const spec = specOf(app);
+  if (app === "dsh") return require("./dsh").parse(text);
   const raw = typeof text === "string" ? text.trim() : "";
   if (!raw) return {};
   if (spec.format === "json") {
@@ -381,7 +393,9 @@ function parseLive(app, text) {
   return doc;
 }
 
-function serializeLive(app, doc) {
+function serializeLive(app, doc, originalText = "") {
+  if (app === "omp") return require("./yaml-text").patch(originalText, doc);
+  if (app === "dsh") return require("./dsh").serialize(originalText, doc);
   const spec = specOf(app);
   if (spec.format === "json") return `${JSON.stringify(doc, null, 2)}\n`;
   if (spec.format === "toml") return tomlStringify(doc);
@@ -420,7 +434,7 @@ function projectAdditive(app, { prev, target, live }) {
   // and not re-defined by the target.
   if (prevWrapper.slotKey && prevWrapper.slotKey !== targetSlot) {
     const prevEntry = readSlot(doc, spec, prevWrapper.slotKey);
-    if (prevEntry !== undefined && stableEqual(prevEntry, prevWrapper.provider)) {
+    if (prevEntry !== undefined && (app === "dsh" ? require("./dsh").sameProvider(prevEntry, prevWrapper.provider) : stableEqual(prevEntry, prevWrapper.provider))) {
       removeSlot(doc, spec, prevWrapper.slotKey);
     }
   }
@@ -451,7 +465,7 @@ function disconnectAdditive(app, { prev, live }) {
   const wrapper = wrapperOf(prev);
   if (!wrapper.slotKey) return doc;
   const slot = readSlot(doc, spec, wrapper.slotKey);
-  if (slot !== undefined && !stableEqual(slot, wrapper.provider)) return doc;
+  if (slot !== undefined && !(app === "dsh" ? require("./dsh").sameProvider(slot, wrapper.provider) : stableEqual(slot, wrapper.provider))) return doc;
   removeSlot(doc, spec, wrapper.slotKey);
   if (spec.pointerProviderKey && valueAt(doc, spec.pointerProviderKey) === wrapper.slotKey) deleteValueAt(doc, spec.pointerProviderKey);
   if (spec.modelPointer && stableEqual(valueAt(doc, spec.modelPointer), pointerValueOf(app, wrapper))) deleteValueAt(doc, spec.modelPointer);
@@ -718,7 +732,7 @@ function applyAdditiveChanges(app, lives, changes) {
     }
     setValueAt(live, change.path, change.after);
   }
-  return { ...lives, config: { ...lives.config, content: serializeLive(app, live) } };
+  return { ...lives, config: { ...lives.config, content: serializeLive(app, live, lives.config.content) } };
 }
 
 module.exports = {

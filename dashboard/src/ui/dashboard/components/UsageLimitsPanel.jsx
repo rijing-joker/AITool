@@ -38,10 +38,10 @@ function devinLoginSnippet() {
   return copy("limits.devin.setupHint.snippet_login");
 }
 
-function formatReset(isoOrUnix) {
+function formatReset(isoOrUnix, now = Date.now()) {
   const ts = resetToMs(isoOrUnix);
   if (!Number.isFinite(ts)) return null;
-  const diff = ts - Date.now();
+  const diff = ts - now;
   if (diff <= 0) return copy("shared.time.now");
   const m = Math.floor(diff / 60000);
   if (m < 60) return `${m}m`;
@@ -594,52 +594,33 @@ function ResetBankSection({ model }) {
   );
 }
 
-function ZcodeResetBankSection({ data }) {
-  const now = Date.now();
+function resetCardRemaining(card, now) {
+  const expires = Date.parse(card.expires_at), granted = Date.parse(card.granted_at);
+  return Number.isFinite(granted) && expires > granted ? Math.max(0, Math.min(100, (expires - now) / (expires - granted) * 100)) : null;
+}
+
+function ZcodeResetBankSection({ data, now = Date.now() }) {
   const groups = [
     { key: "five_hour", label: copy("limits.label.zcode_5h") },
     { key: "weekly", label: copy("limits.label.zcode_weekly") },
-  ].map((group) => ({
-    ...group,
-    cards: (data[group.key] || []).filter((card) => Date.parse(card.expires_at) > now)
-      .slice().sort((a, b) => Date.parse(a.expires_at) - Date.parse(b.expires_at)),
-  }));
-  return (
-    <div className="mt-1 flex flex-col gap-1.5">
-      <div className="text-[10.5px] font-medium uppercase tracking-wide text-oai-gray-400 dark:text-oai-gray-500">
-        {copy("limits.zcode.reset_bank.title")}
-      </div>
-      {data.error ? (
-        <StatusLine tone="error">{copy("shared.error.prefix", { error: data.error })}</StatusLine>
-      ) : groups.map((group) => (
-        <div key={group.key} className="flex items-center gap-2 text-[11px]">
-          <span
-            data-limit-label=""
-            className="shrink-0 whitespace-nowrap text-oai-gray-500 dark:text-oai-gray-400"
-            style={{ width: "var(--tt-limits-label-w)" }}
-          >
-            {group.label}
-          </span>
-          <span className="rounded-full bg-oai-gray-100 px-2 py-0.5 tabular-nums text-oai-gray-600 dark:bg-oai-gray-800 dark:text-oai-gray-300">
-            {copy("limits.zcode.reset_bank.count", { count: group.cards.length })}
-          </span>
-          {group.cards.length ? (
-            <span
-              className="ml-auto text-right text-[10px] tabular-nums text-oai-gray-400 dark:text-oai-gray-500"
-              title={group.cards.map((card) => formatExactReset(Date.parse(card.expires_at))).join("\n")}
-            >
-              {copy("limits.zcode.reset_bank.earliest", { time: formatExactReset(Date.parse(group.cards[0].expires_at)) })}
-            </span>
-          ) : null}
-        </div>
-      ))}
-    </div>
-  );
+  ].map(group => ({ ...group, cards: (Array.isArray(data[group.key]) ? data[group.key] : []).filter(card => Date.parse(card.expires_at) > now).slice().sort((a, b) => Date.parse(a.expires_at) - Date.parse(b.expires_at)) })).filter(group => { return group.cards.length; });
+  if (!groups.length && !data.error) return null;
+  return <details open className="mt-2 space-y-2" onClick={event => event.stopPropagation()}>
+    <summary className="cursor-pointer rounded py-1 text-xs font-medium text-oai-gray-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 dark:text-oai-gray-300">{copy("limits.zcode.reset_bank.title")}</summary>
+    {data.error ? <StatusLine tone="error">{copy("shared.error.prefix", { error: data.error })}</StatusLine> : groups.map(group => <details key={group.key} className="border-t border-oai-gray-200 py-1 dark:border-oai-gray-800">
+      <summary className="cursor-pointer rounded text-xs text-oai-gray-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 dark:text-oai-gray-400"><span>{group.label}</span><span className="ml-2 tabular-nums">{copy("limits.zcode.reset_bank.count", { count: group.cards.length })}</span><span className="mt-1 block text-[11px] tabular-nums">{copy("limits.zcode.reset_bank.earliest", { time: formatExactReset(Date.parse(group.cards[0].expires_at)) })}</span></summary>
+      <ol className="mt-2 space-y-2 pl-3">{group.cards.map((card, index) => {
+        const expires = Date.parse(card.expires_at), granted = Date.parse(card.granted_at);
+        const remaining = resetCardRemaining(card, now);
+        return <li key={`${card.expires_at}:${index}`} className="text-xs text-oai-gray-600 dark:text-oai-gray-400"><div className="flex flex-wrap justify-between gap-2"><span>{copy("limits.zcode.reset_bank.card", { index: index + 1 })}</span><time dateTime={card.expires_at} title={formatExactReset(expires)} className="tabular-nums">{copy("limits.zcode.reset_bank.remaining", { time: formatReset(card.expires_at, now) })}</time></div>{remaining !== null ? <progress value={remaining} max={100} aria-label={copy("limits.zcode.reset_bank.lifetime")} className="mt-1 h-1.5 w-full accent-oai-brand-600" /> : null}</li>;
+      })}</ol>
+    </details>)}
+  </details>;
 }
 
-function renderProviderExtra(kind, data) {
+function renderProviderExtra(kind, data, now = Date.now()) {
   if (kind === "zcode_reset_bank") {
-    return data.reset_credits ? <ZcodeResetBankSection data={data.reset_credits} /> : null;
+    return data.reset_credits ? <ZcodeResetBankSection data={data.reset_credits} now={now} /> : null;
   }
   if (kind === "codex_meta") {
     // Credit amounts show on hover (LimitBar's title) instead of an
@@ -742,7 +723,7 @@ function renderConfiguredProvider(id, data, title, mode, expanded, onToggle, bad
     .windows(data)
     .filter((s) => s.window)
     .map((s) => ({ spec: s, pace: paceForSpec(s, mode, now) }));
-  const extra = renderProviderExtra(spec.extra, data);
+  const extra = renderProviderExtra(spec.extra, data, now);
   return (
     <ToolGroup
       key={id}

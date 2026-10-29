@@ -1,14 +1,15 @@
 import React from "react";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { CodexCatalogEditor } from "./provider-codex-catalog";
 import { showToast } from "../ui/components/Toast";
+import { ModalFrame } from "../ui/components/ModalFrame";
 vi.mock("../lib/copy", () => ({ copy: (key, values) => values?.count ? `${key} ${values.count}` : key }));
 vi.mock("../ui/components/Toast", () => ({ showToast: vi.fn() }));
 const metadata = { "kimi-k3": { contextWindow: 262144, reasoningEfforts: ["low", "medium", "bogus"], inputModalities: ["text", "image"] } };
 const baseProps = { fetchState: "done", onFetch: () => {}, defaultModel: "", onAddToMapping: () => {} };
 beforeEach(() => vi.clearAllMocks());
-afterEach(() => cleanup());
+afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 const openPicker = () => {
   fireEvent.click(screen.getByRole("button", { name: "pswitch.catalog.choose" }));
   return within(screen.getByRole("dialog"));
@@ -72,4 +73,37 @@ it("per-row dropdown fills blank parameters and preserves manual values", () => 
   fireEvent.click(screen.getByLabelText("pswitch.models.dropdown_aria"));
   fireEvent.click(screen.getByRole("button", { name: "kimi-k3" }));
   expect(onChange.mock.calls[0][0][0]).toMatchObject({ displayName: "Kept", contextWindow: "999", reasoningLevels: ["low", "medium"] });
+});
+
+it("keyboard sorting reaches the sensor inside a modal and Escape cancels before closing", async () => {
+  const rows = [{ model: "a", displayName: "Alpha", contextWindow: "999", baseInstructions: "keep" }, { model: "b", displayName: "Beta", reasoningLevels: ["high"] }];
+  const onChange = vi.fn(), onClose = vi.fn();
+  const measure = HTMLElement.prototype.getBoundingClientRect;
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function () {
+    if (this.firstElementChild?.getAttribute("aria-roledescription") !== "sortable") return measure.call(this);
+    const top = this.querySelector("input").value === "Alpha" ? 100 : 200;
+    return { x: 0, y: top, top, left: 0, right: 600, bottom: top + 80, width: 600, height: 80, toJSON() {} };
+  });
+  render(<ModalFrame open label="Catalog" onClose={onClose}><CodexCatalogEditor {...baseProps} models={rows} onChange={onChange} /></ModalFrame>);
+  const handle = screen.getAllByRole("button", { name: "pswitch.provider.drag_handle" })[0];
+  handle.focus();
+  fireEvent.keyDown(handle, { key: " ", code: "Space" });
+  await waitFor(() => expect(handle).toHaveAttribute("aria-pressed", "true"));
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+  fireEvent.keyDown(handle, { key: "ArrowDown", code: "ArrowDown" });
+  fireEvent.keyDown(handle, { key: " ", code: "Space" });
+  await waitFor(() => expect(onChange).toHaveBeenCalledWith([rows[1], rows[0]]));
+  await waitFor(() => expect(handle).not.toHaveAttribute("aria-pressed", "true"));
+  expect(onClose).not.toHaveBeenCalled();
+
+  onChange.mockClear();
+  fireEvent.keyDown(handle, { key: " ", code: "Space" });
+  await waitFor(() => expect(handle).toHaveAttribute("aria-pressed", "true"));
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+  fireEvent.keyDown(handle, { key: "Escape", code: "Escape" });
+  await waitFor(() => expect(handle).not.toHaveAttribute("aria-pressed", "true"));
+  expect(onChange).not.toHaveBeenCalled();
+  expect(onClose).not.toHaveBeenCalled();
+  fireEvent.keyDown(handle, { key: "Escape", code: "Escape" });
+  expect(onClose).toHaveBeenCalledOnce();
 });

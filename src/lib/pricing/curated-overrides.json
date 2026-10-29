@@ -6,6 +6,7 @@
     "iflytek_maas_pricing_note": "iFlytek MaaS inference prices supplied for AStudio on 2026-08-31. AStudio homepage: https://agent.xfyun.cn/. Official pricing source: https://maas.xfyun.cn/modelSquare. Source values are RMB per million tokens, converted at 7.2 RMB/USD, then rounded to two decimal places for billing. Models without a dedicated cache-hit price use the normal input rate; cache writes also use the normal input rate. iFlytek MaaS prices are source-scoped and do not inherit DeepSeek time-of-use discounts. Spark-X2.5 entries (spark-x2.5, spark-x2.5-4b, spark-x2.5-1.7b) were read from the model square on 2026-10-08; spark-x2.5 is listed at a limited-time 30% rate (0.96 / 3.6 / 0.14 RMB input / output / cache-hit, list price 3.2 / 12 / 0.48), and the two small models are free."
   },
   "exact": {
+    "gpt-6.1-terra": {"input": 1, "output": 5, "cache_read": 0.05, "cache_write": 1.25, "priority_multiplier": 2, "note": "TokenTracker fixed snapshot f80ed15a, 2026-10-27 upstream verification: https://developers.openai.com/api/docs/models/gpt-6.1-terra . Official pages returned HTTP 403 during AiTool 2026-10-29 review; not independently verified here. Above 272K raw input: 2x input/cache, 1.5x output; Fast 2x. Ultrafast unpublished, kept as Standard estimate. Cloud totals are Standard short-context estimates."},
     "big-pickle": {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "note": "OpenCode free tier verified 2026-10-17; historical IDs retained. https://opencode.ai/docs/zen/"},
     "beam-free": {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "note": "OpenCode free tier verified 2026-10-17; historical IDs retained. https://opencode.ai/docs/zen/"},
     "cat-jam-free": {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0, "note": "OpenCode free tier verified 2026-10-17; historical IDs retained. https://opencode.ai/docs/zen/"},
@@ -728,6 +729,7 @@
     }
   },
   "fuzzy": [
+    {"match": "gpt-6.1-terra", "ref": "gpt-6.1-terra"},
     {
       "match": "cline-free/",
       "ref": "cline-gateway-models"

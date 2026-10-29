@@ -148,6 +148,10 @@ function targetFiles(app) {
           private: true,
         },
       ];
+    case "omp":
+      return [{ id: "config", labelKey: "pswitch.live.file.omp_config", path: path.join(require("./omp").agentDir(process.env), "models.yml"), format: "yaml", private: true }];
+    case "dsh":
+      return [{ id: "config", labelKey: "pswitch.live.file.dsh_config", path: path.join(process.env.DSH_HOME?.trim() || path.join(home(), ".dsh"), "profiles", "web", "cordis.patch.yml"), format: "yaml", private: true }, { id: "credentials", labelKey: "pswitch.live.file.dsh_credentials", path: path.join(process.env.DSH_HOME?.trim() || path.join(home(), ".dsh"), ".credentials.yaml"), format: "yaml", private: true }];
     case "pi":
       return [
         {

@@ -40,6 +40,7 @@ const SOURCE_FILTERS = [
   { id: "zcode", label: () => "ZCode" },
   { id: "opencode", label: () => copy("leaderboard.column.opencode") },
   { id: "kimi", label: () => copy("leaderboard.column.kimi") },
+  { id: "dsh", label: () => copy("provider.display.deepseek_harness") },
   { id: "omp", label: () => "oh-my-pi" },
 ];
 
@@ -251,7 +252,7 @@ const SessionRow = React.memo(function SessionRow({
         </div>
         <div className="sessions-row-value">
           <dt className="text-xs text-oai-gray-600 dark:text-oai-gray-300 md:sr-only">{copy("sessions.col.speed")}</dt>
-          <dd className="mt-1 min-h-5 text-sm tabular-nums text-oai-gray-600 dark:text-oai-gray-300 md:mt-0"><SessionPerformance performance={session.performance} /></dd>
+          <dd className="mt-1 min-h-5 text-sm tabular-nums text-oai-gray-600 dark:text-oai-gray-300 md:mt-0"><SessionPerformance focusable performance={session.performance} /></dd>
         </div>
       </dl>
       <button
@@ -690,9 +691,11 @@ export function SessionsPage() {
               </button>
             </div>
           ) : isLoading ? (
-            <div className="flex items-center gap-2 py-16 text-sm text-oai-gray-500 dark:text-oai-gray-400">
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-              {copy("sessions.loading")}
+            <div role="status" aria-busy="true" aria-live="polite" data-testid="sessions-skeleton" className="py-4">
+              <span className="sr-only">{copy("sessions.loading")}</span>
+              <div className="space-y-6 motion-safe:animate-pulse" aria-hidden="true">
+                {Array.from({ length: 5 }, (_, index) => <div key={index} className="sessions-row-grid border-b border-oai-gray-200 py-4 dark:border-oai-gray-800"><div className="min-w-0 space-y-2"><div className="h-4 w-2/3 rounded bg-oai-gray-200 dark:bg-oai-gray-800" /><div className="h-3 w-1/3 rounded bg-oai-gray-100 dark:bg-oai-gray-900" /></div><div className="sessions-row-metrics">{[0, 1, 2].map(metric => <div key={metric} className="h-4 w-full rounded bg-oai-gray-100 dark:bg-oai-gray-900" />)}</div></div>)}
+              </div>
             </div>
           ) : filtered.length === 0 ? (
             <div className="rounded-xl border border-dashed border-oai-gray-200 py-16 text-center dark:border-oai-gray-800">

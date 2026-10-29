@@ -1,11 +1,14 @@
 "use strict";
-// Protocol/auth adapted from magpie-community/plugins @ 7fdc07f1,
+// Protocol/auth adapted from magpie-community/plugins @ 6a86762e (WorkBuddy 0.1.47),
 // MIT. Instruction identity rewriting and system-to-user retries are omitted.
 const fs = require("node:fs/promises");
 const path = require("node:path");
 const os = require("node:os");
 const crypto = require("node:crypto");
 const https = require("node:https");
+const { gzip } = require("node:zlib");
+const { promisify } = require("node:util");
+const gzipAsync = promisify(gzip);
 const { withFileLock } = require("../../fs");
 const state = require("../managed-upstream");
 const direct = require("./http");
@@ -14,11 +17,14 @@ const SITES = { workbuddy: "https://copilot.tencent.com", "workbuddy-ai": "https
 function site(kind) { if (!SITES[kind]) throw new Error("Unknown WorkBuddy site"); return SITES[kind]; }
 const file = (kind, options) => path.join(state.root(options), `${kind}-account.json`);
 function headers(kind, account = {}) {
-  return { authorization: `Bearer ${account.access || ""}`, "content-type": "application/json", accept: "application/json",
-    "user-agent": "WorkBuddy/5.5.6", "x-user-id": String(account.uid || ""), "x-domain": account.domain || new URL(site(kind)).host,
-    "x-product": "SaaS", "x-ide-type": "WorkBuddy", "x-ide-name": "WorkBuddy", "x-ide-version": "5.5.6", "x-requested-with": "XMLHttpRequest",
+  const result = { authorization: `Bearer ${account.access || ""}`, "content-type": "application/json", accept: "application/json",
+    "user-agent": `WorkBuddy/5.9.3 ${kind === "workbuddy-ai" ? "workbuddy-ai" : "WorkBuddy"}/5.9.3 CLI/2.165.0`, "x-user-id": String(account.uid || ""), "x-domain": account.domain || new URL(site(kind)).host,
+    "x-product": "SaaS", "x-ide-type": "WorkBuddy", "x-ide-name": "WorkBuddy", "x-ide-version": "5.9.3", "x-requested-with": "XMLHttpRequest",
     "x-agent-intent": "craft", "x-agent-purpose": "conversation", ...(kind === "workbuddy-ai" ? { "x-agent-type": "main" } : {}),
+    ...(account.source === "key" ? { "x-api-key": account.access, "x-domain": undefined } : {}),
     ...(account.enterpriseId ? { "x-enterprise-id": account.enterpriseId, "x-tenant-id": account.enterpriseId } : {}) };
+  if (account.source === "key") delete result["x-domain"];
+  return result;
 }
 async function call(kind, route, { account, method = "POST", body = {}, extra = {}, signal } = {}, options = {}) {
   const response = await (options.request || direct.request)(site(kind) + route, { method, headers: { ...headers(kind, account), ...extra }, body: method === "GET" ? undefined : JSON.stringify(body), signal });
@@ -51,6 +57,16 @@ async function desktop(kind, options = {}) {
   const account = merged({ uid: String(data.account.uid), enterpriseId: data.account.enterpriseId || "", source: "desktop" }, { ...data.auth, refreshToken: "" });
   if (account.expires && account.expires < Date.now() + 60000) throw new Error("Desktop login is expiring; refresh it in WorkBuddy or use browser login");
   return account;
+}
+async function useKey(kind, key, options = {}) {
+  site(kind);
+  if (typeof key !== "string" || !key.trim() || key.length > 8192 || /[\r\n\x00]/.test(key)) throw new Error("Enter a valid WorkBuddy API key");
+  const access = key.trim();
+  const account = { source: "key", access, uid: "anonymous_" + access.slice(-8) };
+  // A failed key check leaves the existing sign-in intact.
+  await call(kind, "/v3/config", { account, method: "GET" }, options);
+  await state.write(file(kind, options), account);
+  return { source: "key" };
 }
 async function useDesktop(kind, options = {}) {
   const account = await desktop(kind, options);
@@ -98,6 +114,7 @@ async function current(kind, options = {}) {
     let account = await state.read(target);
     if (!account) throw new Error("Sign in to WorkBuddy first");
     if (account.source === "desktop") return desktop(kind, options);
+    if (account.source === "key" && account.access && account.uid) return account;
     if (typeof account.access !== "string" || !account.access || !account.uid || ![undefined, "browser"].includes(account.source)) throw new Error("WorkBuddy login is unreadable; sign in again");
     if (!account.expires || account.expires > Date.now() + 60000) return account;
     if (!account.refresh || (account.refreshExpiresAt && account.refreshExpiresAt < Date.now())) throw new Error("WorkBuddy login expired; sign in again");
@@ -126,6 +143,95 @@ async function authorizedCall(kind, route, { account, ...rest }, options = {}) {
     return await call(kind, route, { ...rest, account: renewed }, options);
   }
 }
+function reasoningOf(m) {
+  if (typeof m.reasoning_content === "string" && m.reasoning_content) return m.reasoning_content
+  if (Array.isArray(m.reasoning_details)) {
+    const text = m.reasoning_details.map((d) => (typeof d?.text === "string" ? d.text : typeof d?.summary === "string" ? d.summary : "")).join("")
+    if (text) return text
+  }
+  return ""
+}
+
+function asReasoning(messages) {
+  let changed = false
+  for (const m of messages) {
+    if (m?.role !== "assistant" || (m.reasoning_content === undefined && m.reasoning_details === undefined)) continue
+    const text = reasoningOf(m)
+    if (text && !(typeof m.reasoning === "string" && m.reasoning)) m.reasoning = text
+    delete m.reasoning_content
+    delete m.reasoning_details
+    changed = true
+  }
+  return changed
+}
+
+function creditsOf(c) {
+  if (c == null || c === "") return undefined
+  const s = String(c).trim().toLowerCase().replace(/\s+credits?$/, "").replace(/^x/, "")
+  const n = Number(s)
+  return s !== "" && Number.isFinite(n) && n >= 0 ? n : undefined
+}
+
+// freeCredits says whether a model's credits are none: "x0.00", "0" or 0.
+// A rate it can't read is not free.
+function freeCredits(c) {
+  return creditsOf(c) === 0
+}
+
+// discountOf reads a promotion's price: its discountedCredits ("0.50x",
+// "0.00x"), else the factor times the model's own credits.
+function discountOf(p, base) {
+  const said = creditsOf(String(p.discount?.discountedCredits ?? "").trim().replace(/x$/i, ""))
+  if (said !== undefined) return said
+  const f = Number(p.discount?.factor)
+  return Number.isFinite(f) && f >= 0 && base !== undefined ? base * f : undefined
+}
+
+// running says whether a promotion is on at now: enabled, and inside its
+// validFrom..validUntil. Its daily hours are not looked at here.
+function running(p, now) {
+  if (!p || p.enabled === false) return false
+  const from = Date.parse(p.schedule?.validFrom ?? "")
+  const until = Date.parse(p.schedule?.validUntil ?? "")
+  return !(from > now) && !(until <= now)
+}
+
+// priceOf is a model's price as magpie keeps it, from its credits and the
+// config's modelPromotions (what WorkBuddy's picker shows as 限时免费,
+// 夜间免费, 夜间折扣). magpie keeps the list it is given until it asks
+// again, so a price that holds only some hours of the day (Hy4 preview,
+// free 23:00–8:00 only) is given as its full price, never as free: a list
+// asked for at night would otherwise say "free" all day (#121). A discount
+// for whole days (Step-5-Preview's 独家限免) is the price now, with the
+// price before it as rateWas.
+function priceOf(d, promotions, now = Date.now()) {
+  const base = creditsOf(d.credits)
+  const mine = (Array.isArray(promotions) ? promotions : []).filter(
+    (p) => p?.kind === "discount" && Array.isArray(p.modelIds) && p.modelIds.includes(d.id) && running(p, now),
+  )
+  if (mine.some((p) => Array.isArray(p.schedule?.daily) && p.schedule.daily.length)) {
+    // by the hour: the full price, which the credits are unless a night
+    // discount already took them to its own price
+    const night = mine.filter((p) => p.discount && Array.isArray(p.schedule?.daily) && p.schedule.daily.length)
+    if (base === undefined || (base === 0 && night.some((p) => discountOf(p, base) === 0))) return { free: false }
+    return { free: false, rate: base }
+  }
+  const off = mine.filter((p) => p.discount).map((p) => discountOf(p, base)).filter((r) => r !== undefined)
+  if (off.length) {
+    const r = Math.min(...off)
+    return { free: r === 0, rate: r, ...(base !== undefined && base > r ? { rateWas: base } : {}) }
+  }
+  if (base === undefined) return {}
+  return { free: base === 0, rate: base }
+}
+
+function defaultEffort(row) {
+  const order = ["low", "medium", "high", "xhigh", "max"];
+  const stated = row.reasoning?.supportedEfforts;
+  const efforts = Array.isArray(stated) && stated.length ? stated.filter(value => order.includes(value)) : row.supportsReasoning === true ? [...new Set(["low", "high", "max", row.reasoning?.effort])].filter(value => order.includes(value)) : [];
+  const own = row.reasoning?.defaultEffort ?? row.reasoning?.effort;
+  return efforts.includes(own) ? own : undefined;
+}
 async function catalog(kind, options = {}) {
   const account = await current(kind, options);
   const config = await authorizedCall(kind, "/v3/config", { account, method: "GET" }, options);
@@ -134,17 +240,22 @@ async function catalog(kind, options = {}) {
     const row = config.models?.find(model => model.id === id);
     if (!row || typeof id !== "string" || !id || id.length > 256 || /[\x00-\x1f]/.test(id)) return [];
     return [{ id, name: String(row.name || id).slice(0, 256), contextWindow: row.maxInputTokens, maxOutputTokens: row.maxOutputTokens,
-      images: row.supportsImages === true && !(kind === "workbuddy-ai" && /^glm-/.test(id)), reasoning: row.supportsReasoning === true }];
+      images: row.supportsImages === true && !(kind === "workbuddy-ai" && /^glm-/.test(id)), reasoning: row.supportsReasoning === true, ...priceOf(row, config.modelPromotions),
+      effort: defaultEffort(row) }];
   });
 }
 function quotaOf(sum) {
-  let used = 0, total = 0;
+  let used = 0, total = 0, balance = 0, wallets = 0;
+  const capacity = value => { const number = Number(value); if (!Number.isFinite(number) || number < 0) throw new Error("Invalid WorkBuddy quota"); return number; };
   for (const row of sum?.Packages || []) {
-    const limit = Number(row.CycleTotalCapacity), amount = Number(row.CycleUsedCapacity);
-    if (!Number.isFinite(limit) || !Number.isFinite(amount) || limit < 0 || amount < 0) throw new Error("Invalid WorkBuddy quota");
-    total += limit; used += amount;
+    if (row.CycleTotalCapacity != null && row.CycleTotalCapacity !== "") {
+      total += capacity(row.CycleTotalCapacity); used += capacity(row.CycleUsedCapacity ?? 0);
+    } else if (row.CycleRemainCapacity != null && row.CycleRemainCapacity !== "") {
+      balance += capacity(row.CycleRemainCapacity); wallets++;
+    }
   }
-  return total > 0 ? { used, total, unit: "credits" } : null;
+  return total > 0 ? { used, total, unit: "credits", ...(wallets ? { balance } : {}) }
+    : wallets ? { balance, used: null, total: null, unit: "credits" } : null;
 }
 async function quota(kind, options = {}) {
   const account = await current(kind, options);
@@ -159,7 +270,7 @@ async function quota(kind, options = {}) {
 }
 async function status(kind, options = {}) {
   site(kind); const config = await state.settings(options), account = await state.read(file(kind, options));
-  return { enabled: config.enabled[kind] === true, signedIn: !!account, source: account?.source || null, models: config[kind]?.models || [], instructionPolicy: "preserve" };
+  return { enabled: config.enabled[kind] === true, signedIn: !!account, source: account?.source || null, models: config[kind]?.models || [], freeOnly: config[kind]?.freeOnly === true, instructionPolicy: "preserve" };
 }
 async function configure(kind, input, options = {}) {
   site(kind); if (typeof input.enabled !== "boolean") throw new Error("enabled must be boolean");
@@ -171,8 +282,9 @@ async function configure(kind, input, options = {}) {
   if (!Array.isArray(input.models) || !input.models.length || input.models.length > 100 || input.models.some(id => !models.some(row => row.id === id))) throw new Error("Select live WorkBuddy models");
   const port = await (options.runtime || require("./runtime")).start(options), config = await state.settings(options);
   const ids = [...new Set(input.models)];
+  if (input.freeOnly === true && ids.some(id => models.find(row => row.id === id)?.free !== true)) throw new Error("Select models with a verified current free price");
   await state.configure(`aitool-${kind}`, { "base-url": `http://127.0.0.1:${port}/${kind}/v1`, keys: [{ "api-key": config.token, "proxy-url": "direct" }], models: ids.map(id => ({ name: id, alias: `${kind}/${id}` })) }, options);
-  await state.saveSettings(value => ({ ...value, enabled: { ...value.enabled, [kind]: true }, [kind]: { models: ids } }), options); return status(kind, options);
+  await state.saveSettings(value => ({ ...value, enabled: { ...value.enabled, [kind]: true }, [kind]: { models: ids, freeOnly: input.freeOnly === true, modelDetails: models.filter(row => ids.includes(row.id)) } }), options); return status(kind, options);
 }
 async function forget(kind, options = {}) {
   await configure(kind, { enabled: false }, options);
@@ -428,6 +540,14 @@ async function forward({ kind, req, res, body, signal, options, pipeline }) {
     res.writeHead(400, { "content-type": "application/json" }); res.end(JSON.stringify({ error: { code: "unsupported_tool_name", message: "WorkBuddy requires ASCII tool names; tool names and instructions are preserved" } })); return;
   }
   const account = await current(kind, options);
+  const model = config[kind]?.freeOnly ? (await catalog(kind, options)).find(row => row.id === body.model) : config[kind]?.modelDetails?.find(row => row.id === body.model);
+  if (config[kind]?.freeOnly && model?.free !== true) throw new Error("WorkBuddy free price is unavailable or has changed; refresh model selection");
+  body = { ...body, messages: body.messages.map(row => ({ ...row })) };
+  asReasoning(body.messages);
+  if (body.reasoning_effort === undefined && body.reasoning?.effort === undefined && model?.effort) body.reasoning_effort = model.effort;
+  // Serialize and compress once; renewal resends the same bytes.
+  const chatBytes = await gzipAsync(JSON.stringify({ ...body, stream: true, stream_options: { ...body.stream_options, include_usage: true } }));
+  const messagesBytes = isMessagesModel(kind, body.model) ? JSON.stringify(chatToMessages(body)) : null;
   const session = req.headers["x-magpie-session"] || req.headers["session_id"];
   const conversation = typeof session === "string" && session.length <= 128 ? session : JSON.stringify(body.messages.find(row => row.role === "user")?.content || crypto.randomUUID());
   const turn = body.messages.map((row, index) => row.role === "user" ? index : -1).filter(index => index >= 0).at(-1);
@@ -444,13 +564,15 @@ async function forward({ kind, req, res, body, signal, options, pipeline }) {
     const signed = headers(kind, current);
     signed.accept = "text/event-stream";
     signed["x-request-id"] = crypto.randomUUID();
-    signed["x-conversation-id"] = crypto.createHmac("sha256", config.token).update(conversation).digest("hex").slice(0, 32);
-    signed["x-conversation-request-id"] = crypto.createHmac("sha256", config.token).update(conversation).update(JSON.stringify([turn, body.messages[turn]?.content])).digest("hex").slice(0, 32);
+    signed["x-conversation-id"] = crypto.createHmac("sha256", config.token).update(JSON.stringify([kind, current.uid, current.enterpriseId || "", current.source === "key" ? crypto.createHash("sha256").update(current.access).digest("hex") : ""])).update(conversation).digest("hex").slice(0, 32);
+    signed["x-conversation-request-id"] = crypto.createHmac("sha256", config.token).update(JSON.stringify([kind, current.uid, current.enterpriseId || "", current.source === "key" ? crypto.createHash("sha256").update(current.access).digest("hex") : ""])).update(conversation).update(JSON.stringify([turn, body.messages[turn]?.content])).digest("hex").slice(0, 32);
     signed["x-conversation-message-id"] = signed["x-request-id"];
+    signed["x-agent-type"] = "main"; signed["x-agent-runtime"] = "local-agent";
+    signed["x-stainless-retry-count"] = "0"; signed["x-stainless-timeout"] = "1200";
     return signed;
   };
   const sendChat = (current, allowRenew) => new Promise((resolve, reject) => {
-    const upstream = (options.streamRequest || https.request)(site(kind) + "/v2/chat/completions", { method: "POST", signal, headers: signedHeaders(current), agent: false }, response => {
+    const upstream = (options.streamRequest || https.request)(site(kind) + "/v2/chat/completions", { method: "POST", signal, headers: { ...signedHeaders(current), "content-encoding": "gzip" }, agent: false }, response => {
       if (response.statusCode >= 300 && response.statusCode < 400) { response.resume(); return reject(new Error("WorkBuddy redirect refused")); }
       if (response.statusCode >= 400) {
         response.resume();
@@ -470,7 +592,7 @@ async function forward({ kind, req, res, body, signal, options, pipeline }) {
       }
     });
     upstream.on("error", reject);
-    upstream.end(JSON.stringify({ ...body, stream: true, stream_options: { ...body.stream_options, include_usage: true } }));
+    upstream.end(chatBytes);
   });
   const sendMessages = (current, allowRenew) => new Promise((resolve, reject) => {
     const signed = signedHeaders(current);
@@ -503,7 +625,7 @@ async function forward({ kind, req, res, body, signal, options, pipeline }) {
       });
     });
     upstream.on("error", reject);
-    upstream.end(JSON.stringify(chatToMessages(body)));
+    upstream.end(messagesBytes);
   });
   const messagesModel = isMessagesModel(kind, body.model);
   const attempt = async (current, allowRenew) => {
@@ -533,4 +655,4 @@ async function forward({ kind, req, res, body, signal, options, pipeline }) {
     }
   }
 }
-module.exports = { SITES, headers, merged, desktopFile, desktop, useDesktop, begin, poll, current, catalog, quotaOf, quota, status, configure, forget, forward, isMessagesModel, chatToMessages };
+module.exports = { defaultEffort, asReasoning, priceOf, useKey, SITES, headers, merged, desktopFile, desktop, useDesktop, begin, poll, current, catalog, quotaOf, quota, status, configure, forget, forward, isMessagesModel, chatToMessages };

@@ -61,10 +61,10 @@ async function projectInSpec(app, id, spec, live) {
   return { spec: out, owned: merged.owned };
 }
 
-async function projectExternal(app, id, enabled) {
+async function projectExternal(app, id, enabled, { alreadyLocked = false } = {}) {
   if (!["claude", "opencode"].includes(app)) return;
   const file = app === "claude" ? paths.targetFiles("claude")[0].path : require("./mcp").mcpLiveFiles().opencode.path;
-  await withFileLock(file, async () => {
+  const project = async () => {
     const store = await require("./mcp").listServers();
     const server = store.find(row => row.id === id);
     const desired = nativeRules(app, id, enabled && server?.apps?.[app] ? server.disabledTools?.[app] || [] : []);
@@ -99,7 +99,8 @@ async function projectExternal(app, id, enabled) {
       await backup.createBackup(app, file); await ensureDir(path.dirname(file));
       await writeFileAtomic(file, `${JSON.stringify(value, null, 2)}\n`); await chmod600IfPossible(file);
     }
-  });
+  };
+  if (alreadyLocked) await project(); else await withFileLock(file, project);
 }
 
 module.exports = { APPS, projectInSpec, projectExternal, commit, mergeRuleList, nativeRules };

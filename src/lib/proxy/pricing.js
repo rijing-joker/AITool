@@ -301,7 +301,7 @@ function isInputInclusive(executorType, model) {
  */
 function isReasoningSeparate(executorType, model) {
   if (executorType && typeof executorType === "string") {
-    return /gemini|aistudio|antigravity/i.test(executorType);
+    return /gemini|aistudio|antigravity|dsh-disjoint-reasoning/i.test(executorType);
   }
   return /^gemini/i.test(String(model ?? ""));
 }

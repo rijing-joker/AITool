@@ -89,6 +89,29 @@ function homePath(...parts) {
   return path.join(tmpHome, ...parts);
 }
 
+test("OMP disabling uses the native denylist and enabling/deleting clear stale discovery overrides", async () => {
+  const native = homePath(".omp", "agent", "mcp.json");
+  fs.mkdirSync(path.dirname(native), { recursive: true });
+  fs.writeFileSync(native, JSON.stringify({ mcpServers: { fetch: { command: "node", args: ["server.cjs"], timeout: 30, enabled: true } }, enabledServers: ["fetch", "foreign"], disabledServers: ["foreign"] }));
+  const saved = await post("/api/provider-switch/mcp", { server: { id: "fetch", server: { command: "node", args: ["server.cjs"] }, apps: { omp: true } } });
+  assert.equal(saved.status, 200);
+  await post("/api/provider-switch/mcp/toggle", { id: "fetch", app: "omp", enabled: false });
+  let doc = JSON.parse(fs.readFileSync(native));
+  assert.deepEqual(doc.disabledServers, ["foreign", "fetch"]);
+  assert.deepEqual(doc.enabledServers, ["foreign"]);
+  assert.equal(doc.mcpServers.fetch.enabled, false);
+  const imported = await post("/api/provider-switch/mcp/import", { apps: ["omp"] });
+  assert.equal(imported.body.servers.find(row => row.id === "fetch").apps.omp, false);
+  await post("/api/provider-switch/mcp/toggle", { id: "fetch", app: "omp", enabled: true });
+  doc = JSON.parse(fs.readFileSync(native));
+  assert.equal(doc.mcpServers.fetch.timeout, 30);
+  assert.deepEqual(doc.disabledServers, ["foreign"]);
+  await post("/api/provider-switch/mcp/delete", { id: "fetch" });
+  doc = JSON.parse(fs.readFileSync(native));
+  assert.equal(doc.mcpServers.fetch, undefined);
+  assert.deepEqual(doc.disabledServers, ["foreign"]);
+});
+
 const stdioSpec = { type: "stdio", command: "npx", args: ["-y", "@modelcontextprotocol/server-fetch"] };
 const httpSpec = { type: "http", url: "https://mcp.example.com/mcp", headers: { Authorization: "Bearer t0k3n" } };
 
@@ -784,4 +807,35 @@ test("mcp: mutations require local auth", async () => {
     isAuthorizedLocalMutation: () => false,
   });
   assert.equal(res.statusCode, 401);
+});
+
+test("mcp: Codex drops foreign fields while Grok retains them", () => {
+  const mcp = require("../src/lib/provider-switch/mcp");
+  const spec = { command: "node", timeout: 900000, autoApprove: ["x"], startup_timeout_sec: 20, tool_timeout_sec: 40 };
+  const codex = mcp.specToTomlEntries(spec, { codexStyle: true });
+  assert.equal(codex.timeout, undefined);
+  assert.equal(codex.autoApprove, undefined);
+  assert.equal(codex.tool_timeout_sec, 40);
+  assert.equal(mcp.specToTomlEntries(spec, { codexStyle: false }).timeout, 900000);
+});
+
+test("mcp: OpenCode v2 wins collisions, keeps disabled and removes both layouts", async () => {
+  const mcp = require("../src/lib/provider-switch/mcp");
+  const file = path.join(tmpHome, ".config", "opencode", "opencode.json");
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify({ mcp: { same: { type: "local", command: ["old"] }, servers: { same: { type: "local", command: ["new"], disabled: true, timeout: 9000 } } } }));
+  const result = await mcp.importFromApps(["opencode"]);
+  assert.equal(result.skipped.length, 0);
+  const row = result.servers.find(item => item.id === "same");
+  assert.equal(row.server.command, "new");
+  assert.equal(row.apps.opencode, false);
+  await mcp.upsertServer({ ...row, server: { command: "updated" }, apps: { opencode: true } });
+  let doc = JSON.parse(fs.readFileSync(file, "utf8"));
+  assert.equal(doc.mcp.servers.same.enabled, undefined);
+  assert.equal(doc.mcp.servers.same.disabled, true);
+  assert.equal(doc.mcp.servers.same.timeout, 9000);
+  await mcp.toggleServerApp("same", "opencode", false);
+  doc = JSON.parse(fs.readFileSync(file, "utf8"));
+  assert.deepEqual(doc.mcp, { servers: {} });
+  assert.deepEqual(mcp.opencodeServerMaps({ mcp: { servers: { type: "local", command: ["actual"] } } }).entries.servers.command, ["actual"]);
 });

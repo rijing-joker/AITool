@@ -48,7 +48,7 @@ const toolRules = require("./mcp-tool-rules");
 // abort the batch — live files are independent, and the caller sees every
 // failure aggregated (cc-switch 81c0ff2).
 
-const MCP_APPS = ["claude", "codex", "gemini", "agy", "grokbuild", "opencode", "hermes", "mcode", "pi", "kimi"];
+const MCP_APPS = ["claude", "codex", "gemini", "agy", "grokbuild", "opencode", "hermes", "mcode", "pi", "kimi", "dsh", "omp"];
 
 // The unified spec allows stdio/http/sse. Transport resolution follows
 // cc-switch's spec_transport_type: an explicit type wins, and a spec with a
@@ -281,6 +281,14 @@ function toOpencodeSpec(spec) {
   throw new Error(`Unknown MCP type: ${type}`);
 }
 
+// Native v2 takes precedence over v1, unless "servers" is a real v1 server.
+function opencodeServerMaps(doc) {
+  const v1 = jsonMapGet(doc, "mcp") || {};
+  const candidate = jsonMapGet(v1, "servers");
+  const v2 = candidate && !["type", "command", "url"].some(key => Object.hasOwn(candidate, key)) ? candidate : null;
+  return { v1, v2, entries: { ...Object.fromEntries(Object.entries(v1).filter(([id]) => !v2 || id !== "servers")), ...(v2 || {}) } };
+}
+
 function fromOpencodeSpec(id, spec) {
   if (!spec || typeof spec !== "object") throw new Error("OpenCode MCP entry must be an object");
   const type = typeof spec.type === "string" ? spec.type : "local";
@@ -428,9 +436,7 @@ function jsonValueToToml(value) {
   return null;
 }
 
-// Codex's known passthrough knobs (timeout, shell, proxy, …); they need no
-// special handling — anything the transport match above didn't consume is
-// written through as a custom field, exactly like cc-switch.
+// Keep client-native knobs, filtering foreign fields only for Codex.
 
 // Unified spec → flat entries for toml.setTable (the env/headers maps ride
 // along as inline tables, which is valid TOML Codex accepts).
@@ -442,6 +448,7 @@ function specToTomlEntries(spec, { codexStyle }) {
   // The per-app toggle owns activation, including for previously imported
   // specs that still contain enabled:false.
   skipped.add("enabled");
+  if (codexStyle) { skipped.add("timeout"); skipped.add("autoApprove"); }
   const entries = {};
   if (type === "stdio") {
     entries.command = String(spec.command || "");
@@ -543,6 +550,8 @@ const HOME_SUBDIRS = {
   mcode: ".minimax",
   pi: ".pi/agent",
   kimi: ".kimi-code",
+  dsh: ".dsh",
+  omp: ".omp",
 };
 
 function mcpLiveFiles() {
@@ -558,15 +567,25 @@ function mcpLiveFiles() {
     hermes: { path: path.join(home, ".hermes", "config.yaml"), mapKey: "mcp_servers" },
     mcode: { path: path.join(home, ".minimax", "mcp.json"), mapKey: "mcpServers" },
     pi: { path: path.join(home, ".pi", "agent", "mcp.json"), mapKey: "mcpServers" },
+    omp: { path: path.join(require("./omp").agentDir(process.env), "mcp.json"), mapKey: "mcpServers" },
+    dsh: { path: require("./paths").targetFiles("dsh")[0].path, mapKey: "plugins" },
     kimi: { path: path.join(String(process.env.KIMI_CODE_HOME || "").trim() || path.join(home, ".kimi-code"), "mcp.json"), mapKey: "mcpServers" },
   };
 }
 
 async function upsertServerInApp(app, id, spec) {
+  const hubState = await require("./mcp-hub-config").read();
+  if (hubState.enabled || hubState.entries[app]) return require("./mcp-hub-config").syncApp(app);
+  if (app === "dsh") { await require("./dsh").mcp(id, spec); return; }
   const file = mcpLiveFiles()[app];
-  if (app !== "mcode" && !shouldSyncDir(HOME_SUBDIRS[app])) return;
+  if (!["mcode", "omp"].includes(app) && !shouldSyncDir(HOME_SUBDIRS[app])) return;
   const projected = envrefs.projectReferences(app, spec);
-  await withFileLock(file.path, async () => {
+  await withFileLock(file.path, () => upsertServerWithRules(app, file, id, projected));
+  await toolRules.projectExternal(app, id, true);
+}
+
+// Caller holds the native file lock; also used when restoring a Hub receipt.
+async function upsertServerWithRules(app, file, id, projected) {
     let live;
     if (app === "codex") live = tomlParse((await readText(file.path)) || "").mcp_servers?.[id];
     if (app === "gemini") live = (await readJsonDoc(file.path)).mcpServers?.[id];
@@ -574,11 +593,15 @@ async function upsertServerInApp(app, id, spec) {
     const rules = await toolRules.projectInSpec(app, id, projected, live);
     await upsertServerInFile(app, file, id, rules.spec);
     if (rules.owned !== null) await toolRules.commit(app, id, rules.owned);
-  });
-  await toolRules.projectExternal(app, id, true);
 }
 
 async function upsertServerInFile(app, file, id, spec) {
+  if (app === "dsh") {
+    const text = (await readText(file.path)) ?? "[]\n";
+    const next = require("./dsh").projectMcp(text, id, spec);
+    if (next !== text) await writeOwnedFile(app, file.path, next);
+    return;
+  }
   if (app === "agy") {
     if (specTransportType(spec) === "sse") throw new Error("Antigravity does not support SSE MCP");
     await updateJsonFile(app, file.path, doc => {
@@ -594,7 +617,17 @@ async function upsertServerInFile(app, file, id, spec) {
     return;
   }
   if (app === "opencode") {
-    await upsertJsonMap(app, file.path, file.mapKey, id, toOpencodeSpec(spec));
+    await updateJsonFile(app, file.path, doc => {
+      if (!jsonMapGet(doc, "mcp")) doc.mcp = {};
+      const { v1, v2 } = opencodeServerMaps(doc);
+      const native = v2 && (Object.hasOwn(v2, id) || !Object.hasOwn(v1, id));
+      const map = native ? v2 : v1;
+      const entry = { ...(map[id] || {}) };
+      for (const key of ["type", "command", "environment", "url", "headers", "enabled"]) delete entry[key];
+      Object.assign(entry, toOpencodeSpec(spec));
+      if (native) delete entry.enabled;
+      map[id] = entry;
+    });
     return;
   }
   if (app === "mcode") {
@@ -612,7 +645,7 @@ async function upsertServerInFile(app, file, id, spec) {
     });
     return;
   }
-  if (app === "pi") {
+  if ((app === "pi" || app === "omp")) {
     // Transport fields only flow from the spec; Pi-owned fields on an
     // existing entry survive the merge (cc-switch native_transport retains
     // TRANSPORT_FIELDS).
@@ -628,6 +661,10 @@ async function upsertServerInFile(app, file, id, spec) {
       }
       merged.enabled = true;
       servers[id] = merged;
+      if (app === "omp") for (const key of ["disabledServers", "enabledServers"]) {
+        if (doc[key] != null && !Array.isArray(doc[key])) throw new Error(`OMP MCP ${key} must be an array`);
+        if (doc[key]) doc[key] = doc[key].filter(name => name !== id);
+      }
     });
     return;
   }
@@ -670,8 +707,11 @@ function stripInlineMcpEntry(text, id) {
 }
 
 async function removeServerFromApp(app, id, { mode = "off" } = {}) {
+  const hubState = await require("./mcp-hub-config").read();
+  if (hubState.enabled || hubState.entries[app]) return require("./mcp-hub-config").syncApp(app);
+  if (app === "dsh") { await require("./dsh").mcp(id, null); return; }
   const file = mcpLiveFiles()[app];
-  if (app !== "mcode" && !shouldSyncDir(HOME_SUBDIRS[app])) return;
+  if (!["mcode", "omp"].includes(app) && !shouldSyncDir(HOME_SUBDIRS[app])) return;
   await withFileLock(file.path, () => removeServerFromFile(app, file, id, { mode }));
   await toolRules.projectExternal(app, id, false);
   if (["codex", "gemini", "hermes"].includes(app)) await toolRules.commit(app, id, []);
@@ -682,19 +722,40 @@ async function removeServerFromApp(app, id, { mode = "off" } = {}) {
 // the app: pi keeps the entry (marked disabled) so re-enabling restores the
 // user's own settings, while a delete removes it outright.
 async function removeServerFromFile(app, file, id, { mode = "off" } = {}) {
+  if (app === "dsh") {
+    const text = await readText(file.path);
+    if (text === null) return;
+    const next = require("./dsh").projectMcp(text, id, null);
+    if (next !== text) await writeOwnedFile(app, file.path, next);
+    return;
+  }
   if (app === "agy") {
     if (mode === "delete") { await removeFromJsonMap(app, file.path, file.mapKey, id); return; }
     const doc = await readJsonDoc(file.path);
     if (!doc?.mcpServers?.[id]) return;
     await updateJsonFile(app, file.path, current => { if (current.mcpServers?.[id]) current.mcpServers[id].disabled = true; }); return;
   }
-  if (app === "claude" || app === "gemini" || app === "opencode" || app === "kimi") {
+  if (app === "opencode") {
+    await updateJsonFile(app, file.path, doc => {
+      const { v1, v2 } = opencodeServerMaps(doc);
+      if (!v2 || id !== "servers") delete v1[id];
+      if (v2) delete v2[id];
+    });
+    return;
+  }
+  if (app === "claude" || app === "gemini" || app === "kimi") {
     await removeFromJsonMap(app, file.path, file.mapKey, id);
     return;
   }
-  if (app === "pi") {
+  if ((app === "pi" || app === "omp")) {
     if (mode === "delete") {
-      await removeFromJsonMap(app, file.path, file.mapKey, id);
+      await updateJsonFile(app, file.path, doc => {
+        if (doc[file.mapKey]) delete doc[file.mapKey][id];
+        if (app === "omp") for (const key of ["disabledServers", "enabledServers"]) {
+          if (doc[key] != null && !Array.isArray(doc[key])) throw new Error(`OMP MCP ${key} must be an array`);
+          if (doc[key]) doc[key] = doc[key].filter(name => name !== id);
+        }
+      });
       return;
     }
     // Disable: mark `enabled: false` on an existing entry (cc-switch
@@ -707,6 +768,11 @@ async function removeServerFromFile(app, file, id, { mode = "off" } = {}) {
       const servers = jsonMapGet(current, file.mapKey);
       if (servers && servers[id] && typeof servers[id] === "object" && !Array.isArray(servers[id])) {
         servers[id].enabled = false;
+        if (app === "omp") {
+          for (const key of ["disabledServers", "enabledServers"]) if (current[key] != null && !Array.isArray(current[key])) throw new Error(`OMP MCP ${key} must be an array`);
+          current.disabledServers = [...new Set([...(current.disabledServers || []), id])];
+          if (current.enabledServers) current.enabledServers = current.enabledServers.filter(name => name !== id);
+        }
       }
     });
     return;
@@ -738,6 +804,8 @@ async function removeServerFromFile(app, file, id, { mode = "off" } = {}) {
 // removed by an explicit disable/delete. Per-server failures are aggregated
 // instead of aborting the batch.
 async function projectServersToApp(app, servers) {
+  const hubState = await require("./mcp-hub-config").read();
+  if (hubState.enabled || hubState.entries[app]) { try { await require("./mcp-hub-config").syncApp(app); return []; } catch (error) { return [error.message]; } }
   const failures = [];
   for (const server of servers) {
     const enabled = server.apps?.[app] === true;
@@ -877,27 +945,30 @@ async function importFromApps(apps) {
   return { changed, skipped, servers: await listServers() };
 }
 
-async function importFromApp(app) {
+async function readServersFromApp(app) {
   const file = mcpLiveFiles()[app];
   let entries = null;
-  if (app === "agy" || app === "claude" || app === "gemini" || app === "opencode" || app === "mcode" || app === "pi" || app === "kimi") {
+  if (app === "dsh") {
+    const rows = require("./dsh").mcpEntries((await readText(file.path)) || "[]");
+    entries = rows.map(row => ({ id: row.config?.serverName, value: row.config, enabled: row.disabled !== true }));
+  } else if (app === "agy" || app === "claude" || app === "gemini" || app === "opencode" || app === "mcode" || (app === "pi" || app === "omp") || app === "kimi") {
     const doc = await readJsonDoc(file.path).catch(() => null);
-    const map = doc ? jsonMapGet(doc, file.mapKey) : null;
-    if (!map) return { changed: 0, skipped: [] };
+    const map = doc ? app === "opencode" ? opencodeServerMaps(doc).entries : jsonMapGet(doc, file.mapKey) : null;
+    if (!map) return [];
     // mcode, opencode and pi entries carry their own `enabled` flag; claude
     // and gemini have none, so presence means enabled.
-    const hasEnabledFlag = app === "mcode" || app === "opencode" || app === "pi";
-    entries = Object.entries(map).map(([id, value]) => ({ id, value, enabled: app === "agy" ? value?.disabled !== true : hasEnabledFlag ? value?.enabled !== false : true }));
+    const hasEnabledFlag = app === "mcode" || app === "opencode" || (app === "pi" || app === "omp");
+    entries = Object.entries(map).map(([id, value]) => ({ id, value, enabled: app === "omp" ? !doc.disabledServers?.includes(id) && (value?.enabled !== false || doc.enabledServers?.includes(id)) : app === "agy" ? value?.disabled !== true : hasEnabledFlag ? value?.enabled !== false && value?.disabled !== true : true }));
   } else if (app === "hermes") {
     const text = await readText(file.path);
-    if (text === null || !text.trim()) return { changed: 0, skipped: [] };
+    if (text === null || !text.trim()) return [];
     const doc = YAML.parse(text);
     const map = doc && typeof doc === "object" ? jsonMapGet(doc, "mcp_servers") : null;
-    if (!map) return { changed: 0, skipped: [] };
+    if (!map) return [];
     entries = Object.entries(map).map(([id, value]) => ({ id, value, enabled: value?.enabled !== false }));
   } else {
     const text = await readText(file.path);
-    if (text === null || !text.trim()) return { changed: 0, skipped: [] };
+    if (text === null || !text.trim()) return [];
     let doc;
     try {
       doc = tomlParse(text);
@@ -905,22 +976,29 @@ async function importFromApp(app) {
       throw new Error(`Parsing ${file.path} failed: ${error?.message || String(error)}`);
     }
     const map = jsonMapGet(doc, "mcp_servers");
-    if (!map) return { changed: 0, skipped: [] };
+    if (!map) return [];
     entries = Object.entries(map).map(([id, value]) => ({ id, value, enabled: value?.enabled !== false }));
   }
 
+  return entries;
+}
+
+async function importFromApp(app) {
+  const entries = await readServersFromApp(app);
   let changed = 0;
   const skipped = [];
   const store = await readMcpStore();
   for (const { id, value, enabled } of entries) {
+    if (id === "aitool-hub" && (await require("./mcp-hub-config").read()).entries[app]) continue;
     let spec = null;
     try {
-      if (app === "agy") { spec = { ...value }; delete spec.disabled; if (spec.serverUrl && !spec.url) spec.url = spec.serverUrl; delete spec.serverUrl; }
+      if (app === "dsh") { spec = { ...value, type: value.transport === "stdio" ? "stdio" : "http" }; delete spec.serverName; delete spec.transport; }
+      else if (app === "agy") { spec = { ...value }; delete spec.disabled; if (spec.serverUrl && !spec.url) spec.url = spec.serverUrl; delete spec.serverUrl; }
       else if (app === "claude" || app === "gemini") spec = value;
       else if (app === "opencode") spec = fromOpencodeSpec(id, value);
       else if (app === "hermes") spec = fromHermesSpec(id, value);
       else if (app === "mcode") spec = mcodeUnifiedSpec(value);
-      else if (app === "pi") {
+      else if ((app === "pi" || app === "omp")) {
         // Transport fields only: Pi-owned fields stay in the live file, where
         // the merge-based projection preserves them.
         const unified = mcodeUnifiedSpec(value);
@@ -944,7 +1022,7 @@ async function importFromApp(app) {
         spec.type = "http";
         delete spec.httpUrl;
       }
-      if (app === "mcode" || app === "pi") delete spec.enabled;
+      if (app === "mcode" || (app === "pi" || app === "omp")) delete spec.enabled;
       validateServerSpec(spec);
     } catch (error) {
       skipped.push(`${app}/${id}: ${error?.message || String(error)}`);
@@ -1011,9 +1089,14 @@ module.exports = {
   toggleServerTool,
   importFromApps,
   syncServers,
+  readServersFromApp,
+  upsertServerInFile,
+  upsertServerWithRules,
+  removeServerFromFile,
   // exported for tests
   toOpencodeSpec,
   fromOpencodeSpec,
+  opencodeServerMaps,
   toHermesSpec,
   fromHermesSpec,
   toPiSpec,

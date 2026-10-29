@@ -1370,3 +1370,32 @@ test("a late real HTTP account GET cannot replace a newer same-account RT and CS
   assert.equal(refreshCalls, 2);
   assert.equal(edgeCalls, 2);
 });
+
+test("a slow shared account read completes in the background and the next read uses its cloud result", async () => {
+  const queuePath = path.join(tmpHome, "queue.jsonl"); writeQueue(queuePath, [SAMPLE_ROW]); seedSignedInTracker();
+  const oldTimeout = process.env.TOKENTRACKER_HTTP_TIMEOUT_MS, realFetch = global.fetch;
+  process.env.TOKENTRACKER_HTTP_TIMEOUT_MS = "100";
+  let requests = 0, resolveRead, signal;
+  global.fetch = async (url, options) => {
+    if (String(url).includes("/api/auth/refresh")) {
+      const jwt = `${Buffer.from(JSON.stringify({ alg: "HS256" })).toString("base64url")}.${Buffer.from(JSON.stringify({ sub: "fixture-account", exp: Math.floor(Date.now() / 1000) + 3600 })).toString("base64url")}.sig`;
+      return { ok: true, status: 200, json: async () => ({ accessToken: jwt }) };
+    }
+    if (String(url).includes("/tokentracker-account-heatmap")) { requests++; signal = options.signal; return new Promise(resolve => { resolveRead = resolve; }); }
+    throw new Error("Unexpected synthetic endpoint");
+  };
+  try {
+    const handler = freshHandler(queuePath);
+    const [first, second] = await Promise.all([call(handler, { endpoint: HEATMAP_ENDPOINT }), call(handler, { endpoint: HEATMAP_ENDPOINT })]);
+    assert.equal(first._headers["x-tokentracker-account-fallback"], "transient-timeout");
+    assert.equal(second._headers["x-tokentracker-account-fallback"], "transient-timeout");
+    assert.equal(requests, 1); assert.equal(signal.aborted, false);
+    resolveRead({ ok: true, status: 200, json: async () => ({ days: [], marker: "cloud background" }) });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    const result = await call(handler, { endpoint: HEATMAP_ENDPOINT });
+    assert.equal(result._headers["x-tokentracker-account-view"], "1"); assert.equal(result.json().marker, "cloud background"); assert.equal(requests, 1);
+  } finally {
+    global.fetch = realFetch;
+    if (oldTimeout === undefined) delete process.env.TOKENTRACKER_HTTP_TIMEOUT_MS; else process.env.TOKENTRACKER_HTTP_TIMEOUT_MS = oldTimeout;
+  }
+});

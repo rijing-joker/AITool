@@ -199,7 +199,9 @@ function createMappingService(h) {
     const alias = original && lower(payload.alias) === lower(originalAlias)
       ? h.existingAliasModelId(payload.alias, "Alias model") : h.validateAliasModelId(payload.alias, "Alias model");
     const effort = String(payload.effort || "").trim() ? h.validateAliasEffort(payload.effort) : "";
-    const fast = Boolean(payload.fast);
+    const serviceTier = payload.serviceTier ?? (payload.fast ? "priority" : "");
+    if (!["", "priority", "ultrafast"].includes(serviceTier)) throw new Error("Unsupported service tier");
+    const fast = serviceTier !== "";
     // Positional clients use this marker for an unchanged source. Resolve it
     // only after verifying the row's source/alias pair above.
     const sourceId = original && !payload.mappingId && payload.sourceId === `alias-edit:${lower(originalAlias)}`
@@ -237,7 +239,7 @@ function createMappingService(h) {
     if (original || !sharedBefore || effort || fast) {
       clearOptions(root, native, alias, source.protocol);
       if (effort) h.appendAliasPayloadOverride(root, alias, source.protocol, h.insertThinkingEffortParams(source, effort));
-      if (fast) h.appendAliasPayloadOverride(root, alias, source.protocol, { service_tier: "priority" });
+      if (fast) h.appendAliasPayloadOverride(root, alias, source.protocol, { service_tier: serviceTier });
     }
   }
 
@@ -302,7 +304,7 @@ function createMappingService(h) {
     const { legacy: root, nativeApiKeys: native } = await h.fetchLegacyConfig();
     const node = resolveMapping(root, native, payload, payload.alias);
     return { mappingId: node.mappingId, revision: node.revision, source: sourceFor(node, true, definitions),
-      effort: node.effort, fast: Boolean(node.serviceTier) };
+      effort: node.effort, fast: Boolean(node.serviceTier), serviceTier: node.serviceTier || "" };
   }
   async function save(payload, deleting) {
     const [available, definitions] = deleting ? [[], []] : await Promise.all([h.fetchAvailableModels(), h.fetchOauthDefinitions()]);

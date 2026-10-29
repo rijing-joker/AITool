@@ -7,7 +7,7 @@ const sync = require("node:fs");
 const path = require("node:path");
 const { readSqliteJsonRowsAsync } = require("./sqlite-reader");
 const { statusOf } = require("./session-tool-results");
-const APPS = ["agy", "hermes", "pi", "omp", "grokbuild", "opencode", "mcode", "kimi"];
+const APPS = ["agy", "hermes", "pi", "omp", "grokbuild", "opencode", "mcode", "kimi", "dsh"];
 const fileMetadata = new Map();
 const parse = value => { try { return typeof value === "string" ? JSON.parse(value) : value; } catch { return null; } };
 const ts = (value, unit = "ms") => {
@@ -29,6 +29,7 @@ function roots(app, home, env = {}) {
     try { for (const row of sync.readdirSync(profiles, { withFileTypes: true })) if (row.isDirectory()) result.push(path.join(profiles, row.name, "antigravity-cli")); } catch {}
     return result;
   }
+  if (app === "dsh") return [path.join(env.DSH_HOME?.trim() || path.join(home, ".dsh"), "sessions")];
   if (app === "hermes") return [env.HERMES_HOME || path.join(home, ".hermes")];
   if (app === "mcode") return [env.MINIMAX_DATA_DIR || env.MAVIS_DATA_DIR || path.join(home, ".minimax")];
   if (app === "opencode") return [path.join(env.XDG_DATA_HOME || path.join(home, ".local", "share"), "opencode")];
@@ -52,12 +53,12 @@ function roots(app, home, env = {}) {
   }
   return [];
 }
-async function walk(root, accept, validate) {
+async function walk(root, accept, validate, { strict = false } = {}) {
   const out = [], stack = [root];
   while (stack.length) {
     const directory = stack.pop();
     let entries;
-    try { await validate(directory); entries = await fs.readdir(directory, { withFileTypes: true }); } catch { continue; }
+    try { await validate(directory); entries = await fs.readdir(directory, { withFileTypes: true }); } catch (error) { if (strict && error.code !== "ENOENT") throw error; continue; }
     for (const entry of entries) {
       const file = path.join(directory, entry.name);
       if (entry.isDirectory()) stack.push(file);
@@ -120,7 +121,7 @@ async function validateSource(app, source, home, env, validate) {
     if (!["hermes", "opencode", "mcode"].includes(app) || file !== database(app, roots(app, home, env)[0])) throw new Error("Unregistered session database");
     return;
   }
-  const valid = app === "agy" ? roots(app,home,env).some(root => /^brain\/[\w-]+\/\.system_generated\/logs\/transcript_full\.jsonl$/.test(path.relative(root,file).split(path.sep).join("/")))
+  const valid = app === "dsh" ? roots(app,home,env).some(root => path.relative(root, file).split(path.sep).length === 3) && require("./rollout").isDshSessionLogName(path.basename(file)) : app === "agy" ? roots(app,home,env).some(root => /^brain\/[\w-]+\/\.system_generated\/logs\/transcript_full\.jsonl$/.test(path.relative(root,file).split(path.sep).join("/")))
     : app === "grokbuild" ? path.basename(file) === "chat_history.jsonl"
     : app === "opencode" ? file.includes(`${path.sep}storage${path.sep}session${path.sep}`) && file.endsWith(".json")
     : app === "kimi" ? file.endsWith(`${path.sep}agents${path.sep}main${path.sep}wire.jsonl`)
@@ -168,6 +169,7 @@ async function list(app, home, env, validate) {
       if (!/^[\w-]+$/.test(id)) return null;
       const profile = app === "agy" && dir.includes(`${path.sep}provider-switch${path.sep}agy${path.sep}`) ? path.dirname(dir) : null;
       const quote = value => `'${value.replaceAll("'", "'\\''")}'`;
+      if (app === "dsh") return `dsh --session ${quote(id)}`;
       if (app === "kimi") return /^[\w-]+$/.test(id) ? `env KIMI_CODE_HOME=${quote(path.dirname(dir))} kimi --session ${id}` : null;
       if (app === "omp") {
         const marker = `${path.sep}profiles${path.sep}`;
@@ -186,15 +188,13 @@ async function list(app, home, env, validate) {
         }
       } catch { /* Binary index is optional. */ }
     }
-    const files = await walk(dir, file => app === "agy" ? isAgyTranscript(file)
+    const files = await walk(dir, file => app === "dsh" ? require("./rollout").isDshSessionLogName(path.basename(file)) : app === "agy" ? isAgyTranscript(file)
       : app === "grokbuild" ? path.basename(file) === "chat_history.jsonl"
       : app === "opencode" ? file.includes(`${path.sep}storage${path.sep}session${path.sep}`) && file.endsWith(".json")
       : app === "hermes" ? file.includes(`${path.sep}sessions${path.sep}`) && file.endsWith(".jsonl")
       : app === "kimi" ? file.endsWith(`${path.sep}agents${path.sep}main${path.sep}wire.jsonl`)
       : (app === "pi" || app === "omp") ? file.endsWith(".jsonl") : false, validate);
-    const listed = app === "omp"
-      ? files.filter(file => !isOmpSubagentTranscript(file, dir))
-      : files;
+    const listed = app === "omp" ? files.filter(file => !isOmpSubagentTranscript(file, dir)) : app === "dsh" ? [...new Set(files.map(file => path.dirname(file)))].map(directory => require("./dsh-session").selectDshTranscript(directory, files.filter(file => path.dirname(file) === directory).map(file => path.basename(file)))) : files;
     for (const file of listed) {
       try {
         const inputs = app === "kimi" ? [file, await kimiStatePath(file, validate)] : [file];
@@ -206,7 +206,7 @@ async function list(app, home, env, validate) {
         const key = `${app}:${file}`;
         let cached = fileMetadata.get(key);
         if (!cached || cached.stamp !== stamp || app === "opencode") {
-          const read = await readFile(app, file, validate);
+          const read = app === "dsh" ? await dshSession(file, validate, { withUsage: false }) : await readFile(app, file, validate);
           cached = { stamp, read: { id: read.id, cwd: read.cwd, title: read.title, messages: read.messages.filter(row => row.role === "user").slice(0,1).map(row => ({ ...row, content: row.content.slice(0,160) })) },
             times: read.messages.map(row => row.ts).filter(Number.isFinite) };
           if (fileMetadata.size >= 4096) fileMetadata.delete(fileMetadata.keys().next().value);
@@ -245,7 +245,7 @@ function fold(app, values) {
     // Antigravity's fallback steps are execution events, not injected context.
     // Preserve unfamiliar records even when they have no text field.
     if (app === "agy" && !content.trim()) content = JSON.stringify(value, null, 2);
-    const message = { role, content, ...(role === "system" && app !== "agy" ? {injected:true} : {}), ts: ts(value.created_at_ms ?? value.created_at ?? value.timestamp ?? value.ts ?? row.timestamp ?? row.time_created ?? row.time?.created, app === "hermes" ? "seconds" : "ms") };
+    const message = { role, content, ...((role === "system" && app !== "agy") || row.injected ? {injected:true} : {}), ts: ts(value.created_at_ms ?? value.created_at ?? value.timestamp ?? value.ts ?? row.timestamp ?? row.time_created ?? row.time?.created, app === "hermes" ? "seconds" : "ms") };
     const parts = row.parts || (Array.isArray(row.content) ? row.content : []);
     const thoughts = parts.filter(part => ["thinking", "reasoning"].includes(part?.type) || part?.thought).map(part => part.text || part.thinking || "");
     if (thoughts.length) message.thinking = thoughts.join("\n");
@@ -261,8 +261,9 @@ function fold(app, values) {
       message.toolResults = [{ callId: row.tool_call_id || row.call_id || row.toolCallId || null,
         output: content, isError, ...(status ? {status} : {}) }];
     }
-    for (const part of parts) if (["toolCall", "tool_use"].includes(part?.type)) {
-      message.toolCalls ||= []; message.toolCalls.push({ id: part.id || null, name: part.name || "unknown", input: JSON.stringify(part.arguments || part.input || {}) });
+    for (const part of parts) if (["toolCall", "tool_use", "tool-call"].includes(part?.type)) {
+      const argumentsValue = part.arguments || part.input || {};
+      message.toolCalls ||= []; message.toolCalls.push({ id: part.id || null, name: part.name || "unknown", input: typeof argumentsValue === "string" ? argumentsValue : JSON.stringify(argumentsValue) });
     }
     for (const part of parts) if (part?.type === "tool") {
       const state = part.state || {};
@@ -294,6 +295,33 @@ function fold(app, values) {
   usage.perModel = [...models.values()]; usage.model = usage.perModel[0]?.model || null;
   return { messages, usage: usage.totalTokens > 0 ? usage : null };
 }
+async function dshSession(file, validate, { withUsage = true } = {}) {
+  await validate(file);
+  const raw = await require("./rollout").readDshSessionText(file);
+  if (raw == null) throw new Error("DSH transcript is unreadable");
+  const values = raw.split("\n").map(parse).filter(Boolean), rows = [], seen = new Set();
+  const header = values.find(row => row.type === "session") || {};
+  let title = null;
+  for (const row of values) {
+    if (row.surfaceOp?.op === "replace") continue;
+    const data = row.data || {}, timestamp = row.time;
+    const messageId = row.type === "user/message" ? data.id : data.message?.id;
+    if (messageId) { const key = `${row.type}:${messageId}`; if (seen.has(key)) continue; seen.add(key); }
+    if (row.type === "session/title") title = data.title;
+    if (row.type === "user/message") rows.push({ ...data, role: "user", timestamp, injected: data.source?.kind && data.source.kind !== "user" });
+    if (row.type === "assistant/message") rows.push({ ...data.message, role: "assistant", timestamp, usage: data.usage, model: data.message?.source?.model });
+    if (row.type === "tool/result") rows.push({ ...data.message, role: "tool", timestamp, tool_call_id: data.message?.toolCallId || data.callId, isError: data.message?.isError === true });
+  }
+  const result = fold("dsh", rows);
+  result.usage = null;
+  // Tokens use the exact same authoritative mapping and cross-log replay dedup as analytics.
+  const scanned = withUsage ? await require("./dsh-session").readDshSessions(await dshDependencies(file, validate)) : [];
+  if (scanned.skippedFiles) throw new Error("DSH replay inventory is incomplete; reload the session");
+  const selected = scanned.find(row => row.files.includes(file));
+  const usage = selected ? { ...selected, ...selected.tokens } : null;
+  if (usage) result.usage = { inputTokens: usage.input_tokens, outputTokens: usage.output_tokens, cacheReadTokens: usage.cached_input_tokens, cacheCreationTokens: usage.cache_creation_input_tokens, reasoningTokens: usage.reasoning_output_tokens, totalTokens: usage.total_tokens, inputInclusive: false, executorType: "dsh-disjoint-reasoning", perModel: (usage.model_usage || []).map(row => ({ model: row.model, inputTokens: row.input_tokens, outputTokens: row.output_tokens, cacheReadTokens: row.cached_input_tokens, cacheCreationTokens: row.cache_creation_input_tokens, reasoningTokens: row.reasoning_output_tokens, totalTokens: row.total_tokens })) };
+  return { ...result, id: String(header.id || path.basename(path.dirname(file))).replace(/^session-/, ""), cwd: header.cwd, title };
+}
 async function readFile(app, file, validate) {
   await validate(file);
   if (app === "opencode" && file.endsWith(".json")) {
@@ -313,6 +341,7 @@ async function readFile(app, file, validate) {
     return { ...fold(app, rows), id: summary.id, cwd: summary.directory };
   }
   if (app === "kimi") return kimiWireSession(file, validate);
+  if (app === "dsh") return dshSession(file, validate);
   let rows = await jsonl(file);
   let summary = null;
   if (app === "grokbuild") { try { const metadata = path.join(path.dirname(file), "summary.json"); await validate(metadata); summary = parse(await fs.readFile(metadata,"utf8")); } catch {} }
@@ -365,6 +394,7 @@ async function read(app, source, validate) {
 }
 async function dependencies(app, source, validate) {
   const { file, id } = splitReference(source);
+  if (app === "dsh") return dshDependencies(file, validate);
   const files = [await validate(file)];
   if (app === "kimi") files.push(await kimiStatePath(file, validate));
   if (id !== null) for (const suffix of ["-wal", "-shm"]) { try { await fs.lstat(file + suffix); files.push(await validate(file + suffix)); } catch (error) { if (error.code !== "ENOENT") throw error; } }
@@ -379,6 +409,18 @@ async function dependencies(app, source, validate) {
       if (message?.id && /^[\w-]+$/.test(message.id)) files.push(...await walk(path.join(storage, "part", message.id), p => p.endsWith(".json"), validate));
     }
   }
+  return files.sort();
+}
+async function dshDependencies(file, validate) {
+  // Native sessions have exactly project/session/log below the registered
+  // root. Include the whole inventory in the revision because a newly found
+  // parent can change replay ownership even when this log is unchanged.
+  const root = path.dirname(path.dirname(path.dirname(file)));
+  await validate(root);
+  const candidates = await walk(root, input => require("./rollout").isDshSessionLogName(path.basename(input)), validate, { strict: true });
+  const files = [...new Set(candidates.map(input => path.dirname(input)))].map(directory => require("./dsh-session").selectDshTranscript(directory, candidates.filter(input => path.dirname(input) === directory).map(input => path.basename(input))));
+  if (!files.includes(file)) files.push(file);
+  await Promise.all(files.map(validate));
   return files.sort();
 }
 // ---------------------------------------------------------------------------

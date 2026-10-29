@@ -12,6 +12,7 @@ const path = require('node:path');
 const http = require('node:http');
 const cp = require('node:child_process');
 const crypto = require('node:crypto');
+const zlib = require('node:zlib');
 const { createRequire } = require('node:module');
 const req = createRequire(path.resolve(__dirname, '../../package.json'));
 const YAML = req('yaml');
@@ -25,7 +26,7 @@ const close = server => new Promise(resolve => { server.close(resolve); server.c
   const root = await fsp.mkdtemp(path.join(os.tmpdir(), 'aitool-core-smoke-'));
   const managementKey = crypto.randomBytes(24).toString('hex');
   const clientKey = crypto.randomBytes(24).toString('hex');
-  const calls = [];
+  const calls = []; let cancellationObserved = false;
   const upstream = http.createServer(async (request, response) => {
     const chunks = [];
     for await (const chunk of request) chunks.push(chunk);
@@ -35,23 +36,28 @@ const close = server => new Promise(resolve => { server.close(resolve); server.c
     const tool = !toolResult && JSON.stringify(body).includes('call_tool');
     const reply = toolResult ? 'Shanghai fixture result' : 'fixture response';
     const truncated = JSON.stringify(body).includes('truncate_stream');
+    const compressed = JSON.stringify(body).includes('gzip_fixture');
+    const canceled = JSON.stringify(body).includes('cancel_fixture');
+    let writer = response;
+    if (compressed) { response.setHeader('content-encoding', 'gzip'); writer = zlib.createGzip({ flush: zlib.constants.Z_SYNC_FLUSH }); writer.pipe(response); }
     const toolCall = { id: 'call_fixture', type: 'function', function: { name: 'get_weather', arguments: '{"city":"Shanghai"}' } };
     if (!body.stream) {
       response.writeHead(200, { 'content-type': 'application/json' });
-      response.end(JSON.stringify({ id: 'chatcmpl-fixture', object: 'chat.completion', created: Math.floor(Date.now()/1000), model: 'fixture-model',
+      writer.end(JSON.stringify({ id: 'chatcmpl-fixture', object: 'chat.completion', created: Math.floor(Date.now()/1000), model: 'fixture-model',
         choices: [{ index: 0, message: { role: 'assistant', content: tool ? null : reply, ...(tool ? { tool_calls: [toolCall] } : {}) }, finish_reason: tool ? 'tool_calls' : 'stop' }],
         usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120, prompt_tokens_details: { cached_tokens: 25 }, completion_tokens_details: { reasoning_tokens: 5 } } }));
       return;
     }
     response.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
-    const event = (delta, finish = null, usage) => response.write(`data: ${JSON.stringify({ id: 'chatcmpl-fixture', object: 'chat.completion.chunk', created: Math.floor(Date.now()/1000), model: 'fixture-model', choices: [{ index: 0, delta, finish_reason: finish }], ...(usage ? { usage } : {}) })}\n\n`);
+    const event = (delta, finish = null, usage) => writer.write(`data: ${JSON.stringify({ id: 'chatcmpl-fixture', object: 'chat.completion.chunk', created: Math.floor(Date.now()/1000), model: 'fixture-model', choices: [{ index: 0, delta, finish_reason: finish }], ...(usage ? { usage } : {}) })}\n\n`);
     if (tool) {
       event({ role: 'assistant', tool_calls: [{ index: 0, id: toolCall.id, type: 'function', function: { name: 'get_weather', arguments: '{"city":' } }] });
       event({ tool_calls: [{ index: 0, function: { arguments: '"Shanghai"}' } }] });
     } else event({ role: 'assistant', content: reply });
-    if (truncated) { response.end(); return; }
+    if (truncated) { writer.end(); return; }
+    if (canceled) { response.once("close", () => { cancellationObserved = true; }); return; }
     event({}, tool ? 'tool_calls' : 'stop', { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120, prompt_tokens_details: { cached_tokens: 25 }, completion_tokens_details: { reasoning_tokens: 5 } });
-    response.end('data: [DONE]\n\n');
+    writer.end('data: [DONE]\n\n');
   });
   let child, bridge;
   try {
@@ -65,7 +71,7 @@ const close = server => new Promise(resolve => { server.close(resolve); server.c
       access: { 'api-keys': [clientKey] }, oauth: { 'auth-dir': path.join(root, 'auths') },
       observability: { logs: { 'request-log': false, 'error-logs-max-files': 0 }, usage: { 'usage-statistics-enabled': true, 'redis-usage-queue-retention-seconds': 3600 } },
       routing: { retry: { 'request-retry': 0 } },
-      'api-keys': { 'openai-compatibility': [{ name: 'fixture', 'base-url': `http://127.0.0.1:${upstream.address().port}/v1`, keys: [{ 'api-key': 'fixture-upstream-key', 'proxy-url': 'direct' }], models: [{ name: 'fixture-model', alias: 'smoke' }, { name: 'fixture-model', alias: 'smoke-tool' }, ...['chat', 'claude', 'responses', 'gemini'].map(format => ({ name: `fixture-truncated-${format}`, alias: `smoke-truncated-${format}` }))] }] },
+      'api-keys': { 'openai-compatibility': [{ name: 'fixture', 'base-url': `http://127.0.0.1:${upstream.address().port}/v1`, keys: [{ 'api-key': 'fixture-upstream-key', 'proxy-url': 'direct' }], models: [{ name: 'fixture-model', alias: 'smoke' }, { name: 'fixture-model', alias: 'smoke-tool' }, ...['gzip-json', 'gzip-stream', 'cancel'].map(kind => ({ name: `fixture-${kind}`, alias: `smoke-${kind}` })), ...['chat', 'claude', 'responses', 'gemini'].map(format => ({ name: `fixture-truncated-${format}`, alias: `smoke-truncated-${format}` }))] }] },
     };
     await fsp.mkdir(config.oauth['auth-dir']);
     await fsp.writeFile(path.join(root, 'config.yaml'), YAML.stringify(config), { mode: 0o600 });
@@ -139,6 +145,7 @@ const close = server => new Promise(resolve => { server.close(resolve); server.c
     }));
     const sum = (buckets, field) => [...buckets.values()].reduce((total, row) => total + (row[field] || 0), 0);
     const totalBefore = sum(await readBuckets(), 'total_tokens');
+    const eventsBeforeRestart = expected;
     bridge.stopBridge();
     await delay(150);
     bridge.startBridge();
@@ -179,6 +186,21 @@ const close = server => new Promise(resolve => { server.close(resolve); server.c
       await waitRecords(truncation.length + 2); // One successful request after reconnect.
       truncation.push({ format, endpoint: endpoint.split('?')[0], httpStatus: broken.status, sentDone: responseBody.includes('[DONE]') });
     }
+    const compatibility = [];
+    for (const stream of [false, true]) {
+      const alias = stream ? "smoke-gzip-stream" : "smoke-gzip-json";
+      const response = await fetchAt('/v1/chat/completions', { method: 'POST', headers: { authorization: `Bearer ${clientKey}`, 'content-type': 'application/json' }, body: JSON.stringify({ model: alias, stream, messages: [{ role: 'user', content: 'gzip_fixture' }] }) });
+      assert.equal(response.status, 200); assert.ok((await response.text()).includes('fixture response'));
+      expected++; compatibility.push(`upstream-gzip:${stream ? 'stream' : 'json'}`);
+    }
+    const cancelController = new AbortController();
+    const canceled = await fetch(base + '/v1/chat/completions', { method: 'POST', headers: { authorization: `Bearer ${clientKey}`, 'content-type': 'application/json' }, signal: cancelController.signal, body: JSON.stringify({ model: 'smoke-cancel', stream: true, messages: [{ role: 'user', content: 'cancel_fixture' }] }) });
+    const reader = canceled.body.getReader(); await reader.read(); cancelController.abort(); await reader.cancel().catch(() => {});
+    for (let i = 0; i < 100 && !cancellationObserved; i++) await delay(50);
+    assert.equal(cancellationObserved, true, 'client cancellation did not close the upstream stream');
+    expected++; compatibility.push('client cancellation:upstream closed');
+    await waitRecords(expected + 1 + truncation.length - eventsBeforeRestart);
+    checks.push(...compatibility);
     const recordFiles = (await fsp.readdir(paths.usageDir)).filter(name=>name.startsWith('records-'));
     const records = (await Promise.all(recordFiles.map(name=>fsp.readFile(path.join(paths.usageDir,name),'utf8')))).join('').trim().split('\n').map(JSON.parse);
     assert.equal(records.length, expected + 1 + truncation.length, 'control notifications must not become usage records');
@@ -195,7 +217,10 @@ const close = server => new Promise(resolve => { server.close(resolve); server.c
     assert.ok(!rawRecords.includes(clientKey));
     assert.ok(!rawRecords.includes('fixture-upstream-key'));
     checks.push('persisted records:client and upstream keys excluded');
-    console.log(JSON.stringify({ checks, truncation, upstreamCalls: calls.length, records: records.length, uniqueRequests: new Set(records.map(row => row.request_id)).size, buckets: buckets.size, freshInput: sum(buckets, 'input_tokens'), cachedInput: sum(buckets, 'cached_input_tokens'), output: sum(buckets, 'output_tokens') }, null, 2));
+    const cancellationRecord = records.find(row => row.alias === "smoke-cancel");
+    assert.ok(cancellationRecord);
+    assert.equal(cancellationRecord.canceled, true);
+    console.log(JSON.stringify({ checks, truncation, cancellation: { canceled: cancellationRecord.canceled, failureStatus: cancellationRecord.failure_status }, upstreamCalls: calls.length, records: records.length, uniqueRequests: new Set(records.map(row => row.request_id)).size, buckets: buckets.size, freshInput: sum(buckets, 'input_tokens'), cachedInput: sum(buckets, 'cached_input_tokens'), output: sum(buckets, 'output_tokens') }, null, 2));
   } finally {
     bridge?.stopBridge();
     if (child && child.exitCode == null) {

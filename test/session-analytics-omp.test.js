@@ -366,9 +366,9 @@ test("OMP sidecar rebuilds on v26 upgrade and nested-only transcript changes", a
   const afterVersion = await buildSessionAnalytics({ home, force: false, cacheTtlMs: 60 * 60_000 });
   const upgraded = afterVersion.find((row) => row.source === "omp");
   assert.ok(upgraded, "v26 → v29 rebuild must invent OMP rows");
-  assert.equal(upgraded.version, 29);
+  assert.equal(upgraded.version, 30);
   assert.equal(upgraded.total_tokens, 20);
-  assert.equal(JSON.parse(fs.readFileSync(metaPath, "utf8")).version, 29);
+  assert.equal(JSON.parse(fs.readFileSync(metaPath, "utf8")).version, 30);
 
   // Touch only the nested child so the dependency signature must invalidate.
   // cacheTtlMs: 0 skips the TTL short-circuit so signature/stat checks run.

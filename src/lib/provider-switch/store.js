@@ -29,7 +29,7 @@ const paths = require("./paths");
 
 const additive = require("./additive");
 
-const SUPPORTED_APPS = ["claude", "codex", "gemini", "agy", "opencode", "openclaw", "mcode", "hermes", "pi", "grokbuild", "kimi"];
+const SUPPORTED_APPS = ["claude", "codex", "gemini", "agy", "opencode", "openclaw", "mcode", "hermes", "pi", "grokbuild", "kimi", "omp", "dsh"];
 const PROVIDER_CATEGORIES = ["official", "custom"];
 
 // Apps a universal provider (cc-switch's UniversalProvider) can project into.

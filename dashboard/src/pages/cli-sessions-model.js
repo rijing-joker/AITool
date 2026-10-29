@@ -12,6 +12,7 @@ const APP_LABELS = {
   grokbuild: "pswitch.tab.grokbuild",
   pi: "pswitch.tab.pi",
   omp: "pswitch.tab.omp",
+  dsh: "pswitch.tab.dsh",
   mcode: "pswitch.tab.mcode",
   kimi: "pswitch.tab.kimi",
 };

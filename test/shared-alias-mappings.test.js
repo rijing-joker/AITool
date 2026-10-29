@@ -181,3 +181,18 @@ test("mapping identities survive reordering and parameter edits affect only thei
   await aliases.deleteAlias({ alias: "private" });
   assert.equal(f.state["api-keys"].codex[1].keys[2].models.length, 0);
 });
+
+test("Ultra Fast alias round-trips separately from Fast and Standard removes only its speed override", async t => {
+  fixture(t, base());
+  let entry = allEntries(await aliases.loadState()).find(row => row.alias === "private");
+  await aliases.createAlias(await editArgs(entry, { serviceTier: "ultrafast", fast: false }));
+  entry = allEntries(await aliases.loadState()).find(row => row.alias === "private");
+  assert.equal(entry.serviceTier, "ultrafast");
+  const context = await aliases.getEditContext(entry); assert.equal(context.serviceTier, "ultrafast");
+  await aliases.createAlias(await editArgs(entry, { serviceTier: "priority" }));
+  entry = allEntries(await aliases.loadState()).find(row => row.alias === "private"); assert.equal(entry.serviceTier, "priority");
+  await aliases.createAlias(await editArgs(entry, { serviceTier: "", effort: "high" }));
+  const state = await aliases.loadState();
+  assert.equal(state.speedEntries.some(row => row.alias === "private"), false);
+  assert.equal(state.thinkingEntries.find(row => row.alias === "private").effort, "high");
+});

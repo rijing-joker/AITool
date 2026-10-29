@@ -1,3 +1,4 @@
+const { gunzipSync } = require("node:zlib");
 "use strict";
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
@@ -144,7 +145,8 @@ test("WorkBuddy inference preserves system/developer content, streaming cache/re
   await state.saveSettings(value => ({ ...value, workbuddy: { models: ["native"] } }), options);
   const body = { model: "native", stream: true, messages: [{ role: "system", content: "Claude Code synthetic" }, { role: "developer", content: "Codex synthetic" }, { role: "user", content: "Synthetic" }] };
   const upstream = http.createServer((req, res) => {
-    let raw = ""; req.on("data", chunk => { raw += chunk; }); req.on("end", () => {
+    const chunks = []; req.on("data", chunk => { chunks.push(chunk); }); req.on("end", () => {
+      const bytes = Buffer.concat(chunks); const raw = (req.headers["content-encoding"] === "gzip" ? gunzipSync(bytes) : bytes).toString("utf8");
       assert.deepEqual(JSON.parse(raw), { ...body, stream_options: { include_usage: true } }); assert.equal(req.headers.authorization, "Bearer synthetic-access");
       assert.ok(req.headers["x-conversation-request-id"]);
       res.writeHead(200, { "content-type": "text/event-stream" }); res.end('data: {"usage":{"prompt_tokens":100,"completion_tokens":10,"prompt_tokens_details":{"cached_tokens":60},"completion_tokens_details":{"reasoning_tokens":5}}}\n\ndata: [DONE]\n\n');
@@ -202,7 +204,8 @@ test("WorkBuddy Claude models use Messages with effort, fall back to chat, and W
   let protocolFailure = false;
   let requested = "";
   const upstream = http.createServer(async (req, res) => {
-    let raw = ""; for await (const chunk of req) raw += chunk;
+    const buffers = []; for await (const chunk of req) buffers.push(chunk);
+    const bytes = Buffer.concat(buffers); const raw = (req.headers["content-encoding"] === "gzip" ? gunzipSync(bytes) : bytes).toString("utf8");
     seen.push({ url: requested, body: JSON.parse(raw) });
     if (requested === "/v1/messages" && fallback) { res.writeHead(404, { "content-type": "application/json" }); res.end("{}"); return; }
     if (requested === "/v1/messages" && overloaded) { res.writeHead(429, { "content-type": "application/json" }); res.end("{}"); return; }
@@ -308,7 +311,8 @@ test("WorkBuddy aggregates SSE into non-streaming JSON with tools, reasoning and
   const wire = Buffer.from(": keepalive\r\n\r\n" + chunks.map(chunk => `event: message\r\ndata: ${JSON.stringify(chunk)}\r\n\r\n`).join("") + "data: [DONE]\r\n\r\n");
   const seen = [];
   const upstream = http.createServer(async (req, res) => {
-    let raw = ""; for await (const chunk of req) raw += chunk;
+    const buffers = []; for await (const chunk of req) buffers.push(chunk);
+    const bytes = Buffer.concat(buffers); const raw = (req.headers["content-encoding"] === "gzip" ? gunzipSync(bytes) : bytes).toString("utf8");
     const sent = JSON.parse(raw); seen.push(sent);
     assert.equal(sent.stream, true); assert.deepEqual(sent.stream_options, { include_usage: true });
     assert.deepEqual(sent.messages, messages); assert.equal(sent.max_tokens, 32);
@@ -479,4 +483,49 @@ test("concurrent chat 401s share one renewal and both resend with the renewed to
   assert.equal(refreshes, 1, "the second caller reuses the renewed account");
   assert.equal(staleRejects, 2);
   assert.equal(renewedChats, 2);
+});
+
+test("WorkBuddy default reasoning effort accepts supported catalog choices only", () => {
+  assert.equal(buddy.defaultEffort({ supportsReasoning: true, reasoning: { supportedEfforts: ["low", "high"], defaultEffort: "high" } }), "high");
+  assert.equal(buddy.defaultEffort({ supportsReasoning: true, reasoning: { supportedEfforts: ["low"], defaultEffort: "max" } }), undefined);
+  assert.equal(buddy.defaultEffort({ supportsReasoning: false, reasoning: { defaultEffort: "high" } }), undefined);
+  assert.equal(buddy.headers("workbuddy", { access: "fixture-key", source: "key" })["x-domain"], undefined);
+  assert.equal(buddy.headers("workbuddy", { access: "fixture-key", source: "key" })["x-api-key"], "fixture-key");
+});
+
+test("WorkBuddy gzip and account-scoped conversation identifiers preserve a large reasoning history", async t => {
+  const { options } = await fixture(t), received = [], body = { model: "native", messages: [{ role: "user", content: "synthetic".repeat(50000) }, { role: "assistant", content: "answer", reasoning_content: "retained reasoning" }, { role: "user", content: "next" }] };
+  await state.saveSettings(value => ({ ...value, enabled: { workbuddy: true }, workbuddy: { models: ["native"], modelDetails: [{ id: "native", effort: "high" }] } }), options);
+  const upstream = http.createServer(async (req, res) => {
+    const chunks = []; for await (const chunk of req) chunks.push(chunk);
+    received.push({ headers: req.headers, body: JSON.parse(gunzipSync(Buffer.concat(chunks))) });
+    res.writeHead(200, { "content-type": "text/event-stream" }); res.end('data: {"choices":[{"index":0,"delta":{"content":"OK"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n');
+  });
+  upstream.listen(0, "127.0.0.1"); await once(upstream, "listening"); t.after(() => { upstream.close(); upstream.closeAllConnections(); });
+  options.streamRequest = (_url, config, callback) => http.request(`http://127.0.0.1:${upstream.address().port}`, config, callback);
+  const proxy = http.createServer((req, res) => buddy.forward({ kind: "workbuddy", req, res, body, signal: new AbortController().signal, options, pipeline }).catch(() => { res.writeHead(502); res.end(); }));
+  proxy.listen(0, "127.0.0.1"); await once(proxy, "listening"); t.after(() => { proxy.close(); proxy.closeAllConnections(); });
+  for (const uid of ["first", "first", "second"]) {
+    await state.write(path.join(options.root, "workbuddy-account.json"), { access: "synthetic-access", uid, expires: Date.now() + 3600000 });
+    const response = await fetch(`http://127.0.0.1:${proxy.address().port}`); assert.equal(response.status, 200); await response.text();
+  }
+  assert.equal(received.length, 3);
+  assert.equal(received[0].headers["content-encoding"], "gzip"); assert.equal(received[0].headers["x-ide-version"], "5.9.3");
+  assert.equal(received[0].headers["x-conversation-id"], received[1].headers["x-conversation-id"]);
+  assert.notEqual(received[0].headers["x-conversation-id"], received[2].headers["x-conversation-id"]);
+  assert.notEqual(received[0].headers["x-request-id"], received[1].headers["x-request-id"]);
+  assert.equal(received[0].body.reasoning_effort, "high"); assert.equal(received[0].body.messages[0].content, body.messages[0].content);
+  assert.equal(received[0].body.messages[1].reasoning, "retained reasoning"); assert.equal(body.messages[1].reasoning_content, "retained reasoning");
+});
+
+test("WorkBuddy free-only forwarding rechecks pricing and refuses an unpriced or newly paid model", async t => {
+  const { options } = await fixture(t); let price = 0, forwarded = false;
+  const managementRequest = options.request;
+  options.request = async (...args) => typeof args[0] === "string" && args[0].startsWith("https:") ? ({ status: 200, body: Buffer.from(JSON.stringify({ data: { agents: [{ name: "cli", models: ["native"] }], models: [{ id: "native", credits: price }] } })) }) : managementRequest(...args);
+  await buddy.useKey("workbuddy", "fixture-key", options);
+  await buddy.configure("workbuddy", { enabled: true, freeOnly: true, models: ["native"] }, options);
+  price = 2;
+  options.streamRequest = () => { forwarded = true; throw new Error("must not send a paid request"); };
+  await assert.rejects(buddy.forward({ kind: "workbuddy", req: { headers: {} }, res: {}, body: { model: "native", messages: [{ role: "user", content: "synthetic" }] }, signal: new AbortController().signal, options, pipeline }), /free price/);
+  assert.equal(forwarded, false);
 });

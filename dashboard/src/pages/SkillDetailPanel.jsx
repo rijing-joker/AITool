@@ -65,6 +65,7 @@ export function SkillDetailPanel({
   onClose,
   onToggleTarget,
   onRemove,
+  onSharedManage,
 }) {
   return (
     <AnimatePresence>
@@ -81,6 +82,7 @@ export function SkillDetailPanel({
           onClose={onClose}
           onToggleTarget={onToggleTarget}
           onRemove={onRemove}
+          onSharedManage={onSharedManage}
         />
       ) : null}
     </AnimatePresence>
@@ -98,6 +100,7 @@ function SkillDetailPanelInner({
   onClose,
   onToggleTarget,
   onRemove,
+  onSharedManage,
 }) {
   const reduceMotion = useReducedMotion();
   const { currency, rate } = useCurrency();
@@ -220,6 +223,7 @@ function SkillDetailPanelInner({
 
         {/* Scrollable body — update banner + description + usage + sync targets */}
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+          {(skill.shared || skill.sharedHandover) && !readOnly ? <div className="mb-4 space-y-2 border-b border-oai-gray-200 pb-4 dark:border-oai-gray-800"><p className="text-xs leading-5 text-oai-gray-600 dark:text-oai-gray-400">{copy(skill.shared ? "skills.shared.hint" : "skills.shared.managed_hint")}</p><button type="button" disabled={Boolean(busyKey)} onClick={() => onSharedManage?.(skill)} className="min-h-10 rounded-lg border border-oai-gray-300 px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500 disabled:opacity-50 dark:border-oai-gray-700">{copy(skill.shared ? "skills.shared.handover" : "skills.shared.handback")}</button></div> : null}
           {hasUpdate ? (
             <div className="mb-4 flex items-center gap-3 rounded-xl bg-sky-50/80 px-3 py-2.5 ring-1 ring-sky-200 dark:bg-sky-950/30 dark:ring-sky-800/60">
               <ArrowUpCircle className="h-4 w-4 shrink-0 text-sky-600 dark:text-sky-300" aria-hidden />

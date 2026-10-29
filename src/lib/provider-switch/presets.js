@@ -1347,6 +1347,15 @@ const PRESETS = {
   kimi: [KIMI_MOONSHOT, KIMI_MOONSHOT_GLOBAL, KIMI_CUSTOM],
 };
 
+PRESETS.omp = PRESETS.pi.map(row => ({ ...row, id: row.id.replace(/^pi_/, "omp_") }));
+PRESETS.dsh = [PI_DEEPSEEK, PI_CUSTOM].map(row => {
+  const entry = structuredClone(row.settingsConfig.provider);
+  entry.baseURL = entry.baseUrl; delete entry.baseUrl;
+  entry.displayName = entry.name; delete entry.name;
+  entry.models = entry.models.map(model => ({ ...model, contextWindow: model.contextWindow || 128000, maxTokens: model.maxTokens || 8192, input: ["text"] }));
+  return { ...row, id: row.id.replace(/^pi_/, "dsh_"), settingsConfig: { ...row.settingsConfig, provider: entry }, formFields: row.formFields.map(field => ({ ...field, path: field.path.replace("baseUrl", "baseURL") })) };
+});
+
 function listPresets(app) {
   const preset = require("./opencode-free-preset").freePreset(app);
   const items = PRESETS[app] || [];

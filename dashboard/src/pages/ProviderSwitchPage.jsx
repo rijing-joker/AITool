@@ -1,3 +1,4 @@
+import { ProviderClaudeAccounts } from "./provider-claude-accounts";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   DndContext,
@@ -52,6 +53,7 @@ import { ProviderEnvBanner } from "./provider-env-banner";
 import { ProviderSkillsPanel } from "./provider-skills-panel";
 import { ProviderAgyAccounts } from "./provider-agy-accounts";
 import { ProviderKimiAccounts } from "./provider-kimi-accounts";
+import { ProviderCodexGlobals } from "./provider-codex-globals";
 import { ProviderCodexClient } from "./provider-codex-client";
 
 // Provider config management — an interaction port of cc-switch's provider
@@ -78,6 +80,8 @@ const APPS = [
   { id: "pi", labelKey: "pswitch.tab.pi" },
   { id: "grokbuild", labelKey: "pswitch.tab.grokbuild" },
   { id: "kimi", labelKey: "pswitch.tab.kimi" },
+  { id: "omp", labelKey: "pswitch.tab.omp" },
+  { id: "dsh", labelKey: "pswitch.tab.dsh" },
 ];
 
 function SectionTitle({ children, action = null }) {
@@ -439,10 +443,10 @@ function SortableProviderCard({ app, provider, isCurrent, busy, dragLabel, coold
           <Button
             variant={isCurrent ? "ghost" : "primary"}
             size="sm"
-            disabled={busy || (isCurrent && app !== "agy")}
+            disabled={busy || (isCurrent && !["agy", "dsh", "omp"].includes(app) && !(app === "claude" && provider.meta?.claudeAccountId))}
             onClick={onSwitch}
           >
-            {copy(app === "agy" ? "pswitch.agy.launch" : "pswitch.action.switch")}
+            {copy(app === "agy" || (isCurrent && (["dsh", "omp"].includes(app) || (app === "claude" && provider.meta?.claudeAccountId))) ? "pswitch.agy.launch" : "pswitch.action.switch")}
           </Button>
           <Button variant="ghost" size="icon" aria-label={copy("pswitch.action.edit")} disabled={busy} onClick={onEdit}>
             <Pencil className="h-4 w-4" />
@@ -967,8 +971,10 @@ export function ProviderSwitchPage() {
         </div>
       ) : null}
       {activeApp === "agy" ? <ProviderAgyAccounts /> : null}
+      {activeApp === "claude" ? <ProviderClaudeAccounts /> : null}
       {activeApp === "kimi" ? <ProviderKimiAccounts /> : null}
       {activeApp === "codex" ? <ProviderCodexClient revision={status} /> : null}
+      {activeApp === "codex" ? <ProviderCodexGlobals /> : null}
       <ProviderDiagnostics key={activeApp} app={activeApp} revision={status} onChanged={refreshStatus} />
       <section className="mb-8">
         <SectionTitle>{copy("pswitch.section.providers")}</SectionTitle>
@@ -1001,7 +1007,11 @@ export function ProviderSwitchPage() {
                     busy={busy}
                     dragLabel={copy("pswitch.provider.drag_handle", { name: provider.name })}
                     cooldownMs={provider.cooldownMs}
-                    onSwitch={() => { if (activeApp !== "agy") { setSwitchTarget(provider); return; } setBusy(true); providerSwitchApi.launchAgy(provider.id).catch(error => setActionError(String(error))).finally(() => setBusy(false)); }}
+                    onSwitch={() => {
+                      if (activeApp !== "agy" && !(provider.id === appState.current && (["dsh", "omp"].includes(activeApp) || (activeApp === "claude" && provider.meta?.claudeAccountId)))) { setSwitchTarget(provider); return; }
+                      setBusy(true);
+                      (activeApp === "agy" ? providerSwitchApi.launchAgy(provider.id) : activeApp === "claude" ? providerSwitchApi.launchClaude(provider.id) : providerSwitchApi.launchNative(activeApp, provider.id)).catch(error => setActionError(String(error))).finally(() => setBusy(false));
+                    }}
                     onEdit={() => void openDialog(provider)}
                     onMigrate={async () => {
                       setBusy(true);

@@ -13,7 +13,7 @@ import { ModalFrame } from "../ui/components/ModalFrame";
 // has no MCP/skills support and stays outside profiles).
 // ---------------------------------------------------------------------------
 
-const PROFILE_APPS = ["claude", "codex", "gemini", "grokbuild", "opencode", "hermes", "mcode", "pi"];
+const PROFILE_APPS = ["claude", "codex", "gemini", "grokbuild", "opencode", "hermes", "mcode", "pi", "omp", "dsh"];
 
 const inputClass = "h-10 w-full rounded-lg border border-oai-gray-200 bg-transparent px-3 text-sm placeholder:text-oai-gray-400 focus:outline-none focus:ring-2 focus:ring-oai-brand-500 dark:border-oai-gray-700";
 

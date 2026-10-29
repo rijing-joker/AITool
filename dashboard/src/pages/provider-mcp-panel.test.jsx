@@ -51,13 +51,13 @@ it("projects a checked tool with its revision and presents unsupported apps as r
   render(<ProviderMcpPanel />);
   await screen.findByText("Sample MCP");
   fireEvent.click(screen.getByText("pswitch.mcp.tools"));
-  const toggle = screen.getByRole("checkbox");
+  const toggle = screen.getByRole("checkbox", { name: "pswitch.mcp.tool_toggle: first pswitch.tab.codex" });
   fireEvent.click(toggle);
   await waitFor(() => expect(mcpApi.tool).toHaveBeenCalledWith("sample", "codex", "first", false, "r1"));
   await waitFor(() => expect(toggle.checked).toBe(false));
   fireEvent.change(screen.getByRole("combobox"), { target: { value: "pi" } });
   expect(screen.getByText("pswitch.mcp.tool_unsupported")).toBeTruthy();
-  expect(screen.getByRole("checkbox").disabled).toBe(true);
+  expect(screen.getByRole("checkbox", { name: "pswitch.mcp.tool_toggle: first pswitch.tab.pi" }).disabled).toBe(true);
 });
 
 it("shows a stage-specific failure and keeps server metadata as text", async () => {

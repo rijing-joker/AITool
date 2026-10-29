@@ -174,3 +174,7 @@ export function publishSkillInventory({
     },
   });
 }
+
+export function handOverSharedSkills(names: string[]) { return mutateSkillsJson({ action: "hand_over_shared", names }); }
+export function handBackSharedSkill(id: string) { return mutateSkillsJson({ action: "hand_back_shared", id }); }
+export function recoverSharedSkill(id: string) { return mutateSkillsJson({ action: "recover_shared", id }); }

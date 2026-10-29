@@ -24,6 +24,7 @@ const SYNC_TIMEOUT_MS = 120_000;
 // request still falls back normally; subsequent fan-out requests reuse that
 // decision for a short cooldown and return local data immediately.
 const ACCOUNT_VIEW_FAILURE_BACKOFF_MS = 2 * 60_000;
+const ACCOUNT_VIEW_BACKGROUND_TIMEOUT_FACTOR = 5;
 const TRACKER_BIN = path.resolve(__dirname, "../../bin/tracker.js");
 const MAX_DEVICE_NAME_LENGTH = 128;
 
@@ -1436,6 +1437,7 @@ function createLocalApiHandler({ queuePath, serverVersion = null }) {
   // otherwise a fallback reason (see above) telling the caller — and, through
   // the `X-TokenTracker-Account-Fallback` header, the popover — why the local
   // single-machine data is being served instead.
+  const ACCOUNT_VIEW_STILL_PENDING = Symbol("account-view-still-pending");
   async function tryServeAccountView(usageSlug, url, res) {
     if (!getCloudSyncPref()) return ACCOUNT_FALLBACK_CLOUD_SYNC_OFF;
     const refreshToken = getRefreshTokenForCloud();
@@ -1454,7 +1456,8 @@ function createLocalApiHandler({ queuePath, serverVersion = null }) {
     const envTimeout = process.env.TOKENTRACKER_HTTP_TIMEOUT_MS
       ? parseInt(process.env.TOKENTRACKER_HTTP_TIMEOUT_MS, 10)
       : 0;
-    const timeoutMs = envTimeout > 0 ? envTimeout : 4000;
+    const responseTimeoutMs = envTimeout > 0 ? envTimeout : 4000;
+    const requestTimeoutMs = responseTimeoutMs * ACCOUNT_VIEW_BACKGROUND_TIMEOUT_FACTOR;
     try {
       // An identical overlapping read shares the entire probe, including its
       // token mint. A healthy pending read must not look like a cloud outage
@@ -1467,7 +1470,7 @@ function createLocalApiHandler({ queuePath, serverVersion = null }) {
           baseUrl: runtime.baseUrl || DEFAULT_BASE_URL,
           anonKey: runtime.anonKey,
           refreshToken,
-          timeoutMs,
+          timeoutMs: requestTimeoutMs,
           onSessionRefreshed: (session) => {
             if (sessionAtStart !== getCloudAccountSessionGeneration()) {
               throw Object.assign(new Error("Account session changed"), { code: "auth_session_changed" });
@@ -1481,8 +1484,15 @@ function createLocalApiHandler({ queuePath, serverVersion = null }) {
           if (accountViewInFlight.get(requestKey) === pending) accountViewInFlight.delete(requestKey);
         };
         pending.then(cleanup, cleanup);
+        pending.then(out => {
+          if (sessionAtStart === getCloudAccountSessionGeneration() && cloudPrefAtStart === cloudSyncPrefGeneration && getCloudSyncPref() && out?.data != null) accountViewFailures.delete(failureKey);
+        }, error => { if (sessionAtStart === getCloudAccountSessionGeneration() && error?.code !== "auth_session_changed") rememberAccountViewFailure(failureKey); });
       }
-      const out = await pending;
+      let timer;
+      let out;
+      try { out = await Promise.race([pending, new Promise(resolve => { timer = setTimeout(() => resolve(ACCOUNT_VIEW_STILL_PENDING), responseTimeoutMs); timer.unref?.(); })]); }
+      finally { clearTimeout(timer); }
+      if (out === ACCOUNT_VIEW_STILL_PENDING) { rememberAccountViewFailure(failureKey); return "transient-timeout"; }
       // `null` here means the slug has no cloud equivalent, or the session
       // vanished mid-request — a routing/session fact, not an outage.
       if (!out) return ACCOUNT_FALLBACK_SIGNED_OUT;
@@ -1578,6 +1588,7 @@ function createLocalApiHandler({ queuePath, serverVersion = null }) {
 
   return async function handleLocalApi(req, res, url) {
     const p = url.pathname;
+    if (p.startsWith("/api/mcp/hub/") && await require("./provider-switch/mcp-hub-http").handle(req, res, url)) return;
 
     // Container liveness should not spawn the proxy binary or authenticate
     // against the management API. Proxy readiness remains in /api/proxy/status.
@@ -3175,7 +3186,7 @@ function createLocalApiHandler({ queuePath, serverVersion = null }) {
         if (method === "GET") {
           const mode = url.searchParams.get("mode") || "installed";
           if (mode === "installed") {
-            json(res, { targets: skills.targetList(), skills: skills.listInstalledSkills() });
+            json(res, { targets: skills.targetList(), skills: skills.listInstalledSkills(), sharedRecovery: skills.listSharedSkillRecovery() });
             return true;
           }
           if (mode === "repos") {
@@ -3315,6 +3326,15 @@ function createLocalApiHandler({ queuePath, serverVersion = null }) {
           if (action === "set_targets") {
             json(res, { ok: true, skill: skills.setSkillTargets(body.id, body.targets || []) });
             return true;
+          }
+          if (action === "hand_over_shared") {
+            json(res, { ok: true, ...skills.handOverSharedSkills(Array.isArray(body.names) ? body.names : []) }); return;
+          }
+          if (action === "recover_shared") {
+            json(res, { ok: true, ...skills.recoverSharedSkill(body.id) }); return;
+          }
+          if (action === "hand_back_shared") {
+            json(res, { ok: true, ...skills.handBackSharedSkill(body.id) }); return;
           }
           if (action === "import_local") {
             json(res, { ok: true, skill: skills.importLocalSkill(body.directory, body.targets || []) });

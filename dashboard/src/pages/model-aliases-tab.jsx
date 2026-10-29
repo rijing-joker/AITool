@@ -101,7 +101,9 @@ function AliasEditorDialog({ editor, onClose, onSaved, onEditorStateChange }) {
   } = editor;
   const [selectedSourceId, setSelectedSourceId] = useState("");
   const [effort, setEffort] = useState("");
-  const [fastEnabled, setFastEnabled] = useState(false);
+  const [serviceTier, setServiceTier] = useState("");
+  const fastEnabled = serviceTier !== "";
+  const setFastEnabled = value => setServiceTier(current => (typeof value === "function" ? value(Boolean(current)) : value) ? current || "priority" : "");
   const [alias, setAlias] = useState("");
   const [search, setSearch] = useState("");
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
@@ -114,7 +116,7 @@ function AliasEditorDialog({ editor, onClose, onSaved, onEditorStateChange }) {
   const editingSource = editor.editingSource;
   const closeGuard = useGuardedDialog({
     dirty: selectedSourceId !== (editingSource?.id ?? "") ||
-      effort !== (editor.initialEffort ?? "") || fastEnabled !== (editor.initialFast ?? false) ||
+      effort !== (editor.initialEffort ?? "") || serviceTier !== (editor.initialServiceTier ?? (editor.initialFast ? "priority" : "")) ||
       alias !== (editingEntry?.alias ?? ""),
     busy: Boolean(busyAlias), onClose, onEditorStateChange,
   });
@@ -196,7 +198,7 @@ function AliasEditorDialog({ editor, onClose, onSaved, onEditorStateChange }) {
   };
 
   const normalizedEffort = effort.trim().toLowerCase();
-  const defaultAlias = defaultModelAlias(selectedSource?.model, normalizedEffort, fastEnabled);
+  const defaultAlias = defaultModelAlias(selectedSource?.model, normalizedEffort, serviceTier);
   const uniqueDefaultAlias = uniqueModelAlias(defaultAlias, baseSources.map((source) => source.model));
   const sharedMappings = editor.entries.filter((entry) =>
     (!editingEntry || (entry.mappingId ? entry.mappingId !== editingEntry.mappingId
@@ -229,7 +231,7 @@ function AliasEditorDialog({ editor, onClose, onSaved, onEditorStateChange }) {
     if (editingEntry && editingSource) {
       setSelectedSourceId(editingSource.id);
       setEffort(editor.initialEffort ?? "");
-      setFastEnabled(editor.initialFast ?? false);
+      setServiceTier(editor.initialServiceTier ?? (editor.initialFast ? "priority" : ""));
       setAlias(editingEntry.alias);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -268,6 +270,7 @@ function AliasEditorDialog({ editor, onClose, onSaved, onEditorStateChange }) {
         alias: normalizedAlias,
         effort: normalizedEffort,
         fast: fastEnabled,
+        serviceTier,
         editingEntry,
         editingRevision,
       });
@@ -470,26 +473,11 @@ function AliasEditorDialog({ editor, onClose, onSaved, onEditorStateChange }) {
 
               <div className="space-y-1.5">
                 <strong className="text-xs font-medium text-oai-gray-700 dark:text-oai-gray-200">{copy("proxy.alias.fast.title")}</strong>
-                <label
-                  className={`flex cursor-pointer items-center justify-between gap-3 rounded-lg border px-3 py-2 transition-colors ${
-                    fastEnabled
-                      ? "border-oai-brand-300 bg-oai-brand-50/60 dark:border-oai-brand-800 dark:bg-oai-brand-950/30"
-                      : "border-oai-gray-200 dark:border-oai-gray-700"
-                  }`}
-                >
-                  <span>
-                    <span className="flex items-center gap-1.5 text-sm font-medium"><Zap className="h-3.5 w-3.5" /> Fast</span>
-                    <small className="block text-xs text-oai-gray-400 dark:text-oai-gray-500">
-                      {copy(fastEnabled ? "proxy.alias.fast.enabled" : "proxy.alias.fast.disabled")}
-                    </small>
-                  </span>
-                  <AliasSwitch
-                    checked={fastEnabled}
-                    onChange={setFastEnabled}
-                    disabled={Boolean(busyAlias) || !fastAvailable}
-                    label={copy("proxy.alias.fast.title")}
-                  />
-                </label>
+                <select aria-label={copy("proxy.alias.fast.title")} value={serviceTier} onChange={event => setServiceTier(event.target.value)} disabled={Boolean(busyAlias) || !fastAvailable} className="h-10 w-full rounded-lg border border-oai-gray-200 bg-transparent px-3 text-sm dark:border-oai-gray-700">
+                  <option value="">{copy("proxy.alias.tier.standard")}</option>
+                  <option value="priority">{copy("proxy.alias.tier.fast")}</option>
+                  <option value="ultrafast">{copy("proxy.alias.tier.ultrafast")}</option>
+                </select>
                 {selectedSource && !selectedSource.supportsFast ? (
                   <p className="text-xs text-oai-gray-400 dark:text-oai-gray-500">{copy("proxy.alias.fast.unsupported")}</p>
                 ) : null}
@@ -564,6 +552,7 @@ export function ModelAliasesTab({ onEditorStateChange } = {}) {
   const [editingRevision, setEditingRevision] = useState(null);
   const [initialEffort, setInitialEffort] = useState("");
   const [initialFast, setInitialFast] = useState(false);
+  const [initialServiceTier, setInitialServiceTier] = useState("");
   const [deleteEntry, setDeleteEntry] = useState(null);
 
   const load = useCallback(async () => {
@@ -619,6 +608,7 @@ export function ModelAliasesTab({ onEditorStateChange } = {}) {
       setEditingRevision(context.revision);
       setInitialEffort(context.effort ?? "");
       setInitialFast(context.fast);
+      setInitialServiceTier(context.serviceTier ?? (context.fast ? "priority" : ""));
       setEditorOpen(true);
     } catch (requestError) {
       setError(String(requestError));
@@ -711,7 +701,7 @@ export function ModelAliasesTab({ onEditorStateChange } = {}) {
                 {entry.serviceTier ? (
                   <span className="flex items-center gap-1 rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
                     <Zap className="h-2.5 w-2.5" />
-                    {copy("proxy.alias.fast.title")}
+                    {copy(entry.serviceTier === "ultrafast" ? "proxy.alias.tier.ultrafast" : "proxy.alias.tier.fast")}
                   </span>
                 ) : null}
                 <button
@@ -753,6 +743,7 @@ export function ModelAliasesTab({ onEditorStateChange } = {}) {
             editingRevision,
             initialEffort,
             initialFast,
+            initialServiceTier,
           }}
           onClose={() => {
             setEditorOpen(false);

@@ -24,6 +24,8 @@ const MCP_APPS = [
   { id: "mcode", labelKey: "pswitch.tab.mcode" },
   { id: "pi", labelKey: "pswitch.tab.pi" },
   { id: "kimi", labelKey: "pswitch.tab.kimi" },
+  { id: "omp", labelKey: "pswitch.tab.omp" },
+  { id: "dsh", labelKey: "pswitch.tab.dsh" },
 ];
 
 const MCP_PRESETS = [
@@ -98,6 +100,8 @@ export function ProviderMcpPanel({ onEditorStateChange }) {
   const [loadError, setLoadError] = useState(null);
   const [busy, setBusy] = useState(false);
   const operation = useRef(false);
+  const [hub, setHub] = useState(null);
+  const [connection, setConnection] = useState(null);
   const [checks, setChecks] = useState({});
   const [toolFilterApps, setToolFilterApps] = useState([]);
   const [search, setSearch] = useState("");
@@ -109,6 +113,7 @@ export function ProviderMcpPanel({ onEditorStateChange }) {
     try {
       const data = await mcpApi.list();
       setServers(data.servers);
+      setHub(data.hub);
       setChecks(data.checks || {});
       setToolFilterApps(data.toolFilterApps || []);
       setLoadError(null);
@@ -241,6 +246,15 @@ export function ProviderMcpPanel({ onEditorStateChange }) {
             </Button>
           </div>
         </div>
+        <div className="mt-4 space-y-2 border-t border-oai-gray-200 pt-3 dark:border-oai-gray-800">
+          <div className="flex flex-wrap items-center gap-3"><label className="flex min-h-10 items-center gap-2 text-sm"><input type="checkbox" checked={hub?.enabled || false} disabled={busy || !hub} onChange={event => { const enabled = event.target.checked; void run(async () => { const result = await mcpApi.setHub(enabled); setHub(result.hub); setConnection(null); if (result.hub.failures.length) throw new Error(result.hub.failures.join("\n")); await load(); }); }} />{copy("pswitch.mcp.hub.title")}</label>
+            {hub?.enabled ? <Button variant="secondary" size="sm" disabled={busy} onClick={() => void run(async () => setConnection((await mcpApi.hubConnection()).connection))}>{copy("pswitch.mcp.hub.connect")}</Button> : null}
+            {hub?.recoveryRequired ? <Button variant="secondary" size="sm" disabled={busy} onClick={() => void run(async () => { const result = await mcpApi.setHub(false); setHub(result.hub); if (result.hub.failures.length) throw new Error(result.hub.failures.join("\n")); await load(); })}>{copy("pswitch.mcp.hub.recover")}</Button> : null}
+          </div>
+          <p className="text-xs text-oai-gray-500">{copy("pswitch.mcp.hub.hint")}</p>
+          {hub?.address ? <p className="break-all text-xs">{hub.address}</p> : null}
+          {connection ? <div className="space-y-2"><p className="text-xs text-oai-gray-500">{copy("pswitch.mcp.hub.secret")}</p><textarea readOnly rows={8} aria-label={copy("pswitch.mcp.hub.connect")} className="w-full rounded-lg border border-oai-gray-300 bg-transparent p-3 text-sm dark:border-oai-gray-700" value={JSON.stringify(connection, null, 2)} /><Button size="sm" variant="secondary" onClick={() => setConnection(null)}>{copy("shared.dialog.close")}</Button></div> : null}
+        </div>
         <div className="mt-3 flex flex-wrap gap-1.5 border-t border-oai-gray-100 pt-3 dark:border-oai-gray-800">
           {MCP_APPS.map((app) => (
             <button
@@ -364,6 +378,7 @@ function McpServerCard({ server, busy, onToggle, onEdit, onDelete, check, toolFi
           );
         })}
       </div>
+      {specTransport(server.server) === "sse" ? <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">{copy("pswitch.mcp.sse_notice")}</p> : null}
       <McpHealth key={JSON.stringify(server.server)} server={server} initialCheck={check} busy={busy} toolFilterApps={toolFilterApps} onTool={onTool} />
     </Card>
   );

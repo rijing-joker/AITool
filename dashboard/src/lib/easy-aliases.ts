@@ -67,6 +67,7 @@ export type ModelAliasEditContext = {
   revision: string;
   effort: string | null;
   fast: boolean;
+  serviceTier?: "" | "priority" | "ultrafast";
 };
 
 export type AliasState = {
@@ -137,6 +138,7 @@ export const submitCreateAlias = (input: {
   alias: string;
   effort: string;
   fast: boolean;
+  serviceTier?: "" | "priority" | "ultrafast";
   editingEntry: AliasListEntry | null;
   editingRevision: string | null;
 }) => {
@@ -147,6 +149,7 @@ export const submitCreateAlias = (input: {
       alias: input.alias,
       effort: input.effort,
       fast: input.fast,
+      serviceTier: input.serviceTier,
       originalAlias: input.editingEntry.alias,
       expectedRevision: input.editingRevision ?? undefined,
       ...aliasLocationArgs(input.editingEntry),
@@ -158,6 +161,7 @@ export const submitCreateAlias = (input: {
     alias: input.alias,
     effort: input.effort,
     fast: input.fast,
+      serviceTier: input.serviceTier,
   });
 };
 
@@ -231,13 +235,13 @@ export const combineModelAliasSources = (
 export const defaultModelAlias = (
   model: string | null | undefined,
   effort: string,
-  fast: boolean,
+  fast: boolean | string,
 ) => {
   const normalizedModel = model?.trim() ?? "";
   const normalizedEffort = effort.trim().toLowerCase();
   if (!normalizedModel) return "";
   if (!normalizedEffort && !fast) return `${normalizedModel}-alias`;
-  return `${normalizedModel}${normalizedEffort ? `-${normalizedEffort}` : ""}${fast ? "-fast" : ""}`;
+  return `${normalizedModel}${normalizedEffort ? `-${normalizedEffort}` : ""}${fast === "ultrafast" ? "-ultrafast" : fast ? "-fast" : ""}`;
 };
 
 export const uniqueModelAlias = (

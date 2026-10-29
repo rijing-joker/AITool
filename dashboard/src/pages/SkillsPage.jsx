@@ -40,6 +40,9 @@ import {
   getSkillRepos,
   getSkillUsage,
   importLocalSkill,
+  handOverSharedSkills,
+  handBackSharedSkill,
+  recoverSharedSkill,
   installSkill,
   publishSkillInventory,
   removeSkillRepo,
@@ -224,6 +227,7 @@ function SkillRow({ skill, targets, selected, onSelect, selectable, checked, onT
   const deviceSources = Array.isArray(skill.deviceSources) ? skill.deviceSources : [];
   const inventoryBadges = [
     skill.remote ? copy("skills.inventory.remote") : null,
+    skill.shared ? copy("skills.shared.scope") : null,
     skill.scope === "plugin" ? copy("skills.inventory.plugin") : null,
   ].filter(Boolean);
 
@@ -890,6 +894,7 @@ export function SkillsPage() {
   const [loading, setLoading] = useState(true);
   const [browseLoading, setBrowseLoading] = useState(false);
   const [error, setError] = useState("");
+  const [sharedChange, setSharedChange] = useState(null);
   const [pendingRemove, setPendingRemove] = useState(null);
   const [pendingBulkRemove, setPendingBulkRemove] = useState(null); // array of skills
   const [pendingUpdateAll, setPendingUpdateAll] = useState(null); // array of stale skill ids
@@ -909,7 +914,7 @@ export function SkillsPage() {
     const requestId = ++cloudInventoryRequest.current;
     const data = await getInstalledSkills();
     if (cloudInventoryRequest.current !== requestId) return;
-    const localData = { skills: data.skills || [], targets: data.targets || [] };
+    const localData = { skills: data.skills || [], targets: data.targets || [], sharedRecovery: data.sharedRecovery || [] };
     setInstalledData(localData);
 
     const deviceId = getCurrentDeviceId();
@@ -928,6 +933,7 @@ export function SkillsPage() {
         const cloud = cloudResult.value;
         if (cloudInventoryRequest.current !== requestId) return;
         setInstalledData({
+          sharedRecovery: localData.sharedRecovery,
           targets: localData.targets,
           skills: mergeSkillInventories(localData.skills, cloud, deviceId),
         });
@@ -1802,6 +1808,21 @@ export function SkillsPage() {
             </div>
           ) : null}
 
+          {installedData.sharedRecovery?.length ? <div className="mb-5 space-y-2 rounded-lg border border-oai-gray-200 p-4 dark:border-oai-gray-800">
+            <p className="text-sm font-medium">{copy("skills.shared.recovery_title")}</p>
+            <p className="text-xs text-oai-gray-500">{copy("skills.shared.recovery_hint")}</p>
+            {installedData.sharedRecovery.map(receipt => <div key={receipt.id} className="flex flex-wrap items-center justify-between gap-3">
+              <span className="text-sm">{receipt.directory}</span>
+              <Button size="sm" variant="secondary" disabled={Boolean(busyKey)} onClick={async () => {
+                if (operationInFlight.current) return;
+                operationInFlight.current = true; setBusyKey(`shared-recovery:${receipt.id}`); setError("");
+                try { await recoverSharedSkill(receipt.id); await loadInstalled(); }
+                catch (error) { setError(error.message); }
+                finally { operationInFlight.current = false; setBusyKey(""); }
+              }}>{copy("skills.shared.recover")}</Button>
+            </div>)}
+          </div> : null}
+
           {tab === "browse" ? (
             <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center">
               <SegmentedControl
@@ -1938,10 +1959,17 @@ export function SkillsPage() {
             onClose={handleCloseDetail}
             onToggleTarget={handleToggleTarget}
             onRemove={handleRemove}
+            onSharedManage={skill => setSharedChange(skill)}
           />
         </div>
       </main>
 
+      <ConfirmModal open={Boolean(sharedChange)} title={copy(sharedChange?.shared ? "skills.shared.handover" : "skills.shared.handback")} description={copy(sharedChange?.shared ? "skills.shared.confirm_over" : "skills.shared.confirm_back")} confirmLabel={copy(sharedChange?.shared ? "skills.shared.handover" : "skills.shared.handback")} cancelLabel={copy("shared.action.cancel")} busy={busyKey === "shared"} onCancel={() => setSharedChange(null)} onConfirm={async () => {
+        if (operationInFlight.current) return; operationInFlight.current = true; setBusyKey("shared");
+        try { if (sharedChange.shared) { const result = await handOverSharedSkills([sharedChange.directory]); const failed = result.results.find(item => !item.ok); if (failed) throw new Error(failed.error); } else await handBackSharedSkill(sharedChange.id); setSharedChange(null); await loadInstalled(); }
+        catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
+        finally { operationInFlight.current = false; setBusyKey(null); }
+      }} />
       <ConfirmModal
         open={Boolean(pendingRemove)}
         title={copy("skills.confirm.remove_title", {

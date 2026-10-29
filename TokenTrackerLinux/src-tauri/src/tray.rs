@@ -12,7 +12,7 @@ const QUIT_ID: &str = "quit";
 const TRAY_ID: &str = "tokentracker-tray";
 static PROVIDERS_PENDING: AtomicBool = AtomicBool::new(false);
 
-pub fn restore_pending_providers<R: Runtime>(window: &tauri::Webview<R>) {
+pub fn restore_pending_providers<R: Runtime>(window: &tauri::WebviewWindow<R>) {
     if PROVIDERS_PENDING.swap(false, Ordering::SeqCst) {
         let _ = window.eval("window.__aitoolProvidersPending=true;window.dispatchEvent(new Event('native:providers'))");
     }

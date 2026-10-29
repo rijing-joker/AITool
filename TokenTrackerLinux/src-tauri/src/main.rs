@@ -432,7 +432,7 @@ fn main() {
             .on_page_load(|window, payload| {
                 if payload.event() == tauri::webview::PageLoadEvent::Finished
                     && matches!(payload.url().host_str(), Some("127.0.0.1" | "localhost")) {
-                    tray::restore_pending_providers(window);
+                    tray::restore_pending_providers(&window);
                     if let Some(main) = window.app_handle().get_webview_window(window.label()) {
                         let visible = main.is_visible().unwrap_or(false) && !main.is_minimized().unwrap_or(false);
                         let _ = window.eval(&format!("window.dispatchEvent(new CustomEvent('native:visibility',{{detail:{{visible:{}}}}}))", visible));

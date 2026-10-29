@@ -310,7 +310,8 @@ function chatToMessages(body) {
     }));
   }
   const choice = body.tool_choice;
-  if (choice === "auto") request.tool_choice = { type: "auto" };
+  if (choice === "none") request.tool_choice = { type: "none" };
+  else if (choice === "auto") request.tool_choice = { type: "auto" };
   else if (choice === "required") request.tool_choice = { type: "any" };
   else if (choice?.function?.name) request.tool_choice = { type: "tool", name: choice.function.name };
   const effort = typeof body.reasoning_effort === "string" ? body.reasoning_effort.toLowerCase() : "";

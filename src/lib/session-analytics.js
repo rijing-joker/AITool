@@ -2300,7 +2300,7 @@ async function buildSessionAnalyticsInternal({ home = os.homedir(), force = fals
     ? previousMeta.files
     : {};
   const nextFiles = {};
-  const sessions = [];
+  let sessions = [];
   const resolveForkReplay = require("./codex-fork-replay").createForkReplayResolver(discovered.codex.flat());
   const entries = [
     ...discovered.claude.map((filePaths) => ({ source: "claude", filePath: filePaths, scan: scanClaudeSession })),
@@ -2352,6 +2352,7 @@ async function buildSessionAnalyticsInternal({ home = os.homedir(), force = fals
         const scanned = await entry.scan(entry.filePath);
         if (entry.source === "omp" && Number.isFinite(scanned?.skippedFiles)) {
           skippedFiles += scanned.skippedFiles;
+          if (scanned.skippedFiles > 0) incompleteOmpScan = true;
         }
         rows = Array.isArray(scanned) ? scanned.filter(Boolean) : (scanned ? [scanned] : []);
       } catch (error) {
@@ -2410,7 +2411,11 @@ async function buildSessionAnalyticsInternal({ home = os.homedir(), force = fals
   }
   if (incompleteOmpScan) {
     await writeAtomic(incompleteOmpPath, "1\n");
-    sessions.push(...readSidecar(sidecarPath).filter((row) => row.source === "omp" && row.version === SIDECAR_VERSION));
+    const complete = readSidecar(sidecarPath).filter((row) => row.source === "omp" && row.version === SIDECAR_VERSION);
+    // OMP deduplicates fork entries across the whole inventory. Mixing a
+    // partial scan with cached rows could count the same turn twice; retain
+    // the complete snapshot until every transcript can be read again.
+    if (complete.length) sessions = [...sessions.filter((row) => row.source !== "omp"), ...complete];
   }
   if (incompleteCodexScan) {
     await writeAtomic(incompleteCodexPath, "1\n");

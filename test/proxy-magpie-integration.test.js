@@ -157,6 +157,19 @@ test("WorkBuddy inference preserves system/developer content, streaming cache/re
   const raw = await (await fetch(`http://127.0.0.1:${proxy.address().port}`)).text(); assert.match(raw, /cached_tokens/); assert.match(raw, /reasoning_tokens/); assert.match(raw, /\[DONE\]/);
 });
 
+test("WorkBuddy Messages conversion preserves an explicit ban on tool calls", () => {
+  const body = {
+    model: "claude-opus-5.5",
+    messages: [{ role: "user", content: "Answer without using tools" }],
+    tools: [{ type: "function", function: { name: "echo", parameters: { type: "object" } } }],
+    tool_choice: "none",
+  };
+  const converted = buddy.chatToMessages(body);
+  assert.deepEqual(converted.tool_choice, { type: "none" });
+  assert.equal(converted.tools[0].name, "echo");
+  assert.equal(body.tool_choice, "none");
+});
+
 test("WorkBuddy Claude models use Messages with effort, fall back to chat, and WorkBuddy AI stays on chat", async t => {
   const { options } = await fixture(t);
   await state.write(path.join(options.root, "workbuddy-account.json"), { access: "synthetic-access", expires: Date.now() + 3600000, uid: "u" });

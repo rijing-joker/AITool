@@ -36,6 +36,12 @@ function isPlainObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+function mergeOfficialModel(prior, model) {
+  const merged = isPlainObject(prior) ? structuredClone(prior) : {};
+  for (const field of OFFICIAL_MODEL_FIELDS) delete merged[field];
+  return { ...merged, ...structuredClone(model) };
+}
+
 // The kimi home is KIMI_CODE_HOME when set; an explicit `home` option (as
 // passed by kimi-accounts and tests) is already the kimi home itself, never
 // re-suffixed; the default is ~/.kimi-code.
@@ -372,9 +378,7 @@ async function saveOauthLogin({ accountId, credentialPath, credential, baseUrl, 
     if (typeof prior.provider === "string" && prior.provider !== accountId) {
       throw new Error(`Kimi Code model key '${key}' belongs to another provider`);
     }
-    const merged = { ...prior };
-    for (const field of OFFICIAL_MODEL_FIELDS) delete merged[field];
-    mergedModels[key] = { ...merged, ...structuredClone(model) };
+    mergedModels[key] = mergeOfficialModel(prior, model);
   }
   const providers = after.providers;
   const provider = isPlainObject(providers[accountId]) ? { ...providers[accountId] } : {};
@@ -494,7 +498,7 @@ async function updateOauthModels(accountId, models, options = {}) {
   }
   for (const key of owned) delete next.models[key];
   for (const [key, model] of Object.entries(models)) {
-    next.models[key] = { ...structuredClone(model), provider: accountId };
+    next.models[key] = { ...mergeOfficialModel(before.models?.[key], model), provider: accountId };
   }
   if (typeof next.default_model !== "string" || !next.default_model) next.default_model = Object.keys(models)[0];
   await writeDocument(before, next, options);

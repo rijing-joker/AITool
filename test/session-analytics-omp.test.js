@@ -479,7 +479,62 @@ test("OMP malformed UTF-8 records do not abort sibling usage", async (t) => {
   assert.equal(row.total_tokens, 15);
 });
 
-test("OMP nested discovery permission errors degrade to the parent transcript", async (t) => {
+for (const seeded of [true, false]) test(`OMP partial reads retry unchanged transcripts after recovery (cached=${seeded})`, async (t) => {
+  const home = fixture(t);
+  writeSession(home, "good.jsonl", [
+    header(), assistant({ id: "aaaaaaaa", input: 100, output: 0, totalTokens: 100 }),
+  ]);
+  const bad = writeSession(home, "bad.jsonl", [
+    header({ id: "second-session" }), assistant({ id: "bbbbbbbb", input: 200, output: 0, totalTokens: 200 }),
+  ]);
+  const sidecar = resolveSessionSidecarPath(home);
+  const meta = `${sidecar}.meta.json`;
+  const marker = `${meta}.omp-incomplete`;
+  const total = rows => rows.filter(row => row.source === "omp").reduce((sum, row) => sum + row.total_tokens, 0);
+  if (seeded) assert.equal(total(await buildSessionAnalytics({ home, force: true })), 300);
+  const savedSidecar = seeded ? fs.readFileSync(sidecar, "utf8") : null;
+  const savedMeta = seeded ? fs.readFileSync(meta, "utf8") : null;
+  let denied = true;
+  let reads = 0;
+  const originalCreate = fs.createReadStream;
+  t.after(() => { fs.createReadStream = originalCreate; });
+  fs.createReadStream = function patched(target, ...args) {
+    if (String(target) === bad) {
+      reads += 1;
+      if (denied) {
+        const error = new Error("fixture permission denied");
+        error.code = "EACCES";
+        throw error;
+      }
+    }
+    return originalCreate.call(this, target, ...args);
+  };
+  const partial = await buildSessionAnalytics({ home, force: true });
+  assert.equal(total(partial), seeded ? 300 : 100);
+  assert.equal(partial.filter(row => row.source === "omp").length, seeded ? 2 : 1);
+  assert.equal(partial.skippedFiles, 1);
+  assert.equal(fs.existsSync(marker), true);
+  if (seeded) {
+    assert.equal(fs.readFileSync(sidecar, "utf8"), savedSidecar);
+    assert.equal(fs.readFileSync(meta, "utf8"), savedMeta);
+  } else {
+    assert.equal(fs.existsSync(sidecar), false);
+    assert.equal(fs.existsSync(meta), false);
+  }
+  denied = false;
+  reads = 0;
+  // No file stat changed; recovery must bypass even a still-valid cache TTL.
+  const recovered = await buildSessionAnalytics({ home, cacheTtlMs: 60 * 60_000 });
+  assert.equal(reads, 1);
+  assert.equal(total(recovered), 300);
+  assert.equal(recovered.filter(row => row.source === "omp").length, 2);
+  assert.equal(fs.existsSync(marker), false);
+  reads = 0;
+  assert.equal(total(await buildSessionAnalytics({ home, cacheTtlMs: 0 })), 300);
+  assert.equal(reads, 0, "a complete recovery can reuse the cache normally");
+});
+
+test("OMP nested discovery permission errors preserve the snapshot and retry", async (t) => {
   const home = fixture(t);
   writeSession(home, `2026-10-10T12-00-00_${SESSION_ID}.jsonl`, [
     header(),
@@ -513,9 +568,12 @@ test("OMP nested discovery permission errors degrade to the parent transcript", 
   };
 
   const second = await buildSessionAnalytics({ home, force: true, cacheTtlMs: 0 });
-  // The parent still updates; only the unreadable subagent directory is lost.
-  assert.equal(second.find((row) => row.source === "omp")?.total_tokens, 15);
+  assert.equal(second.find((row) => row.source === "omp")?.total_tokens, 20);
   assert.ok(second.skippedFiles >= 1, "the unreadable subagent directory is reported");
+  assert.equal(fs.existsSync(`${resolveSessionSidecarPath(home)}.meta.json.omp-incomplete`), true);
+  fs.readdirSync = originalReaddir;
+  const recovered = await buildSessionAnalytics({ home, cacheTtlMs: 60 * 60_000 });
+  assert.equal(recovered.find((row) => row.source === "omp")?.total_tokens, 20);
   assert.equal(fs.existsSync(`${resolveSessionSidecarPath(home)}.meta.json.omp-incomplete`), false);
 });
 

@@ -63,18 +63,22 @@ function owned(client, doc, ids = []) {
   return { models: rows.filter(row => ids.includes(row.id)), availableModels: Array.isArray(doc.availableModels) ? doc.availableModels.filter(id => ids.includes(id)) : null };
 }
 async function write(file, value) { await writeFileAtomic(file, typeof value === "string" ? value : `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 }); }
-function comparable(client, value) {
+function comparable(client, value, expected) {
   if (client === "zed" || !value) return value;
   // WorkBuddy rewrites models.json itself seconds after every start (local
-  // model gate) and may encrypt apiKey (WBEF1). Neither changes AiTool's
-  // models, so compare vendor rows without apiKey, disabled or reasoning
-  // (magpie 5e0d7c0); otherwise every restart reads as an external change.
-  const ignored = ["disabled", "reasoning", ...(client === "workbuddy" || client === "workbuddy-ai" ? ["apiKey"] : [])];
-  return { ...value, models: value.models.map(row => Object.fromEntries(
-    Object.entries(row).filter(([key]) => !ignored.includes(key)),
-  )) };
+  // model gate) and may encrypt apiKey (WBEF1). Only the native encrypted
+  // form can stand in for the receipt's key; plaintext edits/removals conflict.
+  const ignored = ["disabled", "reasoning"];
+  return { ...value, models: value.models.map(row => {
+    const result = Object.fromEntries(Object.entries(row).filter(([key]) => !ignored.includes(key)));
+    const prior = expected?.models?.find(item => item.id === row.id);
+    if ((client === "workbuddy" || client === "workbuddy-ai") &&
+      typeof row.apiKey === "string" && row.apiKey.startsWith("WBEF1") && row.apiKey.length > 5 &&
+      typeof prior?.apiKey === "string") result.apiKey = prior.apiKey;
+    return result;
+  }) };
 }
-function matches(client, doc, value, ids) { return value !== undefined && same(comparable(client, owned(client, doc, ids)), comparable(client, value)); }
+function matches(client, doc, value, ids) { return value !== undefined && same(comparable(client, owned(client, doc, ids), value), comparable(client, value)); }
 function recoverReceipt(client, doc, raw, receipt) {
   if (!receipt) return null;
   if (matches(client, doc, receipt.pending, receipt.pendingIds)) return { ...receipt, ids: receipt.pendingIds, applied: receipt.pending };
@@ -96,7 +100,7 @@ function projectBuddy(doc, values, catalog, receipt) {
   for (const row of current) {
     const expected = receipt?.applied?.models.find(item => item.id === row.id);
     // Native enable/reasoning choices survive; address/key changes conflict.
-    if (expected && !same(comparable("workbuddy", { models: [row] }), comparable("workbuddy", { models: [expected] }))) throw new Error("Desktop client configuration changed outside AiTool; restore or review it first");
+    if (expected && !same(comparable("workbuddy", { models: [row] }, { models: [expected] }), comparable("workbuddy", { models: [expected] }))) throw new Error("Desktop client configuration changed outside AiTool; restore or review it first");
   }
   for (const id of ids) if (rows.some(row => row.id === id && !previousIds.includes(row.id))) throw new Error(`A user model already uses this ID: ${id}`);
   const generated = catalog.map(model => {

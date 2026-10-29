@@ -27,7 +27,7 @@
 ### 4. OMP 会话面（P1）
 
 - `src/lib/omp-session.js`：从 TokenTracker `9cbe2fd5` 近原样移植，仅存元数据。
-- `src/lib/session-analytics.js`：`SIDECAR_VERSION = 29`；OMP 文件发现、签名、保留、清理与 `omp --resume` 恢复命令接线。OMP home 解析区分真实 HOME 与测试隔离 HOME（`OMP_HOME`）。
+- `src/lib/session-analytics.js`：`SIDECAR_VERSION = 29`；OMP 文件发现、签名、保留、清理与 `omp --resume` 恢复命令接线。OMP home 解析区分真实 HOME 与测试隔离 HOME（`OMP_HOME`）。部分文件读取失败也标记待重试：有完整快照时沿用整份 OMP 快照，避免与部分结果混合重复计数；无快照时返回可读结果但不提交缓存，权限恢复后即使文件签名和 TTL 未变也重新扫描。
 - Sessions 页：`sessions-api.ts`/`sessions-insights.js`/`SessionsPage.jsx` 增加 `omp` 来源与筛选；`test/session-analytics-omp.test.js` 14 项通过。
 - CLI 会话第 8 个只读来源：`session-sources.js` 的 `omp` roots（`PI_CODING_AGENT_SESSION_DIR`、`OMP_HOME`/`PI_CONFIG_DIR`、profiles）复用 Pi 树解析，支持 title slot、header title 与 `OMP_PROFILE`/`PI_PROFILE` 恢复命令；`test/upstream-session-sources.test.js` 19 项通过。
 - OMP provider-switch（第 12 个受管应用）未纳入本轮，见下文。
@@ -46,18 +46,20 @@
 
 `test/proxy-magpie-integration.test.js` 新增合成 SSE 用例：effort/thinking 透传、chat 回退、WorkBuddy AI 不旁路。**未做真实账号实测**：本机未安装 WorkBuddy 桌面端，旁路按社区插件 0.1.32 的证据实现，失败时始终回退，不会比现状更差。
 
+显式的 `tool_choice: "none"` 转换为 Messages 的 `{type: "none"}`，保留禁用工具调用的要求。
+
 ### 7. P2 小项
 
 | 项 | 结果 |
 | --- | --- |
 | Kimi 无订阅显示 | `provider-kimi-accounts.jsx` 在 `credentialStatus === "valid"` 且无 tiers 时显示“未订阅”；copy 六语言。 |
 | DeepSeek 余额语义 | `quota.js` 不再把 `is_available:false` 当 key 失效；负余额/0 仍有效，前端红字金额；`-0` 归一为 `0`。 |
-| Kimi 官方卡模型编辑 | 新增 `kimi.updateOauthModels`、账号 manager `models`/`updateModels`，以及 `GET/PUT /kimi/accounts/models`；用账号自己的 token 刷 `/models`，保存时只接受模型 key，连接与凭据保持不变；拒绝删除当前默认模型或仍被 secondary_model 引用的模型。 |
+| Kimi 官方卡模型编辑 | 新增 `kimi.updateOauthModels`、账号 manager `models`/`updateModels`，以及 `GET/PUT /kimi/accounts/models`；用账号自己的 token 刷 `/models`，保存时只接受模型 key，连接与凭据保持不变；同一别名沿用用户 overrides 和扩展字段，并按登录时的合并规则刷新目录字段；拒绝删除当前默认模型或仍被 secondary_model 引用的模型。 |
 | Kimi “从 Kimi 移除” | 新增 `kimi.restoreOauthAccount`、manager `removeFromKimi`/`restore`，`POST /kimi/accounts/detach|restore`；节点、模型和服务引用移出 config.toml，但卡片、凭据和 connection 快照留在本地 store，可加回。已移出的卡片还可直接“重新登录”：登录流程读取快照连接，成功后自动加回并清掉快照。仍存活的独立账号必须先移出才能删除；Kimi 默认登录仍只隐藏、不登出。UI 增加 Edit / Remove from Kimi / Add back 与已移出徽标。 |
 | Pi/omp `$NAME` 出站解析 | `provider-switch/api.js` 的 `resolvePiApiKey`：支持 `$NAME`/`${NAME}`/`$$`/`$!`，未设置或空值按空串发送，`!command` 永不执行；仅用于模型抓取。 |
 | Grok 分段池条 | **未实施**：AiTool 当前为文本 product_shares 行，两个正确性修复针对的分段 UI bug 不存在；升级需一次取 TokenTracker 五提交最终态并决策 Cursor Sand 去重，属产品决策，留待单独立项。 |
 | 展开组焦点环 | `UsageLimitsPanel.jsx` 非 header `ToolGroup` 增加 `focus-visible:ring-2 ring-oai-brand-500`。 |
-| WorkBuddy 自写 models.json 误报 | `proxy/desktop-clients.js` 的投影比较忽略 `apiKey`（WorkBuddy 会写 WBEF1 加密值），与既有 disabled/reasoning 同等处理；新增回归测试。 |
+| WorkBuddy 自写 models.json 误报 | `proxy/desktop-clients.js` 的投影比较仅容忍 `apiKey` 的 WBEF1 原生加密改写，并忽略既有 disabled/reasoning；明文密钥修改或删除仍报告冲突，重连与恢复保留配置和恢复记录；新增回归测试。 |
 | Magpie 检查项 | `c8901d4`（auto 分类器未知档位 no reasoning）、`ef1a203`（agy 429 按 reset 播眠）、`a60493a`（Codex-in-Claude-Code 归属）均属 Magpie gateway 的本地分类器/账号路由/归属层；AiTool 无等价模块（usage 来源为 CLIProxyAPI 与本地会话解析），无代码可移植。 |
 | agy 子代理模型恢复 | 现有 field 19 join 与 `dbReadOk=false` 下轮重试逻辑正确；新增回归：库缺失时先按 estimated 导入，库出现后无 transcript 变更也能恢复 `gemini-3.8-flash` 与精确 token。 |
 | 预设 lineup | Claude Zen Haiku 4.5→5.5；MoArk Claude/Codex/OpenCode/OpenClaw/Pi 全部换到 `deepseek-v4.1-flash`、`DeepSeek-V4-Pro-0813`、GLM-5.3/Flash、Kimi K3.1 Pro、Qwen3.8 Max/Flash 等上游当前目录；Codex MoArk 补 GLM-5.3-Flash、移除已下架 qwen3-coder-plus；OpenCode/OpenClaw/Pi Kimi 补 K2.7 Code HighSpeed 与 K2.6。 |

@@ -105,6 +105,36 @@ test("kimi engine: official nodes are protected from provider CRUD and removable
   assert.equal(kimi.officialProviderName("Kimi Subscription Ada", null), "Kimi Official · Ada");
 });
 
+test("kimi engine: official model selection preserves overrides and refreshes catalog fields", async () => {
+  const accountId = kimi.OFFICIAL_PROVIDER_ID;
+  const overrides = { capabilities: ["custom_cap"], thinking: { type: "disabled" } };
+  const original = {
+    providers: { [accountId]: { type: "kimi", base_url: "https://api.kimi.com/coding/v1", oauth: { key: "oauth/kimi-code" } } },
+    models: {
+      "kimi-code/k3": { provider: accountId, model: "k3", max_context_size: 262144, capabilities: ["old_cap"], beta_api: "old", overrides, custom_field: "user-value" },
+      "kimi-code/k4": { provider: accountId, model: "k4", max_context_size: 131072 },
+      "relay/model": { provider: "relay", model: "model", max_context_size: 8192 },
+    },
+    default_model: "kimi-code/k3",
+  };
+  await writeConfig(original);
+  const catalog = { "kimi-code/k3": { model: "k3", max_context_size: 131072, capabilities: ["tool_use"] } };
+  await kimi.updateOauthModels(accountId, catalog);
+  let doc = JSON.parse(JSON.stringify(await kimi.readDocument()));
+  assert.deepEqual(doc.models["kimi-code/k3"], {
+    ...catalog["kimi-code/k3"], provider: accountId, overrides, custom_field: "user-value",
+  });
+  assert.equal(doc.models["kimi-code/k4"], undefined);
+  assert.deepEqual(doc.models["relay/model"], original.models["relay/model"]);
+  assert.deepEqual(doc.providers, original.providers);
+  assert.equal(doc.default_model, original.default_model);
+  // Saving the same selection again must also preserve the user's overrides.
+  await kimi.updateOauthModels(accountId, catalog);
+  doc = JSON.parse(JSON.stringify(await kimi.readDocument()));
+  assert.deepEqual(doc.models["kimi-code/k3"].overrides, overrides);
+  assert.equal(doc.models["kimi-code/k3"].custom_field, "user-value");
+});
+
 test("kimi engine: saveOauthLogin merges the catalog, keeps user fields, adds services and rolls back on credential failure", async () => {
   await writeConfig({
     providers: { "managed:kimi-code": { type: "kimi", base_url: "https://api.kimi.com/coding/v1", api_key: "", oauth: { key: "oauth/kimi-code" }, custom_headers: { x: "1" } } },

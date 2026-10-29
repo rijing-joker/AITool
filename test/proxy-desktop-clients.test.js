@@ -96,17 +96,35 @@ test("edited managed addresses block reconnect and restore; status reports drift
   assert.equal((await clients.status(options)).find(row => row.client === "workbuddy").configured, false);
 });
 
-test("WorkBuddy's own models.json save after start is not external drift (magpie 5e0d7c0)", async t => {
-  const { options, files } = await fixture(t, "workbuddy");
-  await clients.connect("workbuddy", values, options);
+for (const client of ["workbuddy", "workbuddy-ai"]) test(`${client} protects externally edited plaintext keys through status, reconnect and restore`, async t => {
+  const { options, files } = await fixture(t, client);
+  await clients.connect(client, values, options);
+  const receipt = await fs.readFile(files.state, "utf8");
+  const doc = JSON.parse(await fs.readFile(files.target));
+  for (const apiKey of ["user-edited-key", "", null, undefined]) {
+    doc[0].apiKey = apiKey;
+    const raw = JSON.stringify(doc);
+    await fs.writeFile(files.target, raw);
+    assert.equal((await clients.status(options)).find(row => row.client === client).configured, false);
+    await assert.rejects(clients.connect(client, values, options), /changed/);
+    await assert.rejects(clients.restore(client, options), /changed/);
+    assert.equal(await fs.readFile(files.target, "utf8"), raw);
+    assert.equal(await fs.readFile(files.state, "utf8"), receipt);
+  }
+});
+
+for (const client of ["workbuddy", "workbuddy-ai"]) test(`${client}'s own models.json save after start is not external drift (magpie 5e0d7c0)`, async t => {
+  const { options, files } = await fixture(t, client);
+  await clients.connect(client, values, options);
   const doc = JSON.parse(await fs.readFile(files.target));
   // WorkBuddy rewrites the file itself and may encrypt apiKey (WBEF1) without
   // a trailing newline; the connected row must stay configured.
   doc[0].apiKey = "WBEF1:fixture-encrypted";
   await fs.writeFile(files.target, JSON.stringify(doc, null, 2));
-  assert.equal((await clients.status(options)).find(row => row.client === "workbuddy").configured, true);
-  await clients.connect("workbuddy", values, options);
-  await clients.restore("workbuddy", options);
+  assert.equal((await clients.status(options)).find(row => row.client === client).configured, true);
+  await clients.connect(client, { ...values, apiKey: "fixture-rotated-key" }, options);
+  assert.equal(JSON.parse(await fs.readFile(files.target))[0].apiKey, "fixture-rotated-key");
+  await clients.restore(client, options);
   await assert.rejects(fs.stat(files.target), { code: "ENOENT" });
 });
 

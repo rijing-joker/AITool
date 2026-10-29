@@ -435,7 +435,7 @@ fn main() {
                     tray::restore_pending_providers(&window);
                     if let Some(main) = window.app_handle().get_webview_window(window.label()) {
                         let visible = main.is_visible().unwrap_or(false) && !main.is_minimized().unwrap_or(false);
-                        let _ = window.eval(&format!("window.dispatchEvent(new CustomEvent('native:visibility',{{detail:{{visible:{}}}}}))", visible));
+                        let _ = window.eval(format!("window.dispatchEvent(new CustomEvent('native:visibility',{{detail:{{visible:{}}}}}))", visible));
                     }
                 }
             })
@@ -475,7 +475,7 @@ fn main() {
             if let WindowEvent::Resized(_) | WindowEvent::Focused(_) = event {
                 let visible = window.is_visible().unwrap_or(false) && !window.is_minimized().unwrap_or(false);
                 if let Some(webview) = window.app_handle().get_webview_window(window.label()) {
-                    let _ = webview.eval(&format!("window.dispatchEvent(new CustomEvent('native:visibility',{{detail:{{visible:{}}}}}))", visible));
+                    let _ = webview.eval(format!("window.dispatchEvent(new CustomEvent('native:visibility',{{detail:{{visible:{}}}}}))", visible));
                 }
             }
             if let WindowEvent::CloseRequested { api, .. } = event {

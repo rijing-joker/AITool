@@ -70,7 +70,17 @@ setTimeout(()=>process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result
   for (let i = 0; i < 30 && hub.activeConnections(); i++) await new Promise(resolve => setTimeout(resolve, 25));
   assert.equal(hub.activeConnections(), 0);
   const pids = (await fs.readFile(starts, "utf8")).trim().split("\n").map(Number); assert.equal(pids.length, 2);
-  for (const pid of pids) assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+  // Pruning removes the pool entry before asynchronous shutdown completes.
+  // Keep checking actual process exit so the test still detects child leaks.
+  for (const pid of pids) {
+    const deadline = Date.now() + 3000;
+    while (Date.now() < deadline) {
+      try { process.kill(pid, 0); }
+      catch (error) { if (error.code === "ESRCH") break; throw error; }
+      await new Promise(resolve => setTimeout(resolve, 25));
+    }
+    assert.throws(() => process.kill(pid, 0), { code: "ESRCH" });
+  }
 });
 
 test("Hub real HTTP negotiates a session, handles SSE tool responses and deletes the session on close", async t => {

@@ -185,10 +185,10 @@ const BALANCE_PROVIDERS = [
 
 // JSON number or numeric string (upstream parse_f64_field).
 function balanceNumber(value) {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "number" && Number.isFinite(value)) return value === 0 ? 0 : value;
   if (typeof value === "string" && value.trim()) {
     const parsed = Number(value);
-    if (Number.isFinite(parsed)) return parsed;
+    if (Number.isFinite(parsed)) return parsed === 0 ? 0 : parsed;
   }
   return null;
 }
@@ -220,14 +220,17 @@ function detectBalanceProvider(baseUrl) {
 function parseBalanceBody(entry, body) {
   if (entry.id === "deepseek") {
     const infos = Array.isArray(body?.balance_infos) ? body.balance_infos : [];
+    // `is_available` only says whether the balance covers calls; an expired
+    // key is 401/403 above. Zero or negative balances stay valid and render
+    // as a red amount instead of "Account unavailable" (cc-switch b9f317a).
     const lines = infos.map((info) => ({
       label: entry.label,
       remaining: balanceNumber(info?.total_balance) ?? 0,
       total: null,
       used: null,
       unit: String(info?.currency ?? entry.unit),
-      isValid: body?.is_available !== false,
-      invalidMessage: body?.is_available === false ? "Account unavailable" : null,
+      isValid: true,
+      invalidMessage: null,
     }));
     return lines.length > 0 ? lines : null;
   }

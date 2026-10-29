@@ -95,10 +95,10 @@ function formatCreditAmount(
   }).format(n);
 }
 
-function buildQuotaDetail(window) {
+function buildQuotaDetail(window, maximumFractionDigits) {
   if (!window || typeof window !== "object") return null;
   if (!(Number(window.limit_credits) > 0)) return null;
-  const formatOptions = { useGrouping: window.unit !== "calls" };
+  const formatOptions = { useGrouping: window.unit !== "calls", maximumFractionDigits };
   const used = formatCreditAmount(window.used_credits, formatOptions);
   const limit = formatCreditAmount(window.limit_credits, formatOptions);
   const remaining = formatCreditAmount(window.remaining_credits, formatOptions);
@@ -144,7 +144,7 @@ function buildWindowHoverDetail(spec, pace, mode) {
   if (exact) {
     lines.push(copy(spec.timeKind === "expiry" ? "limits.hover.expires_at" : "limits.hover.resets_at", { time: exact }));
   }
-  const quota = buildQuotaDetail(spec.window);
+  const quota = buildQuotaDetail(spec.window, spec.creditPrecision);
   if (quota) lines.push(quota);
   return lines.join("\n");
 }
@@ -252,6 +252,9 @@ function LimitDetail({ rows, mode, now = Date.now() }) {
                 {" · "}
                 {copy(spec.timeKind === "expiry" ? "limits.hover.expires_at" : "limits.hover.resets_at", { time: exact })}
               </span>
+            ) : null}
+            {spec.showCreditDetail ? (
+              <div>{buildQuotaDetail(spec.window, spec.creditPrecision)}</div>
             ) : null}
           </div>
         );
@@ -384,7 +387,9 @@ function ToolGroup({ name, providerId, children, expandable = false, expanded = 
           onToggle?.();
         }
       }}
-      className="flex flex-col gap-1.5 -mx-1.5 px-1.5 py-1 rounded-lg cursor-pointer transition-colors hover:bg-oai-gray-50 dark:hover:bg-oai-gray-800/40 aria-expanded:bg-oai-gray-50 dark:aria-expanded:bg-oai-gray-800/40"
+      // Expanding reveals detail (e.g. Grok's per-product slices), so keyboard
+      // focus needs the same visible ring as the card's other toggles.
+      className="flex flex-col gap-1.5 -mx-1.5 px-1.5 py-1 rounded-lg cursor-pointer transition-colors hover:bg-oai-gray-50 dark:hover:bg-oai-gray-800/40 aria-expanded:bg-oai-gray-50 dark:aria-expanded:bg-oai-gray-800/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-oai-brand-500"
     >
       {header}
       {children}
@@ -1181,8 +1186,8 @@ function useWidestLabelWidth(containerRef) {
   return labelWidth;
 }
 
-export function UsageLimitsPanel({ claude, codex, cursor, gemini, kimi, kiro, grok, antigravity, copilot, zcode, opencodeGo, commandCode, qoder, qoderCn, codingPlan, agentPlan, devin, order, visibility, displayMode, subscriptions = [], showSubscriptions = true }) {
-  const dataById = { claude, codex, cursor, gemini, kimi, kiro, grok, antigravity, copilot, zcode, opencodeGo, commandCode, qoder, qoderCn, codingPlan, agentPlan, devin };
+export function UsageLimitsPanel({ claude, codex, cursor, gemini, kimi, kiro, grok, antigravity, copilot, zcode, opencodeGo, commandCode, qoder, qoderCn, codingPlan, agentPlan, devin, workbuddy, order, visibility, displayMode, subscriptions = [], showSubscriptions = true }) {
+  const dataById = { claude, codex, cursor, gemini, kimi, kiro, grok, antigravity, copilot, zcode, opencodeGo, commandCode, qoder, qoderCn, codingPlan, agentPlan, devin, workbuddy };
   const containerRef = useRef(null);
   const labelWidth = useWidestLabelWidth(containerRef);
   const [expandedId, setExpandedId] = useState(null);

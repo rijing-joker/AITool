@@ -165,7 +165,7 @@ const CLAUDE_COMMANDCODE = {
 };
 
 // MoArk (模力方舟) aggregator — cc-switch d4a2410. Claude Code rides the
-// Anthropic-native entry; all four role slots pin deepseek-v4-flash-0731.
+// Anthropic-native entry; all four role slots pin deepseek-v4.1-flash.
 const CLAUDE_MOARK = {
   id: "claude_moark",
   name: "MoArk",
@@ -178,10 +178,10 @@ const CLAUDE_MOARK = {
     env: {
       ANTHROPIC_BASE_URL: "https://moark.com/anthropic",
       ANTHROPIC_AUTH_TOKEN: "",
-      ANTHROPIC_MODEL: "deepseek-v4-flash-0731",
-      ANTHROPIC_DEFAULT_HAIKU_MODEL: "deepseek-v4-flash-0731",
-      ANTHROPIC_DEFAULT_SONNET_MODEL: "deepseek-v4-flash-0731",
-      ANTHROPIC_DEFAULT_OPUS_MODEL: "deepseek-v4-flash-0731",
+      ANTHROPIC_MODEL: "deepseek-v4.1-flash",
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: "deepseek-v4.1-flash",
+      ANTHROPIC_DEFAULT_SONNET_MODEL: "deepseek-v4.1-flash",
+      ANTHROPIC_DEFAULT_OPUS_MODEL: "deepseek-v4.1-flash",
     },
   },
   formFields: [
@@ -211,7 +211,7 @@ const CLAUDE_ZEN = {
       ANTHROPIC_BASE_URL: "https://opencode.ai/zen",
       ANTHROPIC_API_KEY: "",
       ANTHROPIC_MODEL: "claude-sonnet-5-5",
-      ANTHROPIC_DEFAULT_HAIKU_MODEL: "claude-haiku-4-5",
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: "claude-haiku-5-5",
       ANTHROPIC_DEFAULT_SONNET_MODEL: "claude-sonnet-5-5",
       ANTHROPIC_DEFAULT_OPUS_MODEL: "claude-opus-5-5",
     },
@@ -341,17 +341,17 @@ const CODEX_MOARK = {
   endpointCandidates: ["https://moark.com/v1"],
   meta: {
     codexCatalogModels: [
-      { model: "deepseek-v4-flash-0731", displayName: "DeepSeek V4 Flash", contextWindow: "1000000", inputModalities: ["text"], reasoningLevels: ["low", "high", "max"], defaultReasoningLevel: "high" },
-      { model: "DeepSeek-V4-Pro", displayName: "DeepSeek V4 Pro", contextWindow: "1000000", inputModalities: ["text"], reasoningLevels: ["low", "medium", "high", "xhigh", "max"], defaultReasoningLevel: "high" },
+      { model: "deepseek-v4.1-flash", displayName: "DeepSeek V4.1 Flash", contextWindow: "1000000", inputModalities: ["text"], reasoningLevels: ["low", "high", "max"], defaultReasoningLevel: "high" },
+      { model: "DeepSeek-V4-Pro-0813", displayName: "DeepSeek V4 Pro 0813", contextWindow: "1000000", inputModalities: ["text"], reasoningLevels: ["low", "medium", "high", "xhigh", "max"], defaultReasoningLevel: "high" },
       { model: "GLM-5.3", displayName: "GLM-5.3", contextWindow: "1048576", inputModalities: ["text"], reasoningLevels: ["none", "low", "medium", "high", "xhigh", "max"], defaultReasoningLevel: "high" },
+      { model: "GLM-5.3-Flash", displayName: "GLM-5.3 Flash", contextWindow: "1000000", inputModalities: ["text", "image"], reasoningLevels: ["low", "high", "max"], defaultReasoningLevel: "high" },
       { model: "Kimi-K2.7-Code", displayName: "Kimi K2.7 Code", contextWindow: "262144", inputModalities: ["text", "image"], reasoningLevels: ["none", "minimal", "low", "medium", "high", "xhigh"], defaultReasoningLevel: "high" },
-      { model: "qwen3-coder-plus", displayName: "Qwen3 Coder Plus", contextWindow: "1000000", inputModalities: ["text"], reasoningLevels: ["none"], defaultReasoningLevel: "none" },
     ],
   },
   settingsConfig: {
     auth: { OPENAI_API_KEY: "" },
     config: {
-      model: "deepseek-v4-flash-0731",
+      model: "deepseek-v4.1-flash",
       model_provider: "custom",
       model_reasoning_effort: "high",
       model_providers: {
@@ -381,7 +381,7 @@ const CODEX_MOARK = {
       id: "model",
       path: "config.model",
       labelKey: "pswitch.field.default_model",
-      placeholder: "deepseek-v4-flash-0731",
+      placeholder: "deepseek-v4.1-flash",
       hintKey: "pswitch.field.default_model_hint",
     },
   ],
@@ -524,6 +524,8 @@ const OPENCODE_KIMI = {
       models: {
         "kimi-k2.7-code": { name: "Kimi K2.7 Code" },
         "kimi-k3": { name: "Kimi K3" },
+        "kimi-k2.7-code-highspeed": { name: "Kimi K2.7 Code HighSpeed", limit: { context: 262144, output: 262144 } },
+        "kimi-k2.6": { name: "Kimi K2.6", limit: { context: 262144, output: 262144 } },
       },
     },
   },
@@ -605,7 +607,7 @@ const OPENCODE_MOARK = {
   endpointCandidates: ["https://api.moark.com/v1"],
   settingsConfig: {
     slotKey: "moark",
-    modelId: "moark/deepseek-v4-flash-0731",
+    modelId: "moark/deepseek-v4.1-flash",
     provider: {
       npm: "@ai-sdk/openai-compatible",
       name: "MoArk",
@@ -614,11 +616,12 @@ const OPENCODE_MOARK = {
         apiKey: "",
       },
       models: {
-        "deepseek-v4-flash-0731": { name: "DeepSeek V4 Flash", reasoning: true, limit: { context: 1000000, output: 384000 } },
-        "DeepSeek-V4-Pro": { name: "DeepSeek V4 Pro", reasoning: true, limit: { context: 1000000, output: 384000 } },
+        "deepseek-v4.1-flash": { name: "DeepSeek V4.1 Flash", reasoning: true, limit: { context: 1000000, output: 384000 } },
+        "DeepSeek-V4-Pro-0813": { name: "DeepSeek V4 Pro", reasoning: true, limit: { context: 1000000, output: 384000 } },
         "GLM-5.3": { name: "GLM-5.3", reasoning: true, limit: { context: 1048576, output: 131072 } },
-        "Kimi-K2.7-Code": { name: "Kimi K2.7 Code", reasoning: true, limit: { context: 262144, output: 262144 } },
-        "qwen3-coder-plus": { name: "Qwen3 Coder Plus", limit: { context: 1000000, output: 65536 } },
+        "GLM-5.3-Flash": { name: "GLM-5.3-Flash", reasoning: true, limit: { context: 1000000, output: 128000 } },
+        "kimi-k3.1-pro": { name: "Kimi K3.1 Pro", reasoning: true, limit: { context: 1048576, output: 131072 } },
+        "qwen3.8-max": { name: "Qwen3.8 Max", reasoning: true, limit: { context: 1000000, output: 65536 } },
       },
     },
   },
@@ -676,6 +679,8 @@ const OPENCLAW_KIMI = {
       models: [
         { id: "kimi-k2.7-code", name: "Kimi K2.7 Code", contextWindow: 262144 },
         { id: "kimi-k3", name: "Kimi K3", contextWindow: 1048576 },
+        { id: "kimi-k2.7-code-highspeed", name: "Kimi K2.7 Code HighSpeed", contextWindow: 262144, maxTokens: 262144 },
+        { id: "kimi-k2.6", name: "Kimi K2.6", contextWindow: 262144 },
       ],
     },
   },
@@ -722,17 +727,22 @@ const OPENCLAW_MOARK = {
   endpointCandidates: ["https://api.moark.com/v1"],
   settingsConfig: {
     slotKey: "moark",
-    modelId: "moark/deepseek-v4-flash-0731",
+    modelId: "moark/deepseek-v4.1-flash",
     provider: {
       baseUrl: "https://api.moark.com/v1",
       apiKey: "",
       api: "openai-completions",
       models: [
-        { id: "deepseek-v4-flash-0731", name: "DeepSeek V4 Flash", reasoning: true, contextWindow: 1000000, maxTokens: 384000 },
-        { id: "DeepSeek-V4-Pro", name: "DeepSeek V4 Pro", reasoning: true, contextWindow: 1000000, maxTokens: 384000 },
+        { id: "deepseek-v4.1-flash", name: "DeepSeek V4.1 Flash", reasoning: true, contextWindow: 1000000, maxTokens: 384000 },
+        { id: "DeepSeek-V4-Pro-0813", name: "DeepSeek V4 Pro 0813", reasoning: true, contextWindow: 1000000, maxTokens: 384000 },
         { id: "GLM-5.3", name: "GLM-5.3", reasoning: true, contextWindow: 1048576, maxTokens: 131072 },
-        { id: "Kimi-K2.7-Code", name: "Kimi K2.7 Code", reasoning: true, contextWindow: 262144, maxTokens: 262144 },
-        { id: "qwen3-coder-plus", name: "Qwen3 Coder Plus", contextWindow: 1000000, maxTokens: 65536 },
+        { id: "kimi-k3.1-pro", name: "Kimi K3.1 Pro", reasoning: true, input: ["text", "image"], contextWindow: 1048576, maxTokens: 131072 },
+        { id: "Kimi-K2.7-Code", name: "Kimi K2.7 Code", reasoning: true, input: ["text", "image"], contextWindow: 262144, maxTokens: 262144 },
+        { id: "qwen3.8-max", name: "Qwen3.8 Max", reasoning: true, contextWindow: 1000000, maxTokens: 65536 },
+        { id: "GLM-5.3-Flash", name: "GLM-5.3-Flash", reasoning: true, input: ["text", "image"], contextWindow: 1000000, maxTokens: 128000 },
+        { id: "MiniMax-M3", name: "MiniMax-M3", reasoning: true, input: ["text", "image"], contextWindow: 1000000 },
+        { id: "qwen3.8-flash", name: "Qwen3.8 Flash", reasoning: true, contextWindow: 1000000 },
+        { id: "Step-3.7-Flash", name: "Step 3.7 Flash", reasoning: true, input: ["text", "image"], contextWindow: 256000 },
       ],
     },
   },
@@ -987,6 +997,8 @@ const PI_KIMI = {
       models: [
         { id: "kimi-k2.7-code", name: "Kimi K2.7 Code" },
         { id: "kimi-k3", name: "Kimi K3", reasoning: true },
+        { id: "kimi-k2.7-code-highspeed", name: "Kimi K2.7 Code HighSpeed" },
+        { id: "kimi-k2.6", name: "Kimi K2.6" },
       ],
     },
   },
@@ -1052,18 +1064,22 @@ const PI_MOARK = {
   endpointCandidates: ["https://api.moark.com/v1"],
   settingsConfig: {
     slotKey: "moark",
-    modelId: "deepseek-v4-flash-0731",
+    modelId: "deepseek-v4.1-flash",
     provider: {
       name: "MoArk",
       baseUrl: "https://api.moark.com/v1",
       api: "openai-completions",
       apiKey: "",
       models: [
-        { id: "deepseek-v4-flash-0731", name: "DeepSeek V4 Flash", reasoning: true },
-        { id: "DeepSeek-V4-Pro", name: "DeepSeek V4 Pro", reasoning: true },
-        { id: "GLM-5.3", name: "GLM-5.3", reasoning: true },
-        { id: "Kimi-K2.7-Code", name: "Kimi K2.7 Code", reasoning: true },
-        { id: "qwen3-coder-plus", name: "Qwen3 Coder Plus" },
+        { id: "deepseek-v4.1-flash", name: "DeepSeek V4.1 Flash" },
+        { id: "DeepSeek-V4-Pro-0813", name: "DeepSeek V4 Pro 0813" },
+        { id: "GLM-5.3", name: "GLM-5.3" },
+        { id: "GLM-5.3-Flash", name: "GLM-5.3 Flash" },
+        { id: "kimi-k3.1-pro", name: "Kimi K3.1 Pro" },
+        { id: "qwen3.8-max", name: "Qwen3.8 Max" },
+        { id: "qwen3.8-flash", name: "Qwen3.8 Flash" },
+        { id: "MiniMax-M3", name: "MiniMax M3" },
+        { id: "Step-3.7-Flash", name: "Step 3.7 Flash" },
       ],
     },
   },

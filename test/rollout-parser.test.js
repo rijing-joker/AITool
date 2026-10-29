@@ -13145,6 +13145,68 @@ test("parseAntigravityIncremental preserves exact totals while SQLite is unavail
   }
 });
 
+test("parseAntigravityIncremental recovers a subagent model when the native database appears on the next sync", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-antigravity-subagent-model-"));
+  try {
+    const proto = buildAntigravityTestProto({
+      model: "gemini-3.8-flash",
+      lastStepIndex: 0,
+      uncachedInput: 1000,
+      cachedInput: 2000,
+      outputTokens: 200,
+      textOutput: 150,
+      reasoningOutput: 50,
+    });
+    const { transcriptPath, dbPath, queuePath } = await setupAntigravitySqliteSession(tmp, {
+      protos: [proto],
+      lines: antigravityPlannerLines([
+        {
+          userStep: 0,
+          userAt: "2026-04-05T14:00:00.000Z",
+          userContent: "hello",
+          plannerStep: 1,
+          plannerAt: "2026-04-05T14:01:00.000Z",
+          plannerContent: "response",
+          thinking: "reasoning",
+        },
+      ]),
+    });
+    const cursors = { version: 1, files: {}, updatedAt: null };
+
+    // Subagent/ACP transcripts carry no model field or Model Selection event,
+    // and the native database is momentarily missing. Tokens still import.
+    await fs.rm(dbPath);
+    await parseAntigravityIncremental({ sessionFiles: [transcriptPath], cursors, queuePath });
+    const firstQueued = await readJsonLines(queuePath);
+    assert.equal(firstQueued.at(-1).model, "antigravity-unknown");
+    assert.equal(cursors.files[transcriptPath].dbReadOk, false);
+
+    // The database becomes readable without any transcript change; the next
+    // sync recovers both the native model and its exact token accounting.
+    sqliteCli.execFileSync("sqlite3", [
+      dbPath,
+      `CREATE TABLE gen_metadata (idx INTEGER PRIMARY KEY, data BLOB);INSERT INTO gen_metadata (idx, data) VALUES (0, X'${proto.toString("hex")}');`,
+    ]);
+    const futureDate = new Date(Date.now() + 2000);
+    await fs.utimes(dbPath, futureDate, futureDate);
+    const direct = readAntigravityConversationDb(dbPath);
+    assert.equal(direct?.size, 1, "the recreated database exposes one generation");
+
+    const second = await parseAntigravityIncremental({
+      sessionFiles: [transcriptPath],
+      cursors,
+      queuePath,
+    });
+    assert.ok(second.bucketsQueued >= 1, "the recovered metadata is reconciled");
+    const latest = (await readJsonLines(queuePath)).at(-1);
+    assert.equal(latest.model, "gemini-3.8-flash");
+    assert.equal(latest.cached_input_tokens, 2000);
+    assert.equal(cursors.files[transcriptPath].dbReadOk, true);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
+});
+
 test("parseAntigravityIncremental ignores SQLite -shm read-mark changes", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "tt-antigravity-shm-"));
   try {

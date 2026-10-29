@@ -468,6 +468,13 @@ function claudeSessionIdFromPath(filePath) {
   return path.basename(filePath).replace(/\.jsonl$/, "") || null;
 }
 
+function isInjectedClaudeText(text) {
+  return text.includes("<local-command-caveat>")
+    || text.startsWith("<local-command-stdout>")
+    || text.startsWith("<local-command-stderr>")
+    || text.startsWith("<task-notification>");
+}
+
 async function claudeParseSession(filePath) {
   if (isClaudeAgentSession(path.basename(filePath))) return null;
   let headTail;
@@ -496,7 +503,7 @@ async function claudeParseSession(filePath) {
       const isUser = value.type === "user" || value?.message?.role === "user";
       if (isUser && value.message) {
         const text = extractText(value.message.content).trim();
-        if (text !== "" && !text.includes("<local-command-caveat>") && !text.startsWith("<command-name>")) {
+        if (text !== "" && !text.startsWith("<command-name>") && !isInjectedClaudeText(text)) {
           firstUserMessage = text;
         }
       }
@@ -511,8 +518,9 @@ async function claudeParseSession(filePath) {
       customTitle = value.customTitle.trim();
     }
     if (summary === null && value?.isMeta !== true && value.message) {
-      const text = extractText(value.message.content);
-      if (text.trim() !== "") summary = text;
+      const text = extractText(value.message.content).trim();
+      // A local command run last, such as `/model`, ends the file with its command and output.
+      if (text !== "" && !text.startsWith("<command-name>") && !isInjectedClaudeText(text)) summary = text;
     }
   }
 

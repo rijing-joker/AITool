@@ -8,24 +8,32 @@ import { useLatestRequestGuard } from "./use-latest-request-guard";
 import {
   isDevinProviderSelected,
   isLimitsPrefsStorageKey,
+  isWorkbuddyProviderSelected,
   LIMITS_PREFS_CHANGED_EVENT,
 } from "./use-limits-display-prefs.js";
 
 /**
- * Devin rows must never outlive the user's provider selection: when the
- * switch is off the server is not asked, and any retained/preloaded payload
- * that still carries Devin data is rewritten to the not-configured shape.
+ * Opt-in rows must never outlive the user's provider selection: when a switch
+ * is off the server is not asked, and any retained/preloaded payload that still
+ * carries that provider's data is rewritten to the not-configured shape.
  */
-function withoutUnselectedDevin(
+function withoutUnselectedOptIns(
   value: UsageLimitsData | null,
   devinSelected: boolean,
+  workbuddySelected: boolean,
 ): UsageLimitsData | null {
-  if (!value || devinSelected) return value;
-  if (!value.devin) return value;
-  // Preserve identity only for the exact empty sentinel, never a disabled
-  // payload that still carries quota windows or provider metadata.
-  if (value.devin.configured === false && Object.keys(value.devin).length === 1) return value;
-  return { ...value, devin: { configured: false } };
+  if (!value) return value;
+  let next = value;
+  const disabledShape = (key: "devin" | "workbuddy") => {
+    const row = next[key];
+    // Preserve identity only for the exact empty sentinel, never a disabled
+    // payload that still carries quota windows or provider metadata.
+    if (!row || (row.configured === false && Object.keys(row).length === 1)) return;
+    next = { ...next, [key]: { configured: false } };
+  };
+  if (!devinSelected) disabledShape("devin");
+  if (!workbuddySelected) disabledShape("workbuddy");
+  return next;
 }
 
 type CodexLimitWindow = {
@@ -127,6 +135,13 @@ interface UsageLimitsData {
     stale?: boolean;
     cached_at?: string | null;
   };
+  workbuddy: {
+    configured: boolean;
+    error?: string | null;
+    plan_label?: string | null;
+    primary_window?: { used_percent: number; reset_at?: string | null; limit_credits?: number | null; used_credits?: number | null; remaining_credits?: number | null } | null;
+    package_code?: string | null;
+  };
 }
 
 interface UsageLimitsInitialState {
@@ -148,11 +163,13 @@ export function useUsageLimits(options?: UseUsageLimitsOptions) {
   // Kept in state so a toggle invalidates in-flight work via the
   // latest-request guard below and re-renders with the new selection.
   const [devinSelected, setDevinSelected] = useState(isDevinProviderSelected);
+  const [workbuddySelected, setWorkbuddySelected] = useState(isWorkbuddyProviderSelected);
   const [data, setData] = useState<UsageLimitsData | null>(() => (
     hasInitialState
-      ? withoutUnselectedDevin(
+      ? withoutUnselectedOptIns(
           options?.initialState?.data ?? null,
           isDevinProviderSelected(),
+          isWorkbuddyProviderSelected(),
         )
       : null
   ));
@@ -169,14 +186,17 @@ export function useUsageLimits(options?: UseUsageLimitsOptions) {
   // The selection is a guard dependency: flipping the Devin switch
   // invalidates every request issued under the previous selection, so a late
   // response fetched while it was enabled can never republish Devin rows.
-  const beginRequest = useLatestRequestGuard([devinSelected, localEnabled]);
+  const beginRequest = useLatestRequestGuard([devinSelected, workbuddySelected, localEnabled]);
 
   // Re-read the saved selection when limits preferences change. Same-window
   // toggles and native-mirror writes arrive via LIMITS_PREFS_CHANGED_EVENT;
   // cross-tab changes arrive via the storage event.
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const syncSelection = () => setDevinSelected(isDevinProviderSelected());
+    const syncSelection = () => {
+      setDevinSelected(isDevinProviderSelected());
+      setWorkbuddySelected(isWorkbuddyProviderSelected());
+    };
     const onStorage = (event: StorageEvent) => {
       if (isLimitsPrefsStorageKey(event.key)) syncSelection();
     };
@@ -201,7 +221,11 @@ export function useUsageLimits(options?: UseUsageLimitsOptions) {
     (value: UsageLimitsData | null, source: "page-load" | "manual-refresh") => {
       if (!localEnabled || !publishToPreloadCache || !value || typeof value !== "object") return;
       publishUsageLimitsPreloadState(
-        withoutUnselectedDevin(value, isDevinProviderSelected()),
+        withoutUnselectedOptIns(
+          value,
+          isDevinProviderSelected(),
+          isWorkbuddyProviderSelected(),
+        ),
         { source },
       );
     },
@@ -220,10 +244,15 @@ export function useUsageLimits(options?: UseUsageLimitsOptions) {
       const res = await getUsageLimits({
         refresh: true,
         devinEnabled: isDevinProviderSelected(),
+        workbuddyEnabled: isWorkbuddyProviderSelected(),
       });
       if (!isCurrent()) return null;
       const nextData = res && typeof res === "object" ? res as UsageLimitsData : null;
-      const next = withoutUnselectedDevin(nextData, isDevinProviderSelected());
+      const next = withoutUnselectedOptIns(
+        nextData,
+        isDevinProviderSelected(),
+        isWorkbuddyProviderSelected(),
+      );
       setData(next);
       setError(null);
       setIsLoading(false);
@@ -246,10 +275,15 @@ export function useUsageLimits(options?: UseUsageLimitsOptions) {
       // is what tripped Claude's OAuth usage endpoint rate limit).
       const res = await getUsageLimits({
         devinEnabled: isDevinProviderSelected(),
+        workbuddyEnabled: isWorkbuddyProviderSelected(),
       });
       if (!isCurrent()) return;
       const nextData = res && typeof res === "object" ? res as UsageLimitsData : null;
-      setData(withoutUnselectedDevin(nextData, isDevinProviderSelected()));
+      setData(withoutUnselectedOptIns(
+        nextData,
+        isDevinProviderSelected(),
+        isWorkbuddyProviderSelected(),
+      ));
       setError(null);
       setIsLoading(false);
       publishSuccessfulState(nextData, "page-load");
@@ -288,18 +322,19 @@ export function useUsageLimits(options?: UseUsageLimitsOptions) {
   }, [localEnabled, refreshFromServerCache, refresh]);
 
   // A selection change invalidates in-flight work via the guard dependency,
-  // drops retained Devin rows immediately when the provider was turned off,
+  // drops retained opt-in rows immediately when a provider was turned off,
   // and re-reads the server cache under the new selection.
-  const previousDevinSelected = useRef(devinSelected);
+  const previousSelection = useRef({ devin: devinSelected, workbuddy: workbuddySelected });
   useEffect(() => {
-    if (previousDevinSelected.current === devinSelected) return;
-    previousDevinSelected.current = devinSelected;
+    const previous = previousSelection.current;
+    if (previous.devin === devinSelected && previous.workbuddy === workbuddySelected) return;
+    previousSelection.current = { devin: devinSelected, workbuddy: workbuddySelected };
     if (!localEnabled) return;
-    if (!devinSelected) {
-      setData((current) => withoutUnselectedDevin(current, false));
+    if (!devinSelected || !workbuddySelected) {
+      setData((current) => withoutUnselectedOptIns(current, devinSelected, workbuddySelected));
     }
     void refreshFromServerCache();
-  }, [devinSelected, localEnabled, refreshFromServerCache]);
+  }, [devinSelected, workbuddySelected, localEnabled, refreshFromServerCache]);
 
   useEffect(() => {
     if (!localEnabled) {
@@ -317,10 +352,15 @@ export function useUsageLimits(options?: UseUsageLimitsOptions) {
         // Claude's OAuth usage endpoint rate limit. Only the manual refresh() forces upstream.
         const res = await getUsageLimits({
           devinEnabled: isDevinProviderSelected(),
+          workbuddyEnabled: isWorkbuddyProviderSelected(),
         });
         if (!isCurrent()) return;
         const nextData = res && typeof res === "object" ? res as UsageLimitsData : null;
-        setData(withoutUnselectedDevin(nextData, isDevinProviderSelected()));
+        setData(withoutUnselectedOptIns(
+          nextData,
+          isDevinProviderSelected(),
+          isWorkbuddyProviderSelected(),
+        ));
         setError(null);
         publishSuccessfulState(nextData, "page-load");
       } catch (err) {

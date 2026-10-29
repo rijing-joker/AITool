@@ -16,7 +16,11 @@ function extractQuotedList(source, pattern, label) {
   return [...match[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
 }
 
-test("macOS LimitsSettingsStore.allProviders matches dashboard LIMIT_PROVIDER_IDS", () => {
+// WorkBuddy's menu-bar row is deferred with the rest of the Swift subscription
+// surface (upstream-review-2026-10-26.md), so the dashboard carries the id first.
+const SWIFT_MENUBAR_DEFERRED = new Set(["workbuddy"]);
+
+test("macOS LimitsSettingsStore.allProviders matches dashboard LIMIT_PROVIDER_IDS except deferred rows", () => {
   const swiftSource = fs.readFileSync(
     path.join(repoRoot, "TokenTrackerBar", "TokenTrackerBar", "Models", "LimitsSettingsStore.swift"),
     "utf8",
@@ -38,5 +42,5 @@ test("macOS LimitsSettingsStore.allProviders matches dashboard LIMIT_PROVIDER_ID
   );
 
   assert.ok(swiftIds.length > 0, "provider lists must not be empty");
-  assert.deepEqual(swiftIds, jsIds);
+  assert.deepEqual(swiftIds, jsIds.filter((id) => !SWIFT_MENUBAR_DEFERRED.has(id)));
 });

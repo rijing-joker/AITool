@@ -91,10 +91,10 @@ test("legacy relay switching still stashes and restores official login", () => {
 test("MoArk catalog has the five exact capabilities and valid default reasoning levels", () => {
   const preset = listPresets("codex").find((item) => item.id === "codex_moark");
   const models = JSON.parse(catalog.buildCodexCatalog(preset.meta.codexCatalogModels, [])).models;
-  assert.deepEqual(models.map((model) => model.slug), ["deepseek-v4-flash-0731", "DeepSeek-V4-Pro", "GLM-5.3", "Kimi-K2.7-Code", "qwen3-coder-plus"]);
-  assert.deepEqual(models.map((model) => model.context_window), [1000000, 1000000, 1048576, 262144, 1000000]);
-  assert.deepEqual(models.map((model) => model.input_modalities), [["text"], ["text"], ["text"], ["text", "image"], ["text"]]);
+  assert.deepEqual(models.map((model) => model.slug), ["deepseek-v4.1-flash", "DeepSeek-V4-Pro-0813", "GLM-5.3", "GLM-5.3-Flash", "Kimi-K2.7-Code"]);
+  assert.deepEqual(models.map((model) => model.context_window), [1000000, 1000000, 1048576, 1000000, 262144]);
+  assert.deepEqual(models.map((model) => model.input_modalities), [["text"], ["text"], ["text"], ["text", "image"], ["text", "image"]]);
   assert.deepEqual(models[0].supported_reasoning_levels.map((level) => level.effort), ["low", "high", "max"]);
-  assert.equal(models[4].default_reasoning_level, "none");
+  assert.equal(models[3].default_reasoning_level, "high");
   assert.ok(models.every((model) => model.supported_reasoning_levels.some((level) => level.effort === model.default_reasoning_level)));
 });

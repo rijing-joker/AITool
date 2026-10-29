@@ -11,6 +11,10 @@ function saveDevinSelection(selected: boolean) {
   window.localStorage.setItem(VISIBILITY_KEY, JSON.stringify({ devin: selected }));
 }
 
+function saveWorkbuddySelection(selected: boolean) {
+  window.localStorage.setItem(VISIBILITY_KEY, JSON.stringify({ workbuddy: selected }));
+}
+
 function dispatchPrefsChanged() {
   window.dispatchEvent(new Event(LIMITS_PREFS_CHANGED_EVENT));
 }
@@ -57,6 +61,7 @@ const existingLimits = {
   codingPlan: { configured: false },
   agentPlan: { configured: false },
   devin: { configured: false },
+  workbuddy: { configured: false },
 };
 
 const freshLimits = {
@@ -115,7 +120,7 @@ describe("useUsageLimits", () => {
 
     // Mount fetch reads the server cache (no forced upstream refresh).
     expect(getUsageLimits).toHaveBeenCalledTimes(1);
-    expect(getUsageLimits).toHaveBeenCalledWith({ devinEnabled: false });
+    expect(getUsageLimits).toHaveBeenCalledWith({ devinEnabled: false, workbuddyEnabled: false });
     expect(result.current.data?.codex.reset_credits).toEqual(freshLimits.codex.reset_credits);
     expect(publishUsageLimitsPreloadState).toHaveBeenCalledWith(freshLimits, {
       source: "page-load",
@@ -133,7 +138,7 @@ describe("useUsageLimits", () => {
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     expect(getUsageLimits).toHaveBeenCalledTimes(1);
-    expect(getUsageLimits).toHaveBeenCalledWith({ devinEnabled: false });
+    expect(getUsageLimits).toHaveBeenCalledWith({ devinEnabled: false, workbuddyEnabled: false });
     expect(result.current.data).toEqual(freshLimits);
     expect(result.current.data?.codex.reset_credits).toEqual(freshLimits.codex.reset_credits);
     expect(result.current.error).toBeNull();
@@ -179,7 +184,7 @@ describe("useUsageLimits", () => {
     });
 
     expect(getUsageLimits).toHaveBeenCalledTimes(1);
-    expect(getUsageLimits).toHaveBeenCalledWith({ refresh: true, devinEnabled: false });
+    expect(getUsageLimits).toHaveBeenCalledWith({ refresh: true, devinEnabled: false, workbuddyEnabled: false });
     expect(result.current.data).toEqual(freshLimits);
     expect(publishUsageLimitsPreloadState).toHaveBeenCalledWith(freshLimits, {
       source: "manual-refresh",
@@ -294,7 +299,7 @@ describe("useUsageLimits Devin opt-in selection", () => {
     const { result } = renderHook(() => useUsageLimits({ initialRefresh: true }));
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
-    expect(getUsageLimits).toHaveBeenCalledWith({ devinEnabled: true });
+    expect(getUsageLimits).toHaveBeenCalledWith({ devinEnabled: true, workbuddyEnabled: false });
     expect(result.current.data?.devin.configured).toBe(true);
     expect(result.current.data?.devin.primary_window?.used_percent).toBe(40);
   });
@@ -311,7 +316,7 @@ describe("useUsageLimits Devin opt-in selection", () => {
     });
 
     await waitFor(() => expect(result.current.data?.devin.configured).toBe(true));
-    expect(getUsageLimits).toHaveBeenLastCalledWith({ devinEnabled: true });
+    expect(getUsageLimits).toHaveBeenLastCalledWith({ devinEnabled: true, workbuddyEnabled: false });
   });
 
   it("turning the switch off drops retained Devin rows before the refetch lands", async () => {
@@ -329,7 +334,7 @@ describe("useUsageLimits Devin opt-in selection", () => {
     // Retained Devin rows are gone immediately, without waiting for the network.
     expect(result.current.data?.devin).toEqual({ configured: false });
     await waitFor(() => expect(result.current.data).toEqual(existingLimits));
-    expect(getUsageLimits).toHaveBeenLastCalledWith({ devinEnabled: false });
+    expect(getUsageLimits).toHaveBeenLastCalledWith({ devinEnabled: false, workbuddyEnabled: false });
   });
 
   it("a response in flight when the switch turns off cannot republish Devin", async () => {
@@ -343,7 +348,7 @@ describe("useUsageLimits Devin opt-in selection", () => {
 
     const { result } = renderHook(() => useUsageLimits({ initialRefresh: true }));
     await waitFor(() =>
-      expect(getUsageLimits).toHaveBeenCalledWith({ devinEnabled: true }),
+      expect(getUsageLimits).toHaveBeenCalledWith({ devinEnabled: true, workbuddyEnabled: false }),
     );
 
     await act(async () => {
@@ -383,6 +388,51 @@ describe("useUsageLimits Devin opt-in selection", () => {
   });
 });
 
+describe("useUsageLimits WorkBuddy opt-in selection", () => {
+  const workbuddyLimits = {
+    ...freshLimits,
+    workbuddy: {
+      configured: true,
+      plan_label: "Pro",
+      primary_window: { used_percent: 35, reset_at: "2026-05-31T08:00:00.000Z", limit_credits: 1000, used_credits: 350, remaining_credits: 650 },
+    },
+  };
+
+  beforeEach(() => {
+    window.localStorage.clear();
+    vi.mocked(getUsageLimits).mockReset();
+    vi.mocked(publishUsageLimitsPreloadState).mockReset();
+  });
+
+  it("forwards the opt-in only when the provider switch is on", async () => {
+    saveWorkbuddySelection(true);
+    vi.mocked(getUsageLimits).mockResolvedValue(workbuddyLimits);
+
+    const { result } = renderHook(() => useUsageLimits({ initialRefresh: true }));
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    expect(getUsageLimits).toHaveBeenCalledWith({ devinEnabled: false, workbuddyEnabled: true });
+    expect(result.current.data?.workbuddy.configured).toBe(true);
+    expect(result.current.data?.workbuddy.primary_window?.used_percent).toBe(35);
+  });
+
+  it("turning the switch off drops retained WorkBuddy rows before the refetch lands", async () => {
+    saveWorkbuddySelection(true);
+    vi.mocked(getUsageLimits).mockResolvedValue(workbuddyLimits);
+    const { result } = renderHook(() => useUsageLimits({ initialRefresh: true }));
+    await waitFor(() => expect(result.current.data?.workbuddy.configured).toBe(true));
+
+    vi.mocked(getUsageLimits).mockResolvedValue(existingLimits);
+    await act(async () => {
+      saveWorkbuddySelection(false);
+      dispatchPrefsChanged();
+    });
+
+    expect(result.current.data?.workbuddy).toEqual({ configured: false });
+    await waitFor(() => expect(result.current.data).toEqual(existingLimits));
+    expect(getUsageLimits).toHaveBeenLastCalledWith({ devinEnabled: false, workbuddyEnabled: false });
+  });
+});
 
 describe("usage limits on a public host", () => {
   afterEach(() => {

@@ -1565,6 +1565,81 @@ function startMockUpstream() {
   });
 }
 
+function startRecordingUpstream() {
+  const requests = [];
+  return new Promise((resolve) => {
+    const server = http.createServer((req, res) => {
+      requests.push({ url: req.url, authorization: req.headers.authorization || "" });
+      if (req.url.endsWith("/models")) {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ data: [{ id: "gpt-5.2" }] }));
+        return;
+      }
+      res.writeHead(404);
+      res.end("not found");
+    });
+    server.listen(0, "127.0.0.1", () => resolve({ server, requests, port: server.address().port }));
+  });
+}
+
+test("fetch-models resolves Pi/omp $ENV api keys only for the provider origin", async () => {
+  const { handleProviderSwitchApiRequest } = require("../src/lib/provider-switch/api");
+  const handler = handleProviderSwitchApiRequest;
+  const prefix = "/api/provider-switch";
+  const provider = await startRecordingUpstream();
+  const other = await startRecordingUpstream();
+  const previous = process.env.PI_TEST_KEY;
+  process.env.PI_TEST_KEY = "sk-secret";
+  try {
+    // Same origin as the base URL: the reference becomes the bearer token.
+    const sameOrigin = await call(handler, {
+      method: "POST",
+      url: `${prefix}/fetch-models`,
+      body: JSON.stringify({
+        app: "pi",
+        baseUrl: `http://127.0.0.1:${provider.port}/v1`,
+        modelsUrl: `http://127.0.0.1:${provider.port}/v1/models`,
+        apiKey: "$PI_TEST_KEY",
+      }),
+    });
+    assert.deepEqual(sameOrigin.body.models, ["gpt-5.2"]);
+    assert.equal(provider.requests.at(-1).authorization, "Bearer sk-secret");
+
+    // A cross-origin modelsUrl (imported config) never receives the secret.
+    const crossOrigin = await call(handler, {
+      method: "POST",
+      url: `${prefix}/fetch-models`,
+      body: JSON.stringify({
+        app: "omp",
+        baseUrl: `http://127.0.0.1:${provider.port}/v1`,
+        modelsUrl: `http://127.0.0.1:${other.port}/v1/models`,
+        apiKey: "${PI_TEST_KEY}",
+      }),
+    });
+    assert.deepEqual(crossOrigin.body.models, ["gpt-5.2"]);
+    assert.equal(other.requests.at(-1).authorization, "Bearer ${PI_TEST_KEY}");
+    assert.equal(provider.requests.length, 1, "the explicit cross-origin url is tried first");
+
+    // Non-Pi apps never treat `$NAME` as an environment reference.
+    const claude = await call(handler, {
+      method: "POST",
+      url: `${prefix}/fetch-models`,
+      body: JSON.stringify({
+        app: "claude",
+        baseUrl: `http://127.0.0.1:${provider.port}/v1`,
+        apiKey: "$PI_TEST_KEY",
+      }),
+    });
+    assert.deepEqual(claude.body.models, ["gpt-5.2"]);
+    assert.equal(provider.requests.at(-1).authorization, "Bearer $PI_TEST_KEY");
+  } finally {
+    if (previous === undefined) delete process.env.PI_TEST_KEY;
+    else process.env.PI_TEST_KEY = previous;
+    provider.server.close();
+    other.server.close();
+  }
+});
+
 test("provider-switch speed-test probes endpoints and fetch-models discovers lists", async () => {
   const { handleProviderSwitchApiRequest } = require("../src/lib/provider-switch/api");
   const handler = handleProviderSwitchApiRequest;
@@ -2286,4 +2361,20 @@ test("fetch-models header overrides invalidate on control chars, duplicates and 
   } finally {
     server.close();
   }
+});
+
+test("Pi apiKey environment references are resolved for model fetches, commands never run", () => {
+  const { resolvePiApiKey } = require("../src/lib/provider-switch/api");
+  const env = { KEY: "sk-env", PART: "abc", EMPTY: "" };
+  assert.equal(resolvePiApiKey("sk-literal", env), "sk-literal");
+  assert.equal(resolvePiApiKey("$KEY", env), "sk-env");
+  assert.equal(resolvePiApiKey("${KEY}", env), "sk-env");
+  assert.equal(resolvePiApiKey("pre-${PART}-$PART.x", env), "pre-abc-abc.x");
+  assert.equal(resolvePiApiKey("a$$b$!c", env), "a$b!c");
+  assert.equal(resolvePiApiKey("cost$5 ${1X} ${open", env), "cost$5 ${1X} ${open");
+  assert.equal(resolvePiApiKey("$MISSING", env), "");
+  assert.equal(resolvePiApiKey("${EMPTY}", env), "");
+  assert.equal(resolvePiApiKey("$KEY-$MISSING", env), "");
+  assert.equal(resolvePiApiKey("!security find-generic-password -w", env), "");
+  assert.equal(resolvePiApiKey("", env), "");
 });

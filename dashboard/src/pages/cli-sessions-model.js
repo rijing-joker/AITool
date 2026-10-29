@@ -11,6 +11,7 @@ const APP_LABELS = {
   hermes: "pswitch.tab.hermes",
   grokbuild: "pswitch.tab.grokbuild",
   pi: "pswitch.tab.pi",
+  omp: "pswitch.tab.omp",
   mcode: "pswitch.tab.mcode",
   kimi: "pswitch.tab.kimi",
 };

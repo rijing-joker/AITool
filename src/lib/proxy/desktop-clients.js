@@ -65,7 +65,14 @@ function owned(client, doc, ids = []) {
 async function write(file, value) { await writeFileAtomic(file, typeof value === "string" ? value : `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 }); }
 function comparable(client, value) {
   if (client === "zed" || !value) return value;
-  return { ...value, models: value.models.map(row => ({ ...row, disabled: undefined, reasoning: undefined })) };
+  // WorkBuddy rewrites models.json itself seconds after every start (local
+  // model gate) and may encrypt apiKey (WBEF1). Neither changes AiTool's
+  // models, so compare vendor rows without apiKey, disabled or reasoning
+  // (magpie 5e0d7c0); otherwise every restart reads as an external change.
+  const ignored = ["disabled", "reasoning", ...(client === "workbuddy" || client === "workbuddy-ai" ? ["apiKey"] : [])];
+  return { ...value, models: value.models.map(row => Object.fromEntries(
+    Object.entries(row).filter(([key]) => !ignored.includes(key)),
+  )) };
 }
 function matches(client, doc, value, ids) { return value !== undefined && same(comparable(client, owned(client, doc, ids)), comparable(client, value)); }
 function recoverReceipt(client, doc, raw, receipt) {
@@ -89,7 +96,7 @@ function projectBuddy(doc, values, catalog, receipt) {
   for (const row of current) {
     const expected = receipt?.applied?.models.find(item => item.id === row.id);
     // Native enable/reasoning choices survive; address/key changes conflict.
-    if (expected && !same({ ...row, disabled: undefined, reasoning: undefined }, { ...expected, disabled: undefined, reasoning: undefined })) throw new Error("Desktop client configuration changed outside AiTool; restore or review it first");
+    if (expected && !same(comparable("workbuddy", { models: [row] }), comparable("workbuddy", { models: [expected] }))) throw new Error("Desktop client configuration changed outside AiTool; restore or review it first");
   }
   for (const id of ids) if (rows.some(row => row.id === id && !previousIds.includes(row.id))) throw new Error(`A user model already uses this ID: ${id}`);
   const generated = catalog.map(model => {

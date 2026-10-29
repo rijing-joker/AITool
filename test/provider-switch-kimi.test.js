@@ -165,7 +165,7 @@ test("kimi engine: removeOauthAccount repoints services at the default login", a
 // OAuth manager (device flow against a mocked official API)
 // ---------------------------------------------------------------------------
 
-function mockKimiApi({ user = "u1", nickname = "Ada" } = {}) {
+function mockKimiApi({ user = "u1", nickname = "Ada", catalog } = {}) {
   const calls = [];
   const fetchImpl = async (url, init) => {
     const target = String(url);
@@ -181,7 +181,7 @@ function mockKimiApi({ user = "u1", nickname = "Ada" } = {}) {
     }
     if (target.endsWith("/me")) return json({ user_id: user, nickname, avatar: "" });
     if (target.endsWith("/models")) {
-      return json({ data: [{ id: "k3", limit: { context: 262144 }, supports_tool_use: true, display_name: "K3", reasoning: { type: "both" } }] });
+      return json({ data: catalog || [{ id: "k3", limit: { context: 262144 }, supports_tool_use: true, display_name: "K3", reasoning: { type: "both" } }] });
     }
     if (target.endsWith("/usages")) {
       return json({ limits: [{ detail: { limit: 100, remaining: 25, resetTime: "2026-10-24T00:00:00Z" } }], usage: { limit: 1000, remaining: 900 } });
@@ -268,11 +268,128 @@ test("kimi accounts: a second account gets a stable separate slot and readable i
   // Use account 2, then removing it is refused while current; removing the
   // default only hides it from the list.
   await accounts3.useAccount("Kimi Subscription Bo");
-  await assert.rejects(accounts3.remove("Kimi Subscription Bo"), /in use/);
+  await assert.rejects(accounts3.remove("Kimi Subscription Bo"), /Remove this account from Kimi Code first/);
   const dismissed = await accounts3.remove("managed:kimi-code");
   assert.equal(dismissed.dismissed, true);
   const status = await accounts3.status();
   assert.deepEqual(status.accounts.map(row => row.id), ["Kimi Subscription Bo"]);
+});
+
+test("kimi accounts: official cards edit models from their own catalog and detach/restore without losing the login", async () => {
+  const catalog = [
+    { id: "k3", limit: { context: 262144 }, supports_tool_use: true, display_name: "K3", reasoning: { type: "both" } },
+    { id: "k4", limit: { context: 131072 }, supports_tool_use: false, display_name: "K4" },
+  ];
+  const mock = mockKimiApi({ catalog });
+  const accounts = manager({ fetchImpl: mock.fetchImpl });
+  assert.equal((await completeLogin(accounts, { region: "cn" })).status, "success");
+  const before = await fsp.readFile(configPath(), "utf8");
+  const listed = await accounts.models("managed:kimi-code");
+  assert.deepEqual(Object.keys(listed.models).sort(), ["kimi-code/k3", "kimi-code/k4"]);
+  assert.deepEqual(listed.selected.sort(), ["kimi-code/k3", "kimi-code/k4"]);
+  assert.equal(await fsp.readFile(configPath(), "utf8"), before, "fetching the catalog never writes");
+  await assert.rejects(accounts.updateModels("managed:kimi-code", ["kimi-code/k4"]), /default model/);
+  await accounts.updateModels("managed:kimi-code", ["kimi-code/k3"]);
+  let doc = await kimi.readDocument();
+  assert.equal(doc.models["kimi-code/k4"], undefined);
+  assert.equal(doc.models["kimi-code/k3"].display_name, "K3");
+  await accounts.updateModels("managed:kimi-code", ["kimi-code/k3", "kimi-code/k4"]);
+  assert.ok((await kimi.readDocument()).models["kimi-code/k4"]);
+  await assert.rejects(accounts.updateModels("managed:kimi-code", ["missing/model"]), /changed; load it again/);
+  // Make another provider current so the official node may leave Kimi.
+  doc = await kimi.readDocument();
+  doc.providers.relay = { type: "openai", base_url: "https://relay.example/v1", api_key: "k" };
+  doc.models["relay/m"] = { model: "m", max_context_size: 8192, provider: "relay" };
+  doc.default_model = "relay/m";
+  await fsp.writeFile(configPath(), kimi.serializeDocument(doc));
+  assert.equal((await accounts.removeFromKimi("managed:kimi-code")).detached, true);
+  let after = await kimi.readDocument();
+  assert.equal(after.providers["managed:kimi-code"], undefined);
+  assert.equal(after.models["kimi-code/k4"], undefined);
+  assert.equal(after.services.moonshot_search.oauth.key, "oauth/kimi-code", "the default login keeps its service refs");
+  let card = (await accounts.status()).accounts.find(row => row.id === "managed:kimi-code");
+  assert.equal(card.detached, true);
+  assert.equal(card.authenticated, true);
+  await assert.rejects(accounts.models("managed:kimi-code"), /not found/);
+  await accounts.restore("managed:kimi-code");
+  after = await kimi.readDocument();
+  assert.equal(after.providers["managed:kimi-code"].oauth.key, "oauth/kimi-code");
+  assert.ok(after.models["kimi-code/k3"]); assert.ok(after.models["kimi-code/k4"]);
+  assert.equal(after.services.moonshot_search.oauth.key, "oauth/kimi-code");
+  card = (await accounts.status()).accounts.find(row => row.id === "managed:kimi-code");
+  assert.equal(card.detached, undefined);
+  assert.equal((await fsp.stat(path.join(kimiHome(), "credentials", "kimi-code.json"))).isFile(), true);
+  // "Sign in again" on the detached card refreshes the login and restores it.
+  await accounts.removeFromKimi("managed:kimi-code");
+  const relogin = await accounts.startLogin("cn", "managed:kimi-code");
+  let result = { status: "pending" };
+  for (let i = 0; i < 6 && result.status === "pending"; i += 1) result = await accounts.pollLogin(relogin.flowId);
+  assert.equal(result.status, "success");
+  assert.ok((await kimi.readDocument()).providers["managed:kimi-code"]);
+  card = (await accounts.status()).accounts.find(row => row.id === "managed:kimi-code");
+  assert.equal(card.detached, undefined);
+});
+
+test("kimi accounts: a new user never overwrites a detached default-slot login", async () => {
+  const first = mockKimiApi({ user: "u1", nickname: "Ada" });
+  const accounts = manager({ fetchImpl: first.fetchImpl });
+  assert.equal((await completeLogin(accounts, { region: "cn" })).status, "success");
+  let doc = await kimi.readDocument();
+  doc.providers.relay = { type: "openai", base_url: "https://relay.example/v1", api_key: "k" };
+  doc.models["relay/m"] = { model: "m", max_context_size: 8192, provider: "relay" };
+  doc.default_model = "relay/m";
+  await fsp.writeFile(configPath(), kimi.serializeDocument(doc));
+  assert.equal((await accounts.removeFromKimi("managed:kimi-code")).detached, true);
+  const credential = path.join(kimiHome(), "credentials", "kimi-code.json");
+  const before = await fsp.readFile(credential, "utf8");
+
+  // A different user signing in without an accountId must not reuse the
+  // detached default slot or overwrite its still-valid credential.
+  const second = mockKimiApi({ user: "u3", nickname: "Cy" });
+  const accounts2 = manager({ fetchImpl: second.fetchImpl });
+  assert.equal((await completeLogin(accounts2, { region: "cn" })).status, "success");
+  assert.equal(await fsp.readFile(credential, "utf8"), before, "the detached credential stays byte-identical");
+  const after = await kimi.readDocument();
+  assert.equal(after.providers["managed:kimi-code"], undefined, "the detached default stays out of config.toml");
+  const created = Object.entries(after.providers).find(([id, provider]) => id !== "relay" && provider.type === "kimi");
+  assert.ok(created, "the new user gets a separate provider slot");
+  assert.notEqual(created[1].oauth.key, "oauth/kimi-code");
+  const detachedCard = (await accounts2.status()).accounts.find(row => row.id === "managed:kimi-code");
+  assert.equal(detachedCard?.detached, true);
+  assert.equal(detachedCard?.authenticated, true);
+
+  // The original user signing in again reclaims the default slot and clears
+  // the detached snapshot instead of creating yet another account.
+  const again = mockKimiApi({ user: "u1", nickname: "Ada" });
+  const accounts3 = manager({ fetchImpl: again.fetchImpl });
+  assert.equal((await completeLogin(accounts3, { region: "cn" })).status, "success");
+  assert.ok((await kimi.readDocument()).providers["managed:kimi-code"]);
+  const restored = (await accounts3.status()).accounts.find(row => row.id === "managed:kimi-code");
+  assert.equal(restored.detached, undefined);
+});
+
+test("kimi accounts: a separate card keeps its credential while removed from Kimi and deletes only afterwards", async () => {
+  const mock = mockKimiApi();
+  const accounts = manager({ fetchImpl: mock.fetchImpl });
+  assert.equal((await completeLogin(accounts, { region: "cn" })).status, "success");
+  const second = mockKimiApi({ user: "u2", nickname: "Bo" });
+  const accounts2 = manager({ fetchImpl: second.fetchImpl });
+  assert.equal((await completeLogin(accounts2, { region: "cn" })).status, "success");
+  const bo = "Kimi Subscription Bo";
+  const credential = path.join(kimiHome(), "credentials", `kimi-code-ccs-${kimiAccounts.accountSuffix("cn", "u2")}.json`);
+  assert.equal((await fsp.stat(credential)).isFile(), true);
+  await assert.rejects(accounts2.remove(bo), /Remove this account from Kimi Code first/);
+  assert.equal((await accounts2.removeFromKimi(bo)).detached, true);
+  assert.equal((await fsp.stat(credential)).isFile(), true, "the detached card keeps its credential");
+  const card = (await accounts2.status()).accounts.find(row => row.id === bo);
+  assert.equal(card.detached, true);
+  assert.equal(card.authenticated, true);
+  await accounts2.restore(bo);
+  assert.ok((await kimi.readDocument()).providers[bo]);
+  await accounts2.removeFromKimi(bo);
+  assert.equal((await accounts2.remove(bo)).id, bo);
+  await assert.rejects(fsp.stat(credential), { code: "ENOENT" });
+  assert.equal((await accounts2.status()).accounts.some(row => row.id === bo), false);
 });
 
 test("kimi accounts: global region uses its own hosts and never falls back across regions", async () => {

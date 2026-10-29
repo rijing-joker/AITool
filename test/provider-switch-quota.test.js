@@ -407,6 +407,17 @@ test("balance: each vendor shape parses per upstream semantics", () => {
     balance_infos: [{ currency: "CNY", total_balance: "110.50" }],
   });
   assert.deepEqual(deepseek, [{ label: "DeepSeek", remaining: 110.5, total: null, used: null, unit: "CNY", isValid: true, invalidMessage: null }]);
+  // is_available:false means the balance is exhausted, not that the key failed
+  // (401/403 is the auth failure path). The amount still renders, in red.
+  for (const [raw, expected] of [["-24.96", -24.96], ["-0.00", 0]]) {
+    const exhausted = quota.parseBalanceBody(quota.BALANCE_PROVIDERS[0], {
+      is_available: false,
+      balance_infos: [{ currency: "CNY", total_balance: raw }],
+    });
+    assert.equal(exhausted[0].remaining, expected);
+    assert.equal(exhausted[0].isValid, true);
+    assert.equal(exhausted[0].invalidMessage, null);
+  }
 
   const openrouter = quota.parseBalanceBody(quota.BALANCE_PROVIDERS.find((e) => e.id === "openrouter"), {
     data: { total_credits: 50, total_usage: 42.5 },

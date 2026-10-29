@@ -89,6 +89,37 @@ test("Pi follows the latest branch and preserves paired tool failures",async t=>
     {type:"message",id:"result",parentId:"new",message:{role:"toolResult",toolCallId:"c",content:[{type:"text",text:"denied"}],isError:true,timestamp:200}},
   ]);const result=await sessions.readSession({app:"pi",sourcePath:file,home:x.home});assert.equal(result.messages.length,3);assert.equal(result.messages[1].toolCalls[0].id,"c");assert.equal(result.messages[2].toolResults[0].isError,true);assert.equal(result.messages[2].ts,200);
 });
+test("OMP reads Pi-format sessions with title slot, profiles and resume env", async t => {
+  const x = await fixture(t);
+  const file = await x.write(".omp/agent/sessions/--repo--/2026-10-10T12-00-00_omp-session.jsonl", [
+    { type: "title", title: "Investigate importer" },
+    { type: "session", version: 3, id: "omp-session", cwd: "/repo", title: "Header title" },
+    { type: "message", id: "q", parentId: null, message: { role: "user", content: "Fix it" } },
+    { type: "message", id: "a", parentId: "q", message: { role: "assistant", model: "claude-sonnet-4-5", content: [{ type: "text", text: "Done" }], usage: { input: 100, output: 20, cacheRead: 5 } } },
+  ]);
+  await x.write(".omp/profiles/work/agent/sessions/--repo--/profile.jsonl", [
+    { type: "session", version: 3, id: "omp-profile", cwd: "/repo" },
+    { type: "message", id: "q", parentId: null, message: { role: "user", content: "Profile question" } },
+  ]);
+  // Subagent transcripts live beside the parent and must not become sessions.
+  await x.write(".omp/agent/sessions/--repo--/2026-10-10T12-00-00_omp-session/AgentA.jsonl", [
+    { type: "session", version: 3, id: "omp-child", cwd: "/repo" },
+    { type: "message", id: "q", parentId: null, message: { role: "user", content: "Child question" } },
+  ]);
+  const list = await sessions.listSessions({ app: "omp", home: x.home, env: {} });
+  assert.equal(list.some(row => row.sessionId === "omp-child"), false, "subagent transcripts are not standalone sessions");
+  const native = list.find(row => row.sessionId === "omp-session");
+  assert.equal(native.title, "Investigate importer");
+  assert.equal(native.projectDir, "/repo");
+  assert.equal(native.resumeCommand, "omp --resume omp-session");
+  const profile = list.find(row => row.sessionId === "omp-profile");
+  assert.equal(profile.resumeCommand, "env OMP_PROFILE='work' PI_PROFILE='work' omp --resume omp-profile");
+  const read = await sessions.readSession({ app: "omp", sourcePath: file, home: x.home, env: {} });
+  assert.deepEqual(read.messages.map(row => row.content), ["Fix it", "Done"]);
+  assert.equal(read.usage.model, "claude-sonnet-4-5");
+  assert.equal(read.usage.inputTokens, 100);
+  assert.equal(read.usage.outputTokens, 20);
+});
 test("Hermes SQLite uses seconds, hides model-only rows and deduplicates protected copies",async t=>{
   const x=await fixture(t);await db(x.home,'.hermes/state.db',`CREATE TABLE sessions(id,title,started_at);INSERT INTO sessions VALUES('h','Hermes',100);CREATE TABLE messages(id,session_id,role,content,timestamp,active,display_metadata);INSERT INTO messages VALUES(1,'h','user','question',100,0,NULL),(2,'h','user','question',100,1,NULL),(3,'h','assistant','hidden',101,1,'{"model_only":true}'),(4,'h','assistant','answer',102,1,NULL);`);
   const [row]=await sessions.listSessions({app:"hermes",home:x.home});assert.equal(row.createdAt,100000);const result=await sessions.readSession({app:"hermes",sourcePath:row.sourcePath,home:x.home});assert.deepEqual(result.messages.map(row=>row.content),["question","answer"]);assert.equal(result.messages[1].ts,102000);

@@ -11633,6 +11633,33 @@ function resolveOmpAgentDir(env = process.env) {
   return ompHome ? path.join(ompHome, "agent") : null;
 }
 
+// Every sessions/ root both the hourly parser and the read-only CLI listing
+// must agree on: PI's explicit session-dir override, the agent dir, and each
+// omp profile's agent dir. Keeping this in one place prevents the dashboard
+// sidecar and the CLI browser from disagreeing about which sessions exist.
+function resolveOmpSessionDirs(env = process.env, home = "") {
+  const scoped = home ? { ...env, HOME: home, USERPROFILE: home } : env;
+  const configured = typeof scoped.PI_CODING_AGENT_SESSION_DIR === "string" ? scoped.PI_CODING_AGENT_SESSION_DIR.trim() : "";
+  if (configured) {
+    const expanded = expandHomePath(configured, scoped);
+    return path.isAbsolute(expanded) ? [expanded] : [];
+  }
+  const dirs = [];
+  const agentDir = resolveOmpAgentDir(scoped);
+  if (agentDir) dirs.push(path.join(agentDir, "sessions"));
+  const configBase = resolveOmpHome(scoped);
+  if (configBase) {
+    const active = (scoped.OMP_PROFILE || scoped.PI_PROFILE || "").trim();
+    if (active && active !== "default") dirs.push(path.join(configBase, "profiles", active, "agent", "sessions"));
+    try {
+      for (const row of fssync.readdirSync(path.join(configBase, "profiles"), { withFileTypes: true })) {
+        if (row.isDirectory()) dirs.push(path.join(configBase, "profiles", row.name, "agent", "sessions"));
+      }
+    } catch { /* profiles directory is optional */ }
+  }
+  return [...new Set(dirs)];
+}
+
 // Session-file discovery is shared with OmO (omo), which persists the exact
 // same on-disk layout under its own agent dir:
 //   <agentDir>/sessions/--<cwd-encoded>--/<timestamp>_<sessionId>.jsonl
@@ -25237,6 +25264,7 @@ module.exports = {
   parseKiroCliIncremental: withCursorTransaction(parseKiroCliIncremental),
   resolveOmpHome,
   resolveOmpAgentDir,
+  resolveOmpSessionDirs,
   resolveOmpSessionFiles,
   resolveOmpSubagentFiles,
   resolveOmpDefaultModel,

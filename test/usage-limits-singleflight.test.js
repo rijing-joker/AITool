@@ -61,7 +61,8 @@ describe("getUsageLimits single-flight", () => {
     delete process.env.OPENCODE_GO_AUTH_COOKIE;
     try {
       const { commandCalls, countFetchCalls, options } = makeCountingDeps();
-      const opts = { home: tmp, ...options };
+      // An empty env keeps host Qoder/Kimi/Codex credentials out of this test.
+      const opts = { home: tmp, env: {}, ...options };
 
       const [r1, r2] = await Promise.all([getUsageLimits(opts), getUsageLimits(opts)]);
 

@@ -59,7 +59,7 @@
     "@sourcegraph/scip-typescript": "^0.4.0",
     "esbuild": "0.28.2",
     "pngjs": "^7.0.0",
-    "sql.js": "1.14.2"
+    "sql.js": "1.15.1"
   },
   "repository": {
     "type": "git",

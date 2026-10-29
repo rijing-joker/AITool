@@ -143,6 +143,7 @@ Still worth running before a commit: `npm test`, plus `npm run validate:copy` / 
 
 ### Provider switch / MCP projections
 
+- **Kimi card `slotKey` is immutable after creation.** Create another card to use a different native key. Model edits must retain aliases selected by `default_model` or `secondary_model.default_model`.
 - **`toml.setTable` only replaces the `[a.b]` block form.** A hand-written config may hold the same entry inline (`fetch = { … }` under `[mcp_servers]`, or a dotted `mcp_servers.fetch = { … }`), and appending a block next to it defines the table twice — Codex/Grok then fail to load the *whole* file. Strip the inline form first (`toml.removeTableKey` + `removeTopLevelKey`, as `stripInlineMcpEntry` in `mcp.js` does); removal has to clear it too, or a disabled server stays live while the UI shows it off.
 - **Resolve transport with `specTransportType(spec)`, never `spec.type` directly.** A url-only spec (no `type`, or `type: "stdio"`) is HTTP — reading `spec.type` sends it down the stdio path and writes an entry with an empty command.
 

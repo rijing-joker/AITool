@@ -205,6 +205,15 @@ function modelsOfProvider(doc, id) {
   return Object.fromEntries(Object.entries(models).filter(([, model]) => model?.provider === id));
 }
 
+function assertAliasesUnselected(doc, aliases) {
+  const removed = new Set(aliases);
+  for (const key of [doc.default_model, doc.secondary_model?.default_model]) {
+    if (typeof key === "string" && removed.has(key)) {
+      throw new Error(`Kimi Code model '${key}' is still selected; change it in Kimi Code first`);
+    }
+  }
+}
+
 // Refuse to remove a provider whose models are still referenced by the
 // conversation default, the secondary agent pool, or tool services
 // (cc-switch apply_provider's in-use checks).
@@ -212,13 +221,7 @@ function assertRemovable(doc, id) {
   if (currentProviderKey(doc) === id) {
     throw new Error("This provider is in use; switch to another provider before removing it");
   }
-  const owned = new Set(Object.keys(modelsOfProvider(doc, id)));
-  const secondary = doc.secondary_model;
-  for (const field of ["default_model", ...(isPlainObject(secondary) ? [secondary.default_model] : [])]) {
-    if (typeof field === "string" && owned.has(field)) {
-      throw new Error("A model of this provider is still selected in Kimi Code; change it there first");
-    }
-  }
+  assertAliasesUnselected(doc, Object.keys(modelsOfProvider(doc, id)));
 }
 
 // Apply a provider row (config = null removes). Protects official nodes,
@@ -249,8 +252,9 @@ function applyProvider(doc, id, config) {
     throw new Error(`Kimi Code provider '${id}' already exists`);
   }
   // Replace the node's models: drop stale aliases owned by this provider,
-  // refuse keys that belong to another provider, keep everything else.
+  // refuse selected aliases and keys belonging to another provider.
   const keep = modelsOfProvider(next, id);
+  assertAliasesUnselected(next, Object.keys(keep).filter(key => !Object.hasOwn(config.models, key)));
   for (const key of Object.keys(keep)) delete models[key];
   for (const [key, model] of Object.entries(config.models)) {
     if (models[key] !== undefined) {

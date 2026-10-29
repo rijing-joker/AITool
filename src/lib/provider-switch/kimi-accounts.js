@@ -151,6 +151,7 @@ function createManager({
   // interleaved card write from being last-writer-wins over a login commit.
   const projectionLock = (action) => withFileLock(path.join(paths.providerSwitchRoot(), "kimi.projection"), action);
   let pending = Promise.resolve();
+  let identification = null;
   let flow = null;
   const serial = (action) => {
     const next = pending.catch(() => {}).then(action);
@@ -478,12 +479,22 @@ function createManager({
       const read = await readCredential(file).catch(() => null);
       if (!read || read.state !== "valid" || !accessValid(read.value)) continue;
       if (store.accounts[id]) continue;
-      if (!device) device = await deviceId().catch(() => null);
+      if (!device) device = await serial(deviceId).catch(() => null);
       if (!device) return;
       try {
         const identity = await fetchIdentity(region.baseUrl, read.value.access_token, device, 5000);
-        await updateStore((value) => {
-          value.accounts[id] = { ...identity, token: tokenMarker(read.value) };
+        // Only the local commit joins account operations. Re-read the node,
+        // credentials and cache after the request so removal or re-login
+        // cannot be undone by a late identity response.
+        await serial(async () => {
+          const current = (await readConfigDoc()).providers?.[id];
+          if (officialRegionOf(current)?.id !== region.id || credentialPathFor(home, current.oauth) !== file) return;
+          const credential = await readCredential(file);
+          if (credential.state !== "valid" || credential.value.access_token !== read.value.access_token ||
+            tokenMarker(credential.value) !== tokenMarker(read.value)) return;
+          await updateStore((value) => {
+            if (!value.accounts[id]) value.accounts[id] = { ...identity, token: tokenMarker(read.value) };
+          });
         });
       } catch { /* naming is best-effort */
       }
@@ -491,10 +502,11 @@ function createManager({
   }
 
   const status = () => serial(async () => {
-    // Identity lookup joins the serial queue in the background: the panel
-    // renders from the cached store immediately and the next read picks the
-    // names up (a status read never blocks on the network, project rule).
-    void serial(() => identifyAccounts()).catch(() => {});
+    // One background lookup at a time; slow /me requests never hold the
+    // queue used by status, login and switching.
+    if (!identification) {
+      identification = identifyAccounts().catch(() => {}).finally(() => { identification = null; });
+    }
     const doc = await readConfigDoc();
     const store = await loadStore();
     const accounts = [];

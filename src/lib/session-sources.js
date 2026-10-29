@@ -168,8 +168,12 @@ async function list(app, home, env, validate) {
       : app === "pi" ? file.endsWith(".jsonl") : false, validate);
     for (const file of files) {
       try {
-        const stat = await fs.stat(file);
-        const stamp = [stat.dev,stat.ino,stat.size,stat.mtimeMs,stat.ctimeMs].join(":");
+        const inputs = app === "kimi" ? [file, await kimiStatePath(file, validate)] : [file];
+        const stamps = await Promise.all(inputs.map(async input => {
+          const stat = await fs.stat(input);
+          return [input,stat.dev,stat.ino,stat.size,stat.mtimeMs,stat.ctimeMs];
+        }));
+        const stamp = JSON.stringify(stamps);
         const key = `${app}:${file}`;
         let cached = fileMetadata.get(key);
         if (!cached || cached.stamp !== stamp || app === "opencode") {
@@ -332,6 +336,7 @@ async function read(app, source, validate) {
 async function dependencies(app, source, validate) {
   const { file, id } = splitReference(source);
   const files = [await validate(file)];
+  if (app === "kimi") files.push(await kimiStatePath(file, validate));
   if (id !== null) for (const suffix of ["-wal", "-shm"]) { try { await fs.lstat(file + suffix); files.push(await validate(file + suffix)); } catch (error) { if (error.code !== "ENOENT") throw error; } }
   if (app === "opencode" && id === null) {
     const storage = file.slice(0, file.lastIndexOf(`${path.sep}session${path.sep}`));
@@ -440,17 +445,25 @@ function kimiRequestIndex(records, active) {
   } };
 }
 
-async function kimiWireSession(file, validate) {
+// Resolve the same companion for parsing and both caches. Rechecking on
+// every read catches edits, deletion and a newly created preferred state.
+async function kimiStatePath(file, validate) {
   const sessionDir = path.dirname(path.dirname(path.dirname(file)));
   const statePaths = [path.join(sessionDir, "state.json"), path.join(sessionDir, "session-meta", "state.json")];
-  let state = null;
   for (const statePath of statePaths) {
     try {
-      await validate(statePath);
-      state = parse(await fs.readFile(statePath, "utf8"));
-      break;
+      const resolved = await validate(statePath);
+      await fs.stat(statePath);
+      return resolved || statePath;
     } catch (error) { if (error.code !== "ENOENT" && !/Not a registered/.test(String(error?.message))) throw error; }
   }
+  throw new Error("Kimi session state is missing");
+}
+
+async function kimiWireSession(file, validate) {
+  const sessionDir = path.dirname(path.dirname(path.dirname(file)));
+  const statePath = await kimiStatePath(file, validate);
+  const state = parse(await fs.readFile(statePath, "utf8"));
   if (!state) throw new Error("Kimi session state is missing");
   if (state.archived === true || state.custom?.session_kind === "child") throw new Error("Kimi session is archived or a child session");
   const records = (await jsonl(file)).filter(row => row && typeof row === "object");

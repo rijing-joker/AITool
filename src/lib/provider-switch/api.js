@@ -413,6 +413,15 @@ async function saveProviderUnlocked({ app, id, body }) {
     for (const model of Object.values(models)) if (model && typeof model === "object") model.provider = slotKey;
     const wrapper = kimiWrapperOf({ settingsConfig: { ...config, slotKey, models } });
     if (!wrapper.slotKey) throw new Error("Enter a Kimi Code provider key");
+    if (id) {
+      const existing = await store.getProvider(app, id);
+      if (!existing) throw new Error(`Provider not found: ${id}`);
+      // A slot key is a native identity shared by the provider and model
+      // tables. Editing a card must not fork it and leave its old node live.
+      if (kimiWrapperOf(existing).slotKey !== wrapper.slotKey) {
+        throw new Error("Kimi Code provider keys cannot be changed; create a new provider instead");
+      }
+    }
     kimi.validateProviderRow(wrapper.slotKey, { provider: wrapper.provider, models: wrapper.models });
     body = { ...body, settingsConfig: { ...config, slotKey, models } };
     const before = await kimi.readDocument();

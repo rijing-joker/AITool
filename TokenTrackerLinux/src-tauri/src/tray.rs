@@ -1,5 +1,5 @@
-use std::time::Duration;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use tauri::image::Image;
 use tauri::menu::{CheckMenuItem, Menu, MenuItem};
@@ -141,7 +141,9 @@ pub fn show_main_window<R: Runtime>(app: &AppHandle<R>) {
         let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();
-        let _ = window.eval("window.dispatchEvent(new CustomEvent('native:visibility',{detail:{visible:true}}))");
+        let _ = window.eval(
+            "window.dispatchEvent(new CustomEvent('native:visibility',{detail:{visible:true}}))",
+        );
     }
 }
 

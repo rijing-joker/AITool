@@ -132,14 +132,14 @@ test("resolvedCliEnvironment merges global-install dirs for env-node shebangs (c
   const { resolvedCliEnvironment } = require("../src/lib/command-runner");
   const path = require("node:path");
   const scoped = resolvedCliEnvironment("/opt/homebrew/bin/codex", {
-    env: { PATH: "/usr/bin:/bin", KEEP: "me" },
+    env: { PATH: ["/usr/bin", "/bin"].join(path.delimiter), KEEP: "me" },
     platform: "darwin",
     home: "/Users/fixture",
   });
-  const dirs = scoped.PATH.split(":");
+  const dirs = scoped.PATH.split(path.delimiter);
   assert.equal(dirs[0], "/opt/homebrew/bin", "the binary's own directory leads");
   assert.ok(dirs.includes("/usr/bin") && dirs.includes("/bin"), "inherited PATH is preserved");
-  assert.ok(dirs.includes("/Users/fixture/.local/bin"), "stat-probed global-install dirs are merged");
+  assert.ok(dirs.includes(path.join("/Users/fixture", ".local", "bin")), "stat-probed global-install dirs are merged");
   assert.ok(dirs.includes(path.dirname(process.execPath)), "the running node is reachable (deduped if already present)");
   assert.equal(new Set(dirs).size, dirs.length, "no duplicate entries");
   assert.equal(scoped.KEEP, "me");

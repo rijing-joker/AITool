@@ -152,6 +152,10 @@ jobs:
       # Linux job by construction, and `npm test` is what CONTRIBUTING asks
       # contributors to run before opening a PR.
       - name: Test suite on macOS
+        # Canonical, short roots keep isolated HOME fixtures out of /var's
+        # symlink alias and below the Unix-domain socket path limit.
+        env:
+          TMPDIR: /private/tmp
         run: npm test
 
       - name: Install xcodegen

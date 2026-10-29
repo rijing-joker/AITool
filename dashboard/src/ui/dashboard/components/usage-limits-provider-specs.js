@@ -262,6 +262,14 @@ export const PROVIDER_LIMIT_SPECS = {
       ];
     },
   },
+  workbuddy: {
+    // Subscription plan credits only. Reward grants are not a window.
+    windows(data) {
+      return [
+        { key: "plan", labelKey: "limits.label.workbuddy_plan", window: data.primary_window, creditPrecision: 2, showCreditDetail: true },
+      ];
+    },
+  },
 };
 
 /** Static copy() anchors for validate:copy — labels resolve at runtime via spec.labelKey. */

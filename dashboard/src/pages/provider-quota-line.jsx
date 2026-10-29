@@ -218,7 +218,7 @@ export function ProviderQuotaLine({ app, provider }) {
           ? quota.balances.map((line, index) => (
             <span
               key={`${line.label}-${index}`}
-              className={`inline-flex items-center gap-1 tabular-nums ${line.isValid ? "text-oai-gray-500 dark:text-oai-gray-400" : "font-medium text-red-600 dark:text-red-400"}`}
+              className={`inline-flex items-center gap-1 tabular-nums ${line.isValid && Number(line.remaining) > 0 ? "text-oai-gray-500 dark:text-oai-gray-400" : "font-medium text-red-600 dark:text-red-400"}`}
               title={line.invalidMessage || undefined}
             >
               {copy("pswitch.quota.balance", { label: line.label, value: line.remaining, unit: line.unit })}

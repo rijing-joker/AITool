@@ -1444,7 +1444,7 @@ test("auth bridge mutation requires the local auth token", async () => {
   }
 });
 
-test("usage-limits honors devin=1 only on locally authenticated requests", async () => {
+test("usage-limits honors opt-in flags only on locally authenticated requests", async () => {
   const { mod, restore } = loadLocalApiWithSpawn(createSuccessfulSpawn([]));
   // Stub the aggregate seam so the handler never touches real credentials or
   // the network; only the forwarded selection flag is observed.
@@ -1463,9 +1463,10 @@ test("usage-limits honors devin=1 only on locally authenticated requests", async
     cacheResets += 1;
   };
 
-  async function requestLimits({ devin, token, refresh, origin } = {}) {
+  async function requestLimits({ devin, workbuddy, token, refresh, origin } = {}) {
     const params = new URLSearchParams();
     if (devin) params.set("devin", devin);
+    if (workbuddy) params.set("workbuddy", workbuddy);
     if (refresh) params.set("refresh", refresh);
     const query = params.size ? `?${params}` : "";
     const headers = {};
@@ -1516,12 +1517,29 @@ test("usage-limits honors devin=1 only on locally authenticated requests", async
     const trueOk = await requestLimits({ devin: "true", token: localAuthToken });
     assert.equal(trueOk.statusCode, 200);
     assert.equal(forwarded.at(-1).devinEnabled, true, "devin=true with auth forwards enabled");
+    assert.equal(forwarded.at(-1).workbuddyEnabled, false, "devin does not enable WorkBuddy");
 
-    // devin=0/false are absent opt-ins: no auth needed, provider stays off.
-    for (const devin of ["0", "false"]) {
-      const res = await requestLimits({ devin });
-      assert.equal(res.statusCode, 200, `devin=${devin} must not require auth`);
-      assert.equal(forwarded.at(-1).devinEnabled, false, `devin=${devin} stays off`);
+    // WorkBuddy uses the same authorization contract.
+    for (const token of [undefined, "wrong-token"]) {
+      const res = await requestLimits({ workbuddy: "1", token });
+      assert.equal(res.statusCode, 401, `workbuddy=1 with token=${token} must 401`);
+    }
+    const workbuddyOk = await requestLimits({ workbuddy: "1", token: localAuthToken });
+    assert.equal(workbuddyOk.statusCode, 200);
+    assert.equal(forwarded.at(-1).workbuddyEnabled, true, "authenticated WorkBuddy opt-in forwards enabled");
+    assert.equal(forwarded.at(-1).devinEnabled, false, "WorkBuddy does not enable Devin");
+
+    // 0/false are absent opt-ins: no auth needed, provider stays off.
+    for (const [key, enabledKey, otherKey] of [
+      ["devin", "devinEnabled", "workbuddyEnabled"],
+      ["workbuddy", "workbuddyEnabled", "devinEnabled"],
+    ]) {
+      for (const value of ["0", "false"]) {
+        const res = await requestLimits({ [key]: value });
+        assert.equal(res.statusCode, 200, `${key}=${value} must not require auth`);
+        assert.equal(forwarded.at(-1)[enabledKey], false, `${key}=${value} stays off`);
+        assert.equal(forwarded.at(-1)[otherKey], false, `${key}=${value} leaves the other opt-in off`);
+      }
     }
 
     // Ordinary requests — with or without local auth but no devin flag — keep

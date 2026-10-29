@@ -63,7 +63,7 @@ test("public discovery surfaces describe every supported tool", () => {
   assert.match(index, /Achievements/);
   assert.match(index, /Service Status page/);
   assert.match(index, /__TOKENTRACKER_DISCOVERY_TRACKED_USAGE__/);
-  assert.match(read("dashboard/src/content/copy.csv"), /landing\.discovery\.tracked_usage,.*usage limits for 17 providers/i);
+  assert.match(read("dashboard/src/content/copy.csv"), /landing\.discovery\.tracked_usage,.*usage limits for 18 providers/i);
 
   const llms = read("dashboard/public/llms.txt");
   assert.match(llms, new RegExp(`Supported AI coding tools \\(${TOOL_COUNT}\\)`));

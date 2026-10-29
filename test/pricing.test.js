@@ -15,15 +15,64 @@ const fetcher = require("../src/lib/pricing/litellm-fetcher");
 const pricing = require("../src/lib/pricing");
 const curatedPricing = require("../src/lib/pricing/curated-overrides.json");
 
-test("OpenCode free suffixes stay zero-priced before paid fuzzy matches, only for OpenCode", () => {
+test("Free suffixes stay zero-priced before paid fuzzy matches across sources", () => {
   const tables = { curated: { exact: {} }, litellm: { "gpt-4o": { input: 2.5, output: 10 } } };
-  for (const model of ["gpt-4o-free", "vendor/unknown-free", "vendor/UNKNOWN-FREE"]) {
-    const result = matcher.lookupPricing(model, { ...tables, source: "opencode" });
-    assert.equal(result.hit, true);
-    assert.deepEqual(result.value, { input: 0, output: 0, cache_read: 0, cache_write: 0 });
+  for (const source of ["opencode", "codex", "muse", undefined]) {
+    for (const model of ["gpt-4o-free", "vendor/unknown-free", "vendor/UNKNOWN-FREE"]) {
+      const result = matcher.lookupPricing(model, { ...tables, source });
+      assert.equal(result.hit, true, `${source}: ${model}`);
+      assert.deepEqual(result.value, { input: 0, output: 0, cache_read: 0, cache_write: 0 });
+    }
+    assert.equal(matcher.lookupPricing("gpt-4o", { ...tables, source }).value.input, 2.5);
   }
-  assert.equal(matcher.lookupPricing("gpt-4o-free", { ...tables, source: "codex" }).value.input, 2.5);
-  assert.equal(matcher.lookupPricing("gpt-4o", { ...tables, source: "opencode" }).value.input, 2.5);
+  // Explicit curated exact still wins over the suffix convention.
+  const curated = { exact: { "synthetic-paid-free": { input: 9, output: 9, cache_read: 1, cache_write: 2 } }, fuzzy: [] };
+  const hit = matcher.lookupPricing("synthetic-paid-free", { curated, litellm: {}, source: "muse" });
+  assert.equal(hit.source, "curated:exact");
+  assert.equal(hit.value.input, 9);
+});
+
+test("index: -free suffix is zero-cost for non-OpenCode sources too (issue #744)", () => {
+  for (const source of ["muse", "claude", "cursor", ""]) {
+    const info = pricing.getModelPricingInfo("minimax-m2.5-free", source ? { source } : {});
+    assert.equal(info.status, "free", `source=${source || "(none)"}`);
+    assert.equal(
+      pricing.computeRowCost({
+        source: source || "unknown",
+        model: "minimax-m2.5-free",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        cached_input_tokens: 0,
+        cache_creation_input_tokens: 0,
+        reasoning_output_tokens: 0,
+      }),
+      0,
+    );
+  }
+});
+
+test("index: Muse *-contributor-free SKUs are free, not unpriced (issue #744)", () => {
+  for (const model of ["muse-spark-1.2-contributor-free", "muse-spark-1.3-contributor-free"]) {
+    const info = pricing.getModelPricingInfo(model, { source: "muse" });
+    assert.equal(info.status, "free", model);
+    assert.equal(
+      pricing.computeRowCost({
+        source: "muse",
+        model,
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        cached_input_tokens: 0,
+        cache_creation_input_tokens: 0,
+        reasoning_output_tokens: 0,
+      }),
+      0,
+      model,
+    );
+  }
+  assert.equal(
+    pricing.getModelPricingInfo("muse-spark-1.3-contributor", { source: "muse" }).status,
+    "unpriced",
+  );
 });
 
 test("Claude 5.5 SKUs use official rates and Claude thinking is already billed in output (#762)", () => {
@@ -222,6 +271,126 @@ test("matcher: Kimi K3 aliases resolve to curated k3 rates (not the kimi-k2.5 fa
     assert.equal(r.value.cache_read, 0.3, `${model} cache_read`);
     if (source) assert.equal(r.source, source, `${model} source`);
   }
+});
+
+test("matcher: Kimi K3.1 Pro / Highspeed resolve to official rates (not kimi-k3 fuzzy)", () => {
+  const curated = require("../src/lib/pricing/curated-overrides.json");
+  const litellm = {};
+  const pro = [
+    "kimi-k3.1-pro",
+    "KIMI-K3.1-PRO",
+    "k3.1-pro",
+    "k3.1pro",
+    "moonshot/kimi-k3.1-pro",
+    "openrouter/moonshotai/kimi-k3.1-pro",
+  ];
+  const highspeed = [
+    "kimi-k3.1-pro-highspeed",
+    "k3.1-pro-highspeed",
+    "k3.1pro-highspeed",
+    "moonshot/kimi-k3.1-pro-highspeed",
+  ];
+  for (const model of pro) {
+    const r = matcher.lookupPricing(model, { curated, litellm, source: "kimi" });
+    assert.equal(r.hit, true, `${model} should resolve`);
+    assert.equal(r.value.input, 2, `${model} input`);
+    assert.equal(r.value.output, 10, `${model} output`);
+    assert.equal(r.value.cache_read, 0.2, `${model} cache_read`);
+    assert.equal(r.value.cache_write, 2, `${model} cache_write`);
+    assert.notEqual(r.value.input, 3, `${model} must not inherit kimi-k3 $3 input`);
+  }
+  for (const model of highspeed) {
+    const r = matcher.lookupPricing(model, { curated, litellm, source: "kimi" });
+    assert.equal(r.hit, true, `${model} should resolve`);
+    assert.equal(r.value.input, 4, `${model} input`);
+    assert.equal(r.value.output, 20, `${model} output`);
+    assert.equal(r.value.cache_read, 0.2, `${model} cache_read`);
+    assert.equal(r.value.cache_write, 4, `${model} cache_write`);
+  }
+  const k3 = matcher.lookupPricing("kimi-k3", { curated, litellm });
+  assert.equal(k3.value.input, 3);
+  assert.equal(k3.value.output, 15);
+});
+
+test("index: Kimi K2.8 Preview aliases stay unpriced (do not inherit kimi-k2.5 fuzzy) (#766)", () => {
+  for (const model of [
+    "k2.8", "kimicoding", "kimi-k2.8", "kimicoding/k2.8", "KIMICODING/K2.8",
+    "kimi-k2-8", "kimicoding/k2-8", "KIMICODING/K2-8",
+  ]) {
+    const info = pricing.getModelPricingInfo(model);
+    assert.equal(info.status, "unpriced", model);
+  }
+  assert.equal(pricing.getModelPricingInfo("kimi-for-coding").status, "priced");
+  assert.equal(pricing.getModelPricingInfo("kimi-k2.5").status, "priced");
+  // A provider-prefixed K2.5 id is not a K2.8 alias and keeps its k2.5 rate.
+  assert.equal(pricing.getModelPricing("kimicoding/kimi-k2.5").input, 0.6);
+});
+
+test("matcher: Kimi K2.7 Code HighSpeed doubles the K2.7 Code rates", () => {
+  const curated = require("../src/lib/pricing/curated-overrides.json");
+  for (const model of [
+    "kimi-k2.7-code-highspeed",
+    "moonshot/kimi-k2.7-code-highspeed",
+    "openrouter/moonshotai/kimi-k2.7-code-highspeed",
+  ]) {
+    const r = matcher.lookupPricing(model, { curated, litellm: {}, source: "kimi" });
+    assert.equal(r.hit, true, `${model} should resolve`);
+    assert.equal(r.value.input, 1.9, `${model} input`);
+    assert.equal(r.value.output, 8, `${model} output`);
+    assert.equal(r.value.cache_read, 0.38, `${model} cache_read`);
+  }
+  const base = matcher.lookupPricing("kimi-k2.7-code", { curated, litellm: {}, source: "kimi" });
+  assert.equal(base.value.input, 0.95);
+  assert.equal(base.value.output, 4);
+});
+
+test("index: qwen3.8-max uses Alibaba Singapore International list rates (issue #744)", () => {
+  const expected = { input: 2, output: 6, cache_read: 0.17, cache_write: 2.5 };
+  for (const model of [
+    "qwen3.8-max",
+    "QWEN3.8-MAX",
+    "qwen3-8-max",
+    "qwen3.8-max-0902",
+    "qwen3.8-max-2026-09-02",
+    "dashscope/qwen3.8-max",
+    "openrouter/qwen/qwen3.8-max",
+  ]) {
+    const rates = pricing.getModelPricing(model);
+    assert.deepEqual(
+      Object.fromEntries(Object.keys(expected).map((key) => [key, rates[key]])),
+      expected,
+      model,
+    );
+    const info = pricing.getModelPricingInfo(model);
+    assert.equal(info.status, "priced", model);
+  }
+  for (const preview of [
+    "qwen3.8-max-preview",
+    "qwen3-8-max-preview",
+    "dashscope/qwen3-8-max-preview",
+    "openrouter/qwen/qwen3.8-max-preview",
+    "qwen3.8-max-0902-preview",
+    "qwen3-8-max-0902-preview",
+    "qwen3.8-max-2026-09-02-preview",
+    "qwen3-8-max-2026-09-02-preview",
+  ]) {
+    assert.equal(pricing.getModelPricingInfo(preview).status, "unpriced", preview);
+  }
+  assert.equal(pricing.getModelPricingInfo("qwen3.8-max-0902").source, "curated:exact");
+  const flash = pricing.getModelPricing("qwen3.8-flash");
+  const max = pricing.getModelPricing("qwen3.8-max");
+  assert.notDeepEqual([max.input, max.output], [flash.input, flash.output]);
+  assert.ok(
+    Math.abs(
+      pricing.computeRowCost({
+        model: "qwen3.8-max",
+        input_tokens: 1e6,
+        output_tokens: 1e6,
+        cached_input_tokens: 1e6,
+        cache_creation_input_tokens: 1e6,
+      }) - 10.67,
+    ) < 1e-12,
+  );
 });
 
 test("matcher: lookupPricing fuzzy match restores `digit-digit` to `digit.digit` (droid GLM parity)", () => {
@@ -1167,6 +1336,21 @@ test("index: computeRowCost on Codex row does NOT double-count reasoning", async
     Math.abs(cost - expected) < 1e-9,
     `expected ${expected}, got ${cost}`,
   );
+});
+
+test("index: computeRowCost on OMP row bills reasoning on top of output", () => {
+  const base = {
+    source: "omp",
+    model: "kimi-k2.5",
+    input_tokens: 0,
+    cached_input_tokens: 0,
+    cache_creation_input_tokens: 0,
+    output_tokens: 1_000_000,
+    reasoning_output_tokens: 0,
+  };
+  const withReasoning = { ...base, reasoning_output_tokens: 500_000 };
+  assert.ok(Math.abs(pricing.computeRowCost(base) - 2) < 1e-9);
+  assert.ok(Math.abs(pricing.computeRowCost(withReasoning) - 3) < 1e-9);
 });
 
 test("index: computeRowCost applies GPT-5.6 Sol long-context pricing to only the observed request subset", () => {

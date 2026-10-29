@@ -39,6 +39,7 @@ const { resolveZcodeNativeDbPath, resolveInstallPaths } = require("./install-res
 const { USD_TICKS_PER_USD, normalizeGrokUsage } = require("./grok-usage");
 const wsl = require("./wsl-probe");
 const { discoverKimiWireFiles, kimiSessionDependencies, readKimiSessions } = require("./kimi-session");
+const { discoverOmpSessionFiles, ompSessionDependencies, readOmpSessions } = require("./omp-session");
 const {
   appendUniqueDirs,
   dedupeDirsByRealpath,
@@ -90,7 +91,8 @@ const {
 // v27 groups Codex pages and removes fork replay using parent usage timelines.
 // v28 retains Codex Ultrafast (service_tier "ultrafast") subset columns so
 // date-filtered session views and cached sidecars keep the 6x premium.
-const SIDECAR_VERSION = 28;
+// v29 adds oh-my-pi (omp) sessions from ~/.omp/agent/sessions/**/*.jsonl.
+const SIDECAR_VERSION = 29;
 const EDIT_TOOLS = new Set([
   "apply_patch",
   "edit",
@@ -1952,6 +1954,42 @@ async function scanKimiSessions(filePaths) {
   }));
 }
 
+async function scanOmpSessions(filePaths, options = {}) {
+  // Batch the whole OMP inventory so fork copies that reuse entry ids are
+  // counted once across sessions (same contract as the hourly seenIds set).
+  let skipped = 0;
+  const rows = await readOmpSessions(Array.isArray(filePaths) ? filePaths : [filePaths], {
+    onSkip: (filePath, error) => {
+      skipped += 1;
+      options.onSkip?.(filePath, error);
+    },
+  });
+  // One unreadable file must not freeze the whole inventory. Only when every
+  // main transcript failed do we throw so the builder retains the last
+  // complete OMP snapshot instead of publishing an empty one.
+  if (rows.length === 0 && skipped > 0) {
+    const error = new Error("omp inventory incomplete");
+    error.code = "OMP_INVENTORY_INCOMPLETE";
+    throw error;
+  }
+  const mapped = rows.map(({ identity, files, title, ...row }) => finalizeRecord({
+    ...row,
+    title: cleanSessionTitle(title),
+    version: SIDECAR_VERSION,
+    source: "omp",
+    session_hash: sessionHash("omp", identity),
+    project_key: projectKey(row.project_ref, files[0]),
+    ...sessionStorageUsage(files),
+  }));
+  Object.defineProperty(mapped, "skippedFiles", { value: skipped, enumerable: false });
+  return mapped;
+}
+
+async function scanOmpSession(filePath) {
+  const rows = await scanOmpSessions([filePath]);
+  return rows[0] || null;
+}
+
 async function discoverSessionFiles(home, env = process.env, deps = {}) {
   const grokHome = resolveGrokHome(home);
   // config.scanRoots (#657): read from the tracker config unless the caller
@@ -2044,7 +2082,12 @@ async function discoverSessionFiles(home, env = process.env, deps = {}) {
     return roots;
   });
   const kimi = discoverKimiWireFiles(dedupeDirsByRealpath(kimiRoots), incomplete);
-  return { claude, codex: groupCodexFiles([...codex, ...archived]), grok, zcode, opencode, kimi, incomplete };
+  const usingMachineHome = path.resolve(home) === path.resolve((deps.homedir || os.homedir)());
+  const ompEnv = usingMachineHome
+    ? { ...env, HOME: home }
+    : { HOME: home, OMP_HOME: path.join(home, ".omp") };
+  const omp = discoverOmpSessionFiles(ompEnv, incomplete);
+  return { claude, codex: groupCodexFiles([...codex, ...archived]), grok, zcode, opencode, kimi, omp, incomplete };
 }
 
 // Warn once per unreadable directory per process: the dashboard polls this
@@ -2148,6 +2191,9 @@ function analyticsEntryStatKey(source, filePath) {
   if (source === "kimi") {
     return `${sessionStat}|metadata:${filesSignature(kimiSessionDependencies(filePaths))}`;
   }
+  if (source === "omp") {
+    return `${sessionStat}|metadata:${filesSignature(ompSessionDependencies(filePaths))}`;
+  }
   if (source === "grok") {
     const primary = filePaths[0];
     return `${sessionStat}|summary:${sessionFileStatKey(grokSummaryPathFor(primary)) || "missing"}|signals:${sessionFileStatKey(grokSignalsPathFor(primary)) || "missing"}`;
@@ -2189,6 +2235,8 @@ async function buildSessionAnalyticsInternal({ home = os.homedir(), force = fals
   const retryOpencodeScan = fs.existsSync(incompleteOpencodePath);
   const incompleteKimiPath = `${metaPath}.kimi-incomplete`;
   const retryKimiScan = fs.existsSync(incompleteKimiPath);
+  const incompleteOmpPath = `${metaPath}.omp-incomplete`;
+  const retryOmpScan = fs.existsSync(incompleteOmpPath);
   const incompleteCodexPath = `${metaPath}.codex-incomplete`;
   const retryCodexScan = fs.existsSync(incompleteCodexPath);
   let previousMeta = null;
@@ -2197,7 +2245,7 @@ async function buildSessionAnalyticsInternal({ home = os.homedir(), force = fals
       previousMeta = JSON.parse(fs.readFileSync(metaPath, "utf8"));
       const checkedAt = Date.parse(previousMeta.checked_at || previousMeta.generated_at || "");
       if (
-        !retryZcodeScan && !retryOpencodeScan && !retryKimiScan && !retryCodexScan && previousMeta.version === SIDECAR_VERSION &&
+        !retryZcodeScan && !retryOpencodeScan && !retryKimiScan && !retryOmpScan && !retryCodexScan && previousMeta.version === SIDECAR_VERSION &&
         Number.isFinite(checkedAt) &&
         Date.now() - checkedAt < Math.max(0, Number(cacheTtlMs) || 0)
       ) {
@@ -2229,13 +2277,15 @@ async function buildSessionAnalyticsInternal({ home = os.homedir(), force = fals
     ...discovered.codex.flat().map(codexTitleIndexPathFor).filter(Boolean),
     ...discovered.kimi,
     ...kimiSessionDependencies(discovered.kimi),
+    ...discovered.omp,
+    ...ompSessionDependencies(discovered.omp),
     ...discovered.grok,
     ...discovered.grok.map(grokSummaryPathFor),
     ...discovered.grok.map(grokSignalsPathFor),
     // db + its WAL sidecars: the trio is one logical file for change detection.
     ...[...(discovered.zcode || []), ...(discovered.opencode || [])].flatMap((dbPath) => [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]),
   ]);
-  if (!force && !retryZcodeScan && !retryOpencodeScan && !retryKimiScan && !retryCodexScan && previousMeta?.version === SIDECAR_VERSION && previousMeta.signature === signature) {
+  if (!force && !retryZcodeScan && !retryOpencodeScan && !retryKimiScan && !retryOmpScan && !retryCodexScan && previousMeta?.version === SIDECAR_VERSION && previousMeta.signature === signature) {
     await writeAtomic(metaPath, `${JSON.stringify({ ...previousMeta, checked_at: new Date().toISOString() })}\n`);
     return readSidecar(sidecarPath);
   }
@@ -2259,6 +2309,7 @@ async function buildSessionAnalyticsInternal({ home = os.homedir(), force = fals
     ...(discovered.zcode.length ? [{ source: "zcode", filePath: discovered.zcode, scan: scanZcodeSessions }] : []),
     ...(discovered.opencode.length ? [{ source: "opencode", filePath: discovered.opencode, scan: scanOpencodeSessions }] : []),
     ...(discovered.kimi.length ? [{ source: "kimi", filePath: discovered.kimi, scan: scanKimiSessions }] : []),
+    ...(discovered.omp.length ? [{ source: "omp", filePath: discovered.omp, scan: scanOmpSessions }] : []),
   ];
   // Files we could not turn into a row (permission denied, half-written line,
   // vanished mid-scan). Swallowing these silently made sessions disappear with
@@ -2267,6 +2318,7 @@ async function buildSessionAnalyticsInternal({ home = os.homedir(), force = fals
   let incompleteZcodeScan = false;
   let incompleteOpencodeScan = false;
   let incompleteKimiScan = false;
+  let incompleteOmpScan = false;
   let incompleteCodexScan = false;
   for (const entry of entries) {
     const cacheKey = sessionFileCacheKey(entry.source, entry.filePath);
@@ -2280,11 +2332,12 @@ async function buildSessionAnalyticsInternal({ home = os.homedir(), force = fals
       if (entry.source === "zcode") incompleteZcodeScan = true;
       if (entry.source === "opencode") incompleteOpencodeScan = true;
       if (entry.source === "kimi") incompleteKimiScan = true;
+      if (entry.source === "omp") incompleteOmpScan = true;
       continue;
     }
     let rows = null;
-    if (!force && !(entry.source === "zcode" && retryZcodeScan) && !(entry.source === "opencode" && retryOpencodeScan) && !(entry.source === "kimi" && retryKimiScan) && !(entry.source === "codex" && retryCodexScan) && previousFiles[cacheKey]?.stat_key === statKey) {
-      if (entry.source === "zcode" || entry.source === "opencode" || entry.source === "kimi") {
+    if (!force && !(entry.source === "zcode" && retryZcodeScan) && !(entry.source === "opencode" && retryOpencodeScan) && !(entry.source === "kimi" && retryKimiScan) && !(entry.source === "omp" && retryOmpScan) && !(entry.source === "codex" && retryCodexScan) && previousFiles[cacheKey]?.stat_key === statKey) {
+      if (entry.source === "zcode" || entry.source === "opencode" || entry.source === "kimi" || entry.source === "omp") {
         // One db scans to many cached rows; recover them all from the previous
         // pass. An empty recovery means the sidecar lost its rows — rescan.
         const cached = previousRows.filter((row) => row?.source === entry.source);
@@ -2297,6 +2350,9 @@ async function buildSessionAnalyticsInternal({ home = os.homedir(), force = fals
     if (!rows) {
       try {
         const scanned = await entry.scan(entry.filePath);
+        if (entry.source === "omp" && Number.isFinite(scanned?.skippedFiles)) {
+          skippedFiles += scanned.skippedFiles;
+        }
         rows = Array.isArray(scanned) ? scanned.filter(Boolean) : (scanned ? [scanned] : []);
       } catch (error) {
         // One active/partial session must not poison the sidecar, but do not
@@ -2305,6 +2361,7 @@ async function buildSessionAnalyticsInternal({ home = os.homedir(), force = fals
         if (entry.source === "zcode") incompleteZcodeScan = true;
         if (entry.source === "opencode") incompleteOpencodeScan = true;
         if (entry.source === "kimi") incompleteKimiScan = true;
+        if (entry.source === "omp") incompleteOmpScan = true;
         if (entry.source === "codex" && error.code === "CODEX_FORK_DEFERRED") incompleteCodexScan = true;
         if (!process.env.NODE_TEST_CONTEXT) {
           console.warn(`[session-analytics] skipped ${entry.source} session file: ${error?.message || error}`);
@@ -2312,7 +2369,7 @@ async function buildSessionAnalyticsInternal({ home = os.homedir(), force = fals
         rows = [];
       }
     }
-    if (rows.length === 0 && !["zcode", "opencode", "kimi"].includes(entry.source)) {
+    if (rows.length === 0 && !["zcode", "opencode", "kimi", "omp"].includes(entry.source)) {
       const previous = previousRowsByFile.get(cacheKey);
       if (previous) { sessions.push(previous); nextFiles[cacheKey] = previousFiles[cacheKey]; }
       continue;
@@ -2324,7 +2381,7 @@ async function buildSessionAnalyticsInternal({ home = os.homedir(), force = fals
       // so key each by the db path plus its session id; a bare session id as a
       // separate path element would be path.resolve()d against the process cwd
       // and never match across runs.
-      row._cache_key = (entry.source === "zcode" || entry.source === "opencode" || entry.source === "kimi") && (row.session_id || row.session_hash)
+      row._cache_key = (entry.source === "zcode" || entry.source === "opencode" || entry.source === "kimi" || entry.source === "omp") && (row.session_id || row.session_hash)
         ? `${cacheKey}#${sessionHash(entry.source, row.session_id || row.session_hash)}`
         : cacheKey;
       sessions.push(row);
@@ -2351,6 +2408,10 @@ async function buildSessionAnalyticsInternal({ home = os.homedir(), force = fals
     await writeAtomic(incompleteKimiPath, "1\n");
     sessions.push(...readSidecar(sidecarPath).filter((row) => row.source === "kimi" && row.version === SIDECAR_VERSION));
   }
+  if (incompleteOmpScan) {
+    await writeAtomic(incompleteOmpPath, "1\n");
+    sessions.push(...readSidecar(sidecarPath).filter((row) => row.source === "omp" && row.version === SIDECAR_VERSION));
+  }
   if (incompleteCodexScan) {
     await writeAtomic(incompleteCodexPath, "1\n");
     const retained = new Set(sessions.map((row) => row._cache_key));
@@ -2360,7 +2421,7 @@ async function buildSessionAnalyticsInternal({ home = os.homedir(), force = fals
   sessions.sort((a, b) => String(b.ended_at || "").localeCompare(String(a.ended_at || "")));
   // A failed database scan is an incomplete inventory. Keep the last complete
   // snapshot and signature so an unchanged database is retried next build.
-  if (incompleteDirs.length === 0 && !incompleteZcodeScan && !incompleteOpencodeScan && !incompleteKimiScan && !incompleteCodexScan) {
+  if (incompleteDirs.length === 0 && !incompleteZcodeScan && !incompleteOpencodeScan && !incompleteKimiScan && !incompleteOmpScan && !incompleteCodexScan) {
     const content = sessions.map(serializeSessionRecord).join("\n") + (sessions.length ? "\n" : "");
     await writeAtomic(sidecarPath, content);
     const generatedAt = new Date().toISOString();
@@ -2374,6 +2435,7 @@ async function buildSessionAnalyticsInternal({ home = os.homedir(), force = fals
     await fsp.rm(incompleteZcodePath, { force: true });
     await fsp.rm(incompleteOpencodePath, { force: true });
     await fsp.rm(incompleteKimiPath, { force: true });
+    await fsp.rm(incompleteOmpPath, { force: true });
     await fsp.rm(incompleteCodexPath, { force: true });
   }
   // Non-enumerable so the array still behaves exactly like a plain row list
@@ -2660,6 +2722,7 @@ function resumeCommandFor(source, sessionId) {
   // Grok Build: `grok --resume <session-id>` (also accepts a title). The
   // command must still be run from the session's project_ref cwd.
   if (source === "grok") return `grok --resume ${id}`;
+  if (source === "omp") return `omp --resume ${id}`;
   return null;
 }
 
@@ -3002,6 +3065,8 @@ module.exports = {
   scanZcodeSessions,
   scanOpencodeSessions,
   scanKimiSessions,
+  scanOmpSessions,
+  scanOmpSession,
   buildSessionAnalytics,
   summarizeSessions,
   listSessionsForBrowser,

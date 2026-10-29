@@ -772,15 +772,18 @@ export async function getUsageMonthly({
   }, { accessToken });
 }
 
-export async function getUsageLimits(opts: { refresh?: boolean; devinEnabled?: boolean } = {}) {
+export async function getUsageLimits(opts: { refresh?: boolean; devinEnabled?: boolean; workbuddyEnabled?: boolean } = {}) {
   const params: AnyRecord = opts?.refresh ? { refresh: "1" } : {};
   const options: AnyRecord = {};
-  // Devin quota is opt-in: devin=1 is honored by the local API only together
-  // with the loopback auth header, so the flag alone can never trigger a
-  // credential read. Away from the local backend (e.g. the hosted site) there
-  // is nothing to opt in to, so the flag is not sent at all.
-  if (opts?.devinEnabled === true && isLocalhostHost()) {
-    params.devin = "1";
+  // Devin and WorkBuddy quota are opt-in: their flags are honored by the local
+  // API only together with the loopback auth header, so a flag alone can never
+  // trigger a credential read. Away from the local backend (e.g. the hosted
+  // site) there is nothing to opt in to, so the flags are not sent at all.
+  const local = isLocalhostHost();
+  const optIn = opts?.devinEnabled === true || opts?.workbuddyEnabled === true;
+  if (opts?.devinEnabled === true && local) params.devin = "1";
+  if (opts?.workbuddyEnabled === true && local) params.workbuddy = "1";
+  if (optIn && local) {
     options.headers = {
       Accept: "application/json",
       ...(await getLocalApiAuthHeaders()),

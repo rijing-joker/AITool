@@ -157,6 +157,126 @@ test("WorkBuddy inference preserves system/developer content, streaming cache/re
   const raw = await (await fetch(`http://127.0.0.1:${proxy.address().port}`)).text(); assert.match(raw, /cached_tokens/); assert.match(raw, /reasoning_tokens/); assert.match(raw, /\[DONE\]/);
 });
 
+test("WorkBuddy Claude models use Messages with effort, fall back to chat, and WorkBuddy AI stays on chat", async t => {
+  const { options } = await fixture(t);
+  await state.write(path.join(options.root, "workbuddy-account.json"), { access: "synthetic-access", expires: Date.now() + 3600000, uid: "u" });
+  await state.write(path.join(options.root, "workbuddy-ai-account.json"), { access: "synthetic-access", expires: Date.now() + 3600000, uid: "u" });
+  await state.saveSettings(value => ({ ...value, enabled: { workbuddy: true, "workbuddy-ai": true }, workbuddy: { models: ["claude-opus-5.5"] }, "workbuddy-ai": { models: ["claude-opus-5.5"] } }), options);
+  assert.equal(buddy.isMessagesModel("workbuddy", "claude-opus-5.5"), true);
+  assert.equal(buddy.isMessagesModel("workbuddy", "glm-5.3"), false);
+  assert.equal(buddy.isMessagesModel("workbuddy-ai", "claude-opus-5.5"), false);
+  const converted = buddy.chatToMessages({ model: "claude-opus-5.5", max_completion_tokens: 32, reasoning_effort: "max",
+    messages: [{ role: "system", content: "System A" }, { role: "developer", content: "Dev B" }, { role: "user", content: "Synthetic" }],
+    tools: [{ type: "function", function: { name: "echo", parameters: { type: "object" } } }] });
+  assert.equal(converted.system, "System A\n\nDev B");
+  assert.equal(converted.max_tokens, 32);
+  assert.deepEqual(converted.output_config, { effort: "max" });
+  assert.deepEqual(converted.thinking, { type: "adaptive" });
+  assert.deepEqual(converted.tools, [{ name: "echo", description: "", input_schema: { type: "object" } }]);
+
+  const anthropic = [
+    { type: "message_start", message: { id: "msg_fixture", model: "claude-opus-5.5", usage: { input_tokens: 100, cache_read_input_tokens: 20, cache_creation_input_tokens: 5 } } },
+    { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+    { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Hello" } },
+    { type: "content_block_start", index: 1, content_block: { type: "tool_use", id: "toolu_1", name: "echo", input: {} } },
+    { type: "content_block_delta", index: 1, delta: { type: "input_json_delta", partial_json: '{"x":1}' } },
+    { type: "message_delta", delta: { stop_reason: "tool_use" }, usage: { output_tokens: 10 } },
+    { type: "message_stop" },
+  ];
+  const seen = [];
+  let fallback = false;
+  let overloaded = false;
+  let protocolFailure = false;
+  let requested = "";
+  const upstream = http.createServer(async (req, res) => {
+    let raw = ""; for await (const chunk of req) raw += chunk;
+    seen.push({ url: requested, body: JSON.parse(raw) });
+    if (requested === "/v1/messages" && fallback) { res.writeHead(404, { "content-type": "application/json" }); res.end("{}"); return; }
+    if (requested === "/v1/messages" && overloaded) { res.writeHead(429, { "content-type": "application/json" }); res.end("{}"); return; }
+    if (requested === "/v1/messages" && protocolFailure) { res.writeHead(200, { "content-type": "application/json" }); res.end("{}"); return; }
+    if (requested === "/v1/messages") {
+      assert.equal(req.headers["anthropic-version"], "2023-06-01");
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.end(anthropic.map(value => `data: ${JSON.stringify(value)}\n\n`).join(""));
+      return;
+    }
+    assert.equal(requested, "/v2/chat/completions");
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.end('data: {"choices":[{"index":0,"delta":{"content":"fallback"},"finish_reason":null}]}\n\ndata: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12}}\n\ndata: [DONE]\n\n');
+  });
+  upstream.listen(0, "127.0.0.1"); await once(upstream, "listening"); t.after(() => { upstream.close(); upstream.closeAllConnections(); });
+  options.streamRequest = (url, config, callback) => {
+    requested = new URL(url).pathname;
+    return http.request(`http://127.0.0.1:${upstream.address().port}`, config, callback);
+  };
+  const runForward = (kind, requestBody) => new Promise((resolve, reject) => {
+    const req = { headers: {} };
+    const res = new http.ServerResponse({ method: "POST" });
+    const chunks = [];
+    res.writeHead = (status, headers) => {
+      res.statusCode = status;
+      Object.entries(headers || {}).forEach(([key, value]) => res.setHeader?.(key, value));
+      return res;
+    };
+    res.write = chunk => { chunks.push(Buffer.from(chunk)); return true; };
+    res.end = chunk => {
+      if (chunk) chunks.push(Buffer.from(chunk));
+      resolve({ status: res.statusCode, text: Buffer.concat(chunks).toString() });
+      return res;
+    };
+    buddy.forward({ kind, req, res, body: requestBody, signal: new AbortController().signal, options, pipeline }).catch(reject);
+  });
+  const body = { model: "claude-opus-5.5", stream: true, reasoning_effort: "max", max_completion_tokens: 32,
+    messages: [{ role: "system", content: "System A" }, { role: "user", content: "Synthetic" }] };
+  for (const [stream, expectJson] of [[true, false], [false, true]]) {
+    const response = await runForward("workbuddy", { ...body, stream });
+    assert.equal(response.status, 200);
+    if (expectJson) {
+      const completion = JSON.parse(response.text);
+      assert.equal(completion.choices[0].message.content, "Hello");
+      assert.equal(completion.choices[0].message.tool_calls[0].function.name, "echo");
+      assert.equal(completion.choices[0].finish_reason, "tool_calls");
+      assert.equal(completion.usage.prompt_tokens, 125);
+      assert.equal(completion.usage.prompt_tokens_details.cached_tokens, 20);
+    } else {
+      assert.match(response.text, /Hello/);
+      assert.match(response.text, /toolu_1/);
+      assert.match(response.text, /"finish_reason":"tool_calls"/);
+      assert.match(response.text, /\[DONE\]/);
+    }
+  }
+  const messagesCall = seen.find(row => row.url === "/v1/messages");
+  assert.equal(messagesCall.body.output_config.effort, "max");
+  assert.equal(messagesCall.body.messages[0].role, "user");
+
+  fallback = true;
+  const response = await runForward("workbuddy", body);
+  assert.equal(response.status, 200);
+  assert.match(response.text, /fallback/);
+  assert.equal(seen.filter(row => row.url === "/v2/chat/completions").length, 1);
+
+  // Quota/rate-limit failures surface as-is instead of spending a chat request.
+  fallback = false;
+  overloaded = true;
+  const chatBefore = seen.filter(row => row.url === "/v2/chat/completions").length;
+  const limited = await runForward("workbuddy", body);
+  assert.equal(limited.status, 429);
+  assert.match(limited.text, /workbuddy_http_429/);
+  assert.equal(seen.filter(row => row.url === "/v2/chat/completions").length, chatBefore);
+  overloaded = false;
+
+  // A 200 that is not SSE fails before headers and still falls back to chat.
+  protocolFailure = true;
+  const broken = await runForward("workbuddy", body);
+  assert.equal(broken.status, 200);
+  assert.match(broken.text, /fallback/);
+  assert.equal(seen.filter(row => row.url === "/v2/chat/completions").length, chatBefore + 1);
+  protocolFailure = false;
+  // WorkBuddy AI has no Messages route: a Claude model stays on chat.
+  const aiBefore = seen.length;
+  await runForward("workbuddy-ai", body);
+  assert.equal(seen[aiBefore].url, "/v2/chat/completions");
+});
 test("WorkBuddy aggregates SSE into non-streaming JSON with tools, reasoning and exact usage", async t => {
   const { options } = await fixture(t);
   for (const kind of ["workbuddy", "workbuddy-ai"]) {

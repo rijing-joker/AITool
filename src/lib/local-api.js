@@ -3383,16 +3383,19 @@ function createLocalApiHandler({ queuePath, serverVersion = null }) {
     if (p === "/functions/tokentracker-usage-limits") {
       const { getUsageLimits, resetUsageLimitsCache } = require("./usage-limits");
       try {
-        // Devin quota is opt-in (Settings > Usage & Limits > Providers). An
-        // explicit devin=1 without local authentication is rejected before any
-        // cache reset or provider work — silently downgrading it to a disabled
-        // response would misreport an enabled client as a disabled provider.
-        // Authorization is evaluated unconditionally so the check never depends
-        // on the user-controlled opt-in flag itself.
+        // Devin and WorkBuddy quota are opt-in (Settings > Usage & Limits >
+        // Providers). An explicit opt-in without local authentication is
+        // rejected before any cache reset or provider work — silently
+        // downgrading it to a disabled response would misreport an enabled
+        // client as a disabled provider. Authorization is evaluated
+        // unconditionally so the check never depends on the user-controlled
+        // opt-in flag itself.
         const localAuthorized = isAuthorizedLocalMutation(req);
         const devinParam = url.searchParams.get("devin");
         const devinEnabled = devinParam === "1" || devinParam === "true";
-        if (devinEnabled && !localAuthorized) {
+        const workbuddyParam = url.searchParams.get("workbuddy");
+        const workbuddyEnabled = workbuddyParam === "1" || workbuddyParam === "true";
+        if ((devinEnabled || workbuddyEnabled) && !localAuthorized) {
           json(res, { error: "Unauthorized" }, 401);
           return true;
         }
@@ -3409,6 +3412,7 @@ function createLocalApiHandler({ queuePath, serverVersion = null }) {
           // cooldown) — an explicit user refresh should hit upstream.
           forceRefresh,
           devinEnabled,
+          workbuddyEnabled,
         });
         json(res, data);
       } catch (e) {

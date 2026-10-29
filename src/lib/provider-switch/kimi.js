@@ -452,6 +452,98 @@ function isPlainProviderOauth(oauth) {
   return isPlainObject(oauth) && typeof oauth.key === "string" && oauth.key !== "";
 }
 
+// Replace an official node's model aliases from the account's own catalog.
+// The provider (endpoint + login reference) stays exactly as signed in
+// (cc-switch 6265294: apply_provider pins it), and removing the selected
+// default or a secondary-model alias is refused like ordinary provider CRUD.
+async function updateOauthModels(accountId, models, options = {}) {
+  const before = await readDocument(options);
+  if (!isOfficialProvider(before.providers?.[accountId])) {
+    throw new Error("Kimi official account not found");
+  }
+  if (!isPlainObject(models) || Object.keys(models).length === 0) {
+    throw new Error("Select at least one Kimi Code model");
+  }
+  const next = structuredClone(before);
+  const owned = new Set(Object.keys(modelsOfProvider(next, accountId)));
+  const selected = typeof next.default_model === "string" ? next.default_model : "";
+  if (owned.has(selected) && models[selected] === undefined) {
+    throw new Error("Select another default model in Kimi Code before removing this model or provider");
+  }
+  const secondary = next.secondary_model;
+  const referenced = new Set();
+  if (isPlainObject(secondary)) {
+    if (typeof secondary.default_model === "string") referenced.add(secondary.default_model);
+    if (isPlainObject(secondary.models)) for (const key of Object.keys(secondary.models)) referenced.add(key);
+  }
+  for (const key of owned) {
+    if (models[key] === undefined && referenced.has(key)) {
+      throw new Error("Update the secondary model selection in Kimi Code before removing this model");
+    }
+  }
+  next.models = isPlainObject(next.models) ? next.models : {};
+  for (const [key, model] of Object.entries(models)) {
+    const existing = next.models[key];
+    if (existing !== undefined && existing?.provider !== accountId) {
+      throw new Error(`Kimi Code model key '${key}' belongs to another provider`);
+    }
+  }
+  for (const key of owned) delete next.models[key];
+  for (const [key, model] of Object.entries(models)) {
+    next.models[key] = { ...structuredClone(model), provider: accountId };
+  }
+  if (typeof next.default_model !== "string" || !next.default_model) next.default_model = Object.keys(models)[0];
+  await writeDocument(before, next, options);
+  return { id: accountId, models: Object.keys(models) };
+}
+
+// Put a detached official card back into config.toml without touching its
+// credential. The snapshot is the signed-in connection captured at removal,
+// so "Add" cannot point the card at a different host.
+async function restoreOauthAccount(accountId, snapshot, options = {}) {
+  const before = await readDocument(options);
+  if (before.providers?.[accountId] !== undefined) {
+    throw new Error("This Kimi account is already in Kimi Code");
+  }
+  if (!isPlainObject(snapshot) || !isOfficialProvider(snapshot.provider)) {
+    throw new Error("Kimi official account not found");
+  }
+  if (!isPlainObject(snapshot.models) || Object.keys(snapshot.models).length === 0) {
+    throw new Error("Kimi official account has no saved models");
+  }
+  const next = structuredClone(before);
+  for (const section of ["providers", "models", "services"]) {
+    if (next[section] === undefined) next[section] = {};
+  }
+  for (const [key, model] of Object.entries(snapshot.models)) {
+    const existing = next.models[key];
+    if (existing !== undefined && existing?.provider !== accountId) {
+      throw new Error(`Kimi Code model key '${key}' belongs to another provider`);
+    }
+    next.models[key] = { ...structuredClone(model), provider: accountId };
+  }
+  next.providers[accountId] = structuredClone(snapshot.provider);
+  if (typeof next.default_model !== "string" || !next.default_model) next.default_model = Object.keys(snapshot.models)[0];
+  const baseUrl = typeof snapshot.provider.base_url === "string" ? snapshot.provider.base_url : "";
+  for (const [name, suffix] of [["moonshot_search", "search"], ["moonshot_fetch", "fetch"]]) {
+    const service = next.services[name];
+    if (service === undefined && baseUrl) {
+      next.services[name] = { base_url: `${baseUrl.replace(/\/$/, "")}/${suffix}`, api_key: "", oauth: structuredClone(snapshot.provider.oauth) };
+      continue;
+    }
+    // Removing the default login drops its oauth reference from managed
+    // services; putting the card back restores it when the service still
+    // points at the same base URL.
+    if (isPlainObject(service) && service.oauth === undefined && baseUrl &&
+      typeof service.base_url === "string" && service.base_url.startsWith(baseUrl.replace(/\/$/, ""))) {
+      service.oauth = structuredClone(snapshot.provider.oauth);
+    }
+  }
+  validateProviderRow(accountId, { provider: next.providers[accountId], models: Object.fromEntries(Object.entries(next.models).filter(([, model]) => model?.provider === accountId)) });
+  await writeDocument(before, next, options);
+  return { id: accountId };
+}
+
 async function useOauthAccount(accountId, options = {}) {
   const before = await readDocument(options);
   if (!isOfficialProvider(before.providers?.[accountId])) {
@@ -505,5 +597,7 @@ module.exports = {
   extractRows,
   saveOauthLogin,
   removeOauthAccount,
+  updateOauthModels,
+  restoreOauthAccount,
   useOauthAccount,
 };

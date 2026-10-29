@@ -63,7 +63,7 @@ function defaultOrder() {
 // after the user turns them on in Settings > Usage & Limits > Providers. The
 // stored selection doubles as the opt-in flag the local API requires before
 // reading credentials, so they default OFF — display-only providers stay on.
-const OPT_IN_PROVIDERS = new Set(["devin"]);
+const OPT_IN_PROVIDERS = new Set(["devin", "workbuddy"]);
 
 function defaultVisibility() {
   return Object.fromEntries(
@@ -164,6 +164,15 @@ export function isDevinProviderSelected() {
   return readVisibility().devin === true;
 }
 
+/**
+ * The saved WorkBuddy provider selection — the same explicit-true opt-in
+ * contract as Devin. The local API reads desktop credentials only when this
+ * flag is forwarded with the loopback authorization header.
+ */
+export function isWorkbuddyProviderSelected() {
+  return readVisibility().workbuddy === true;
+}
+
 function readDisplayMode() {
   if (typeof window === "undefined") return LIMIT_DISPLAY_MODES.USED;
   try {
@@ -241,6 +250,42 @@ function writeLocalSnapshot(snapshot) {
   } catch (error) {
     console.warn("[tokentracker] limits preferences localStorage write failed:", error);
   }
+}
+
+// The macOS menu bar keeps its own provider list. Until it learns an id, that
+// id must not round-trip through the native mirror: Swift filters unknown ids
+// out, and normalizing the missing key back in would reset the dashboard's
+// visibility/order for the provider (WorkBuddy is deferred on that surface).
+const NATIVE_UNSUPPORTED_PROVIDERS = new Set(["workbuddy"]);
+
+function stripNativeSnapshot(snapshot) {
+  const normalized = normalizeSnapshot(snapshot);
+  return {
+    ...normalized,
+    providerOrder: normalized.providerOrder.filter((id) => !NATIVE_UNSUPPORTED_PROVIDERS.has(id)),
+    providerVisibility: Object.fromEntries(
+      Object.entries(normalized.providerVisibility)
+        .filter(([id]) => !NATIVE_UNSUPPORTED_PROVIDERS.has(id)),
+    ),
+  };
+}
+
+function mergeNativeSnapshot(nativeSnapshot, localSnapshot) {
+  const native = stripNativeSnapshot(nativeSnapshot);
+  const local = normalizeSnapshot(localSnapshot);
+  return {
+    ...native,
+    providerOrder: normalizeOrder([
+      ...native.providerOrder,
+      ...local.providerOrder.filter((id) => NATIVE_UNSUPPORTED_PROVIDERS.has(id)),
+    ]),
+    providerVisibility: {
+      ...native.providerVisibility,
+      ...Object.fromEntries(
+        [...NATIVE_UNSUPPORTED_PROVIDERS].map((id) => [id, local.providerVisibility[id]]),
+      ),
+    },
+  };
 }
 
 function toBridgeSnapshot(snapshot) {
@@ -369,7 +414,7 @@ export function useLimitsDisplayPrefs() {
     const unsubscribe = onNativeSettings((detail) => {
       const nativePrefs = detail?.[NATIVE_PREFERENCES_KEY];
       if (nativePrefs && typeof nativePrefs === "object") {
-        const nativeSnapshot = normalizeSnapshot(nativePrefs);
+        const nativeSnapshot = mergeNativeSnapshot(nativePrefs, readLocalSnapshot());
         if (!hasLocalLimitsPreferenceKeys()) {
           applySnapshot(nativeSnapshot, { writeLocal: true });
           return;
@@ -379,7 +424,7 @@ export function useLimitsDisplayPrefs() {
           applySnapshot(nativeSnapshot, { writeLocal: true });
         } else {
           const dashboard = applySnapshot(dashboardSnapshot);
-          if (!sameSnapshot(nativeSnapshot, dashboardSnapshot)) {
+          if (!sameSnapshot(stripNativeSnapshot(nativeSnapshot), stripNativeSnapshot(dashboardSnapshot))) {
             sendNativeSnapshot(dashboard);
           }
         }

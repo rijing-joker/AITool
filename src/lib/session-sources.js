@@ -7,7 +7,7 @@ const sync = require("node:fs");
 const path = require("node:path");
 const { readSqliteJsonRowsAsync } = require("./sqlite-reader");
 const { statusOf } = require("./session-tool-results");
-const APPS = ["agy", "hermes", "pi", "grokbuild", "opencode", "mcode", "kimi"];
+const APPS = ["agy", "hermes", "pi", "omp", "grokbuild", "opencode", "mcode", "kimi"];
 const fileMetadata = new Map();
 const parse = value => { try { return typeof value === "string" ? JSON.parse(value) : value; } catch { return null; } };
 const ts = (value, unit = "ms") => {
@@ -44,6 +44,12 @@ function roots(app, home, env = {}) {
     }
     return [path.join(agent, "sessions")];
   }
+  if (app === "omp") {
+    // Shared with the Sessions sidecar so the dashboard and the CLI browser
+    // cannot disagree about profiles or the session-dir override.
+    const { resolveOmpSessionDirs } = require("./rollout");
+    return resolveOmpSessionDirs(env, home);
+  }
   return [];
 }
 async function walk(root, accept, validate) {
@@ -63,6 +69,21 @@ async function walk(root, accept, validate) {
     }
   }
   return out.sort();
+}
+// OMP stores subagent transcripts under `<main stem>/`, next to the parent
+// `<main>.jsonl`. Those files reuse the main session's header shape but are
+// not resumable sessions of their own; the Sessions sidecar folds them into
+// the parent, so the CLI list must exclude them too.
+function isOmpSubagentTranscript(file, root) {
+  const stop = path.resolve(root);
+  let dir = path.resolve(path.dirname(file));
+  while (dir !== stop) {
+    if (sync.existsSync(`${dir}.jsonl`)) return true;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return false;
 }
 async function jsonl(file) {
   const stat = await fs.stat(file);
@@ -103,7 +124,7 @@ async function validateSource(app, source, home, env, validate) {
     : app === "grokbuild" ? path.basename(file) === "chat_history.jsonl"
     : app === "opencode" ? file.includes(`${path.sep}storage${path.sep}session${path.sep}`) && file.endsWith(".json")
     : app === "kimi" ? file.endsWith(`${path.sep}agents${path.sep}main${path.sep}wire.jsonl`)
-    : app === "hermes" ? file.includes(`${path.sep}sessions${path.sep}`) && file.endsWith(".jsonl") : app === "pi" && file.endsWith(".jsonl");
+    : app === "hermes" ? file.includes(`${path.sep}sessions${path.sep}`) && file.endsWith(".jsonl") : (app === "pi" || app === "omp") && file.endsWith(".jsonl");
   if (!valid) throw new Error("Not a registered session transcript");
 }
 const literal = id => `'${id.replaceAll("'", "''")}'`;
@@ -148,6 +169,11 @@ async function list(app, home, env, validate) {
       const profile = app === "agy" && dir.includes(`${path.sep}provider-switch${path.sep}agy${path.sep}`) ? path.dirname(dir) : null;
       const quote = value => `'${value.replaceAll("'", "'\\''")}'`;
       if (app === "kimi") return /^[\w-]+$/.test(id) ? `env KIMI_CODE_HOME=${quote(path.dirname(dir))} kimi --session ${id}` : null;
+      if (app === "omp") {
+        const marker = `${path.sep}profiles${path.sep}`;
+        const profile = dir.includes(marker) ? dir.slice(dir.indexOf(marker) + marker.length).split(path.sep)[0] : null;
+        return profile ? `env OMP_PROFILE=${quote(profile)} PI_PROFILE=${quote(profile)} omp --resume ${id}` : `omp --resume ${id}`;
+      }
       return app === "agy" ? `agy${profile ? ` --gemini_dir=${quote(profile)}` : ""} --conversation=${id}` : app === "grokbuild" ? `grok --resume ${id}` : null;
     };
     if (app === "agy") {
@@ -165,8 +191,11 @@ async function list(app, home, env, validate) {
       : app === "opencode" ? file.includes(`${path.sep}storage${path.sep}session${path.sep}`) && file.endsWith(".json")
       : app === "hermes" ? file.includes(`${path.sep}sessions${path.sep}`) && file.endsWith(".jsonl")
       : app === "kimi" ? file.endsWith(`${path.sep}agents${path.sep}main${path.sep}wire.jsonl`)
-      : app === "pi" ? file.endsWith(".jsonl") : false, validate);
-    for (const file of files) {
+      : (app === "pi" || app === "omp") ? file.endsWith(".jsonl") : false, validate);
+    const listed = app === "omp"
+      ? files.filter(file => !isOmpSubagentTranscript(file, dir))
+      : files;
+    for (const file of listed) {
       try {
         const stat = await fs.stat(file);
         const stamp = [stat.dev,stat.ino,stat.size,stat.mtimeMs,stat.ctimeMs].join(":");
@@ -200,7 +229,7 @@ function fold(app, values) {
   const messages = [];
   const usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, reasoningTokens: 0,
     totalTokens: 0, inputInclusive: false, model: null, perModel: [] };
-  if (app === "agy" || app === "pi" || app === "opencode") usage.executorType = "fresh-input-output-includes-reasoning";
+  if (app === "agy" || app === "pi" || app === "omp" || app === "opencode") usage.executorType = "fresh-input-output-includes-reasoning";
   const models = new Map();
   let selectedModel = null;
   for (const value of values) {
@@ -284,8 +313,9 @@ async function readFile(app, file, validate) {
   let summary = null;
   if (app === "grokbuild") { try { const metadata = path.join(path.dirname(file), "summary.json"); await validate(metadata); summary = parse(await fs.readFile(metadata,"utf8")); } catch {} }
   const header = rows.find(row => row.type === "session") || {};
+  const titleSlot = app === "omp" ? rows.find(row => row.type === "title" && typeof row.title === "string")?.title : null;
   if (app === "agy") { const latest = new Map(); for (const row of rows) if (Number.isInteger(row.step_index)) latest.set(row.step_index, row); rows = [...latest].sort((a, b) => a[0] - b[0]).map(([, row]) => row); }
-  if (app === "pi") {
+  if (app === "pi" || app === "omp") {
     if (header.version === 0) throw new Error("Unsupported Pi session version");
     if ((header.version || 1) < 2) { let previous = null; rows = rows.map((row, index) => { if (row.type === "session") return row; const next = { ...row, id: `legacy-${index}`, parentId: previous }; previous = next.id; return next; }); }
     const nodes = new Map(rows.filter(row => row.id && row.type !== "session").map(row => [row.id, row]));
@@ -293,7 +323,7 @@ async function readFile(app, file, validate) {
     while (leaf && !active.has(leaf.id)) { active.add(leaf.id); leaf = nodes.get(leaf.parentId); }
     rows = [...nodes.values()].filter(row => active.has(row.id) && row.type === "message");
   }
-  return { ...fold(app, rows), id: summary?.info?.id || header.id, cwd: summary?.info?.cwd || header.cwd, title: summary?.generated_title || summary?.session_summary };
+  return { ...fold(app, rows), id: summary?.info?.id || header.id, cwd: summary?.info?.cwd || header.cwd, title: titleSlot || (app === "omp" ? header.title : null) || summary?.generated_title || summary?.session_summary };
 }
 async function read(app, source, validate) {
   const { file, id } = splitReference(source);

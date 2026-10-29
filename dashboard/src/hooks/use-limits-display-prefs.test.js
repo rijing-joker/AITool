@@ -4,6 +4,7 @@ import { LIMIT_PROVIDER_IDS } from "../lib/limits-providers.js";
 import {
   isDevinProviderSelected,
   isLimitsPrefsStorageKey,
+  isWorkbuddyProviderSelected,
   LIMIT_DISPLAY_MODES,
   LIMITS_PREFS_CHANGED_EVENT,
   useLimitsDisplayPrefs,
@@ -15,11 +16,12 @@ const VISIBILITY_KEY = "tt.limits.providerVisibility";
 const SHOW_SUBSCRIPTIONS_KEY = "tt.limits.showSubscriptions";
 const UPDATED_AT_KEY = "tt.limits.updatedAt";
 
-// Devin is the opt-in provider: it defaults OFF because its selection is also
-// the consent flag the local API requires before reading CLI credentials.
+// Devin and WorkBuddy are opt-in providers: they default OFF because their
+// selection is also the consent flag the local API requires before reading
+// local credentials.
 function defaultVisibility() {
   return Object.fromEntries(
-    LIMIT_PROVIDER_IDS.map((id) => [id, id !== "devin"]),
+    LIMIT_PROVIDER_IDS.map((id) => [id, !["devin", "workbuddy"].includes(id)]),
   );
 }
 
@@ -133,6 +135,7 @@ describe("useLimitsDisplayPrefs", () => {
         "opencodeGo",
         "qoder",
         "qoderCn",
+        "workbuddy",
         "zcode",
       ].sort(),
     );
@@ -350,6 +353,38 @@ describe("useLimitsDisplayPrefs", () => {
       showSubscriptions: true,
       updatedAt: "20",
     });
+    expect(bridgeWrites(messages)).toHaveLength(0);
+  });
+
+  it("keeps WorkBuddy preferences when a newer native snapshot omits the provider", () => {
+    vi.spyOn(Date, "now").mockReturnValue(9999);
+    const messages = installNativeBridge();
+    setStoredSnapshot({
+      ...defaultSnapshot(10),
+      providerVisibility: { ...defaultVisibility(), workbuddy: true },
+    });
+    const { result } = renderHook(() => useLimitsDisplayPrefs());
+    messages.length = 0;
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent("native:settings", {
+          detail: {
+            limitsPreferences: {
+              displayMode: LIMIT_DISPLAY_MODES.REMAINING,
+              providerOrder: ["gemini", "claude"],
+              providerVisibility: { claude: false },
+              updatedAt: 20,
+            },
+          },
+        }),
+      );
+    });
+
+    expect(result.current.displayMode).toBe(LIMIT_DISPLAY_MODES.REMAINING);
+    expect(result.current.visibility.claude).toBe(false);
+    expect(result.current.visibility.workbuddy).toBe(true);
+    expect(readStoredSnapshot().providerVisibility.workbuddy).toBe(true);
     expect(bridgeWrites(messages)).toHaveLength(0);
   });
 
@@ -855,14 +890,26 @@ describe("Devin opt-in selection", () => {
     delete window.webkit;
   });
 
-  it("defaults Devin off while every other provider stays on", () => {
+  it("defaults opt-in providers off while every other provider stays on", () => {
     const { result } = renderHook(() => useLimitsDisplayPrefs());
     expect(result.current.visibility.devin).toBe(false);
+    expect(result.current.visibility.workbuddy).toBe(false);
     for (const id of LIMIT_PROVIDER_IDS) {
-      if (id === "devin") continue;
+      if (["devin", "workbuddy"].includes(id)) continue;
       expect(result.current.visibility[id]).toBe(true, `${id} must stay on`);
     }
     expect(isDevinProviderSelected()).toBe(false);
+    expect(isWorkbuddyProviderSelected()).toBe(false);
+  });
+
+  it("reads WorkBuddy consent only from an explicit stored true", () => {
+    setStoredSnapshot({ providerVisibility: { workbuddy: true } });
+    expect(isWorkbuddyProviderSelected()).toBe(true);
+    for (const stored of [{ workbuddy: "true" }, { claude: true }, { workbuddy: false }]) {
+      window.localStorage.clear();
+      setStoredSnapshot({ providerVisibility: stored });
+      expect(isWorkbuddyProviderSelected()).toBe(false);
+    }
   });
 
   it("treats a stored devin:true as the explicit selection and keeps it across normalize", () => {

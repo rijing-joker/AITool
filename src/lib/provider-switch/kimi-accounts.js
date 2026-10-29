@@ -161,10 +161,11 @@ function createManager({
   const loadStore = async () => {
     try {
       const value = JSON.parse(await fsp.readFile(storeFile, "utf8"));
-      if (!isPlainObject(value) || !isPlainObject(value.accounts) || !Array.isArray(value.dismissed)) throw new Error("shape");
-      return value;
+      if (!isPlainObject(value) || !isPlainObject(value.accounts) || !Array.isArray(value.dismissed) ||
+        (value.detached !== undefined && !isPlainObject(value.detached))) throw new Error("shape");
+      return { ...value, detached: isPlainObject(value.detached) ? value.detached : {} };
     } catch (error) {
-      if (error.code === "ENOENT") return { version: 1, accounts: {}, dismissed: [] };
+      if (error.code === "ENOENT") return { version: 1, accounts: {}, dismissed: [], detached: {} };
       throw new Error("Cannot read the Kimi account store");
     }
   };
@@ -325,6 +326,17 @@ function createManager({
     return kimi.readDocument({ home });
   }
 
+  // A detached card keeps its credential file, so the default slot is not free
+  // merely because its provider row left config.toml. Treat a detached snapshot
+  // or any remaining default credential as occupied to avoid overwriting a
+  // different user's login.
+  async function defaultSlotOccupied(doc, store, region) {
+    if (isPlainObject(store?.detached?.[kimi.OFFICIAL_PROVIDER_ID])) return true;
+    const provider = doc.providers?.[kimi.OFFICIAL_PROVIDER_ID];
+    if (kimi.isOfficialProvider(provider) && await credentialExists(credentialPathFor(home, provider.oauth))) return true;
+    return credentialExists(credentialPathFor(home, nativeOauthRef(region)));
+  }
+
   // Where a finished login lands: the same account re-signs in place; an
   // explicit re-login keeps its slot for the same user; anything else is new
   // — Kimi's default slot while free, else a stable separate slot.
@@ -332,9 +344,8 @@ function createManager({
     if (!identity) {
       if (explicit) return explicit;
       const doc = await readConfigDoc();
-      const occupied = kimi.isOfficialProvider(doc.providers?.[kimi.OFFICIAL_PROVIDER_ID]) &&
-        await credentialExists(credentialPathFor(home, doc.providers[kimi.OFFICIAL_PROVIDER_ID].oauth));
-      if (occupied) {
+      const store = await loadStore();
+      if (await defaultSlotOccupied(doc, store, region)) {
         const suffix = crypto.randomUUID().replace(/-/g, "").slice(0, 8);
         const slot = `kimi-code-ccs-${suffix}`;
         return { accountId: slot, oauth: { storage: "file", key: `oauth/${slot}`, oauth_host: region.oauthHost } };
@@ -358,9 +369,16 @@ function createManager({
       const known = store.accounts[explicit.accountId];
       if (!known || known.userId === identity.userId) return explicit;
     }
-    const occupied = kimi.isOfficialProvider(doc.providers?.[kimi.OFFICIAL_PROVIDER_ID]) &&
-      await credentialExists(credentialPathFor(home, doc.providers[kimi.OFFICIAL_PROVIDER_ID].oauth));
-    if (!occupied) return { accountId: kimi.OFFICIAL_PROVIDER_ID, oauth: nativeOauthRef(region) };
+    const detachedOfficial = store.detached?.[kimi.OFFICIAL_PROVIDER_ID];
+    if (!explicit && isPlainObject(detachedOfficial) && store.accounts?.[kimi.OFFICIAL_PROVIDER_ID]?.userId === identity.userId) {
+      return {
+        accountId: kimi.OFFICIAL_PROVIDER_ID,
+        oauth: detachedOfficial.provider?.oauth || nativeOauthRef(region),
+      };
+    }
+    if (!(await defaultSlotOccupied(doc, store, region))) {
+      return { accountId: kimi.OFFICIAL_PROVIDER_ID, oauth: nativeOauthRef(region) };
+    }
     const id = readableProviderId(doc, identity.nickname) || separate;
     return { accountId: id, oauth: { storage: "file", key: `oauth/${separate}`, oauth_host: region.oauthHost } };
   }
@@ -452,6 +470,96 @@ function createManager({
     });
   }
 
+  // The account's own current catalog, keyed and shaped as signing in would
+  // write it. Nothing is saved (cc-switch kimi_oauth_models / models_at).
+  async function catalogAt(accountId, provider, identity) {
+    const region = officialRegionOf(provider);
+    if (!region) throw new Error("Kimi account endpoints are not official hosts; check Kimi Code config.toml");
+    const file = credentialPathFor(home, provider.oauth);
+    const device = await deviceId();
+    const access = await accessTokenFor(provider, device);
+    if (access.state === "expired") throw new Error("Use this account once in Kimi Code, then try again");
+    if (access.state === "needsReauth") throw new Error("Sign in to this Kimi account again in the Authorization Center");
+    const { status, body } = await getJson(`${String(provider.base_url || region.baseUrl).replace(/\/$/, "")}/models`, device, access.token);
+    if (status !== 200) throw new Error(`Kimi model discovery failed (HTTP ${status})`);
+    return scopeModels(parseModels(body), accountId, slotNameOf(file), identity?.nickname || null);
+  }
+
+  const models = (accountId) => serial(async () => {
+    const doc = await readConfigDoc();
+    const provider = doc.providers?.[accountId];
+    if (!kimi.isOfficialProvider(provider)) throw new Error("Kimi official account not found");
+    const store = await loadStore();
+    const catalog = await catalogAt(accountId, provider, store.accounts[accountId]);
+    return { id: accountId, models: catalog, selected: Object.keys(kimi.modelsOfProvider(doc, accountId)) };
+  });
+
+  // Replace the node's model set from the account's live catalog. Only keys
+  // are accepted so endpoint, credential and capabilities always come from
+  // the account itself rather than a hand-edited request.
+  const updateModels = (accountId, keys) => serial(async () => {
+    if (!Array.isArray(keys) || keys.some((key) => typeof key !== "string" || !key)) {
+      throw new Error("Select Kimi Code models to keep");
+    }
+    const doc = await readConfigDoc();
+    const provider = doc.providers?.[accountId];
+    if (!kimi.isOfficialProvider(provider)) throw new Error("Kimi official account not found");
+    const store = await loadStore();
+    const catalog = await catalogAt(accountId, provider, store.accounts[accountId]);
+    const picked = {};
+    for (const key of keys) {
+      if (!isPlainObject(catalog[key])) throw new Error("Kimi Code model list changed; load it again");
+      picked[key] = catalog[key];
+    }
+    if (Object.keys(picked).length === 0) throw new Error("Select at least one Kimi Code model");
+    await projectionLock(() => kimi.updateOauthModels(accountId, picked, { home }));
+    return { id: accountId, models: Object.keys(picked) };
+  });
+
+  // Take the official node out of config.toml but keep the card, credential
+  // and a signed-in connection snapshot so "Add back" restores it.
+  const removeFromKimi = (accountId) => serial(() => projectionLock(async () => {
+    const doc = await readConfigDoc();
+    const provider = doc.providers?.[accountId];
+    if (!kimi.isOfficialProvider(provider)) {
+      const store = await loadStore();
+      if (isPlainObject(store.detached[accountId])) return { id: accountId, detached: true };
+      throw new Error("Kimi official account not found");
+    }
+    if (!officialRegionOf(provider)) throw new Error("Kimi account endpoints are not official hosts; check Kimi Code config.toml");
+    if (kimi.currentProviderKey(doc) === accountId) {
+      throw new Error("This account is in use; switch to another account before removing it");
+    }
+    const snapshot = {
+      provider: structuredClone(provider),
+      models: structuredClone(kimi.modelsOfProvider(doc, accountId)),
+    };
+    await updateStore((value) => {
+      value.detached[accountId] = snapshot;
+    });
+    try {
+      await kimi.removeOauthAccount(accountId, { home });
+    } catch (error) {
+      await updateStore((value) => {
+        delete value.detached[accountId];
+      }).catch(() => {});
+      throw error;
+    }
+    return { id: accountId, detached: true };
+  }));
+
+  const restore = (accountId) => serial(() => projectionLock(async () => {
+    const store = await loadStore();
+    const snapshot = store.detached[accountId];
+    if (!isPlainObject(snapshot)) throw new Error("This Kimi account is still in Kimi Code");
+    if (!officialRegionOf(snapshot.provider)) throw new Error("Kimi account endpoints are not official hosts; check Kimi Code config.toml");
+    await kimi.restoreOauthAccount(accountId, snapshot, { home });
+    await updateStore((value) => {
+      delete value.detached[accountId];
+    });
+    return { id: accountId, restored: true };
+  }));
+
   // Best-effort /me for accounts with no cached identity yet, using only
   // still-valid access tokens — never refresh just for a name. Restricted to
   // official hosts and a short timeout so a status read can never hang on the
@@ -498,8 +606,10 @@ function createManager({
     const doc = await readConfigDoc();
     const store = await loadStore();
     const accounts = [];
+    const live = new Set();
     for (const [id, provider] of Object.entries(isPlainObject(doc.providers) ? doc.providers : {})) {
       if (!kimi.isOfficialProvider(provider)) continue;
+      live.add(id);
       const identity = store.accounts[id];
       if (store.dismissed.includes(id) || (identity && store.dismissed.includes(identity.userId))) continue;
       const region = regionOfProvider(provider);
@@ -530,6 +640,33 @@ function createManager({
       }
       accounts.push(account);
     }
+    for (const [id, snapshot] of Object.entries(store.detached)) {
+      if (live.has(id)) continue;
+      const provider = snapshot?.provider;
+      if (!kimi.isOfficialProvider(provider)) continue;
+      const identity = store.accounts[id];
+      if (store.dismissed.includes(id) || (identity && store.dismissed.includes(identity.userId))) continue;
+      const region = regionOfProvider(provider);
+      let account = {
+        id, name: kimi.officialProviderName(id, identity?.nickname || null), nickname: identity?.nickname || null,
+        avatarUrl: identity?.avatar || null, primary: id === kimi.OFFICIAL_PROVIDER_ID, region: region.id,
+        authenticated: false, expiresAt: null, detached: true, error: null,
+      };
+      try {
+        const read = await readCredential(credentialPathFor(home, provider.oauth));
+        const expiresAt = read.state === "valid" ? Number(read.value.expires_at) || null : null;
+        const hasAccess = read.state === "valid" && read.value.access_token !== "";
+        const canRefresh = read.state === "valid" && read.value.refresh_token !== "";
+        account = {
+          ...account,
+          authenticated: canRefresh || (hasAccess && expiresAt !== null && expiresAt > Math.floor(now() / 1000)),
+          expiresAt,
+        };
+      } catch (error) {
+        account.error = error.message;
+      }
+      accounts.push(account);
+    }
     const current = kimi.currentProviderKey(doc);
     return {
       accounts,
@@ -549,7 +686,9 @@ function createManager({
     let target = null;
     if (accountId) {
       const doc = await readConfigDoc();
-      const provider = doc.providers?.[accountId];
+      // A detached card keeps its signed-in connection snapshot, so "Sign in
+      // again" can refresh its login and put the node back in one flow.
+      const provider = doc.providers?.[accountId] || (await loadStore()).detached[accountId]?.provider;
       if (!kimi.isOfficialProvider(provider)) throw new Error("Kimi official account not found");
       credentialPathFor(home, provider.oauth);
       const accountRegion = regionOfProvider(provider);
@@ -675,6 +814,11 @@ function createManager({
         value.accounts[accountId] = identity;
         const dismissedKey = identity.userId;
         value.dismissed = value.dismissed.filter((key) => key !== dismissedKey && key !== accountId);
+        delete value.detached[accountId];
+      }).catch(() => {});
+    } else {
+      await updateStore((value) => {
+        delete value.detached[accountId];
       }).catch(() => {});
     }
   }
@@ -747,35 +891,40 @@ function createManager({
     return result;
   });
 
-  // Separate accounts lose provider node, models and (ccs-owned) credential.
-  // Kimi's own default login is only hidden — AiTool never logs Kimi out.
+  // A live official card must leave config.toml first ("Remove from Kimi"),
+  // which keeps its credential so it can be added back. Deleting a detached
+  // separate card also removes its ccs-owned credential. Kimi's own default
+  // login is only hidden — AiTool never logs Kimi out.
   const remove = (accountId) => serial(async () => {
     if (flow?.target?.accountId === accountId) cancelFlow();
     const doc = await readConfigDoc();
     const provider = doc.providers?.[accountId];
-    if (!kimi.isOfficialProvider(provider)) throw new Error("Kimi official account not found");
+    const saved = await loadStore();
+    if (kimi.isOfficialProvider(provider) && accountId !== kimi.OFFICIAL_PROVIDER_ID) {
+      throw new Error("Remove this account from Kimi Code first");
+    }
     if (accountId === kimi.OFFICIAL_PROVIDER_ID) {
-      const store = await loadStore();
-      const key = store.accounts[accountId]?.userId || accountId;
+      const key = saved.accounts[accountId]?.userId || accountId;
       await updateStore((value) => {
         if (!value.dismissed.includes(key)) value.dismissed.push(key);
+        delete value.detached[accountId];
       });
       return { id: accountId, dismissed: true };
     }
-    const file = credentialPathFor(home, provider.oauth);
+    const snapshot = saved.detached[accountId];
+    if (!kimi.isOfficialProvider(snapshot?.provider)) throw new Error("Kimi official account not found");
+    const file = credentialPathFor(home, snapshot.provider.oauth);
     const owned = slotNameOf(file).startsWith("kimi-code-ccs-");
-    await projectionLock(async () => {
-      await kimi.removeOauthAccount(accountId, { home });
-      if (owned) {
-        await withSlotLock(home, slotNameOf(file), async () => {
-          await fsp.unlink(file).catch((error) => {
-            if (error.code !== "ENOENT") throw error;
-          });
+    if (owned) {
+      await withSlotLock(home, slotNameOf(file), async () => {
+        await fsp.unlink(file).catch((error) => {
+          if (error.code !== "ENOENT") throw error;
         });
-      }
-    });
+      });
+    }
     await updateStore((value) => {
       delete value.accounts[accountId];
+      delete value.detached[accountId];
     });
     return { id: accountId };
   });
@@ -786,6 +935,10 @@ function createManager({
     pollLogin: (flowId) => pollLogin(flowId),
     cancel: () => { cancelFlow(); },
     quota,
+    models,
+    updateModels,
+    removeFromKimi,
+    restore,
     useAccount,
     remove,
   };

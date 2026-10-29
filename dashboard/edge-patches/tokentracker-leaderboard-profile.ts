@@ -106,6 +106,7 @@ const MODEL_PRICING: Record<string, { input: number; output: number; cache_read:
   "ll-alpha-free": { input: 0, output: 0, cache_read: 0, cache_write: 0 },
   "longcat-2.5-preview-free": { input: 0, output: 0, cache_read: 0, cache_write: 0 },
   "mimo-v2.6-flash-free": { input: 0, output: 0, cache_read: 0, cache_write: 0 },
+  "muse-spark-1.2-contributor-free": { input: 0, output: 0, cache_read: 0, cache_write: 0 },
   "muse-spark-1.3-contributor-free": { input: 0, output: 0, cache_read: 0, cache_write: 0 },
   "nemotron-3.5-lightning-free": { input: 0, output: 0, cache_read: 0, cache_write: 0 },
   "nemotron-3.5-super-vl-free": { input: 0, output: 0, cache_read: 0, cache_write: 0 },
@@ -200,6 +201,15 @@ const MODEL_PRICING: Record<string, { input: number; output: number; cache_read:
   "kimi-k2.5-free": { input: 0, output: 0, cache_read: 0 },
   "kimi-k2.6": { input: 0.95, output: 4, cache_read: 0.16 },
   "kimi-k2.7-code": { input: 0.95, output: 4, cache_read: 0.19 },
+  "kimi-k2.7-code-highspeed": { input: 1.9, output: 8, cache_read: 0.38 },
+  // Kimi K3.1 Pro / Highspeed (official USD list https://platform.kimi.ai/ 2026-10-25).
+  // Must precede kimi-k3: substring "kimi-k3" would otherwise bill k3.1 at k3 rates.
+  "kimi-k3.1-pro": { input: 2, output: 10, cache_read: 0.2, cache_write: 2 },
+  "kimi-k3.1-pro-highspeed": { input: 4, output: 20, cache_read: 0.2, cache_write: 4 },
+  "k3.1-pro": { input: 2, output: 10, cache_read: 0.2, cache_write: 2 },
+  "k3.1pro": { input: 2, output: 10, cache_read: 0.2, cache_write: 2 },
+  "k3.1-pro-highspeed": { input: 4, output: 20, cache_read: 0.2, cache_write: 4 },
+  "k3.1pro-highspeed": { input: 4, output: 20, cache_read: 0.2, cache_write: 4 },
   // Kimi K3 (released 2026-07-16; reported rates $3/M in, $15/M out, $0.30/M
   // cached). Kimi Code records the alias as bare "k3" (kimi-code/k3), hence
   // the separate "k3" exact key below. Not yet in LiteLLM.
@@ -272,6 +282,9 @@ const MODEL_PRICING: Record<string, { input: number; output: number; cache_read:
   // Hy4 preview: 6 / 0.3 (cache hit) / 18 RMB per MTok at ~7.2 RMB/USD (#633).
   // Alibaba Model Studio Singapore reference rates; see curated-overrides.json (#715).
   "qwen3.8-flash": { input: 0.15, output: 0.47, cache_read: 0.016, cache_write: 0.2 },
+  "qwen3.8-max": { input: 2, output: 6, cache_read: 0.17, cache_write: 2.5 },
+  "qwen3.8-max-0902": { input: 2, output: 6, cache_read: 0.17, cache_write: 2.5 },
+  "qwen3.8-max-2026-09-02": { input: 2, output: 6, cache_read: 0.17, cache_write: 2.5 },
   "hy4-preview": { input: 0.833, output: 2.5, cache_read: 0.042, cache_write: 0.833 },
   "hy4-preview-agent": { input: 0.833, output: 2.5, cache_read: 0.042, cache_write: 0.833 },
   // ── Misc / Free ──
@@ -396,11 +409,14 @@ function getModelPricing(model: string, source = "") {
     const iFlytekMaasPricing = IFLYTEK_MAAS_MODEL_PRICING[normalized];
     if (iFlytekMaasPricing) return iFlytekMaasPricing;
   }
-  if (source.toLowerCase() === "opencode" && model.toLowerCase().endsWith("-free")) return ZERO_PRICING;
   const exact = MODEL_PRICING[model];
   if (exact) return exact;
   const lower = model.toLowerCase();
   if (source === "cline" && lower.endsWith(":free")) return ZERO_PRICING;
+  // Free gateway SKUs append `-free` to the paid id (deepseek-v4.1-flash-free,
+  // minimax-m2.5-free, Muse *-contributor-free). Exact MODEL_PRICING hits above
+  // still win; this only blocks fuzzy/base-name inheritance (issue #744).
+  if (lower.endsWith("-free")) return ZERO_PRICING;
   // Cline's own gateway namespaces (`cline-free/*` free tier, `cline-pass/*`
   // flat-rate Cline Pass) bill nothing per token, and the model id after the
   // slash must not inherit a public rate — cline-pass/glm-5.3 is not GLM-5.3
@@ -476,12 +492,29 @@ function getModelPricing(model: string, source = "") {
   // of the $0.20/$0.50 MTok fast-tier rate (15x / 30x overestimate).
   if (lower.includes("grok-4-1-fast")) return MODEL_PRICING["grok-4-1-fast-non-reasoning"];
   if (lower.includes("grok-4")) return MODEL_PRICING["grok-4"];
+  // k3.1-pro-highspeed before k3.1-pro before kimi-k3 (substring trap).
+  if (lower.includes("kimi-k3.1-pro-highspeed") || lower.includes("k3.1-pro-highspeed") || lower.includes("k3.1pro-highspeed")) {
+    return MODEL_PRICING["kimi-k3.1-pro-highspeed"];
+  }
+  if (lower.includes("kimi-k3.1-pro") || lower.includes("k3.1-pro") || lower.includes("k3.1pro")) {
+    return MODEL_PRICING["kimi-k3.1-pro"];
+  }
   if (lower.includes("kimi-k3")) return MODEL_PRICING["kimi-k3"];
   // Bare "k3" alias from Kimi Code (or provider-prefixed "*/k3"); the exact
-  // key above only catches the unprefixed form.
+  // key above only catches the unprefixed form. Do not treat k3.1* as bare k3.
   if (lower === "k3" || lower.endsWith("/k3")) return MODEL_PRICING["kimi-k3"];
+  if (lower.includes("kimi-k2.7-code-highspeed")) return MODEL_PRICING["kimi-k2.7-code-highspeed"];
   if (lower.includes("kimi-k2.7-code")) return MODEL_PRICING["kimi-k2.7-code"];
   if (lower.includes("kimi-k2.6")) return MODEL_PRICING["kimi-k2.6"];
+  // K2.8 Preview aliases must not inherit kimi-k2.5 (#766). Stay unpriced
+  // until an official per-token public rate exists (Kimi Code is mostly quota).
+  const kimiGuard = lower.replace(/(\d)-(?=\d)/g, "$1.");
+  if (
+    /(?:^|\/)(?:kimicoding(?:\/k2\.8)?|kimi-k2\.8|k2\.8)(?:-|\.|$)/.test(kimiGuard.trim()) ||
+    kimiGuard.trim() === "kimicoding"
+  ) {
+    return ZERO_PRICING;
+  }
   if (lower.includes("kimi")) return MODEL_PRICING["kimi-k2.5"];
   // MiMo ordering: more specific suffixes first (mimo-v2.5-pro before
   // mimo-v2.5 which is a substring; the free tier is a distinct name).
@@ -509,6 +542,7 @@ function getModelPricing(model: string, source = "") {
   if (lower.includes("kiro")) return MODEL_PRICING["kiro-cli-agent"];
   if (lower.includes("hy3")) return MODEL_PRICING["hy3-preview-agent"];
   if (/(?:^|\/)qwen3[.-]8-flash(?:-\d{4}-\d{2}-\d{2})?$/.test(lower.trim())) return MODEL_PRICING["qwen3.8-flash"];
+  if (/(?:^|\/)qwen3[.-]8-max(?:-0902|-\d{4}-\d{2}-\d{2})?$/.test(lower.trim())) return MODEL_PRICING["qwen3.8-max"];
   if (lower.includes("hy4")) return MODEL_PRICING["hy4-preview"];
   if (lower.includes("composer-2.5") && lower.includes("fast")) return MODEL_PRICING["composer-2.5-fast"];
   if (lower.includes("composer-2.5")) return MODEL_PRICING["composer-2.5"];

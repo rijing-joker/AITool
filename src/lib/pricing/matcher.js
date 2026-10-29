@@ -252,6 +252,11 @@ function lookupContainedExactCaseInsensitive(table, model) {
     // is a separate SKU from Opus 5). Dated and provider suffixes still work.
     const suffix = lower.slice(start + key.length);
     if (/^[.\d]/.test(suffix)) continue;
+    // Alternate SKU markers (preview/next/exp/…) must not inherit the base
+    // exact rate, including when they follow a date snapshot
+    // (`qwen3.8-max-2026-09-02-preview`, `qwen3-8-max-0902-preview`).
+    // Plain dated (-0902 / -YYYY-MM-DD) and provider-qualified suffixes still match.
+    if (/(?:^|-)(?:preview|next|exp|experimental|beta|alpha)(?:-|$)/.test(suffix)) continue;
     return table[key];
   }
   return null;
@@ -280,14 +285,6 @@ function lookupPricing(model, { curated, litellm, source } = {}) {
       value: { input: 0, output: 0, cache_read: 0, cache_write: 0 },
     };
   }
-  // OpenCode's free SKU must not inherit the paid base model's fuzzy price.
-  if (sourceKey === "opencode" && lower.endsWith("-free")) {
-    return {
-      hit: true,
-      source: "curated:opencode-free-suffix",
-      value: { input: 0, output: 0, cache_read: 0, cache_write: 0 },
-    };
-  }
   // AStudio does not disclose its routed model. Stop before generic aliases
   // and fuzzy matching can turn an unresolved router into a priced model.
   if (sourceKey === "acode" && (lower === "auto" || lower.endsWith("-auto"))) {
@@ -301,18 +298,25 @@ function lookupPricing(model, { curated, litellm, source } = {}) {
     }
   }
 
-  // 1. CURATED exact
-  // Qwen Flash's provider-qualified and dated IDs share the reference SKU.
-  // Keep the boundary strict: Flash-Next and Max have independent prices.
-  if (/(?:^|\/)qwen3[.-]8-flash(?:-\d{4}-\d{2}-\d{2})?$/.test(lower.trim()) && curated.exact?.["qwen3.8-flash"]) {
-    return { hit: true, source: "curated:exact", value: curated.exact["qwen3.8-flash"] };
-  }
+  // 1. CURATED exact (before family regex aliases so a distinct dated exact
+  // entry cannot be overridden by the shared-SKU regex).
   if (curated.exact && curated.exact[lookupModel]) {
     return { hit: true, source: "curated:exact", value: curated.exact[lookupModel] };
   }
   const curatedDotExact = lookupExactCaseInsensitive(curated.exact, dotForm);
   if (curatedDotExact) {
     return { hit: true, source: "curated:exact-dot", value: curatedDotExact };
+  }
+
+  // Qwen Flash's provider-qualified and dated IDs share the reference SKU.
+  // Keep the boundary strict: Flash-Next and Max have independent prices.
+  if (/(?:^|\/)qwen3[.-]8-flash(?:-\d{4}-\d{2}-\d{2})?$/.test(lower.trim()) && curated.exact?.["qwen3.8-flash"]) {
+    return { hit: true, source: "curated:exact", value: curated.exact["qwen3.8-flash"] };
+  }
+  // Qwen Max (dated -0902 and ISO snapshot -YYYY-MM-DD) share Singapore International SKU.
+  // Keep the boundary strict vs Flash / Flash-Next / -preview (issue #744).
+  if (/(?:^|\/)qwen3[.-]8-max(?:-0902|-\d{4}-\d{2}-\d{2})?$/.test(lower.trim()) && curated.exact?.["qwen3.8-max"]) {
+    return { hit: true, source: "curated:exact", value: curated.exact["qwen3.8-max"] };
   }
 
   // 2. LiteLLM exact
@@ -323,6 +327,35 @@ function lookupPricing(model, { curated, litellm, source } = {}) {
   if (litellmDotExact) {
     return { hit: true, source: "litellm:exact-dot", value: litellmDotExact };
   }
+
+  // Free gateway SKUs carry a `-free` suffix on the paid model id
+  // (`deepseek-v4.1-flash-free`, `minimax-m2.5-free`, Muse `*-contributor-free`).
+  // Runs AFTER curated/LiteLLM exact so an explicit paid exact entry still wins,
+  // and BEFORE alias/fuzzy/base-name matchers so `foo-free` cannot inherit `foo`
+  // list rates. OpenCode Zen established the convention; other sources reuse it
+  // when they emit the same suffix (issue #744).
+  if (lower.endsWith("-free")) {
+    return {
+      hit: true,
+      source: sourceKey === "opencode" ? "curated:opencode-free-suffix" : "curated:free-suffix",
+      value: { input: 0, output: 0, cache_read: 0, cache_write: 0 },
+    };
+  }
+
+  // Kimi Code K2.8 Preview aliases must not inherit fuzzy `kimi` → kimi-k2.5 rates (#766).
+  // Parser stores bare `k2.8`; raw `kimicoding` / `kimi-k2.8` / `kimicoding/k2.8` may still
+  // appear in lookups, including dash-normalized `kimi-k2-8` forms. Check the fuzzy
+  // dot-restored form too, since that matcher would otherwise rejoin `k2-8` → `k2.8`.
+  // `kimi-for-coding` keeps its curated exact entry (resolved above).
+  // Stay unpriced until an official per-token public rate exists.
+  if (
+    [lower.trim(), dotForm.trim()].some((form) =>
+      /(?:^|\/)(?:kimicoding(?:\/k2\.8)?|kimi-k2\.8|k2\.8)(?:-|\.|$)/.test(form) || form === "kimicoding"
+    )
+  ) {
+    return { hit: false, source: "miss", value: null };
+  }
+
   const curatedDotContainedExact = lookupContainedExactCaseInsensitive(curated.exact, dotForm);
   if (curatedDotContainedExact) {
     return { hit: true, source: "curated:exact-dot", value: curatedDotContainedExact };

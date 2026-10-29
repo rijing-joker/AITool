@@ -1660,10 +1660,12 @@ limits.commandCode.setupHint.snippet_login_windows,ui,LimitsPage,UsageLimitsPane
 limits.commandCode.setupHint.snippet_env_windows,ui,LimitsPage,UsageLimitsPanel,command_code_hint_snippet_env_windows,"$token = Read-Host -AsSecureString\n$env:COMMAND_CODE_API_KEY = [System.Net.NetworkCredential]::new('', $token).Password\n[Environment]::SetEnvironmentVariable('COMMAND_CODE_API_KEY', $env:COMMAND_CODE_API_KEY, 'User')",,active
 limits.commandCode.setupHint.note_windows,ui,LimitsPage,UsageLimitsPanel,command_code_hint_note_windows,"Windows: run in PowerShell, then restart TokenTracker.",,active
 limits.commandCode.setupHint.note_linux,ui,LimitsPage,UsageLimitsPanel,command_code_hint_note_linux,"Linux: start TokenTracker from this terminal to inherit the environment variable.",,active
-landing.discovery.tracked_usage,landing,LandingPage,index.html,tracked_usage,"Token Tracker tracks input, output, cached, and cache-creation tokens per model, project, and time window. It also detects usage limits for 17 providers, including Claude, Codex, Cursor, Gemini, Antigravity, Qoder, Qoder CN, Command Code, and Devin.",Build-time static discovery copy,active
-landing.discovery.limits_summary,landing,LandingPage,index.html,limits_summary,"live quota and subscription status for 17 providers, with last-good caching for local providers such as Antigravity and Qoder.",Build-time static discovery copy,active
-landing.discovery.faq_usage,landing,LandingPage,index.html,faq_usage,"Input, output, cached, and cache-creation tokens per model, project, and time window. It also surfaces usage limits for 17 providers, including Claude, Codex, Cursor, Gemini, Antigravity, Qoder, Qoder CN, Command Code, and Devin.",Build-time static discovery copy,active
+landing.discovery.tracked_usage,landing,LandingPage,index.html,tracked_usage,"Token Tracker tracks input, output, cached, and cache-creation tokens per model, project, and time window. It also detects usage limits for 18 providers, including Claude, Codex, Cursor, Gemini, Antigravity, Qoder, Qoder CN, Command Code, Devin, and WorkBuddy.",Build-time static discovery copy,active
+landing.discovery.limits_summary,landing,LandingPage,index.html,limits_summary,"live quota and subscription status for 18 providers, with last-good caching for local providers such as Antigravity and Qoder.",Build-time static discovery copy,active
+landing.discovery.faq_usage,landing,LandingPage,index.html,faq_usage,"Input, output, cached, and cache-creation tokens per model, project, and time window. It also surfaces usage limits for 18 providers, including Claude, Codex, Cursor, Gemini, Antigravity, Qoder, Qoder CN, Command Code, Devin, and WorkBuddy.",Build-time static discovery copy,active
 limits.provider.devin,ui,LimitsPage,UsageLimitsPanel,provider_devin,"Devin",,active
+limits.provider.workbuddy,ui,LimitsPage,UsageLimitsPanel,provider_workbuddy,"WorkBuddy",,active
+limits.label.workbuddy_plan,ui,LimitsPage,UsageLimitsPanel,workbuddy_plan,"Plan",,active
 limits.label.devin_daily,ui,LimitsPage,UsageLimitsPanel,devin_daily,"Daily",,active
 limits.label.devin_weekly,ui,LimitsPage,UsageLimitsPanel,devin_weekly,"Weekly",,active
 limits.devin.setupHint.title,ui,LimitsPage,UsageLimitsPanel,devin_hint_title,"Connect Devin",,active
@@ -2748,6 +2750,7 @@ pswitch.validate.key.openclaw,pswitch,ProviderSwitchPage,ProviderEditDialog,open
 pswitch.validate.key.mcode,pswitch,ProviderSwitchPage,ProviderEditDialog,mcode,MiniMax Code API key is empty.,,active
 pswitch.tab.hermes,pswitch,ProviderSwitchPage,ProviderSwitchPage,tab_hermes,Hermes,,active
 pswitch.tab.pi,pswitch,ProviderSwitchPage,ProviderSwitchPage,tab_pi,Pi,,active
+pswitch.tab.omp,pswitch,ProviderSwitchPage,ProviderSwitchPage,tab_omp,Oh My Pi,,active
 pswitch.tab.grokbuild,pswitch,ProviderSwitchPage,ProviderSwitchPage,tab_grokbuild,Grok Build,,active
 pswitch.tab.kimi,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_kimi,"Kimi Code",,active
 pswitch.live.file.kimi_config,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_kimi_config,"Kimi Code config.toml",,active
@@ -2766,9 +2769,20 @@ pswitch.kimi.account.cancelled,pswitch,ProviderSwitchPage,ProviderSwitchPage,kim
 pswitch.kimi.account.current,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_current,"Current",,active
 pswitch.kimi.account.use,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_use,"Use this account",,active
 pswitch.kimi.account.quota,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_quota,"Quota",,active
+pswitch.kimi.account.no_subscription,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_no_subscription,"No subscription",,active
 pswitch.kimi.account.relogin,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_relogin,"Sign in again",,active
 pswitch.kimi.account.remove,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_remove,"Remove",,active
-pswitch.kimi.account.removeHint,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_removeHint,"Separate accounts lose their provider, models and local credentials. Kimi's own default login is only hidden from this list.",,active
+pswitch.kimi.account.removeHint,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_removeHint,"Delete this detached account card and its local credentials. Kimi's own default login is only hidden from this list.",,active
+pswitch.kimi.account.edit,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_edit,"Edit models",,active
+pswitch.kimi.account.editHint,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_editHint,"Pick the models this account exposes to Kimi Code. The signed-in connection stays unchanged.",,active
+pswitch.kimi.account.editSave,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_editSave,"Save models",,active
+pswitch.kimi.account.loading,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_loading,"Loading models",,active
+pswitch.kimi.account.modelsEmpty,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_modelsEmpty,"No models available for this account",,active
+pswitch.kimi.account.detached,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_detached,"Not in Kimi",,active
+pswitch.kimi.account.detachedHint,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_detachedHint,"The card and sign-in are kept; add it back to Kimi Code whenever you need it.",,active
+pswitch.kimi.account.detach,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_detach,"Remove from Kimi",,active
+pswitch.kimi.account.detachHint,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_detachHint,"Take this account out of config.toml but keep the card and sign-in so it can be added back.",,active
+pswitch.kimi.account.restore,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_restore,"Add back to Kimi",,active
 pswitch.kimi.account.reauth,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_reauth,"Sign in again to use this account",,active
 pswitch.kimi.account.primary,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_primary,"default slot",,active
 pswitch.kimi.account.used,pswitch,ProviderSwitchPage,ProviderSwitchPage,kimi_used,"{value}% used",,active

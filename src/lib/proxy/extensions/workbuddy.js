@@ -231,6 +231,195 @@ async function collectCompletion(response, model) {
   });
   return result;
 }
+function isMessagesModel(kind, model) {
+  // WorkBuddy's China build serves only its Claude models on Messages; the
+  // international build has no /v1/messages route (magpie-community 0.1.32).
+  return kind === "workbuddy" && /^claude-/i.test(String(model || ""));
+}
+function textOf(content) {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content.map(part => typeof part === "string" ? part : part?.type === "text" ? String(part.text || "") : "").join("");
+}
+function imageBlock(part) {
+  const url = part?.image_url?.url || part?.image_url;
+  if (typeof url !== "string" || !url) return null;
+  const match = /^data:([^;,]+);base64,(.+)$/.exec(url);
+  return match
+    ? { type: "image", source: { type: "base64", media_type: match[1], data: match[2] } }
+    : { type: "image", source: { type: "url", url } };
+}
+function chatToMessages(body) {
+  const system = [];
+  const messages = [];
+  let toolResults = [];
+  const flushResults = () => {
+    if (!toolResults.length) return;
+    messages.push({ role: "user", content: toolResults });
+    toolResults = [];
+  };
+  for (const row of body.messages || []) {
+    if (!row || typeof row !== "object") continue;
+    if (row.role === "system" || row.role === "developer") {
+      const text = textOf(row.content);
+      if (text) system.push(text);
+      continue;
+    }
+    if (row.role === "tool") {
+      toolResults.push({ type: "tool_result", tool_use_id: String(row.tool_call_id || ""), content: textOf(row.content) });
+      continue;
+    }
+    flushResults();
+    if (row.role === "assistant") {
+      const content = [];
+      const text = textOf(row.content);
+      if (text) content.push({ type: "text", text });
+      for (const call of row.tool_calls || []) {
+        let input = {};
+        try { input = typeof call.function?.arguments === "string" ? JSON.parse(call.function.arguments) : call.function?.arguments || {}; } catch { input = {}; }
+        content.push({ type: "tool_use", id: String(call.id || `toolu_${crypto.randomUUID()}`), name: String(call.function?.name || "unknown"), input });
+      }
+      if (content.length) messages.push({ role: "assistant", content });
+      continue;
+    }
+    if (row.role !== "user") continue;
+    const content = [];
+    if (Array.isArray(row.content)) {
+      for (const part of row.content) {
+        if (part?.type === "image_url") { const image = imageBlock(part); if (image) content.push(image); }
+        else if (part?.type === "tool_result") content.push({ type: "tool_result", tool_use_id: String(part.tool_use_id || ""), content: textOf(part.content), ...(part.is_error ? { is_error: true } : {}) });
+        else content.push({ type: "text", text: String(part?.text ?? part?.content ?? "") });
+      }
+    } else if (row.content != null) content.push({ type: "text", text: String(row.content) });
+    if (content.length) messages.push({ role: "user", content });
+  }
+  flushResults();
+  const request = {
+    model: body.model,
+    messages,
+    max_tokens: Number(body.max_tokens) > 0 ? Number(body.max_tokens) : Number(body.max_completion_tokens) > 0 ? Number(body.max_completion_tokens) : 8192,
+    stream: true,
+  };
+  if (system.length) request.system = system.join("\n\n");
+  if (Number.isFinite(Number(body.temperature))) request.temperature = Number(body.temperature);
+  if (Number.isFinite(Number(body.top_p))) request.top_p = Number(body.top_p);
+  if (Array.isArray(body.stop) && body.stop.length) request.stop_sequences = body.stop;
+  if (Array.isArray(body.tools) && body.tools.length) {
+    request.tools = body.tools.filter(tool => tool?.function?.name).map(tool => ({
+      name: tool.function.name, description: tool.function.description || "", input_schema: tool.function.parameters || { type: "object" },
+    }));
+  }
+  const choice = body.tool_choice;
+  if (choice === "auto") request.tool_choice = { type: "auto" };
+  else if (choice === "required") request.tool_choice = { type: "any" };
+  else if (choice?.function?.name) request.tool_choice = { type: "tool", name: choice.function.name };
+  const effort = typeof body.reasoning_effort === "string" ? body.reasoning_effort.toLowerCase() : "";
+  if (["low", "medium", "high", "xhigh", "max"].includes(effort)) {
+    request.thinking = { type: "adaptive" };
+    request.output_config = { effort };
+  }
+  return request;
+}
+function openAiUsage(usage) {
+  if (!usage || typeof usage !== "object") return undefined;
+  const input = Number(usage.input_tokens) || 0, read = Number(usage.cache_read_input_tokens) || 0;
+  const write = Number(usage.cache_creation_input_tokens) || 0, output = Number(usage.output_tokens) || 0;
+  if (!input && !read && !write && !output) return undefined;
+  return { prompt_tokens: input + read + write, completion_tokens: output, total_tokens: input + read + write + output,
+    prompt_tokens_details: { cached_tokens: read, cache_creation_tokens: write } };
+}
+function stopReason(value) {
+  return value === "tool_use" ? "tool_calls" : value === "max_tokens" ? "length" : value === "refusal" ? "content_filter" : "stop";
+}
+async function collectMessagesCompletion(response, model) {
+  const result = { id: `chatcmpl-${crypto.randomUUID()}`, object: "chat.completion", created: Math.floor(Date.now() / 1000), model,
+    choices: [{ index: 0, message: { role: "assistant", content: null }, finish_reason: null }] };
+  const choice = result.choices[0], tools = new Map();
+  let rawUsage = {}, stop = null, bytes = 0;
+  for await (const event of events(response)) {
+    bytes += Buffer.byteLength(event);
+    if (bytes > 16 * 1024 * 1024) throw new Error("WorkBuddy response exceeds size limit");
+    let value; try { value = JSON.parse(event); } catch { throw new Error("Invalid WorkBuddy stream"); }
+    if (value?.type === "message_start") {
+      result.id = value.message?.id || result.id;
+      result.model = value.message?.model || result.model;
+      rawUsage = { ...rawUsage, ...(value.message?.usage || {}) };
+    } else if (value?.type === "content_block_start") {
+      const block = value.content_block || {};
+      if (block.type === "tool_use") {
+        tools.set(value.index, { id: String(block.id || ""), type: "function", function: { name: String(block.name || "unknown"), arguments: "" } });
+      }
+    } else if (value?.type === "content_block_delta") {
+      const delta = value.delta || {};
+      if (delta.type === "text_delta") choice.message.content = (choice.message.content || "") + String(delta.text || "");
+      else if (delta.type === "thinking_delta") choice.message.reasoning_content = (choice.message.reasoning_content || "") + String(delta.thinking || "");
+      else if (delta.type === "input_json_delta") { const tool = tools.get(value.index); if (tool) tool.function.arguments += String(delta.partial_json || ""); }
+    } else if (value?.type === "message_delta") {
+      if (value.delta?.stop_reason) stop = value.delta.stop_reason;
+      rawUsage = { ...rawUsage, ...(value.usage || {}) };
+    } else if (value?.type === "error") {
+      throw new Error("WorkBuddy stream failed");
+    }
+  }
+  if (!stop) throw new Error("Incomplete WorkBuddy stream");
+  choice.finish_reason = stopReason(stop);
+  if (tools.size) choice.message.tool_calls = [...tools.entries()].sort(([a], [b]) => a - b).map(([, tool]) => tool);
+  const usage = openAiUsage(rawUsage);
+  if (usage) result.usage = usage;
+  return result;
+}
+async function pipeMessagesStream(response, res, model) {
+  // Hold the 200 until the first real SSE event parses. A build that answers
+  // with plain JSON then fails while headers are still unsent, so the caller
+  // can fall back to chat instead of truncating a "successful" stream.
+  const write = value => {
+    if (!res.headersSent) {
+      res.writeHead(response.statusCode, { "content-type": "text/event-stream", "cache-control": "no-cache" });
+    }
+    res.write(`data: ${JSON.stringify(value)}\n\n`);
+  };
+  const state = { id: `chatcmpl-${crypto.randomUUID()}`, created: Math.floor(Date.now() / 1000), model, rawUsage: {}, stop: null, tools: new Map(), nextTool: 0, roleSent: false };
+  let bytes = 0;
+  for await (const event of events(response)) {
+    bytes += Buffer.byteLength(event);
+    if (bytes > 16 * 1024 * 1024) throw new Error("WorkBuddy response exceeds size limit");
+    let value; try { value = JSON.parse(event); } catch { throw new Error("Invalid WorkBuddy stream"); }
+    if (value?.type === "message_start") {
+      state.id = value.message?.id || state.id;
+      state.model = value.message?.model || state.model;
+      state.rawUsage = { ...state.rawUsage, ...(value.message?.usage || {}) };
+      if (!state.roleSent) { state.roleSent = true; write({ id: state.id, object: "chat.completion.chunk", created: state.created, model: state.model, choices: [{ index: 0, delta: { role: "assistant" }, finish_reason: null }] }); }
+    } else if (value?.type === "content_block_start") {
+      const block = value.content_block || {};
+      if (block.type === "tool_use") {
+        const index = state.nextTool++;
+        state.tools.set(value.index, { index, tool: { id: String(block.id || ""), type: "function", function: { name: String(block.name || "unknown"), arguments: "" } } });
+        write({ id: state.id, object: "chat.completion.chunk", created: state.created, model: state.model, choices: [{ index: 0, delta: { tool_calls: [{ index, id: String(block.id || ""), type: "function", function: { name: String(block.name || "unknown"), arguments: "" } }] }, finish_reason: null }] });
+      }
+    } else if (value?.type === "content_block_delta") {
+      const delta = value.delta || {};
+      let next = null;
+      if (delta.type === "text_delta") next = { content: String(delta.text || "") };
+      else if (delta.type === "thinking_delta") next = { reasoning_content: String(delta.thinking || "") };
+      else if (delta.type === "input_json_delta") {
+        const entry = state.tools.get(value.index);
+        if (entry) { entry.tool.function.arguments += String(delta.partial_json || ""); next = { tool_calls: [{ index: entry.index, function: { arguments: String(delta.partial_json || "") } }] }; }
+      }
+      if (next) write({ id: state.id, object: "chat.completion.chunk", created: state.created, model: state.model, choices: [{ index: 0, delta: next, finish_reason: null }] });
+    } else if (value?.type === "message_delta") {
+      if (value.delta?.stop_reason) state.stop = value.delta.stop_reason;
+      state.rawUsage = { ...state.rawUsage, ...(value.usage || {}) };
+    } else if (value?.type === "error") {
+      throw new Error("WorkBuddy stream failed");
+    }
+  }
+  if (!state.stop) throw new Error("Incomplete WorkBuddy stream");
+  const usage = openAiUsage(state.rawUsage);
+  write({ id: state.id, object: "chat.completion.chunk", created: state.created, model: state.model,
+    choices: [{ index: 0, delta: {}, finish_reason: stopReason(state.stop) }], ...(usage ? { usage } : {}) });
+  res.end("data: [DONE]\n\n");
+  return true;
+}
 async function forward({ kind, req, res, body, signal, options, pipeline }) {
   const config = await state.settings(options);
   if (!config[kind]?.models.includes(body.model) || !Array.isArray(body.messages)) throw new Error("WorkBuddy model not selected");
@@ -246,16 +435,21 @@ async function forward({ kind, req, res, body, signal, options, pipeline }) {
     res.writeHead(statusCode, { "content-type": "application/json" });
     res.end(JSON.stringify({ error: { type: statusCode === 429 ? "insufficient_quota" : "upstream_error", code: `workbuddy_http_${statusCode}`, message: "WorkBuddy refused this request; instructions were preserved. Check login, quota or choose another provider." } }));
   };
-  // Chat signs per-request headers, so the 401 renewal cannot reuse
-  // authorizedCall directly: one renewal under the same account-file lock,
-  // then one re-signed resend. Nothing has been written to the client before
-  // the first response arrives, so a mid-stream failure is never retried.
-  const send = (current, allowRenew) => new Promise((resolve, reject) => {
-    const signed = headers(kind, current); signed.accept = "text/event-stream"; signed["x-conversation-id"] = crypto.randomUUID(); signed["x-request-id"] = crypto.randomUUID();
+  // Chat and Messages sign per-request headers, so the 401 renewal cannot
+  // reuse authorizedCall directly: one renewal under the same account-file
+  // lock, then one re-signed resend. Nothing has been written to the client
+  // before the first response arrives, so a mid-stream failure is never retried.
+  const signedHeaders = (current) => {
+    const signed = headers(kind, current);
+    signed.accept = "text/event-stream";
+    signed["x-request-id"] = crypto.randomUUID();
     signed["x-conversation-id"] = crypto.createHmac("sha256", config.token).update(conversation).digest("hex").slice(0, 32);
     signed["x-conversation-request-id"] = crypto.createHmac("sha256", config.token).update(conversation).update(JSON.stringify([turn, body.messages[turn]?.content])).digest("hex").slice(0, 32);
     signed["x-conversation-message-id"] = signed["x-request-id"];
-    const upstream = (options.streamRequest || https.request)(site(kind) + "/v2/chat/completions", { method: "POST", signal, headers: signed, agent: false }, response => {
+    return signed;
+  };
+  const sendChat = (current, allowRenew) => new Promise((resolve, reject) => {
+    const upstream = (options.streamRequest || https.request)(site(kind) + "/v2/chat/completions", { method: "POST", signal, headers: signedHeaders(current), agent: false }, response => {
       if (response.statusCode >= 300 && response.statusCode < 400) { response.resume(); return reject(new Error("WorkBuddy redirect refused")); }
       if (response.statusCode >= 400) {
         response.resume();
@@ -277,8 +471,48 @@ async function forward({ kind, req, res, body, signal, options, pipeline }) {
     upstream.on("error", reject);
     upstream.end(JSON.stringify({ ...body, stream: true, stream_options: { ...body.stream_options, include_usage: true } }));
   });
+  const sendMessages = (current, allowRenew) => new Promise((resolve, reject) => {
+    const signed = signedHeaders(current);
+    signed["anthropic-version"] ||= "2023-06-01";
+    const upstream = (options.streamRequest || https.request)(site(kind) + "/v1/messages", { method: "POST", signal, headers: signed, agent: false }, response => {
+      if (response.statusCode >= 300 && response.statusCode < 400) { response.resume(); return reject(new Error("WorkBuddy redirect refused")); }
+      if (response.statusCode >= 400) {
+        response.resume();
+        if (allowRenew && response.statusCode === 401 && current.source !== "desktop" && current.refresh) {
+          const error = new Error(`WorkBuddy HTTP ${response.statusCode}`); error.status = response.statusCode; return reject(error);
+        }
+        // Only a missing route means this build/account cannot serve Messages.
+        // Quota, rate-limit and upstream failures must surface instead of
+        // silently spending a second full chat request.
+        if ([404, 405, 415, 501].includes(response.statusCode)) { resolve({ fallback: true }); return; }
+        refusal(response.statusCode); resolve({ fallback: false }); return;
+      }
+      const done = body.stream === true
+        ? pipeMessagesStream(response, res, body.model)
+        : collectMessagesCompletion(response, body.model).then(completion => {
+            res.writeHead(response.statusCode, { "content-type": "application/json" });
+            res.end(JSON.stringify(completion));
+          });
+      done.then(() => resolve({ fallback: false }), error => {
+        // The Messages protocol failed before any bytes were written; chat can
+        // still answer this request. Once headers are out, a retry would splice
+        // two responses together, so the error propagates to the proxy layer.
+        if (!res.headersSent) resolve({ fallback: true });
+        else reject(error);
+      });
+    });
+    upstream.on("error", reject);
+    upstream.end(JSON.stringify(chatToMessages(body)));
+  });
+  const messagesModel = isMessagesModel(kind, body.model);
+  const attempt = async (current, allowRenew) => {
+    if (!messagesModel) return sendChat(current, allowRenew);
+    const result = await sendMessages(current, allowRenew);
+    if (result?.fallback) await sendChat(current, false);
+    return result;
+  };
   try {
-    await send(account, true);
+    await attempt(account, true);
   } catch (error) {
     if (error.status !== 401) throw error;
     const target = file(kind, options);
@@ -291,11 +525,11 @@ async function forward({ kind, req, res, body, signal, options, pipeline }) {
         const token = await call(kind, "/v2/plugin/auth/token/refresh", { account: latest, extra: { "x-refresh-token": latest.refresh, "x-auth-refresh-source": "plugin" } }, options);
         latest = merged(latest, token); await state.write(target, latest); return latest;
       });
-      await send(renewed, false);
+      await attempt(renewed, false);
     } catch (renewError) {
       if (renewError === error || (renewError && renewError.status === 401)) { refusal(401); return; }
       throw renewError;
     }
   }
 }
-module.exports = { SITES, headers, merged, desktopFile, desktop, useDesktop, begin, poll, current, catalog, quotaOf, quota, status, configure, forget, forward };
+module.exports = { SITES, headers, merged, desktopFile, desktop, useDesktop, begin, poll, current, catalog, quotaOf, quota, status, configure, forget, forward, isMessagesModel, chatToMessages };

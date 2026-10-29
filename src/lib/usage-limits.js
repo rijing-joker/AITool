@@ -35,6 +35,7 @@ const { fetchDevinLimits } = require("./devin-limits");
 const { fetchQoderLimits, fetchQoderCnLimits } = require("./qoder-limits");
 const { fetchArkCodingPlanLimits } = require("./ark-coding-plan-limits");
 const { fetchArkAgentPlanLimits } = require("./ark-agent-plan-limits");
+const { fetchWorkbuddyLimits, fetchWorkbuddyAiLimits, selectWorkbuddyLimits } = require("./workbuddy-limits");
 const { fetchProviderServiceStatus } = require("./provider-status");
 const { resolveKimiProfile } = require("./kimi-profile");
 const { readSqliteJsonRows, readSqliteJsonRowsAsync } = require("./sqlite-reader");
@@ -49,17 +50,26 @@ const execFileAsync = promisify(cp.execFile);
 // 2-minute in-memory cache. It also expires early at the earliest upcoming window
 // reset in the cached data (see cacheExpiresAtMs), floored so a provider reporting
 // a reset "right now" can't turn every poll into a full upstream round.
-// Partitioned by the Devin opt-in selection AND the Antigravity quota opt-out, so
-// a request made while Devin is off is never served (or joined onto) a response
-// fetched while it was on, and an aggregate fetched while Antigravity was enabled
-// is never served after the opt-out is set. Key = `${devin}-${antigravity}`.
-const USAGE_LIMITS_SELECTION_KEYS = ["off-on", "off-off", "on-on", "on-off"];
+// Partitioned by the Devin and WorkBuddy opt-in selections AND the Antigravity
+// quota opt-out, so a request made while an opt-in provider is off is never
+// served (or joined onto) a response fetched while it was on, and an aggregate
+// fetched while Antigravity was enabled is never served after the opt-out is
+// set. Key = `${devin}-${workbuddy}-${antigravity}`.
+const USAGE_LIMITS_SELECTION_KEYS = [];
+for (const devin of ["off", "on"]) {
+  for (const workbuddy of ["off", "on"]) {
+    for (const antigravity of ["off", "on"]) {
+      USAGE_LIMITS_SELECTION_KEYS.push(`${devin}-${workbuddy}-${antigravity}`);
+    }
+  }
+}
 const cacheBySelection = {};
 for (const key of USAGE_LIMITS_SELECTION_KEYS) cacheBySelection[key] = { data: null, expiresAtMs: 0 };
 function usageLimitsSelectionKey(options) {
   const devin = options?.devinEnabled === true ? "on" : "off";
+  const workbuddy = options?.workbuddyEnabled === true ? "on" : "off";
   const antigravity = isAntigravityQuotaDisabled() ? "off" : "on";
-  return `${devin}-${antigravity}`;
+  return `${devin}-${workbuddy}-${antigravity}`;
 }
 const CACHE_TTL_MS = 2 * 60 * 1000;
 // Must stay below the macOS app's post-reset re-fetch grace (10s in
@@ -4036,6 +4046,7 @@ async function fetchUsageLimitsUncached({
   providerTimeoutMs = DEFAULT_PROVIDER_TIMEOUT_MS,
   forceRefresh = false,
   devinEnabled = false,
+  workbuddyEnabled = false,
   // Selection key fixed by getUsageLimits before the fetch began. Re-deriving it
   // here would let an opt-out flipped mid-fetch store a pre-opt-out result in the
   // post-opt-out slot.
@@ -4103,7 +4114,7 @@ async function fetchUsageLimitsUncached({
     : null;
 
   const providerFetch = withFetchTimeout(fetchImpl, providerTimeoutMs);
-  const [claudeResult, codexResult, cursor, kimi, gemini, kiro, antigravity, copilot, grok, zcode, opencodeGoRaw, qoder, qoderCn, codingPlan, agentPlan, commandCodeRaw, devinRaw, claudeServiceStatus] = await Promise.all([
+  const [claudeResult, codexResult, cursor, kimi, gemini, kiro, antigravity, copilot, grok, zcode, opencodeGoRaw, qoder, qoderCn, codingPlan, agentPlan, commandCodeRaw, devinRaw, workbuddy, workbuddyAi, claudeServiceStatus] = await Promise.all([
     claudeToken && !freshClaudeCache && !claudeRetryAtMs
       ? withProviderTimeout(fetchClaudeUsageLimits(claudeToken, { fetchImpl: providerFetch, maxAttempts: 1 }), "Claude", providerTimeoutMs).then(
           (value) => ({ status: "fulfilled", value }),
@@ -4228,6 +4239,18 @@ async function fetchUsageLimitsUncached({
         (value) => ({ status: "fulfilled", value }),
         (reason) => ({ status: "rejected", reason }),
       ),
+    // WorkBuddy CN and WorkBuddy AI are separate editions. Each one calls only
+    // its own local authenticated billing proxy, and only after the user turns
+    // the provider on. Abort closes the IPC socket when the provider budget
+    // expires. Reward credits are not a plan window.
+    workbuddyEnabled
+      ? withAbortableProviderTimeout((signal) => fetchWorkbuddyLimits({ home, env, fetchImpl: providerFetch, signal }), "WorkBuddy", providerTimeoutMs)
+        .catch((reason) => ({ configured: true, error: reason?.message || "Unknown error" }))
+      : Promise.resolve({ configured: false }),
+    workbuddyEnabled
+      ? withAbortableProviderTimeout((signal) => fetchWorkbuddyAiLimits({ home, env, fetchImpl: providerFetch, signal }), "WorkBuddy AI", providerTimeoutMs)
+        .catch((reason) => ({ configured: true, error: reason?.message || "Unknown error" }))
+      : Promise.resolve({ configured: false }),
     // Public status-page probe (fail-soft, own 5-min cache in provider-status.js).
     // Only probed for configured accounts — without a token the Claude section
     // never renders, so the reading would have nowhere to go.
@@ -4489,6 +4512,10 @@ async function fetchUsageLimitsUncached({
     qoderCn: withPlanLabel(qoderCn, qoderCn?.plan_label, "Qoder CN"),
     codingPlan: withPlanLabel(codingPlan, codingPlan?.plan_label, "Ark Coding Plan"),
     agentPlan: withPlanLabel(agentPlan, agentPlan?.plan_label, "Ark Agent Plan"),
+    // WorkBuddy preserves provider English names and official edition labels
+    // verbatim (including Free, STANDARD and Pro-Trial). Disabled keeps the
+    // same empty sentinel as Devin so the dashboard hides the row.
+    workbuddy: workbuddyEnabled ? selectWorkbuddyLimits(workbuddy, workbuddyAi) : { configured: false },
   };
 
   for (const [providerName, provider] of Object.entries(data)) {
@@ -4512,7 +4539,7 @@ async function fetchUsageLimitsUncached({
     };
   }
 
-  if (keyGeneration === credentialGeneration) cacheBySelection[selectionKey || usageLimitsSelectionKey({ devinEnabled })] = {
+  if (keyGeneration === credentialGeneration) cacheBySelection[selectionKey || usageLimitsSelectionKey({ devinEnabled, workbuddyEnabled })] = {
     data,
     expiresAtMs: cacheExpiresAtMs(data, nowMs),
   };

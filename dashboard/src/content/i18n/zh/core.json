@@ -819,6 +819,8 @@
   "limits.commandCode.setupHint.note_windows": "Windows：在 PowerShell 中运行，然后重启 TokenTracker。",
   "limits.commandCode.setupHint.note_linux": "Linux：从当前终端启动 TokenTracker，以读取环境变量。",
   "limits.provider.devin": "Devin",
+  "limits.provider.workbuddy": "WorkBuddy",
+  "limits.label.workbuddy_plan": "套餐",
   "limits.label.devin_daily": "每日",
   "limits.label.devin_weekly": "每周",
   "limits.devin.setupHint.title": "连接 Devin",

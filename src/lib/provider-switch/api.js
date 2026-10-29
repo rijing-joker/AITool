@@ -645,6 +645,13 @@ async function handleProviderSwitchApiRequest(req, res, url, ctx) {
       else if (p === `${prefix}/kimi/accounts/login` && method === "GET") json(res, { ok: true, ...await accounts.pollLogin(url.searchParams.get("flowId")) });
       else if (p === `${prefix}/kimi/accounts/login` && method === "DELETE") { accounts.cancel(); json(res, { ok: true }); }
       else if (p === `${prefix}/kimi/accounts/quota` && method === "GET") json(res, { ok: true, quota: await accounts.quota(url.searchParams.get("id")) });
+      else if (p === `${prefix}/kimi/accounts/models` && method === "GET") json(res, { ok: true, ...await accounts.models(url.searchParams.get("id")) });
+      else if (p === `${prefix}/kimi/accounts/models` && method === "PUT") {
+        const body = await readJsonBody(req);
+        json(res, { ok: true, ...await accounts.updateModels(String(body.id || ""), body.models) });
+      }
+      else if (p === `${prefix}/kimi/accounts/detach` && method === "POST") { const body = await readJsonBody(req); json(res, { ok: true, ...await accounts.removeFromKimi(String(body.id || "")) }); }
+      else if (p === `${prefix}/kimi/accounts/restore` && method === "POST") { const body = await readJsonBody(req); json(res, { ok: true, ...await accounts.restore(String(body.id || "")) }); }
       else if (p === `${prefix}/kimi/accounts/use` && method === "POST") { const body = await readJsonBody(req); json(res, { ok: true, ...await accounts.useAccount(body.id) }); }
       else if (p === `${prefix}/kimi/accounts` && method === "DELETE") { const body = await readJsonBody(req); json(res, { ok: true, ...await accounts.remove(body.id) }); }
       else return false;
@@ -1507,10 +1514,68 @@ function parseModelFetchHeaders(raw) {
   return Object.keys(headers).length ? headers : null;
 }
 
-async function fetchModelList({ baseUrl, apiKey, modelsUrl, isFullUrl, requestHeaders }) {
+// Pi lets a models.json apiKey be "$NAME" / "${NAME}" ($$ and $! are literal),
+// or "!command". AiTool only sends the key for its own model fetch, so resolve
+// the environment form and never send a reference or run a command (cc-switch
+// dcdcbcb). Unset/empty variables leave the whole value unresolved, as in Pi.
+function resolvePiApiKey(value, env = process.env) {
+  const raw = String(value || "");
+  if (raw.startsWith("!")) return "";
+  const isStart = ch => ch === "_" || /[A-Za-z]/.test(ch);
+  const isChar = ch => ch === "_" || /[A-Za-z0-9]/.test(ch);
+  const lookup = name => env?.[name] || "";
+  let resolved = "", rest = raw;
+  while (true) {
+    const dollar = rest.indexOf("$");
+    if (dollar < 0) { resolved += rest; break; }
+    resolved += rest.slice(0, dollar);
+    const after = rest.slice(dollar + 1);
+    if (after[0] === "$" || after[0] === "!") { resolved += after[0]; rest = after.slice(1); continue; }
+    if (after[0] === "{") {
+      const end = after.indexOf("}");
+      if (end < 0) { resolved += "$"; rest = after; continue; }
+      const name = after.slice(1, end);
+      if (name && isStart(name[0]) && [...name].every(isChar)) {
+        const found = lookup(name);
+        if (!found) return "";
+        resolved += found;
+      } else resolved += `$${after.slice(0, end + 1)}`;
+      rest = after.slice(end + 1);
+      continue;
+    }
+    if (after && isStart(after[0])) {
+      const found = lookup(/^[A-Za-z0-9_]+/.exec(after)?.[0] || "");
+      if (!found) return "";
+      const name = /^[A-Za-z0-9_]+/.exec(after)[0];
+      resolved += found;
+      rest = after.slice(name.length);
+      continue;
+    }
+    resolved += "$"; rest = after;
+  }
+  return resolved;
+}
+
+function urlOrigin(value) {
+  try { return new URL(String(value || "")).origin; } catch { return ""; }
+}
+
+async function fetchModelList({ app, baseUrl, apiKey, modelsUrl, isFullUrl, requestHeaders }) {
   const base = String(baseUrl || "").trim().replace(/\/+$/, "");
   const explicit = String(modelsUrl || "").trim();
   if (!base && !explicit) throw new Error("Base URL is required");
+  const rawKey = String(apiKey || "");
+  const resolvedKey = app === "pi" || app === "omp" ? resolvePiApiKey(rawKey) : rawKey;
+  const providerOrigin = urlOrigin(base) || urlOrigin(explicit);
+  // Resolve a Pi/omp `$NAME` reference only for the provider's own origin.
+  // A cross-origin modelsUrl (imported config) must never turn an environment
+  // reference into a bearer token for a different host.
+  const keyFor = (target) => {
+    if (app !== "pi" && app !== "omp") return rawKey;
+    if (!rawKey.includes("$") || resolvedKey === rawKey) return rawKey;
+    const targetOrigin = urlOrigin(target);
+    return targetOrigin && providerOrigin && targetOrigin === providerOrigin ? resolvedKey : rawKey;
+  };
   const overrideHeaders = parseModelFetchHeaders(requestHeaders);
   const candidates = [];
   if (explicit && /^https?:\/\//.test(explicit)) {
@@ -1534,7 +1599,8 @@ async function fetchModelList({ baseUrl, apiKey, modelsUrl, isFullUrl, requestHe
     const timer = setTimeout(() => controller.abort(), 10000);
     try {
       const headers = { Accept: "application/json" };
-      if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+      const key = keyFor(url);
+      if (key) headers.Authorization = `Bearer ${key}`;
       if (overrideHeaders) Object.assign(headers, overrideHeaders);
       const response = await fetch(url, { headers, signal: controller.signal });
       if (!response.ok) {
@@ -1604,4 +1670,4 @@ async function buildStatus() {
   };
 }
 
-module.exports = { handleProviderSwitchApiRequest, switchProvider, buildStatus };
+module.exports = { handleProviderSwitchApiRequest, switchProvider, buildStatus, resolvePiApiKey };
